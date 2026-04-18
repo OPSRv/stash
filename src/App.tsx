@@ -1,3 +1,4 @@
+import { DownloadsShell } from './modules/downloader/DownloadsShell';
 import { PopupShell } from './shell/PopupShell';
 import { SettingsShell } from './settings/SettingsShell';
 
@@ -7,5 +8,12 @@ const windowKind = () => {
 };
 
 export default function App() {
-  return windowKind() === 'settings' ? <SettingsShell /> : <PopupShell />;
+  switch (windowKind()) {
+    case 'settings':
+      return <SettingsShell />;
+    case 'downloads':
+      return <DownloadsShell />;
+    default:
+      return <PopupShell />;
+  }
 }

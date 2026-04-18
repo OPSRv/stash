@@ -10,7 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   launchAtLogin: false,
 };
 
-const store = new LazyStore('settings.json', { autoSave: true });
+const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });
 
 export const loadSettings = async (): Promise<Settings> => {
   const keys = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];

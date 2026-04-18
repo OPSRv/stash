@@ -28,6 +28,15 @@ vi.mock('@tauri-apps/plugin-autostart', () => ({
   isEnabled: vi.fn().mockResolvedValue(false),
 }));
 
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  readText: vi.fn().mockResolvedValue(''),
+  writeText: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  revealItemInDir: vi.fn().mockResolvedValue(undefined),
+}));
+
 afterEach(() => {
   cleanup();
 });

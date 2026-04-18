@@ -8,6 +8,8 @@
     "opener:default",
     "global-shortcut:default",
     "store:default",
-    "autostart:default"
+    "autostart:default",
+    "clipboard-manager:allow-read-text",
+    "opener:allow-reveal-item-in-dir"
   ]
 }

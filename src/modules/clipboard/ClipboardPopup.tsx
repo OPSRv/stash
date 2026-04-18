@@ -21,6 +21,8 @@ import {
 } from './api';
 import { detectType, type ContentType } from './contentType';
 import { iconFor, typeTint } from './icons';
+import { detect as detectVideo, start as startDownload, type DetectedVideo } from '../downloader/api';
+import { PlatformBadge } from '../downloader/PlatformBadge';
 
 const iso = (ts: number) => {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
@@ -57,6 +59,8 @@ export const ClipboardPopup = () => {
   const [filter, setFilter] = useState<Filter>('all');
   const [reloadNonce, setReloadNonce] = useState(0);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const [videoBanner, setVideoBanner] = useState<DetectedVideo | null>(null);
+  const [videoBannerUrl, setVideoBannerUrl] = useState<string | null>(null);
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
 
@@ -77,6 +81,50 @@ export const ClipboardPopup = () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [reload]);
+
+  // Auto-detect video downloads when the newest text item is a video URL.
+  useEffect(() => {
+    const newest = rawItems.find((i) => i.kind === 'text');
+    if (!newest) {
+      setVideoBanner(null);
+      setVideoBannerUrl(null);
+      return;
+    }
+    const candidate = newest.content.trim();
+    const supported = /https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|reddit\.com|vimeo\.com|twitch\.tv|facebook\.com|fb\.watch)/i.test(
+      candidate
+    );
+    if (!supported || candidate === videoBannerUrl) return;
+    setVideoBannerUrl(candidate);
+    setVideoBanner(null);
+    let cancelled = false;
+    detectVideo(candidate)
+      .then((d) => {
+        if (!cancelled) setVideoBanner(d);
+      })
+      .catch((e) => {
+        if (!cancelled) console.warn('dl_detect failed:', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawItems, videoBannerUrl]);
+
+  const downloadFromBanner = async (kind: 'video' | 'audio', formatId?: string) => {
+    if (!videoBanner || !videoBannerUrl) return;
+    try {
+      await startDownload({
+        url: videoBannerUrl,
+        title: videoBanner.info.title,
+        thumbnail: videoBanner.info.thumbnail,
+        format_id: formatId ?? null,
+        kind,
+      });
+      setVideoBanner(null);
+    } catch (e) {
+      console.error('start download failed:', e);
+    }
+  };
 
   const typed = useMemo(
     () =>
@@ -249,6 +297,45 @@ export const ClipboardPopup = () => {
         shortcutHint="⌘K"
         inputRef={searchRef}
       />
+
+      {videoBanner && (
+        <div className="mx-2 mt-2 p-2 rounded-lg flex items-center gap-2" style={{ background: 'rgba(47,122,229,0.08)', border: '1px solid rgba(47,122,229,0.25)' }}>
+          <div className="w-10 h-7 rounded overflow-hidden shrink-0 bg-black/50">
+            {videoBanner.info.thumbnail && (
+              <img src={videoBanner.info.thumbnail} alt="" className="w-full h-full object-cover" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <PlatformBadge platform={videoBanner.platform} />
+              <span className="t-primary text-meta font-medium truncate">Download this video</span>
+            </div>
+            <div className="t-tertiary text-[11px] truncate">{videoBanner.info.title}</div>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {videoBanner.qualities.slice(0, 3).map((q) => (
+              <button
+                key={q.format_id}
+                onClick={() => downloadFromBanner(q.kind, q.format_id)}
+                className="px-2 py-1 rounded-md text-meta font-medium t-primary"
+                style={{ background: 'rgba(47,122,229,0.15)' }}
+              >
+                {q.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              setVideoBanner(null);
+              setVideoBannerUrl(null);
+            }}
+            className="t-tertiary hover:t-primary p-1"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto nice-scroll" role="listbox">
         {isEmpty && !query && (
