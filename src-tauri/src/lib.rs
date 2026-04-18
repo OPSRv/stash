@@ -12,6 +12,13 @@ use modules::clipboard::{
     monitor::{ArboardReader, Monitor},
     repo::ClipboardRepo,
 };
+use modules::downloader::{
+    commands::{
+        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_list, dl_start,
+    },
+    jobs::JobRepo,
+    runner::RunnerState,
+};
 
 use rusqlite::Connection;
 use tauri::{
@@ -67,6 +74,12 @@ pub fn run() {
             clipboard_paste,
             clipboard_copy_only,
             clipboard_clear,
+            dl_detect,
+            dl_start,
+            dl_cancel,
+            dl_list,
+            dl_delete,
+            dl_clear_completed,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -102,7 +115,24 @@ pub fn run() {
             let handle_for_thread = app.handle().clone();
             thread::spawn(move || run_monitor(state_for_thread, images_dir_thread, handle_for_thread));
 
+            // Downloader runtime
+            let downloads_dir = dirs_next::video_dir()
+                .unwrap_or_else(|| data_dir.join("Downloads"))
+                .join("Stash");
+            std::fs::create_dir_all(&downloads_dir).ok();
+            let dl_db_path = data_dir.join("downloads.sqlite");
+            let dl_repo = JobRepo::new(Connection::open(&dl_db_path)?)?;
+            let runner_state = Arc::new(RunnerState::new(dl_repo, downloads_dir));
+            app.manage(Arc::clone(&runner_state));
+
             let show = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
+            let downloads_menu = MenuItem::with_id(
+                app,
+                "downloads",
+                "Downloads…",
+                true,
+                Some("CmdOrCtrl+Shift+D"),
+            )?;
             let prefs = MenuItem::with_id(
                 app,
                 "prefs",
@@ -111,7 +141,7 @@ pub fn run() {
                 Some("CmdOrCtrl+,"),
             )?;
             let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &prefs, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &downloads_menu, &prefs, &quit])?;
 
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -129,6 +159,12 @@ pub fn run() {
                     }
                     "prefs" => {
                         if let Some(win) = app.get_webview_window("settings") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "downloads" => {
+                        if let Some(win) = app.get_webview_window("downloads") {
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -176,6 +212,16 @@ pub fn run() {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = settings_clone.hide();
+                    }
+                });
+            }
+
+            if let Some(downloads_win) = app.get_webview_window("downloads") {
+                let dl_clone = downloads_win.clone();
+                downloads_win.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = dl_clone.hide();
                     }
                 });
             }
