@@ -202,6 +202,7 @@ const DownloadsTab = ({
             className="input-field rounded-md px-2 py-1 text-body"
           >
             <option value="">None</option>
+            <option value="arc">Arc</option>
             <option value="safari">Safari</option>
             <option value="chrome">Chrome</option>
             <option value="firefox">Firefox</option>

@@ -165,7 +165,7 @@ pub fn dl_set_cookies_browser(
         if b.is_empty() {
             None
         } else {
-            Some(b)
+            Some(translate_browser_arg(&b))
         }
     });
     *state.cookies_browser.lock().unwrap() = normalized;
@@ -173,4 +173,23 @@ pub fn dl_set_cookies_browser(
     // detect runs with the new setting.
     state.detect_cache.lock().unwrap().clear();
     Ok(())
+}
+
+/// Translate our browser key into a yt-dlp --cookies-from-browser argument.
+/// Arc is not natively supported by yt-dlp but is Chromium-based, so we
+/// point yt-dlp at Arc's Default profile via the chromium extractor.
+fn translate_browser_arg(key: &str) -> String {
+    if key == "arc" {
+        if let Some(home) = dirs_next::home_dir() {
+            let profile = home
+                .join("Library/Application Support/Arc/User Data/Default");
+            if profile.exists() {
+                return format!("chromium:{}", profile.display());
+            }
+        }
+        // Fall back to chromium default — yt-dlp will look in the usual
+        // Chromium dir; at least the command won't fail-fast.
+        return "chromium".to_string();
+    }
+    key.to_string()
 }

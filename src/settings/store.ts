@@ -8,6 +8,7 @@ export type CookiesBrowser =
   | 'brave'
   | 'vivaldi'
   | 'chromium'
+  | 'arc'
   | null;
 
 export type Settings = {
