@@ -29,7 +29,12 @@ const CLIPBOARD_TRIM_EVERY_N_POLLS: u32 = 120; // ~once per minute at 500ms poll
 pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_positioner::init());
+        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
 
     #[cfg(desktop)]
     {
@@ -97,9 +102,16 @@ pub fn run() {
             let handle_for_thread = app.handle().clone();
             thread::spawn(move || run_monitor(state_for_thread, images_dir_thread, handle_for_thread));
 
-            let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let prefs = MenuItem::with_id(
+                app,
+                "prefs",
+                "Preferences…",
+                true,
+                Some("CmdOrCtrl+,"),
+            )?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show, &prefs, &quit])?;
 
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -111,6 +123,12 @@ pub fn run() {
                     "show" => {
                         if let Some(win) = app.get_webview_window("popup") {
                             let _ = win.move_window(Position::TrayCenter);
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "prefs" => {
+                        if let Some(win) = app.get_webview_window("settings") {
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -148,6 +166,16 @@ pub fn run() {
                 win.on_window_event(move |event| {
                     if let WindowEvent::Focused(false) = event {
                         let _ = win_clone.hide();
+                    }
+                });
+            }
+
+            if let Some(settings) = app.get_webview_window("settings") {
+                let settings_clone = settings.clone();
+                settings.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = settings_clone.hide();
                     }
                 });
             }

@@ -24,6 +24,16 @@
         "visible": false,
         "focus": true,
         "shadow": false
+      },
+      {
+        "label": "settings",
+        "title": "Stash Settings",
+        "width": 720,
+        "height": 520,
+        "resizable": false,
+        "visible": false,
+        "center": true,
+        "url": "index.html?window=settings"
       }
     ],
     "security": {

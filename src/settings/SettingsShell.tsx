@@ -1,0 +1,136 @@
+import { useEffect, useState } from 'react';
+import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
+import { Toggle } from '../shared/ui/Toggle';
+import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
+
+type Tab = 'general' | 'clipboard' | 'about';
+
+const tabs: { id: Tab; label: string }[] = [
+  { id: 'general', label: 'General' },
+  { id: 'clipboard', label: 'Clipboard' },
+  { id: 'about', label: 'About' },
+];
+
+export const SettingsShell = () => {
+  const [tab, setTab] = useState<Tab>('general');
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [autostartOn, setAutostartOn] = useState(false);
+
+  useEffect(() => {
+    loadSettings().then(setSettings).catch(console.error);
+    isEnabled().then(setAutostartOn).catch(console.error);
+  }, []);
+
+  const update = async <K extends keyof Settings>(key: K, value: Settings[K]) => {
+    setSettings((s) => ({ ...s, [key]: value }));
+    await saveSetting(key, value).catch(console.error);
+  };
+
+  const toggleAutostart = async (next: boolean) => {
+    setAutostartOn(next);
+    try {
+      if (next) await enable();
+      else await disable();
+    } catch (e) {
+      console.error('autostart toggle failed', e);
+    }
+    await update('launchAtLogin', next);
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-bg-canvas">
+      <nav className="px-4 py-2 flex items-center gap-1 border-b hair">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-3 py-1.5 rounded-md text-body font-medium ${
+              tab === t.id ? 't-primary' : 't-secondary'
+            }`}
+            style={tab === t.id ? { background: 'rgba(255,255,255,0.06)' } : undefined}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+      <main className="flex-1 overflow-y-auto nice-scroll px-6 py-5">
+        {tab === 'general' && (
+          <GeneralTab autostartOn={autostartOn} onToggleAutostart={toggleAutostart} />
+        )}
+        {tab === 'clipboard' && (
+          <ClipboardTab settings={settings} onChange={update} />
+        )}
+        {tab === 'about' && <AboutTab />}
+      </main>
+    </div>
+  );
+};
+
+const SettingRow = ({
+  title,
+  description,
+  control,
+}: {
+  title: string;
+  description?: string;
+  control: React.ReactNode;
+}) => (
+  <div className="flex items-center justify-between py-3">
+    <div>
+      <div className="t-primary text-body font-medium">{title}</div>
+      {description && <div className="t-tertiary text-meta">{description}</div>}
+    </div>
+    {control}
+  </div>
+);
+
+const GeneralTab = ({
+  autostartOn,
+  onToggleAutostart,
+}: {
+  autostartOn: boolean;
+  onToggleAutostart: (next: boolean) => void;
+}) => (
+  <div className="divide-y divide-white/5">
+    <SettingRow
+      title="Launch at login"
+      description="Starts Stash quietly in the menubar when you log in."
+      control={<Toggle checked={autostartOn} onChange={onToggleAutostart} label="Launch at login" />}
+    />
+  </div>
+);
+
+const ClipboardTab = ({
+  settings,
+  onChange,
+}: {
+  settings: Settings;
+  onChange: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+}) => (
+  <div className="divide-y divide-white/5">
+    <SettingRow
+      title="Max history items"
+      description="Older unpinned items are trimmed automatically."
+      control={
+        <input
+          type="number"
+          min={10}
+          max={10000}
+          value={settings.maxHistoryItems}
+          onChange={(e) =>
+            onChange('maxHistoryItems', Math.max(10, Number(e.currentTarget.value) || 0))
+          }
+          className="input-field rounded-md px-2 py-1 w-24 text-body"
+        />
+      }
+    />
+  </div>
+);
+
+const AboutTab = () => (
+  <div className="t-secondary text-body space-y-2">
+    <div className="t-primary text-heading font-medium">Stash</div>
+    <div>macOS menubar multitool — clipboard, downloads, recorder.</div>
+    <div className="t-tertiary text-meta">v0.1.0 · github.com/OPSRv/stash</div>
+  </div>
+);

@@ -15,6 +15,19 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({ hide: vi.fn().mockResolvedValue(undefined) }),
 }));
 
+vi.mock('@tauri-apps/plugin-store', () => ({
+  LazyStore: class {
+    get = vi.fn().mockResolvedValue(undefined);
+    set = vi.fn().mockResolvedValue(undefined);
+  },
+}));
+
+vi.mock('@tauri-apps/plugin-autostart', () => ({
+  enable: vi.fn().mockResolvedValue(undefined),
+  disable: vi.fn().mockResolvedValue(undefined),
+  isEnabled: vi.fn().mockResolvedValue(false),
+}));
+
 afterEach(() => {
   cleanup();
 });
