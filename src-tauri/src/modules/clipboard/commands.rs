@@ -1,10 +1,12 @@
 use crate::modules::clipboard::repo::{ClipboardItem, ClipboardRepo};
 use rusqlite::Result;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
 pub struct ClipboardState {
     pub repo: Mutex<ClipboardRepo>,
+    pub images_dir: PathBuf,
 }
 
 const DEFAULT_LIMIT: usize = 200;
@@ -33,13 +35,13 @@ pub fn delete_item(state: &ClipboardState, id: i64) -> Result<()> {
     state.repo.lock().unwrap().delete(id)
 }
 
-pub fn paste_prepare(state: &ClipboardState, id: i64, now: i64) -> Result<String> {
+pub fn paste_prepare(state: &ClipboardState, id: i64, now: i64) -> Result<ClipboardItem> {
     let mut repo = state.repo.lock().unwrap();
     let item = repo
         .get(id)?
         .ok_or_else(|| rusqlite::Error::QueryReturnedNoRows)?;
     repo.touch(id, now)?;
-    Ok(item.content)
+    Ok(item)
 }
 
 fn to_string_err<T, E: std::fmt::Display>(r: std::result::Result<T, E>) -> std::result::Result<T, String> {
@@ -47,7 +49,9 @@ fn to_string_err<T, E: std::fmt::Display>(r: std::result::Result<T, E>) -> std::
 }
 
 #[tauri::command]
-pub fn clipboard_list(state: State<'_, Arc<ClipboardState>>) -> std::result::Result<Vec<ClipboardItem>, String> {
+pub fn clipboard_list(
+    state: State<'_, Arc<ClipboardState>>,
+) -> std::result::Result<Vec<ClipboardItem>, String> {
     to_string_err(list_items(&state, DEFAULT_LIMIT))
 }
 
@@ -85,14 +89,36 @@ pub fn clipboard_paste(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let content = to_string_err(paste_prepare(&state, id, now))?;
+    let item = to_string_err(paste_prepare(&state, id, now))?;
 
     if let Some(win) = tauri::Manager::get_webview_window(&app, "popup") {
         let _ = win.hide();
     }
 
     let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-    clipboard.set_text(content).map_err(|e| e.to_string())?;
+
+    match item.kind.as_str() {
+        "text" => {
+            clipboard.set_text(item.content).map_err(|e| e.to_string())?;
+        }
+        "image" => {
+            let meta = item.meta.unwrap_or_default();
+            let parsed: serde_json::Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
+            let path = parsed
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "image meta.path missing".to_string())?;
+            let img = image::open(path).map_err(|e| e.to_string())?.to_rgba8();
+            let (w, h) = img.dimensions();
+            let data = arboard::ImageData {
+                width: w as usize,
+                height: h as usize,
+                bytes: std::borrow::Cow::Owned(img.into_raw()),
+            };
+            clipboard.set_image(data).map_err(|e| e.to_string())?;
+        }
+        other => return Err(format!("unknown kind: {other}")),
+    }
 
     #[cfg(target_os = "macos")]
     simulate_cmd_v()?;
@@ -122,6 +148,7 @@ mod tests {
         let repo = ClipboardRepo::new(Connection::open_in_memory().unwrap()).unwrap();
         ClipboardState {
             repo: Mutex::new(repo),
+            images_dir: PathBuf::from("/tmp/stash-test"),
         }
     }
 
@@ -171,15 +198,16 @@ mod tests {
     }
 
     #[test]
-    fn paste_prepare_returns_content_and_touches_timestamp() {
+    fn paste_prepare_returns_item_and_touches_timestamp() {
         let state = fresh_state();
         let id = state.repo.lock().unwrap().insert_text("paste me", 100).unwrap();
 
-        let content = paste_prepare(&state, id, 999).unwrap();
+        let item = paste_prepare(&state, id, 999).unwrap();
 
-        assert_eq!(content, "paste me");
-        let item = state.repo.lock().unwrap().get(id).unwrap().unwrap();
-        assert_eq!(item.created_at, 999);
+        assert_eq!(item.content, "paste me");
+        assert_eq!(item.kind, "text");
+        let reloaded = state.repo.lock().unwrap().get(id).unwrap().unwrap();
+        assert_eq!(reloaded.created_at, 999);
     }
 
     #[test]

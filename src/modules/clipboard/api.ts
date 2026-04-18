@@ -2,9 +2,26 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type ClipboardItem = {
   id: number;
+  kind: 'text' | 'image';
   content: string;
+  meta: string | null;
   created_at: number;
   pinned: boolean;
+};
+
+export type ImageMeta = {
+  path: string;
+  w: number;
+  h: number;
+};
+
+export const parseImageMeta = (item: ClipboardItem): ImageMeta | null => {
+  if (item.kind !== 'image' || !item.meta) return null;
+  try {
+    return JSON.parse(item.meta) as ImageMeta;
+  } catch {
+    return null;
+  }
 };
 
 export const listItems = (): Promise<ClipboardItem[]> => invoke('clipboard_list');

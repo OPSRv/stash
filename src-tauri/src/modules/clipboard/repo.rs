@@ -4,7 +4,9 @@ use serde::Serialize;
 #[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct ClipboardItem {
     pub id: i64,
+    pub kind: String,
     pub content: String,
+    pub meta: Option<String>,
     pub created_at: i64,
     pub pinned: bool,
 }
@@ -24,26 +26,60 @@ impl ClipboardRepo {
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_items(created_at DESC);",
         )?;
+        // Migration: add kind + meta columns for clients that predate image support.
+        Self::ensure_column(&conn, "kind", "TEXT NOT NULL DEFAULT 'text'")?;
+        Self::ensure_column(&conn, "meta", "TEXT")?;
         Ok(Self { conn })
+    }
+
+    fn ensure_column(conn: &Connection, name: &str, decl: &str) -> Result<()> {
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM pragma_table_info('clipboard_items') WHERE name=?1",
+                params![name],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !exists {
+            conn.execute(
+                &format!("ALTER TABLE clipboard_items ADD COLUMN {} {}", name, decl),
+                [],
+            )?;
+        }
+        Ok(())
     }
 
     pub fn insert_text(&mut self, content: &str, created_at: i64) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO clipboard_items (content, created_at) VALUES (?1, ?2)
+            "INSERT INTO clipboard_items (kind, content, created_at) VALUES ('text', ?1, ?2)
              ON CONFLICT(content) DO UPDATE SET created_at = excluded.created_at",
             params![content, created_at],
         )?;
-        let id: i64 = self.conn.query_row(
+        self.id_by_content(content)
+    }
+
+    pub fn insert_image(&mut self, hash: &str, meta_json: &str, created_at: i64) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO clipboard_items (kind, content, meta, created_at)
+             VALUES ('image', ?1, ?2, ?3)
+             ON CONFLICT(content) DO UPDATE SET created_at = excluded.created_at",
+            params![hash, meta_json, created_at],
+        )?;
+        self.id_by_content(hash)
+    }
+
+    fn id_by_content(&self, content: &str) -> Result<i64> {
+        self.conn.query_row(
             "SELECT id FROM clipboard_items WHERE content = ?1",
             params![content],
             |row| row.get(0),
-        )?;
-        Ok(id)
+        )
     }
 
     pub fn list(&self, limit: usize) -> Result<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, content, created_at, pinned FROM clipboard_items
+            "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items
              ORDER BY pinned DESC, created_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], Self::map_row)?;
@@ -53,8 +89,8 @@ impl ClipboardRepo {
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<ClipboardItem>> {
         let like = format!("%{}%", query);
         let mut stmt = self.conn.prepare(
-            "SELECT id, content, created_at, pinned FROM clipboard_items
-             WHERE content LIKE ?1 COLLATE NOCASE
+            "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items
+             WHERE kind = 'text' AND content LIKE ?1 COLLATE NOCASE
              ORDER BY pinned DESC, created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![like, limit as i64], Self::map_row)?;
@@ -64,25 +100,25 @@ impl ClipboardRepo {
     pub fn get(&self, id: i64) -> Result<Option<ClipboardItem>> {
         self.conn
             .query_row(
-                "SELECT id, content, created_at, pinned FROM clipboard_items WHERE id = ?1",
+                "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items WHERE id = ?1",
                 params![id],
                 Self::map_row,
             )
             .optional()
     }
 
-    pub fn toggle_pin(&mut self, id: i64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE clipboard_items SET pinned = 1 - pinned WHERE id = ?1",
-            params![id],
-        )?;
-        Ok(())
-    }
-
     pub fn touch(&mut self, id: i64, created_at: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE clipboard_items SET created_at = ?1 WHERE id = ?2",
             params![created_at, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn toggle_pin(&mut self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE clipboard_items SET pinned = 1 - pinned WHERE id = ?1",
+            params![id],
         )?;
         Ok(())
     }
@@ -96,9 +132,11 @@ impl ClipboardRepo {
     fn map_row(row: &rusqlite::Row<'_>) -> Result<ClipboardItem> {
         Ok(ClipboardItem {
             id: row.get(0)?,
-            content: row.get(1)?,
-            created_at: row.get(2)?,
-            pinned: row.get::<_, i64>(3)? != 0,
+            kind: row.get(1)?,
+            content: row.get(2)?,
+            meta: row.get(3)?,
+            created_at: row.get(4)?,
+            pinned: row.get::<_, i64>(5)? != 0,
         })
     }
 }
@@ -120,6 +158,32 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, id);
         assert_eq!(items[0].content, "hello world");
+        assert_eq!(items[0].kind, "text");
+    }
+
+    #[test]
+    fn insert_image_stores_kind_and_meta() {
+        let mut repo = fresh_repo();
+        let id = repo
+            .insert_image("abc123", r#"{"path":"/tmp/a.png","w":10,"h":10}"#, 500)
+            .unwrap();
+        let item = repo.get(id).unwrap().unwrap();
+        assert_eq!(item.kind, "image");
+        assert_eq!(item.content, "abc123");
+        assert_eq!(
+            item.meta.as_deref(),
+            Some(r#"{"path":"/tmp/a.png","w":10,"h":10}"#)
+        );
+    }
+
+    #[test]
+    fn search_ignores_images() {
+        let mut repo = fresh_repo();
+        repo.insert_text("findme", 1).unwrap();
+        repo.insert_image("hash-findme", "{}", 2).unwrap();
+        let results = repo.search("findme", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].kind, "text");
     }
 
     #[test]

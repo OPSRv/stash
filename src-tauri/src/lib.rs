@@ -58,25 +58,36 @@ pub fn run() {
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            {
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                let trusted = macos_accessibility_client::accessibility::application_is_trusted_with_prompt();
+                if !trusted {
+                    eprintln!(
+                        "[stash] Accessibility permission not granted — paste will not work. \
+                         Enable Stash in System Settings → Privacy & Security → Accessibility."
+                    );
+                }
+            }
 
-            let db_path = app
+            let data_dir = app
                 .path()
                 .app_data_dir()
-                .map(|d| {
-                    std::fs::create_dir_all(&d).ok();
-                    d.join("stash.sqlite")
-                })
-                .unwrap_or_else(|_| std::path::PathBuf::from("stash.sqlite"));
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            std::fs::create_dir_all(&data_dir).ok();
+            let db_path = data_dir.join("stash.sqlite");
+            let images_dir = data_dir.join("clipboard-images");
+            std::fs::create_dir_all(&images_dir).ok();
             let repo = ClipboardRepo::new(Connection::open(&db_path)?)?;
             let state = ClipboardState {
                 repo: Mutex::new(repo),
+                images_dir: images_dir.clone(),
             };
             let shared_repo = Arc::new(state);
             app.manage(Arc::clone(&shared_repo));
 
             let state_for_thread = Arc::clone(&shared_repo);
-            thread::spawn(move || run_monitor(state_for_thread));
+            let images_dir_thread = images_dir.clone();
+            thread::spawn(move || run_monitor(state_for_thread, images_dir_thread));
 
             let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
@@ -137,7 +148,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn run_monitor(state: Arc<ClipboardState>) {
+fn run_monitor(state: Arc<ClipboardState>, images_dir: std::path::PathBuf) {
     let reader = match ArboardReader::new() {
         Ok(r) => r,
         Err(e) => {
@@ -145,7 +156,7 @@ fn run_monitor(state: Arc<ClipboardState>) {
             return;
         }
     };
-    let mut monitor = Monitor::new(reader);
+    let mut monitor = Monitor::with_images_dir(reader, images_dir);
     loop {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -4,8 +4,9 @@ import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { ClipboardItem } from './api';
-import { deleteItem, listItems, pasteItem, searchItems, togglePin } from './api';
+import { deleteItem, listItems, parseImageMeta, pasteItem, searchItems, togglePin } from './api';
 import { detectType, type ContentType } from './contentType';
 import { iconFor, typeTint } from './icons';
 
@@ -45,7 +46,11 @@ export const ClipboardPopup = () => {
   }, [query, reloadNonce]);
 
   const typed = useMemo(
-    () => rawItems.map((i) => ({ ...i, type: detectType(i.content) })),
+    () =>
+      rawItems.map((i) => ({
+        ...i,
+        type: (i.kind === 'image' ? 'image' : detectType(i.content)) as ContentType,
+      })),
     [rawItems]
   );
 
@@ -67,7 +72,7 @@ export const ClipboardPopup = () => {
   const onPaste = useCallback(
     (i: number) => {
       const item = flat[i];
-      if (item) pasteItem(item.id);
+      if (item) pasteItem(item.id).catch((e) => console.error('paste failed:', e));
     },
     [flat]
   );
@@ -93,10 +98,14 @@ export const ClipboardPopup = () => {
       if (!item) return;
       if (e.metaKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
-        togglePin(item.id).then(() => setReloadNonce((n) => n + 1));
+        togglePin(item.id)
+          .then(() => setReloadNonce((n) => n + 1))
+          .catch((err) => console.error('togglePin failed:', err));
       } else if (e.key === 'Backspace' && (e.target as HTMLElement | null)?.tagName !== 'INPUT') {
         e.preventDefault();
-        deleteItem(item.id).then(() => setReloadNonce((n) => n + 1));
+        deleteItem(item.id)
+          .then(() => setReloadNonce((n) => n + 1))
+          .catch((err) => console.error('deleteItem failed:', err));
       }
     };
     window.addEventListener('keydown', handler);
@@ -112,12 +121,25 @@ export const ClipboardPopup = () => {
 
   const renderRow = (item: (typeof typed)[number], flatIndex: number) => {
     const tint = typeTint[item.type];
+    const imageMeta = item.kind === 'image' ? parseImageMeta(item) : null;
+    const icon = imageMeta ? (
+      <img
+        src={convertFileSrc(imageMeta.path)}
+        alt=""
+        className="w-7 h-7 rounded-md object-cover"
+      />
+    ) : (
+      iconFor(item.type)
+    );
+    const primary = imageMeta
+      ? `Image · ${imageMeta.w}×${imageMeta.h}`
+      : item.content;
     return (
       <Row
         key={item.id}
-        primary={item.content}
-        icon={iconFor(item.type)}
-        iconTint={tint.bg}
+        primary={primary}
+        icon={icon}
+        iconTint={imageMeta ? 'transparent' : tint.bg}
         iconColor={tint.fg}
         meta={
           <>
