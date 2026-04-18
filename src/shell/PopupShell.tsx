@@ -3,7 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { modules } from '../modules/registry';
 import { TabButton } from '../shared/ui/TabButton';
 import { loadSettings } from '../settings/store';
-import { setDownloadsDir } from '../modules/downloader/api';
+import { setCookiesBrowser, setDownloadsDir } from '../modules/downloader/api';
 
 export const PopupShell = () => {
   const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
@@ -12,7 +12,9 @@ export const PopupShell = () => {
 
   useEffect(() => {
     loadSettings()
-      .then((s) => setDownloadsDir(s.downloadsFolder))
+      .then((s) =>
+        Promise.all([setDownloadsDir(s.downloadsFolder), setCookiesBrowser(s.cookiesFromBrowser)])
+      )
       .catch(() => {});
   }, []);
 

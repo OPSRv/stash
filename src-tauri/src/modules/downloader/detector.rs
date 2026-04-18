@@ -113,17 +113,25 @@ pub fn pick_quality_options(info: &VideoInfo) -> Vec<QualityOption> {
     out
 }
 
-pub fn fetch_info(yt_dlp: &Path, url: &str) -> Result<VideoInfo, String> {
-    let output = Command::new(yt_dlp)
-        .args([
-            "--dump-json",
-            "--no-playlist",
-            "--no-warnings",
-            // Prefer YouTube's iOS player — generally a bit faster and
-            // more stable than the web extraction layer on cold caches.
-            "--extractor-args",
-            "youtube:player_client=ios,web",
-        ])
+pub fn fetch_info(
+    yt_dlp: &Path,
+    url: &str,
+    cookies_browser: Option<&str>,
+) -> Result<VideoInfo, String> {
+    let mut cmd = Command::new(yt_dlp);
+    cmd.args([
+        "--dump-json",
+        "--no-playlist",
+        "--no-warnings",
+        // Prefer YouTube's iOS player — generally a bit faster and
+        // more stable than the web extraction layer on cold caches.
+        "--extractor-args",
+        "youtube:player_client=ios,web",
+    ]);
+    if let Some(browser) = cookies_browser {
+        cmd.args(["--cookies-from-browser", browser]);
+    }
+    let output = cmd
         .arg(url)
         .output()
         .map_err(|e| format!("spawn yt-dlp: {e}"))?;

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { Toggle } from '../shared/ui/Toggle';
-import { setDownloadsDir } from '../modules/downloader/api';
+import { setCookiesBrowser, setDownloadsDir } from '../modules/downloader/api';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
 
 type Tab = 'general' | 'clipboard' | 'downloads' | 'about';
@@ -29,6 +29,9 @@ export const SettingsShell = () => {
     await saveSetting(key, value).catch(console.error);
     if (key === 'downloadsFolder') {
       await setDownloadsDir(value as string | null).catch(console.error);
+    }
+    if (key === 'cookiesFromBrowser') {
+      await setCookiesBrowser(value as string | null).catch(console.error);
     }
   };
 
@@ -185,6 +188,28 @@ const DownloadsTab = ({
             onChange={(v) => onChange('notifyOnDownloadComplete', v)}
             label="Notify on completion"
           />
+        }
+      />
+      <SettingRow
+        title="Auth cookies from browser"
+        description="Required for login-walled content (Instagram stories, private X posts, age-gated YouTube, etc.). Keep it 'None' for public content."
+        control={
+          <select
+            value={settings.cookiesFromBrowser ?? ''}
+            onChange={(e) =>
+              onChange('cookiesFromBrowser', (e.currentTarget.value || null) as Settings['cookiesFromBrowser'])
+            }
+            className="input-field rounded-md px-2 py-1 text-body"
+          >
+            <option value="">None</option>
+            <option value="safari">Safari</option>
+            <option value="chrome">Chrome</option>
+            <option value="firefox">Firefox</option>
+            <option value="edge">Edge</option>
+            <option value="brave">Brave</option>
+            <option value="vivaldi">Vivaldi</option>
+            <option value="chromium">Chromium</option>
+          </select>
         }
       />
     </div>

@@ -56,9 +56,12 @@ pub async fn dl_detect(
 
     let yt_dlp = resolve_yt_dlp(&state)?;
     let url_clone = url.clone();
-    let info = tauri::async_runtime::spawn_blocking(move || fetch_info(&yt_dlp, &url_clone))
-        .await
-        .map_err(|e| e.to_string())??;
+    let cookies = state.cookies_browser.lock().unwrap().clone();
+    let info = tauri::async_runtime::spawn_blocking(move || {
+        fetch_info(&yt_dlp, &url_clone, cookies.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let qualities = pick_quality_options(&info);
 
     state.detect_cache.lock().unwrap().insert(
@@ -149,5 +152,25 @@ pub fn dl_set_downloads_dir(
     };
     std::fs::create_dir_all(&next).ok();
     *state.downloads_dir.lock().unwrap() = next;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn dl_set_cookies_browser(
+    state: State<'_, Arc<RunnerState>>,
+    browser: Option<String>,
+) -> Result<(), String> {
+    let normalized = browser.and_then(|b| {
+        let b = b.trim().to_lowercase();
+        if b.is_empty() {
+            None
+        } else {
+            Some(b)
+        }
+    });
+    *state.cookies_browser.lock().unwrap() = normalized;
+    // Any cached detection was done without cookies — drop it so the next
+    // detect runs with the new setting.
+    state.detect_cache.lock().unwrap().clear();
     Ok(())
 }

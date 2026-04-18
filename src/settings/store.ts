@@ -1,10 +1,21 @@
 import { LazyStore } from '@tauri-apps/plugin-store';
 
+export type CookiesBrowser =
+  | 'safari'
+  | 'chrome'
+  | 'firefox'
+  | 'edge'
+  | 'brave'
+  | 'vivaldi'
+  | 'chromium'
+  | null;
+
 export type Settings = {
   maxHistoryItems: number;
   launchAtLogin: boolean;
   downloadsFolder: string | null;
   notifyOnDownloadComplete: boolean;
+  cookiesFromBrowser: CookiesBrowser;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -12,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   launchAtLogin: false,
   downloadsFolder: null,
   notifyOnDownloadComplete: true,
+  cookiesFromBrowser: null,
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

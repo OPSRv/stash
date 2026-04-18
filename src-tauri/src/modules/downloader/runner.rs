@@ -21,6 +21,7 @@ pub struct RunnerState {
     pub downloads_dir: Mutex<PathBuf>,
     pub default_downloads_dir: PathBuf,
     pub detect_cache: Mutex<std::collections::HashMap<String, CachedDetection>>,
+    pub cookies_browser: Mutex<Option<String>>,
 }
 
 impl RunnerState {
@@ -32,6 +33,7 @@ impl RunnerState {
             downloads_dir: Mutex::new(downloads_dir.clone()),
             default_downloads_dir: downloads_dir,
             detect_cache: Mutex::new(std::collections::HashMap::new()),
+            cookies_browser: Mutex::new(None),
         }
     }
 }
@@ -70,6 +72,10 @@ pub fn spawn_download(
         .arg("after_move:filepath:%(filepath)s")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    if let Some(browser) = state.cookies_browser.lock().unwrap().clone() {
+        cmd.args(["--cookies-from-browser", &browser]);
+    }
 
     if kind == "audio" {
         cmd.args(["-x", "--audio-format", "m4a"]);

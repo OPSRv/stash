@@ -14,8 +14,8 @@ use modules::clipboard::{
 };
 use modules::downloader::{
     commands::{
-        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_list, dl_set_downloads_dir,
-        dl_start,
+        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_list, dl_set_cookies_browser,
+        dl_set_downloads_dir, dl_start,
     },
     jobs::JobRepo,
     runner::RunnerState,
@@ -85,6 +85,7 @@ pub fn run() {
             dl_delete,
             dl_clear_completed,
             dl_set_downloads_dir,
+            dl_set_cookies_browser,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

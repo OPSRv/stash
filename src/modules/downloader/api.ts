@@ -77,6 +77,9 @@ export const clearCompleted = (): Promise<number> => invoke('dl_clear_completed'
 export const setDownloadsDir = (path: string | null): Promise<void> =>
   invoke('dl_set_downloads_dir', { path });
 
+export const setCookiesBrowser = (browser: string | null): Promise<void> =>
+  invoke('dl_set_cookies_browser', { browser });
+
 export const platformBadge = (p: Platform | string): { label: string; bg: string; fg: string } => {
   const known: Record<string, { label: string; bg: string; fg: string }> = {
     youtube: { label: 'YOUTUBE', bg: 'rgba(235,72,72,0.16)', fg: '#FF6B6B' },
