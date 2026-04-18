@@ -17,6 +17,7 @@ import {
 } from './api';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { Kbd } from '../../shared/ui/Kbd';
+import { VideoPlayer } from '../../shared/ui/VideoPlayer';
 
 const statusLabel = (s: DownloadJob['status']) =>
   ({
@@ -35,6 +36,7 @@ export const DownloadsShell = () => {
   const [detectError, setDetectError] = useState<string | null>(null);
   const [pickedFormat, setPickedFormat] = useState<QualityOption | null>(null);
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
+  const [playing, setPlaying] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     list().then(setJobs).catch((e) => console.error('list failed', e));
@@ -241,6 +243,7 @@ export const DownloadsShell = () => {
                   job={j}
                   zebra={i % 2 === 0}
                   onDelete={() => deleteJob(j.id).then(reload)}
+                  onPlay={() => j.target_path && setPlaying(j.target_path)}
                 />
               ))}
             </div>
@@ -253,6 +256,8 @@ export const DownloadsShell = () => {
         )}
         <div className="h-6" />
       </div>
+
+      {playing && <VideoPlayer src={playing} onClose={() => setPlaying(null)} />}
     </div>
   );
 };
@@ -304,10 +309,12 @@ const CompletedRow = ({
   job,
   zebra,
   onDelete,
+  onPlay,
 }: {
   job: DownloadJob;
   zebra: boolean;
   onDelete: () => void;
+  onPlay: () => void;
 }) => {
   const reveal = async () => {
     if (!job.target_path) return;
@@ -345,6 +352,15 @@ const CompletedRow = ({
       </span>
       {job.bytes_total && (
         <span className="t-tertiary text-meta font-mono">{formatBytes(job.bytes_total)}</span>
+      )}
+      {job.target_path && !isFail && (
+        <button
+          onClick={onPlay}
+          className="t-primary text-meta px-2 py-1 rounded"
+          style={{ background: 'rgba(47,122,229,0.18)' }}
+        >
+          Play
+        </button>
       )}
       {job.target_path && (
         <button
