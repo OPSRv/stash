@@ -14,7 +14,8 @@ use modules::clipboard::{
 };
 use modules::downloader::{
     commands::{
-        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_list, dl_start,
+        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_list, dl_set_downloads_dir,
+        dl_start,
     },
     jobs::JobRepo,
     runner::RunnerState,
@@ -42,7 +43,9 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_clipboard_manager::init());
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(desktop)]
     {
@@ -81,6 +84,7 @@ pub fn run() {
             dl_list,
             dl_delete,
             dl_clear_completed,
+            dl_set_downloads_dir,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

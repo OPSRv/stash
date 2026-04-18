@@ -37,6 +37,16 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
   revealItemInDir: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('@tauri-apps/plugin-notification', () => ({
+  isPermissionGranted: vi.fn().mockResolvedValue(true),
+  requestPermission: vi.fn().mockResolvedValue('granted'),
+  sendNotification: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: vi.fn().mockResolvedValue(null),
+}));
+
 afterEach(() => {
   cleanup();
 });

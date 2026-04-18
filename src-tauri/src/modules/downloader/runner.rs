@@ -11,7 +11,8 @@ pub struct RunnerState {
     pub jobs: Mutex<JobRepo>,
     pub active: Mutex<std::collections::HashMap<i64, Child>>,
     pub yt_dlp_path: Mutex<Option<PathBuf>>,
-    pub downloads_dir: PathBuf,
+    pub downloads_dir: Mutex<PathBuf>,
+    pub default_downloads_dir: PathBuf,
 }
 
 impl RunnerState {
@@ -20,7 +21,8 @@ impl RunnerState {
             jobs: Mutex::new(repo),
             active: Mutex::new(Default::default()),
             yt_dlp_path: Mutex::new(None),
-            downloads_dir,
+            downloads_dir: Mutex::new(downloads_dir.clone()),
+            default_downloads_dir: downloads_dir,
         }
     }
 }
@@ -44,8 +46,9 @@ pub fn spawn_download(
     format_id: Option<&str>,
     kind: &str, // "video" | "audio"
 ) -> Result<(), String> {
-    let output_template = state
-        .downloads_dir
+    let downloads_dir = state.downloads_dir.lock().unwrap().clone();
+    std::fs::create_dir_all(&downloads_dir).ok();
+    let output_template = downloads_dir
         .join("%(title).100B [%(id)s].%(ext)s")
         .to_string_lossy()
         .to_string();

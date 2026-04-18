@@ -74,6 +74,9 @@ export const list = (): Promise<DownloadJob[]> => invoke('dl_list');
 export const deleteJob = (id: number): Promise<void> => invoke('dl_delete', { id });
 export const clearCompleted = (): Promise<number> => invoke('dl_clear_completed');
 
+export const setDownloadsDir = (path: string | null): Promise<void> =>
+  invoke('dl_set_downloads_dir', { path });
+
 export const platformBadge = (p: Platform | string): { label: string; bg: string; fg: string } => {
   const known: Record<string, { label: string; bg: string; fg: string }> = {
     youtube: { label: 'YOUTUBE', bg: 'rgba(235,72,72,0.16)', fg: '#FF6B6B' },

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
+import {
+  isPermissionGranted,
+  requestPermission,
+  sendNotification,
+} from '@tauri-apps/plugin-notification';
+import { loadSettings } from '../../settings/store';
 import { PlatformBadge } from './PlatformBadge';
 import {
   cancel,
@@ -38,16 +44,56 @@ export const DownloadsShell = () => {
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const [playing, setPlaying] = useState<string | null>(null);
 
+  // On mount: if clipboard holds a supported URL, auto-fill and detect.
+  useEffect(() => {
+    (async () => {
+      try {
+        const text = await readText();
+        const t = text?.trim() ?? '';
+        if (
+          t &&
+          /https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|reddit\.com|vimeo\.com|twitch\.tv|facebook\.com|fb\.watch)/i.test(
+            t
+          )
+        ) {
+          setUrl(t);
+          runDetect(t);
+        }
+      } catch (e) {
+        console.warn('clipboard read failed on mount', e);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const reload = useCallback(() => {
     list().then(setJobs).catch((e) => console.error('list failed', e));
   }, []);
 
   useEffect(() => {
     reload();
+    const notify = async (title: string, body: string) => {
+      try {
+        const settings = await loadSettings();
+        if (!settings.notifyOnDownloadComplete) return;
+        let granted = await isPermissionGranted();
+        if (!granted) granted = (await requestPermission()) === 'granted';
+        if (granted) sendNotification({ title, body });
+      } catch (e) {
+        console.error('notify failed', e);
+      }
+    };
     const unlisten = Promise.all([
       listen('downloader:progress', reload),
-      listen('downloader:completed', reload),
-      listen('downloader:failed', reload),
+      listen<{ id: number; path: string }>('downloader:completed', (e) => {
+        reload();
+        const name = e.payload.path.split('/').pop() ?? 'Download';
+        notify('Download finished', name);
+      }),
+      listen<{ id: number }>('downloader:failed', (_) => {
+        reload();
+        notify('Download failed', 'See Downloads for details.');
+      }),
     ]);
     return () => {
       unlisten

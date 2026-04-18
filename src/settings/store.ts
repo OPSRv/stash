@@ -3,11 +3,15 @@ import { LazyStore } from '@tauri-apps/plugin-store';
 export type Settings = {
   maxHistoryItems: number;
   launchAtLogin: boolean;
+  downloadsFolder: string | null;
+  notifyOnDownloadComplete: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
   maxHistoryItems: 1000,
   launchAtLogin: false,
+  downloadsFolder: null,
+  notifyOnDownloadComplete: true,
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

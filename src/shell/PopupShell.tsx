@@ -2,11 +2,19 @@ import { useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { modules } from '../modules/registry';
 import { TabButton } from '../shared/ui/TabButton';
+import { loadSettings } from '../settings/store';
+import { setDownloadsDir } from '../modules/downloader/api';
 
 export const PopupShell = () => {
   const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
   const active = modules.find((m) => m.id === activeId);
   const Popup = active?.PopupView;
+
+  useEffect(() => {
+    loadSettings()
+      .then((s) => setDownloadsDir(s.downloadsFolder))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

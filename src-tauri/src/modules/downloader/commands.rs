@@ -21,7 +21,7 @@ fn to_string_err<T, E: std::fmt::Display>(r: Result<T, E>) -> Result<T, String> 
 }
 
 fn resolve_yt_dlp(state: &RunnerState) -> Result<std::path::PathBuf, String> {
-    let bin_dir = state.downloads_dir.join("bin");
+    let bin_dir = state.default_downloads_dir.join("bin");
     {
         let guard = state.yt_dlp_path.lock().unwrap();
         if let Some(p) = guard.clone() {
@@ -113,4 +113,18 @@ pub fn dl_delete(state: State<'_, Arc<RunnerState>>, id: i64) -> Result<(), Stri
 #[tauri::command]
 pub fn dl_clear_completed(state: State<'_, Arc<RunnerState>>) -> Result<usize, String> {
     to_string_err(state.jobs.lock().unwrap().clear_completed())
+}
+
+#[tauri::command]
+pub fn dl_set_downloads_dir(
+    state: State<'_, Arc<RunnerState>>,
+    path: Option<String>,
+) -> Result<(), String> {
+    let next = match path {
+        Some(p) if !p.is_empty() => std::path::PathBuf::from(p),
+        _ => state.default_downloads_dir.clone(),
+    };
+    std::fs::create_dir_all(&next).ok();
+    *state.downloads_dir.lock().unwrap() = next;
+    Ok(())
 }

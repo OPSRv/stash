@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { Toggle } from '../shared/ui/Toggle';
+import { setDownloadsDir } from '../modules/downloader/api';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
 
-type Tab = 'general' | 'clipboard' | 'about';
+type Tab = 'general' | 'clipboard' | 'downloads' | 'about';
 
 const tabs: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'clipboard', label: 'Clipboard' },
+  { id: 'downloads', label: 'Downloads' },
   { id: 'about', label: 'About' },
 ];
 
@@ -24,6 +27,9 @@ export const SettingsShell = () => {
   const update = async <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((s) => ({ ...s, [key]: value }));
     await saveSetting(key, value).catch(console.error);
+    if (key === 'downloadsFolder') {
+      await setDownloadsDir(value as string | null).catch(console.error);
+    }
   };
 
   const toggleAutostart = async (next: boolean) => {
@@ -59,6 +65,9 @@ export const SettingsShell = () => {
         )}
         {tab === 'clipboard' && (
           <ClipboardTab settings={settings} onChange={update} />
+        )}
+        {tab === 'downloads' && (
+          <DownloadsTab settings={settings} onChange={update} />
         )}
         {tab === 'about' && <AboutTab />}
       </main>
@@ -126,6 +135,61 @@ const ClipboardTab = ({
     />
   </div>
 );
+
+const DownloadsTab = ({
+  settings,
+  onChange,
+}: {
+  settings: Settings;
+  onChange: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
+}) => {
+  const pickFolder = async () => {
+    try {
+      const selected = await openDialog({ directory: true, multiple: false });
+      if (typeof selected === 'string') onChange('downloadsFolder', selected);
+    } catch (e) {
+      console.error('folder pick failed', e);
+    }
+  };
+  return (
+    <div className="divide-y divide-white/5">
+      <SettingRow
+        title="Download folder"
+        description={settings.downloadsFolder ?? 'Default: ~/Movies/Stash'}
+        control={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={pickFolder}
+              className="px-3 py-1 rounded-md t-primary text-meta"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            >
+              Choose…
+            </button>
+            {settings.downloadsFolder && (
+              <button
+                onClick={() => onChange('downloadsFolder', null)}
+                className="t-tertiary text-meta hover:t-secondary"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        }
+      />
+      <SettingRow
+        title="Notify when a download finishes"
+        description="Shows a system notification on completion and failure."
+        control={
+          <Toggle
+            checked={settings.notifyOnDownloadComplete}
+            onChange={(v) => onChange('notifyOnDownloadComplete', v)}
+            label="Notify on completion"
+          />
+        }
+      />
+    </div>
+  );
+};
 
 const AboutTab = () => (
   <div className="t-secondary text-body space-y-2">

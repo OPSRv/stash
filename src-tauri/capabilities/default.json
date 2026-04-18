@@ -10,6 +10,8 @@
     "store:default",
     "autostart:default",
     "clipboard-manager:allow-read-text",
-    "opener:allow-reveal-item-in-dir"
+    "opener:allow-reveal-item-in-dir",
+    "notification:default",
+    "dialog:allow-open"
   ]
 }
