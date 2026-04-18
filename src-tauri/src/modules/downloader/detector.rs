@@ -129,7 +129,11 @@ pub fn fetch_info(
         "youtube:player_client=ios,web",
     ]);
     if let Some(browser) = cookies_browser {
-        cmd.args(["--cookies-from-browser", browser]);
+        if let Some(file) = browser.strip_prefix("file:") {
+            cmd.args(["--cookies", file]);
+        } else {
+            cmd.args(["--cookies-from-browser", browser]);
+        }
     }
     let output = cmd
         .arg(url)

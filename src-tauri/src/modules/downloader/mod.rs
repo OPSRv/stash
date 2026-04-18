@@ -1,3 +1,4 @@
+pub mod arc_cookies;
 pub mod commands;
 pub mod detector;
 pub mod installer;

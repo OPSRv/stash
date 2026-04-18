@@ -74,7 +74,11 @@ pub fn spawn_download(
         .stderr(Stdio::piped());
 
     if let Some(browser) = state.cookies_browser.lock().unwrap().clone() {
-        cmd.args(["--cookies-from-browser", &browser]);
+        if let Some(file) = browser.strip_prefix("file:") {
+            cmd.args(["--cookies", file]);
+        } else {
+            cmd.args(["--cookies-from-browser", &browser]);
+        }
     }
 
     if kind == "audio" {
