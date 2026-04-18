@@ -6,7 +6,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use modules::clipboard::{
     commands::{
-        clipboard_delete, clipboard_list, clipboard_search, clipboard_toggle_pin, ClipboardState,
+        clipboard_delete, clipboard_list, clipboard_paste, clipboard_search, clipboard_toggle_pin,
+        ClipboardState,
     },
     monitor::{ArboardReader, Monitor},
     repo::ClipboardRepo,
@@ -53,6 +54,7 @@ pub fn run() {
             clipboard_search,
             clipboard_toggle_pin,
             clipboard_delete,
+            clipboard_paste,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

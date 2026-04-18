@@ -17,3 +17,6 @@ export const togglePin = (id: number): Promise<void> =>
 
 export const deleteItem = (id: number): Promise<void> =>
   invoke('clipboard_delete', { id });
+
+export const pasteItem = (id: number): Promise<void> =>
+  invoke('clipboard_paste', { id });

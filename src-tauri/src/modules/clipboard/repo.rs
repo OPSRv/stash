@@ -79,6 +79,14 @@ impl ClipboardRepo {
         Ok(())
     }
 
+    pub fn touch(&mut self, id: i64, created_at: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE clipboard_items SET created_at = ?1 WHERE id = ?2",
+            params![created_at, id],
+        )?;
+        Ok(())
+    }
+
     pub fn delete(&mut self, id: i64) -> Result<()> {
         self.conn
             .execute("DELETE FROM clipboard_items WHERE id = ?1", params![id])?;
@@ -182,6 +190,16 @@ mod tests {
         let id = repo.insert_text("byebye", 1).unwrap();
         repo.delete(id).unwrap();
         assert_eq!(repo.list(10).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn touch_updates_created_at_without_changing_content() {
+        let mut repo = fresh_repo();
+        let id = repo.insert_text("touched", 100).unwrap();
+        repo.touch(id, 500).unwrap();
+        let item = repo.get(id).unwrap().unwrap();
+        assert_eq!(item.content, "touched");
+        assert_eq!(item.created_at, 500);
     }
 
     #[test]

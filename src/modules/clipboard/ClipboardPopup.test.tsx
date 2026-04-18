@@ -66,4 +66,40 @@ describe('ClipboardPopup', () => {
       expect(screen.getByText(/no clipboard items/i)).toBeInTheDocument();
     });
   });
+
+  it('Enter triggers clipboard_paste for active item', async () => {
+    const user = userEvent.setup();
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('pinned link')).toBeInTheDocument());
+
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_paste', { id: 1 });
+    });
+  });
+
+  it('Meta+P toggles pin on active item', async () => {
+    const user = userEvent.setup();
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('pinned link')).toBeInTheDocument());
+
+    await user.keyboard('{Meta>}p{/Meta}');
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_toggle_pin', { id: 1 });
+    });
+  });
+
+  it('Backspace deletes active item', async () => {
+    const user = userEvent.setup();
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('pinned link')).toBeInTheDocument());
+
+    await user.keyboard('{Backspace}');
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_delete', { id: 1 });
+    });
+  });
 });
