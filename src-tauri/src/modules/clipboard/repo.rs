@@ -129,6 +129,30 @@ impl ClipboardRepo {
         Ok(())
     }
 
+    /// Delete every unpinned item. Returns how many rows were removed.
+    pub fn clear_all(&mut self) -> Result<usize> {
+        let removed = self
+            .conn
+            .execute("DELETE FROM clipboard_items WHERE pinned = 0", [])?;
+        Ok(removed)
+    }
+
+    /// Keep at most `cap` unpinned items (newest first). Pinned items are
+    /// always retained. Returns how many rows were removed.
+    pub fn trim_to_cap(&mut self, cap: usize) -> Result<usize> {
+        let removed = self.conn.execute(
+            "DELETE FROM clipboard_items
+             WHERE pinned = 0 AND id NOT IN (
+                 SELECT id FROM clipboard_items
+                 WHERE pinned = 0
+                 ORDER BY created_at DESC
+                 LIMIT ?1
+             )",
+            params![cap as i64],
+        )?;
+        Ok(removed)
+    }
+
     fn map_row(row: &rusqlite::Row<'_>) -> Result<ClipboardItem> {
         Ok(ClipboardItem {
             id: row.get(0)?,
@@ -264,6 +288,43 @@ mod tests {
         let item = repo.get(id).unwrap().unwrap();
         assert_eq!(item.content, "touched");
         assert_eq!(item.created_at, 500);
+    }
+
+    #[test]
+    fn clear_all_deletes_unpinned_items_and_keeps_pinned() {
+        let mut repo = fresh_repo();
+        let pinned = repo.insert_text("keep me", 1).unwrap();
+        repo.toggle_pin(pinned).unwrap();
+        repo.insert_text("go away 1", 2).unwrap();
+        repo.insert_text("go away 2", 3).unwrap();
+
+        let removed = repo.clear_all().unwrap();
+
+        assert_eq!(removed, 2);
+        let items = repo.list(10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, pinned);
+    }
+
+    #[test]
+    fn trim_to_cap_keeps_only_latest_n_unpinned() {
+        let mut repo = fresh_repo();
+        let pinned = repo.insert_text("pinned", 1).unwrap();
+        repo.toggle_pin(pinned).unwrap();
+        for i in 0..10 {
+            repo.insert_text(&format!("item-{i}"), 100 + i).unwrap();
+        }
+
+        let removed = repo.trim_to_cap(3).unwrap();
+
+        assert_eq!(removed, 7);
+        let items = repo.list(20).unwrap();
+        // 1 pinned + 3 most recent unpinned = 4
+        assert_eq!(items.len(), 4);
+        assert_eq!(items[0].content, "pinned");
+        assert_eq!(items[1].content, "item-9");
+        assert_eq!(items[2].content, "item-8");
+        assert_eq!(items[3].content, "item-7");
     }
 
     #[test]

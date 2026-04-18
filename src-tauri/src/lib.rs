@@ -6,8 +6,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use modules::clipboard::{
     commands::{
-        clipboard_delete, clipboard_list, clipboard_paste, clipboard_search, clipboard_toggle_pin,
-        ClipboardState,
+        clipboard_clear, clipboard_copy_only, clipboard_delete, clipboard_list, clipboard_paste,
+        clipboard_search, clipboard_toggle_pin, ClipboardState,
     },
     monitor::{ArboardReader, Monitor},
     repo::ClipboardRepo,
@@ -21,6 +21,8 @@ use tauri::{
 };
 
 const CLIPBOARD_POLL_MS: u64 = 500;
+const CLIPBOARD_MAX_UNPINNED: usize = 1000;
+const CLIPBOARD_TRIM_EVERY_N_POLLS: u32 = 120; // ~once per minute at 500ms poll
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -55,6 +57,8 @@ pub fn run() {
             clipboard_toggle_pin,
             clipboard_delete,
             clipboard_paste,
+            clipboard_copy_only,
+            clipboard_clear,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -163,25 +167,33 @@ fn run_monitor(
         }
     };
     let mut monitor = Monitor::with_images_dir(reader, images_dir);
+    let mut tick: u32 = 0;
     loop {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let inserted = if let Ok(mut repo) = state.repo.lock() {
-            match monitor.poll_once(&mut repo, now) {
+            let id = match monitor.poll_once(&mut repo, now) {
                 Ok(id) => id,
                 Err(e) => {
                     eprintln!("[clipboard] poll error: {e}");
                     None
                 }
+            };
+            if tick % CLIPBOARD_TRIM_EVERY_N_POLLS == 0 {
+                if let Err(e) = repo.trim_to_cap(CLIPBOARD_MAX_UNPINNED) {
+                    eprintln!("[clipboard] trim error: {e}");
+                }
             }
+            id
         } else {
             None
         };
         if let Some(id) = inserted {
             let _ = app.emit("clipboard:changed", id);
         }
+        tick = tick.wrapping_add(1);
         thread::sleep(Duration::from_millis(CLIPBOARD_POLL_MS));
     }
 }

@@ -37,3 +37,8 @@ export const deleteItem = (id: number): Promise<void> =>
 
 export const pasteItem = (id: number): Promise<void> =>
   invoke('clipboard_paste', { id });
+
+export const copyOnly = (id: number): Promise<void> =>
+  invoke('clipboard_copy_only', { id });
+
+export const clearAll = (): Promise<number> => invoke('clipboard_clear');

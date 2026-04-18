@@ -35,6 +35,14 @@ pub fn delete_item(state: &ClipboardState, id: i64) -> Result<()> {
     state.repo.lock().unwrap().delete(id)
 }
 
+pub fn clear_all(state: &ClipboardState) -> Result<usize> {
+    state.repo.lock().unwrap().clear_all()
+}
+
+pub fn trim_to_cap(state: &ClipboardState, cap: usize) -> Result<usize> {
+    state.repo.lock().unwrap().trim_to_cap(cap)
+}
+
 pub fn paste_prepare(state: &ClipboardState, id: i64, now: i64) -> Result<ClipboardItem> {
     let mut repo = state.repo.lock().unwrap();
     let item = repo
@@ -69,6 +77,47 @@ pub fn clipboard_toggle_pin(
     id: i64,
 ) -> std::result::Result<(), String> {
     to_string_err(toggle_pin(&state, id))
+}
+
+#[tauri::command]
+pub fn clipboard_clear(
+    state: State<'_, Arc<ClipboardState>>,
+) -> std::result::Result<usize, String> {
+    to_string_err(clear_all(&state))
+}
+
+#[tauri::command]
+pub fn clipboard_copy_only(
+    state: State<'_, Arc<ClipboardState>>,
+    id: i64,
+) -> std::result::Result<(), String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let item = to_string_err(paste_prepare(&state, id, now))?;
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    match item.kind.as_str() {
+        "text" => clipboard.set_text(item.content).map_err(|e| e.to_string())?,
+        "image" => {
+            let meta = item.meta.unwrap_or_default();
+            let parsed: serde_json::Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
+            let path = parsed
+                .get("path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "image meta.path missing".to_string())?;
+            let img = image::open(path).map_err(|e| e.to_string())?.to_rgba8();
+            let (w, h) = img.dimensions();
+            let data = arboard::ImageData {
+                width: w as usize,
+                height: h as usize,
+                bytes: std::borrow::Cow::Owned(img.into_raw()),
+            };
+            clipboard.set_image(data).map_err(|e| e.to_string())?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { listItems, searchItems, togglePin, deleteItem, pasteItem } from './api';
+import {
+  listItems,
+  searchItems,
+  togglePin,
+  deleteItem,
+  pasteItem,
+  copyOnly,
+  clearAll,
+} from './api';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -57,6 +65,23 @@ describe('clipboard api', () => {
       mockInvoke.mockResolvedValueOnce(undefined);
       await pasteItem(9);
       expect(mockInvoke).toHaveBeenCalledWith('clipboard_paste', { id: 9 });
+    });
+  });
+
+  describe('copyOnly', () => {
+    it('calls clipboard_copy_only with id', async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+      await copyOnly(12);
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_copy_only', { id: 12 });
+    });
+  });
+
+  describe('clearAll', () => {
+    it('calls clipboard_clear and returns removed count', async () => {
+      mockInvoke.mockResolvedValueOnce(5);
+      const removed = await clearAll();
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_clear');
+      expect(removed).toBe(5);
     });
   });
 });
