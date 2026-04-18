@@ -1,0 +1,1075 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<title>Menubar Utility — Design</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: {
+          sys: ['-apple-system','BlinkMacSystemFont','SF Pro Text','SF Pro Display','system-ui','sans-serif'],
+          mono: ['SF Mono','ui-monospace','Menlo','monospace'],
+        },
+        colors: {
+          accent: {
+            DEFAULT: '#2F7AE5',
+            600: '#2F7AE5',
+            500: '#4A8BEA',
+          },
+        },
+        fontSize: {
+          'meta': ['11px', {lineHeight: '14px', letterSpacing: '0.01em'}],
+          'body': ['13px', {lineHeight: '18px'}],
+          'title': ['15px', {lineHeight: '20px'}],
+          'heading': ['18px', {lineHeight: '24px'}],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  html, body { background: #0b0b0e; }
+  html.light, html.light body { background: #eceef2; }
+
+  /* Scrollbars */
+  .nice-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+  .nice-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.08); border-radius: 99px; }
+  .light .nice-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); }
+
+  /* Checkered transparency (for image thumbs) */
+  .checker {
+    background-image:
+      linear-gradient(45deg, rgba(255,255,255,.04) 25%, transparent 25%),
+      linear-gradient(-45deg, rgba(255,255,255,.04) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, rgba(255,255,255,.04) 75%),
+      linear-gradient(-45deg, transparent 75%, rgba(255,255,255,.04) 75%);
+    background-size: 8px 8px;
+    background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+  }
+
+  /* Canvas grid background */
+  .canvas-grid {
+    background-color: #0b0b0e;
+    background-image:
+      radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .light .canvas-grid {
+    background-color: #eceef2;
+    background-image:
+      radial-gradient(rgba(0,0,0,0.08) 1px, transparent 1px);
+  }
+
+  /* Window chrome vibrancy */
+  .pane {
+    background: rgba(28,28,32,0.86);
+    backdrop-filter: blur(30px) saturate(1.4);
+    -webkit-backdrop-filter: blur(30px) saturate(1.4);
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow:
+      0 1px 0 0 rgba(255,255,255,0.05) inset,
+      0 30px 60px -20px rgba(0,0,0,0.55),
+      0 0 0 0.5px rgba(0,0,0,0.6);
+  }
+  .light .pane {
+    background: rgba(246,247,249,0.92);
+    border: 1px solid rgba(0,0,0,0.06);
+    box-shadow:
+      0 1px 0 0 rgba(255,255,255,0.8) inset,
+      0 30px 60px -20px rgba(30,40,60,0.20),
+      0 0 0 0.5px rgba(0,0,0,0.08);
+  }
+
+  /* Generic utility: hairline divider that adapts */
+  .hair { background: rgba(255,255,255,0.06); }
+  .light .hair { background: rgba(0,0,0,0.08); }
+
+  /* Text tokens */
+  .t-primary { color: rgba(255,255,255,0.92); }
+  .t-secondary { color: rgba(255,255,255,0.60); }
+  .t-tertiary { color: rgba(255,255,255,0.40); }
+  .light .t-primary { color: rgba(20,22,28,0.92); }
+  .light .t-secondary { color: rgba(20,22,28,0.62); }
+  .light .t-tertiary { color: rgba(20,22,28,0.42); }
+
+  /* Keyboard cap */
+  .kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    border-radius: 5px;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+    font-size: 11px; font-weight: 500; line-height: 1;
+    color: rgba(255,255,255,0.78);
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.25);
+  }
+  .light .kbd {
+    color: rgba(20,22,28,0.78);
+    background: rgba(255,255,255,0.9);
+    border: 1px solid rgba(0,0,0,0.10);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.05);
+  }
+
+  /* Active row background */
+  .row-active {
+    background: linear-gradient(180deg, rgba(47,122,229,0.18) 0%, rgba(47,122,229,0.14) 100%);
+    box-shadow: inset 0 0 0 0.5px rgba(47,122,229,0.35);
+  }
+  .light .row-active {
+    background: linear-gradient(180deg, rgba(47,122,229,0.14) 0%, rgba(47,122,229,0.10) 100%);
+    box-shadow: inset 0 0 0 0.5px rgba(47,122,229,0.35);
+  }
+
+  /* Pinned tint */
+  .row-pinned { background: rgba(255,255,255,0.02); }
+  .light .row-pinned { background: rgba(0,0,0,0.015); }
+
+  /* Segmented control */
+  .seg {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 7px; padding: 2px;
+  }
+  .light .seg {
+    background: rgba(0,0,0,0.05);
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+  .seg button { color: rgba(255,255,255,0.70); }
+  .light .seg button { color: rgba(20,22,28,0.68); }
+  .seg .on {
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.95);
+    box-shadow: 0 1px 0 rgba(0,0,0,0.25), inset 0 0 0 0.5px rgba(255,255,255,0.08);
+  }
+  .light .seg .on {
+    background: #ffffff;
+    color: rgba(20,22,28,0.95);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 0 0 0.5px rgba(0,0,0,0.04);
+  }
+
+  /* Input */
+  .input {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.92);
+  }
+  .light .input {
+    background: #ffffff;
+    border: 1px solid rgba(0,0,0,0.09);
+    color: rgba(20,22,28,0.92);
+  }
+  .input::placeholder { color: rgba(255,255,255,0.35); }
+  .light .input::placeholder { color: rgba(20,22,28,0.38); }
+
+  /* Traffic lights */
+  .tl { width: 12px; height: 12px; border-radius: 999px; display: inline-block; }
+  .tl.red { background: #ff5f57; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+  .tl.yellow { background: #febc2e; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+  .tl.green { background: #28c840; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.2); }
+
+  /* Record button pulse */
+  @keyframes pulseRec {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(235,72,72,0.55), inset 0 0 0 0.5px rgba(255,255,255,0.12); }
+    50% { box-shadow: 0 0 0 7px rgba(235,72,72,0.0), inset 0 0 0 0.5px rgba(255,255,255,0.12); }
+  }
+  .rec-dot { animation: pulseRec 1.6s ease-in-out infinite; }
+
+  /* Waveform bars */
+  @keyframes wavey {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1); }
+  }
+  .wbar { transform-origin: center; animation: wavey 1.1s ease-in-out infinite; }
+
+  /* Progress shimmer */
+  @keyframes shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+  .prog-fill {
+    background:
+      linear-gradient(90deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.25) 45%, rgba(255,255,255,0.10) 100%),
+      #2F7AE5;
+    background-size: 200px 100%, 100% 100%;
+    background-repeat: no-repeat, no-repeat;
+    animation: shimmer 1.8s linear infinite;
+  }
+
+  /* Hard separator between popup sections with a tiny label */
+  .section-label {
+    font-size: 11px; font-weight: 500; letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.38);
+  }
+  .light .section-label { color: rgba(20,22,28,0.45); }
+
+  /* Screen label chip */
+  .screen-label {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: rgba(255,255,255,0.45);
+  }
+  .light .screen-label { color: rgba(20,22,28,0.55); }
+  .screen-num {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    font-size: 10px; letter-spacing: 0.08em;
+    color: rgba(255,255,255,0.30);
+  }
+  .light .screen-num { color: rgba(20,22,28,0.40); }
+
+  /* Code preview style */
+  .code-sample {
+    font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,0.80);
+  }
+  .light .code-sample { color: rgba(20,22,28,0.80); }
+</style>
+</head>
+<body class="font-sys antialiased">
+
+<!-- ================== TOP CHROME / CANVAS HEADER ================== -->
+<div class="fixed top-0 inset-x-0 z-50 flex items-center justify-between px-6 py-3" style="backdrop-filter: blur(20px);">
+  <div class="flex items-center gap-3">
+    <div class="flex items-center gap-1.5">
+      <span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span>
+    </div>
+    <span class="t-secondary text-body font-medium ml-2">Clip — UI Exploration</span>
+    <span class="t-tertiary text-meta ml-1">v0.3 · 4 screens</span>
+  </div>
+  <div class="flex items-center gap-2">
+    <div class="seg flex text-meta font-medium">
+      <button id="themeDark" class="on px-3 py-1 rounded-md flex items-center gap-1.5">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        Dark
+      </button>
+      <button id="themeLight" class="px-3 py-1 rounded-md flex items-center gap-1.5">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        Light
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ================== CANVAS ================== -->
+<main class="canvas-grid min-h-screen pt-20 pb-24">
+  <div class="max-w-[1560px] mx-auto px-10">
+
+    <!-- Header / rationale -->
+    <header class="mb-10 mt-6">
+      <div class="flex items-baseline gap-4 mb-3">
+        <span class="screen-num">00 / OVERVIEW</span>
+        <span class="hair h-px flex-1"></span>
+      </div>
+      <h1 class="t-primary text-[34px] leading-[40px] font-medium tracking-tight mb-4 max-w-[760px]">A menubar utility for clipboard, downloads and capture.</h1>
+      <p class="t-secondary text-body max-w-[640px] mb-6">
+        Four surfaces across one mental model: a keyboard-first popup, a dedicated downloads window, a floating recorder that collapses while recording, and a preferences pane. Quiet palette, one accent, zero ornament.
+      </p>
+      <div class="grid grid-cols-4 gap-4 max-w-[840px]">
+        <div class="pane rounded-xl p-4">
+          <div class="screen-label mb-2">PALETTE</div>
+          <div class="flex items-center gap-1">
+            <span class="w-5 h-5 rounded-md" style="background:#0b0b0e;border:1px solid rgba(255,255,255,0.08)"></span>
+            <span class="w-5 h-5 rounded-md" style="background:#1c1c20;border:1px solid rgba(255,255,255,0.08)"></span>
+            <span class="w-5 h-5 rounded-md" style="background:#2a2a30;border:1px solid rgba(255,255,255,0.08)"></span>
+            <span class="w-5 h-5 rounded-md" style="background:#2F7AE5"></span>
+          </div>
+        </div>
+        <div class="pane rounded-xl p-4">
+          <div class="screen-label mb-2">TYPE</div>
+          <div class="t-primary text-body font-medium">SF Pro · 11 / 13 / 15 / 18</div>
+        </div>
+        <div class="pane rounded-xl p-4">
+          <div class="screen-label mb-2">RADIUS</div>
+          <div class="t-primary text-body">8 · 12 · 16</div>
+        </div>
+        <div class="pane rounded-xl p-4">
+          <div class="screen-label mb-2">ACCENT</div>
+          <div class="t-primary text-body font-mono">#2F7AE5</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ================== SCREEN 1: CLIPBOARD POPUP ================== -->
+    <section class="mt-20">
+      <div class="flex items-baseline gap-4 mb-6">
+        <span class="screen-num">01</span>
+        <h2 class="t-primary text-title font-medium">Clipboard popup</h2>
+        <span class="screen-label">560 × 480 · menubar anchored</span>
+        <span class="hair h-px flex-1"></span>
+      </div>
+
+      <div class="flex gap-12 items-start">
+        <!-- The popup -->
+        <div class="relative">
+          <!-- Menubar caret -->
+          <div class="absolute -top-2 left-[430px] w-3 h-3 rotate-45 pane" style="border-radius:2px;"></div>
+
+          <div class="pane rounded-2xl overflow-hidden" style="width:560px;height:480px;">
+
+            <!-- Search bar -->
+            <div class="flex items-center gap-2.5 px-3 py-2.5 border-b hair" style="border-color:rgba(255,255,255,0.06)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="t-tertiary"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input type="text" placeholder="Search clipboard" class="flex-1 bg-transparent outline-none text-body t-primary placeholder:t-tertiary" style="background:transparent"/>
+              <span class="flex items-center gap-1">
+                <span class="kbd">⌘</span><span class="kbd">K</span>
+              </span>
+            </div>
+
+            <!-- Body -->
+            <div class="nice-scroll overflow-y-auto" style="height:384px;">
+
+              <!-- Pinned -->
+              <div class="px-3 pt-3 pb-1 flex items-center gap-2">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" class="t-tertiary"><path d="M16 3.5 13 6v5l-4 3v2h5v5l1 1 1-1v-5h5v-2l-4-3V6l-3-2.5z"/></svg>
+                <span class="section-label">Pinned</span>
+              </div>
+
+              <!-- Pinned row: link -->
+              <div class="row-pinned mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style="background:rgba(47,122,229,0.12);color:#4A8BEA">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="t-primary text-body font-medium truncate">https://tauri.app/v2/guides/window</span>
+                  </div>
+                  <div class="t-tertiary text-meta truncate">Safari · tauri.app</div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">2d</div>
+              </div>
+
+              <!-- Pinned row: code -->
+              <div class="row-pinned mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style="background:rgba(180,120,255,0.10);color:#B48BFF">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6"/><path d="m16 6 6 6-6 6"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate code-sample"><span style="color:#B48BFF">const</span> listener = <span style="color:#63B7FF">window</span>.addEventListener(<span style="color:#FFB86C">'focus'</span>, …</div>
+                  <div class="t-tertiary text-meta truncate">VS Code · useClipboard.ts</div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">5d</div>
+              </div>
+
+              <!-- Divider label: Recent -->
+              <div class="px-3 pt-3 pb-1 flex items-center gap-2">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" class="t-tertiary"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                <span class="section-label">Recent · today</span>
+              </div>
+
+              <!-- ACTIVE row: text -->
+              <div class="row-active mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.85)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h10"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate">Looking at the spec today — happy to push the review to Friday if that helps.</div>
+                  <div class="t-tertiary text-meta truncate">Mail · “Re: Q2 planning”</div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="t-tertiary text-meta font-mono">4m</span>
+                  <span class="kbd">↵</span>
+                </div>
+              </div>
+
+              <!-- Image row -->
+              <div class="mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md overflow-hidden shrink-0 checker relative">
+                  <div class="absolute inset-0" style="background:linear-gradient(135deg,#2F7AE5 0%,#7B54E8 100%);opacity:0.85;"></div>
+                  <svg class="absolute inset-0 m-auto text-white/80" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="left:0;right:0;top:0;bottom:0;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate">Screenshot 2026-04-18 at 10.14.png</div>
+                  <div class="t-tertiary text-meta truncate flex items-center gap-2">
+                    <span>Finder</span><span class="opacity-50">·</span><span>1440 × 900</span><span class="opacity-50">·</span><span>312 KB</span>
+                  </div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">12m</div>
+              </div>
+
+              <!-- Link row -->
+              <div class="mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style="background:rgba(47,122,229,0.10);color:#4A8BEA">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate">github.com/olena/menubar-utils/pull/284</div>
+                  <div class="t-tertiary text-meta truncate">Arc · “Fix copy-paste jitter on Sonoma”</div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">38m</div>
+              </div>
+
+              <!-- Code row -->
+              <div class="mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style="background:rgba(180,120,255,0.10);color:#B48BFF">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6"/><path d="m16 6 6 6-6 6"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate code-sample">npx create-tauri-app@latest --template react-ts</div>
+                  <div class="t-tertiary text-meta truncate">Terminal · ~/code/clip</div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">1h</div>
+              </div>
+
+              <!-- Text row multi-line preview -->
+              <div class="mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.85)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h10"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate">Olena Kravchuk · ul. Franka 24, flat 12 · 79000 Lviv</div>
+                  <div class="t-tertiary text-meta truncate">Notes · Shipping addresses</div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">3h</div>
+              </div>
+
+              <!-- Yesterday label -->
+              <div class="px-3 pt-2 pb-1">
+                <span class="section-label">Yesterday</span>
+              </div>
+
+              <!-- Image row 2 -->
+              <div class="mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md overflow-hidden shrink-0 checker relative">
+                  <div class="absolute inset-0" style="background:linear-gradient(135deg,#F59E0B 0%,#EF4444 100%);opacity:0.85;"></div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate">hero-banner@2x.jpg</div>
+                  <div class="t-tertiary text-meta truncate">Figma · Marketing / Landing</div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">1d</div>
+              </div>
+
+              <!-- Text row -->
+              <div class="mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2">
+                <div class="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.85)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 6h14M5 12h14M5 18h10"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="t-primary text-body truncate">IBAN UA21 3223 1300 0002 6007 2335 6600 1</div>
+                  <div class="t-tertiary text-meta truncate">Safari · monobank.ua</div>
+                </div>
+                <div class="t-tertiary text-meta font-mono">1d</div>
+              </div>
+
+            </div>
+
+            <!-- Bottom bar -->
+            <div class="absolute bottom-0 inset-x-0 flex items-center justify-between px-3 py-2 border-t hair" style="border-color:rgba(255,255,255,0.06); background:rgba(0,0,0,0.18);">
+              <div class="flex items-center gap-1">
+                <button class="px-2 py-1 rounded-md flex items-center gap-1.5 t-primary text-meta font-medium" style="background:rgba(255,255,255,0.06)">
+                  <span class="kbd">⌘1</span> All
+                </button>
+                <button class="px-2 py-1 rounded-md flex items-center gap-1.5 t-secondary text-meta">
+                  <span class="kbd">⌘2</span> Text
+                </button>
+                <button class="px-2 py-1 rounded-md flex items-center gap-1.5 t-secondary text-meta">
+                  <span class="kbd">⌘3</span> Images
+                </button>
+                <button class="px-2 py-1 rounded-md flex items-center gap-1.5 t-secondary text-meta">
+                  <span class="kbd">⌘4</span> Links
+                </button>
+              </div>
+              <div class="flex items-center gap-3">
+                <span class="t-tertiary text-meta">428 items · 96 MB</span>
+                <button class="t-secondary hover:t-primary">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Annotations -->
+        <div class="flex-1 max-w-[340px] pt-6">
+          <div class="screen-label mb-3">NOTES</div>
+          <ul class="space-y-4 t-secondary text-body">
+            <li class="flex gap-3">
+              <span class="t-tertiary text-meta font-mono shrink-0 w-6">A</span>
+              <span>Active row uses accent at 14–18% alpha with a hairline inset; ↵ kbd glyph on the right signals commit without crowding the timestamp.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="t-tertiary text-meta font-mono shrink-0 w-6">B</span>
+              <span>Pinned uses the smallest possible differentiator: a 2% white tint on the row, plus a tiny pin glyph in the section label. No separate tray.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="t-tertiary text-meta font-mono shrink-0 w-6">C</span>
+              <span>Type icons are monochrome except images, which use a 28px tile so the thumbnail itself reads as the icon.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="t-tertiary text-meta font-mono shrink-0 w-6">D</span>
+              <span>Bottom filter bar doubles as status line (count + size) to justify its presence.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================== SCREEN 2: DOWNLOADS WINDOW ================== -->
+    <section class="mt-24">
+      <div class="flex items-baseline gap-4 mb-6">
+        <span class="screen-num">02</span>
+        <h2 class="t-primary text-title font-medium">Downloads</h2>
+        <span class="screen-label">720 × 520 · standalone window</span>
+        <span class="hair h-px flex-1"></span>
+      </div>
+
+      <div class="flex gap-12 items-start">
+        <div class="pane rounded-2xl overflow-hidden" style="width:720px;height:520px;">
+
+          <!-- Title bar -->
+          <div class="flex items-center px-4 py-2.5 border-b hair relative" style="border-color:rgba(255,255,255,0.06)">
+            <div class="flex items-center gap-1.5">
+              <span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span>
+            </div>
+            <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span class="t-primary text-body font-medium">Downloads</span>
+            </div>
+          </div>
+
+          <!-- URL row -->
+          <div class="px-4 py-3.5 flex items-center gap-2">
+            <div class="input rounded-lg flex-1 flex items-center gap-2 px-3 py-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="t-tertiary"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5"/></svg>
+              <input value="https://www.youtube.com/watch?v=jNQXAC9IVRw" class="flex-1 bg-transparent outline-none text-body t-primary" />
+            </div>
+            <button class="px-3 py-2 rounded-lg t-secondary text-body flex items-center gap-1.5" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.06)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              Paste
+            </button>
+            <button class="px-3.5 py-2 rounded-lg text-body font-medium text-white flex items-center gap-1.5" style="background:#2F7AE5;box-shadow:0 1px 0 rgba(0,0,0,0.25), inset 0 0.5px 0 rgba(255,255,255,0.18)">
+              Download
+              <span class="kbd" style="background:rgba(255,255,255,0.16);color:#fff;border-color:rgba(255,255,255,0.15)">↵</span>
+            </button>
+          </div>
+
+          <!-- Detected preview card -->
+          <div class="mx-4 mb-3 rounded-xl p-3 flex gap-3 items-center" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05)">
+            <!-- thumb -->
+            <div class="w-[110px] h-[62px] rounded-md overflow-hidden relative shrink-0" style="background:linear-gradient(135deg,#8E1B1B 0%,#2A0F0F 100%)">
+              <div class="absolute bottom-1 right-1 text-[10px] font-mono text-white/90 px-1 rounded" style="background:rgba(0,0,0,0.55)">19:12</div>
+              <div class="absolute inset-0 m-auto w-8 h-8 rounded-full flex items-center justify-center" style="background:rgba(0,0,0,0.55);left:0;right:0;top:0;bottom:0;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="text-white"><path d="M8 5v14l11-7z"/></svg>
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-0.5">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" style="background:rgba(235,72,72,0.16);color:#FF6B6B">YOUTUBE</span>
+                <span class="t-tertiary text-meta">jawed · 2005 · 19:12</span>
+              </div>
+              <div class="t-primary text-body font-medium truncate">Me at the zoo — and other first uploads of the era</div>
+              <div class="t-tertiary text-meta truncate">Resolved as single video · 1080p available · 312 MB estimated</div>
+            </div>
+            <div class="seg flex text-meta font-medium shrink-0">
+              <button class="on px-2.5 py-1 rounded-md">1080p</button>
+              <button class="px-2.5 py-1 rounded-md">720p</button>
+              <button class="px-2.5 py-1 rounded-md">Audio</button>
+            </div>
+          </div>
+
+          <!-- List area -->
+          <div class="nice-scroll overflow-y-auto" style="height:calc(520px - 46px - 62px - 78px - 36px)">
+
+            <!-- Section: Active -->
+            <div class="px-4 pt-2 pb-1 flex items-center justify-between">
+              <span class="section-label">Active · 2</span>
+              <button class="t-tertiary text-meta hover:t-secondary">Pause all</button>
+            </div>
+
+            <!-- Active row 1 -->
+            <div class="mx-3 my-1 p-3 rounded-xl flex items-center gap-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05)">
+              <div class="w-[52px] h-[32px] rounded-md shrink-0" style="background:linear-gradient(135deg,#E5448A 0%,#7A1F48 100%)"></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" style="background:rgba(229,68,138,0.14);color:#E5448A">INSTAGRAM</span>
+                  <span class="t-primary text-body truncate font-medium">Summer 2025 reel — Kira Petrenko</span>
+                </div>
+                <div class="h-1 rounded-full overflow-hidden" style="background:rgba(255,255,255,0.08)">
+                  <div class="h-full rounded-full prog-fill" style="width:62%"></div>
+                </div>
+                <div class="flex items-center justify-between mt-1.5">
+                  <span class="t-secondary text-meta font-mono">62% · 12.4 / 20.0 MB</span>
+                  <span class="t-tertiary text-meta font-mono">4.8 MB/s · 3s left</span>
+                </div>
+              </div>
+              <button class="t-secondary hover:t-primary p-1.5 rounded-md" style="background:rgba(255,255,255,0.04)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <!-- Active row 2 -->
+            <div class="mx-3 my-1 p-3 rounded-xl flex items-center gap-3" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05)">
+              <div class="w-[52px] h-[32px] rounded-md shrink-0" style="background:linear-gradient(135deg,#222 0%,#444 100%)"></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-medium" style="background:rgba(255,255,255,0.10);color:rgba(255,255,255,0.85)">TIKTOK</span>
+                  <span class="t-primary text-body truncate font-medium">Carbonara debate — final answer</span>
+                </div>
+                <div class="h-1 rounded-full overflow-hidden" style="background:rgba(255,255,255,0.08)">
+                  <div class="h-full rounded-full" style="width:18%;background:rgba(255,255,255,0.35)"></div>
+                </div>
+                <div class="flex items-center justify-between mt-1.5">
+                  <span class="t-secondary text-meta font-mono">Paused · 1.8 / 10.1 MB</span>
+                  <span class="t-tertiary text-meta">Resume to continue</span>
+                </div>
+              </div>
+              <button class="t-secondary hover:t-primary p-1.5 rounded-md" style="background:rgba(255,255,255,0.04)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+            </div>
+
+            <!-- Section: Completed -->
+            <div class="px-4 pt-4 pb-1 flex items-center justify-between">
+              <span class="section-label">Completed · today</span>
+              <button class="t-tertiary text-meta hover:t-secondary">Clear</button>
+            </div>
+
+            <!-- Zebra completed list -->
+            <div class="mx-3 rounded-xl overflow-hidden" style="border:1px solid rgba(255,255,255,0.05)">
+              <!-- row -->
+              <div class="flex items-center gap-3 px-3 py-2" style="background:rgba(255,255,255,0.02)">
+                <div class="w-6 h-6 rounded flex items-center justify-center shrink-0" style="background:rgba(40,200,64,0.14);color:#43D66B">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0" style="background:rgba(29,155,240,0.14);color:#4DB2FF">X</span>
+                <span class="t-primary text-body truncate flex-1">thread-dump-2026-04-17.mp4</span>
+                <span class="t-tertiary text-meta font-mono hidden md:inline">~/Movies/Clip</span>
+                <span class="t-tertiary text-meta font-mono">84.2 MB</span>
+                <button class="t-secondary hover:t-primary text-meta px-2 py-1 rounded" style="background:rgba(255,255,255,0.04)">Reveal</button>
+              </div>
+              <div class="flex items-center gap-3 px-3 py-2">
+                <div class="w-6 h-6 rounded flex items-center justify-center shrink-0" style="background:rgba(40,200,64,0.14);color:#43D66B">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0" style="background:rgba(255,69,58,0.14);color:#FF6B6B">REDDIT</span>
+                <span class="t-primary text-body truncate flex-1">r/MechanicalKeyboards — kbd unboxing.mp4</span>
+                <span class="t-tertiary text-meta font-mono hidden md:inline">~/Movies/Clip</span>
+                <span class="t-tertiary text-meta font-mono">212 MB</span>
+                <button class="t-secondary hover:t-primary text-meta px-2 py-1 rounded" style="background:rgba(255,255,255,0.04)">Reveal</button>
+              </div>
+              <div class="flex items-center gap-3 px-3 py-2" style="background:rgba(255,255,255,0.02)">
+                <div class="w-6 h-6 rounded flex items-center justify-center shrink-0" style="background:rgba(40,200,64,0.14);color:#43D66B">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0" style="background:rgba(255,204,0,0.14);color:#FFCC00">AUDIO</span>
+                <span class="t-primary text-body truncate flex-1">darkside-of-the-menubar.m4a</span>
+                <span class="t-tertiary text-meta font-mono hidden md:inline">~/Music/Clip</span>
+                <span class="t-tertiary text-meta font-mono">7.3 MB</span>
+                <button class="t-secondary hover:t-primary text-meta px-2 py-1 rounded" style="background:rgba(255,255,255,0.04)">Reveal</button>
+              </div>
+            </div>
+
+            <div class="h-8"></div>
+          </div>
+        </div>
+
+        <div class="flex-1 max-w-[340px] pt-6">
+          <div class="screen-label mb-3">NOTES</div>
+          <ul class="space-y-4 t-secondary text-body">
+            <li class="flex gap-3"><span class="t-tertiary text-meta font-mono shrink-0 w-6">A</span><span>Platform badge stays the same shape across active and completed; the tint carries the platform identity.</span></li>
+            <li class="flex gap-3"><span class="t-tertiary text-meta font-mono shrink-0 w-6">B</span><span>Detected preview is a separate card above the list, not a modal — pasting updates it in-place.</span></li>
+            <li class="flex gap-3"><span class="t-tertiary text-meta font-mono shrink-0 w-6">C</span><span>Completed uses a single grouped card with a zebra rhythm, so 20 items feel like a log, not twenty cards.</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================== SCREEN 3: RECORDER ================== -->
+    <section class="mt-24">
+      <div class="flex items-baseline gap-4 mb-6">
+        <span class="screen-num">03</span>
+        <h2 class="t-primary text-title font-medium">Recorder</h2>
+        <span class="screen-label">Floating bar · 360 × 80 expanded → 200 × 40 recording</span>
+        <span class="hair h-px flex-1"></span>
+      </div>
+
+      <div class="space-y-10">
+
+        <!-- STATE A: expanded setup -->
+        <div class="flex gap-12 items-start">
+          <div>
+            <div class="screen-label mb-3">A · Pre-record (expanded)</div>
+            <div class="pane rounded-2xl px-3 py-2.5 flex items-center gap-3" style="width:560px;">
+              <!-- Mode segmented -->
+              <div class="seg flex text-meta font-medium shrink-0">
+                <button class="on px-2 py-1 rounded-md flex items-center gap-1">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>
+                  Screen
+                </button>
+                <button class="px-2 py-1 rounded-md flex items-center gap-1">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><circle cx="17" cy="15" r="3" fill="currentColor" fill-opacity="0.2"/></svg>
+                  Screen + Cam
+                </button>
+                <button class="px-2 py-1 rounded-md flex items-center gap-1">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+                  Cam
+                </button>
+              </div>
+
+              <!-- Display picker -->
+              <button class="flex items-center gap-1.5 px-2 py-1.5 rounded-md t-secondary text-meta" style="background:rgba(255,255,255,0.04)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>
+                <span>Studio Display</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+              </button>
+
+              <!-- Mic with waveform -->
+              <div class="flex items-center gap-1.5 px-2 py-1.5 rounded-md" style="background:rgba(255,255,255,0.04)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="t-secondary"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+                <div class="flex items-end gap-[2px] h-4">
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.9s"></span>
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.7s"></span>
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.5s"></span>
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.3s"></span>
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.1s"></span>
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.8s"></span>
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.4s"></span>
+                  <span class="wbar w-[2px] h-3 bg-accent rounded-full" style="animation-delay:-.2s"></span>
+                </div>
+              </div>
+
+              <div class="flex-1"></div>
+
+              <!-- Record button -->
+              <button class="flex items-center gap-2 pr-3 pl-1 py-1 rounded-full" style="background:rgba(235,72,72,0.12);border:1px solid rgba(235,72,72,0.28)">
+                <span class="w-6 h-6 rounded-full flex items-center justify-center rec-dot" style="background:#EB4848">
+                  <span class="w-2.5 h-2.5 rounded-full bg-white/80"></span>
+                </span>
+                <span class="text-body font-medium" style="color:#FF7878">Record</span>
+              </button>
+            </div>
+
+            <!-- Secondary row of meta -->
+            <div class="mt-2 flex items-center justify-between t-tertiary text-meta" style="width:560px;">
+              <span>FaceTime HD · 1080p · 60fps · H.265</span>
+              <span class="flex items-center gap-1"><span class="kbd">⌥</span><span class="kbd">⇧</span><span class="kbd">5</span> to toggle</span>
+            </div>
+          </div>
+
+          <div class="flex-1 max-w-[340px] pt-6">
+            <div class="screen-label mb-3">NOTES</div>
+            <ul class="space-y-4 t-secondary text-body">
+              <li class="flex gap-3"><span class="t-tertiary text-meta font-mono shrink-0 w-6">A</span><span>Bar composes horizontally — mode, source, input, record. No dropdowns nested inside dropdowns.</span></li>
+              <li class="flex gap-3"><span class="t-tertiary text-meta font-mono shrink-0 w-6">B</span><span>Live waveform <i>replaces</i> a separate level meter to keep width under 560.</span></li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- STATE B: countdown -->
+        <div class="flex gap-12 items-start">
+          <div>
+            <div class="screen-label mb-3">B · Countdown</div>
+            <div class="pane rounded-2xl px-4 py-3 flex items-center gap-4" style="width:360px;">
+              <div class="w-12 h-12 rounded-full flex items-center justify-center text-white text-[22px] font-medium" style="background:#EB4848;box-shadow: 0 0 0 3px rgba(235,72,72,0.18)">3</div>
+              <div class="flex-1">
+                <div class="t-primary text-body font-medium">Starting in 3…</div>
+                <div class="t-tertiary text-meta">Screen · Studio Display · mic on</div>
+              </div>
+              <button class="t-secondary hover:t-primary px-2 py-1 rounded-md text-meta" style="background:rgba(255,255,255,0.05)">
+                <span class="kbd mr-1">Esc</span> Cancel
+              </button>
+            </div>
+          </div>
+          <div class="flex-1 max-w-[340px] pt-6"></div>
+        </div>
+
+        <!-- STATE C: recording compact -->
+        <div class="flex gap-12 items-start">
+          <div>
+            <div class="screen-label mb-3">C · Recording (compact pill)</div>
+            <div class="pane rounded-full pl-2 pr-1 py-1 flex items-center gap-2" style="width:220px;">
+              <span class="w-2.5 h-2.5 rounded-full rec-dot" style="background:#EB4848"></span>
+              <span class="t-primary text-body font-mono tabular-nums">00:04:27</span>
+              <!-- mini waveform -->
+              <div class="flex items-end gap-[2px] h-3 ml-0.5">
+                <span class="wbar w-[2px] h-2 rounded-full" style="background:rgba(255,255,255,0.55);animation-delay:-.5s"></span>
+                <span class="wbar w-[2px] h-2 rounded-full" style="background:rgba(255,255,255,0.55);animation-delay:-.3s"></span>
+                <span class="wbar w-[2px] h-2 rounded-full" style="background:rgba(255,255,255,0.55);animation-delay:-.1s"></span>
+                <span class="wbar w-[2px] h-2 rounded-full" style="background:rgba(255,255,255,0.55);animation-delay:-.7s"></span>
+              </div>
+              <div class="flex-1"></div>
+              <button class="w-7 h-7 rounded-full flex items-center justify-center t-secondary hover:t-primary" style="background:rgba(255,255,255,0.06)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+              </button>
+              <button class="w-7 h-7 rounded-full flex items-center justify-center text-white" style="background:#EB4848">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="1"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="flex-1 max-w-[340px] pt-6 t-secondary text-body">
+            <div class="screen-label mb-3">NOTES</div>
+            <p>Compact pill detaches from its expanded footprint (pill shape signals "minimal, system-level"). Timer is tabular-nums so width never jitters.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================== SCREEN 4: SETTINGS ================== -->
+    <section class="mt-24">
+      <div class="flex items-baseline gap-4 mb-6">
+        <span class="screen-num">04</span>
+        <h2 class="t-primary text-title font-medium">Settings</h2>
+        <span class="screen-label">720 × 520 · standalone window · General + Shortcuts shown</span>
+        <span class="hair h-px flex-1"></span>
+      </div>
+
+      <div class="flex gap-10 items-start">
+        <!-- General -->
+        <div class="pane rounded-2xl overflow-hidden" style="width:720px;height:520px;">
+          <!-- title bar -->
+          <div class="flex items-center px-4 py-2.5 border-b hair relative" style="border-color:rgba(255,255,255,0.06)">
+            <div class="flex items-center gap-1.5">
+              <span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span>
+            </div>
+            <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span class="t-primary text-body font-medium">Settings</span>
+            </div>
+          </div>
+          <!-- toolbar tabs -->
+          <div class="px-4 py-2 flex items-center gap-1 border-b hair" style="border-color:rgba(255,255,255,0.06)">
+            <button class="px-3 py-1.5 rounded-md flex items-center gap-1.5 t-primary text-body font-medium" style="background:rgba(255,255,255,0.06)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              General
+            </button>
+            <button class="px-3 py-1.5 rounded-md flex items-center gap-1.5 t-secondary text-body">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              Clipboard
+            </button>
+            <button class="px-3 py-1.5 rounded-md flex items-center gap-1.5 t-secondary text-body">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+              Downloads
+            </button>
+            <button class="px-3 py-1.5 rounded-md flex items-center gap-1.5 t-secondary text-body">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 22h8M12 18v4"/></svg>
+              Recorder
+            </button>
+            <button class="px-3 py-1.5 rounded-md flex items-center gap-1.5 t-secondary text-body">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8h4M6 12h12M6 16h8"/></svg>
+              Shortcuts
+            </button>
+            <button class="px-3 py-1.5 rounded-md flex items-center gap-1.5 t-secondary text-body">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
+              About
+            </button>
+          </div>
+
+          <!-- General rows -->
+          <div class="px-6 py-5 space-y-5 nice-scroll overflow-y-auto" style="height: calc(520px - 46px - 46px)">
+
+            <!-- Row: launch at login -->
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="t-primary text-body font-medium">Launch at login</div>
+                <div class="t-tertiary text-meta">Starts quietly in the menubar.</div>
+              </div>
+              <!-- toggle -->
+              <label class="inline-flex items-center cursor-pointer">
+                <span class="relative w-[34px] h-[20px] rounded-full transition" style="background:#2F7AE5">
+                  <span class="absolute top-[2px] left-[16px] w-4 h-4 bg-white rounded-full shadow"></span>
+                </span>
+              </label>
+            </div>
+
+            <div class="hair h-px"></div>
+
+            <!-- Menubar icon style -->
+            <div class="flex items-start justify-between gap-6">
+              <div class="flex-1">
+                <div class="t-primary text-body font-medium">Menubar icon</div>
+                <div class="t-tertiary text-meta">Style shown next to the time.</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="w-9 h-9 rounded-lg flex items-center justify-center" style="background:rgba(47,122,229,0.15);border:1px solid rgba(47,122,229,0.35);color:#4A8BEA">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+                </button>
+                <button class="w-9 h-9 rounded-lg flex items-center justify-center t-secondary" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14M5 14h14"/></svg>
+                </button>
+                <button class="w-9 h-9 rounded-lg flex items-center justify-center t-secondary" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg>
+                </button>
+                <button class="w-9 h-9 rounded-lg flex items-center justify-center t-secondary" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)">
+                  <span class="font-mono text-[11px]">Aa</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="hair h-px"></div>
+
+            <!-- Theme -->
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="t-primary text-body font-medium">Appearance</div>
+                <div class="t-tertiary text-meta">Match the system, or pick a side.</div>
+              </div>
+              <div class="seg flex text-meta font-medium">
+                <button class="px-3 py-1 rounded-md">System</button>
+                <button class="px-3 py-1 rounded-md">Light</button>
+                <button class="on px-3 py-1 rounded-md">Dark</button>
+              </div>
+            </div>
+
+            <div class="hair h-px"></div>
+
+            <!-- Default folder -->
+            <div class="flex items-center justify-between gap-6">
+              <div class="flex-1">
+                <div class="t-primary text-body font-medium">Default download folder</div>
+                <div class="t-tertiary text-meta font-mono mt-0.5">~/Movies/Clip</div>
+              </div>
+              <button class="px-3 py-1.5 rounded-md text-body t-secondary" style="background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.06)">Choose…</button>
+            </div>
+
+            <div class="hair h-px"></div>
+
+            <!-- Menubar count -->
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="t-primary text-body font-medium">Show item count in menubar</div>
+                <div class="t-tertiary text-meta">Only visible when downloads are active.</div>
+              </div>
+              <label class="inline-flex items-center cursor-pointer">
+                <span class="relative w-[34px] h-[20px] rounded-full transition" style="background:rgba(255,255,255,0.12)">
+                  <span class="absolute top-[2px] left-[2px] w-4 h-4 bg-white/90 rounded-full shadow"></span>
+                </span>
+              </label>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Shortcuts -->
+        <div class="pane rounded-2xl overflow-hidden" style="width:720px;height:520px;">
+          <div class="flex items-center px-4 py-2.5 border-b hair relative" style="border-color:rgba(255,255,255,0.06)">
+            <div class="flex items-center gap-1.5">
+              <span class="tl red"></span><span class="tl yellow"></span><span class="tl green"></span>
+            </div>
+            <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span class="t-primary text-body font-medium">Settings — Shortcuts</span>
+            </div>
+          </div>
+
+          <div class="px-6 py-5 nice-scroll overflow-y-auto" style="height: calc(520px - 46px)">
+            <div class="flex items-center justify-between mb-3">
+              <div class="t-secondary text-body">Global hotkeys. Click any row to recapture.</div>
+              <button class="t-tertiary text-meta hover:t-secondary">Reset to defaults</button>
+            </div>
+
+            <!-- table -->
+            <div class="rounded-xl overflow-hidden" style="border:1px solid rgba(255,255,255,0.06)">
+              <!-- group: Clipboard -->
+              <div class="px-3 py-1.5 section-label" style="background:rgba(255,255,255,0.02)">Clipboard</div>
+              <div class="divide-y" style="border-color:rgba(255,255,255,0.05)">
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">Open clipboard popup</span>
+                  <span class="flex items-center gap-1"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">V</span></span>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2.5 row-active">
+                  <span class="t-primary text-body">Paste last item</span>
+                  <span class="flex items-center gap-1">
+                    <span class="t-tertiary text-meta mr-2">listening…</span>
+                    <span class="kbd">⌘</span><span class="kbd">⌥</span><span class="kbd">V</span>
+                  </span>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">Pin highlighted item</span>
+                  <span class="flex items-center gap-1"><span class="kbd">⌘</span><span class="kbd">P</span></span>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">Clear clipboard history</span>
+                  <span class="t-tertiary text-meta">—</span>
+                </div>
+              </div>
+
+              <div class="px-3 py-1.5 section-label border-t hair" style="background:rgba(255,255,255,0.02);border-color:rgba(255,255,255,0.05)">Downloads</div>
+              <div class="divide-y" style="border-color:rgba(255,255,255,0.05)">
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">New download from clipboard</span>
+                  <span class="flex items-center gap-1"><span class="kbd">⌘</span><span class="kbd">⇧</span><span class="kbd">D</span></span>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">Open downloads window</span>
+                  <span class="flex items-center gap-1"><span class="kbd">⌘</span><span class="kbd">0</span></span>
+                </div>
+              </div>
+
+              <div class="px-3 py-1.5 section-label border-t hair" style="background:rgba(255,255,255,0.02);border-color:rgba(255,255,255,0.05)">Recorder</div>
+              <div class="divide-y" style="border-color:rgba(255,255,255,0.05)">
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">Start / stop recording</span>
+                  <span class="flex items-center gap-1"><span class="kbd">⌥</span><span class="kbd">⇧</span><span class="kbd">5</span></span>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">Pause / resume recording</span>
+                  <span class="flex items-center gap-1"><span class="kbd">⌥</span><span class="kbd">Space</span></span>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2.5 hover:bg-white/[0.03]">
+                  <span class="t-primary text-body">Abort recording</span>
+                  <span class="flex items-center gap-1"><span class="kbd">Esc</span></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 t-tertiary text-meta">Clip needs Accessibility + Screen Recording permissions to listen for global hotkeys.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty state example -->
+      <div class="mt-16">
+        <div class="flex items-baseline gap-4 mb-6">
+          <span class="screen-num">04 · ε</span>
+          <h3 class="t-primary text-body font-medium">Empty state (clipboard, fresh install)</h3>
+          <span class="hair h-px flex-1"></span>
+        </div>
+        <div class="pane rounded-2xl overflow-hidden mx-auto" style="width:560px;height:280px;">
+          <div class="flex items-center gap-2.5 px-3 py-2.5 border-b hair" style="border-color:rgba(255,255,255,0.06)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="t-tertiary"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input disabled placeholder="Search clipboard" class="flex-1 bg-transparent outline-none text-body"/>
+            <span class="flex items-center gap-1"><span class="kbd">⌘</span><span class="kbd">K</span></span>
+          </div>
+          <div class="h-full flex flex-col items-center justify-center -mt-8 text-center px-10">
+            <div class="w-10 h-10 rounded-xl flex items-center justify-center mb-3" style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="t-secondary"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            </div>
+            <div class="t-primary text-title font-medium">Nothing copied yet</div>
+            <div class="t-secondary text-body mt-1">Try <span class="kbd">⌘</span><span class="kbd">C</span> somewhere — it'll show up here.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="mt-24 flex items-center justify-between t-tertiary text-meta">
+      <span>Clip · menubar utility · UI exploration</span>
+      <span>4 screens · 1 accent · 0 emoji</span>
+    </footer>
+  </div>
+</main>
+
+<script>
+  // Theme toggle
+  const html = document.documentElement;
+  const dark = document.getElementById('themeDark');
+  const light = document.getElementById('themeLight');
+  function setTheme(mode) {
+    if (mode === 'light') {
+      html.classList.remove('dark');
+      html.classList.add('light');
+      light.classList.add('on'); dark.classList.remove('on');
+    } else {
+      html.classList.add('dark');
+      html.classList.remove('light');
+      dark.classList.add('on'); light.classList.remove('on');
+    }
+    try { localStorage.setItem('clip-theme', mode); } catch (e) {}
+  }
+  dark.addEventListener('click', () => setTheme('dark'));
+  light.addEventListener('click', () => setTheme('light'));
+  try { setTheme(localStorage.getItem('clip-theme') || 'dark'); } catch(e) { setTheme('dark'); }
+</script>
+
+</body>
+</html>
