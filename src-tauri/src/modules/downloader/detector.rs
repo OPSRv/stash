@@ -123,10 +123,6 @@ pub fn fetch_info(
         "--dump-json",
         "--no-playlist",
         "--no-warnings",
-        // Prefer YouTube's iOS player — generally a bit faster and
-        // more stable than the web extraction layer on cold caches.
-        "--extractor-args",
-        "youtube:player_client=ios,web",
     ]);
     if let Some(browser) = cookies_browser {
         if let Some(file) = browser.strip_prefix("file:") {

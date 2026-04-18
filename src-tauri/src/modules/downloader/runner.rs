@@ -90,14 +90,7 @@ pub fn spawn_download(
             ),
             None => "bestvideo+bestaudio/best".to_string(),
         };
-        cmd.args([
-            "-f",
-            &selector,
-            "--merge-output-format",
-            "mp4",
-            "--extractor-args",
-            "youtube:player_client=ios,web",
-        ]);
+        cmd.args(["-f", &selector, "--merge-output-format", "mp4"]);
     }
 
     cmd.arg(url);
