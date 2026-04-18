@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import {
@@ -45,6 +45,7 @@ export const DownloadsShell = () => {
   const [pickedFormat, setPickedFormat] = useState<QualityOption | null>(null);
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const [playing, setPlaying] = useState<string | null>(null);
+  const detectEpoch = useRef(0);
   const [dragOver, setDragOver] = useState(false);
   const [view, setView] = useState<'list' | 'grid'>('list');
 
@@ -116,15 +117,20 @@ export const DownloadsShell = () => {
       setDetectError(null);
       setDetected(null);
       setPickedFormat(null);
+      const myEpoch = ++detectEpoch.current;
       try {
         const result = await detect(trimmed);
+        if (detectEpoch.current !== myEpoch) return;
         setDetected(result);
         setPickedFormat(result.qualities[0] ?? null);
       } catch (e) {
+        if (detectEpoch.current !== myEpoch) return;
         setDetectError(String(e));
       } finally {
-        setDetecting(false);
-        setDetectStartedAt(null);
+        if (detectEpoch.current === myEpoch) {
+          setDetecting(false);
+          setDetectStartedAt(null);
+        }
       }
     },
     []
@@ -224,22 +230,38 @@ export const DownloadsShell = () => {
         >
           Paste
         </button>
-        <button
-          onClick={() => runDetect(url)}
-          disabled={!url.trim() || detecting}
-          className="px-3 py-2 rounded-lg t-primary text-body flex items-center gap-1.5"
-          style={{ background: 'rgba(255,255,255,0.06)' }}
-        >
-          {detecting ? (
-            <>
-              <span className="inline-block w-3 h-3 rounded-full border-2 border-white/30 border-t-white/90 animate-spin" />
-              <span>Detecting · {elapsed}s</span>
-            </>
-          ) : (
-            'Detect'
-          )}
-        </button>
+        {detecting ? (
+          <button
+            onClick={() => {
+              detectEpoch.current += 1;
+              setDetecting(false);
+              setDetectStartedAt(null);
+              setDetectError('Cancelled');
+            }}
+            className="px-3 py-2 rounded-lg t-primary text-body flex items-center gap-1.5"
+            style={{ background: 'rgba(235,72,72,0.15)', color: '#FF7878' }}
+            title="Cancel"
+          >
+            <span className="inline-block w-3 h-3 rounded-full border-2 border-white/30 border-t-white/90 animate-spin" />
+            <span>Cancel · {elapsed}s</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => runDetect(url)}
+            disabled={!url.trim()}
+            className="px-3 py-2 rounded-lg t-primary text-body"
+            style={{ background: 'rgba(255,255,255,0.06)' }}
+          >
+            Detect
+          </button>
+        )}
       </div>
+      {detecting && elapsed > 8 && (
+        <div className="mx-4 mt-1 t-tertiary text-meta">
+          YouTube and a few other sites can take 20–40 seconds on the first
+          fetch; subsequent detects of the same URL are instant.
+        </div>
+      )}
 
       {/* Detected preview */}
       {detected && (
