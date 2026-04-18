@@ -1,0 +1,69 @@
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
+import { ClipboardPopup } from './ClipboardPopup';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+const mockInvoke = vi.mocked(invoke);
+
+const items = [
+  { id: 1, content: 'pinned link', created_at: 100, pinned: true },
+  { id: 2, content: 'recent note', created_at: 200, pinned: false },
+  { id: 3, content: 'older note', created_at: 150, pinned: false },
+];
+
+describe('ClipboardPopup', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    mockInvoke.mockImplementation(async (cmd, args) => {
+      if (cmd === 'clipboard_list') return items;
+      if (cmd === 'clipboard_search') {
+        const q = String((args as { query?: string } | undefined)?.query ?? '').toLowerCase();
+        if (!q) return items;
+        return items.filter((i) => i.content.toLowerCase().includes(q));
+      }
+      return undefined;
+    });
+  });
+
+  it('lists items on mount', async () => {
+    render(<ClipboardPopup />);
+    await waitFor(() => {
+      expect(screen.getByText('pinned link')).toBeInTheDocument();
+      expect(screen.getByText('recent note')).toBeInTheDocument();
+    });
+  });
+
+  it('groups pinned items under a Pinned section', async () => {
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('pinned link')).toBeInTheDocument());
+    expect(screen.getByText('Pinned')).toBeInTheDocument();
+  });
+
+  it('groups unpinned items under a Recent section', async () => {
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('recent note')).toBeInTheDocument());
+    expect(screen.getByText('Recent')).toBeInTheDocument();
+  });
+
+  it('filters items when user types in search', async () => {
+    const user = userEvent.setup();
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('pinned link')).toBeInTheDocument());
+
+    await user.type(screen.getByRole('searchbox'), 'recent');
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_search', { query: 'recent' });
+    });
+  });
+
+  it('shows empty state when no items match', async () => {
+    mockInvoke.mockImplementation(async () => []);
+    render(<ClipboardPopup />);
+    await waitFor(() => {
+      expect(screen.getByText(/no clipboard items/i)).toBeInTheDocument();
+    });
+  });
+});
