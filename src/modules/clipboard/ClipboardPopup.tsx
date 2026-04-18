@@ -5,6 +5,7 @@ import { SearchInput } from '../../shared/ui/SearchInput';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { ClipboardItem } from './api';
 import { deleteItem, listItems, parseImageMeta, pasteItem, searchItems, togglePin } from './api';
 import { detectType, type ContentType } from './contentType';
@@ -44,6 +45,13 @@ export const ClipboardPopup = () => {
       cancelled = true;
     };
   }, [query, reloadNonce]);
+
+  useEffect(() => {
+    const unlisten = listen('clipboard:changed', () => setReloadNonce((n) => n + 1));
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
 
   const typed = useMemo(
     () =>

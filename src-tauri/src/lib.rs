@@ -87,7 +87,8 @@ pub fn run() {
 
             let state_for_thread = Arc::clone(&shared_repo);
             let images_dir_thread = images_dir.clone();
-            thread::spawn(move || run_monitor(state_for_thread, images_dir_thread));
+            let handle_for_thread = app.handle().clone();
+            thread::spawn(move || run_monitor(state_for_thread, images_dir_thread, handle_for_thread));
 
             let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
@@ -148,7 +149,12 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn run_monitor(state: Arc<ClipboardState>, images_dir: std::path::PathBuf) {
+fn run_monitor(
+    state: Arc<ClipboardState>,
+    images_dir: std::path::PathBuf,
+    app: tauri::AppHandle,
+) {
+    use tauri::Emitter;
     let reader = match ArboardReader::new() {
         Ok(r) => r,
         Err(e) => {
@@ -162,10 +168,19 @@ fn run_monitor(state: Arc<ClipboardState>, images_dir: std::path::PathBuf) {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
-        if let Ok(mut repo) = state.repo.lock() {
-            if let Err(e) = monitor.poll_once(&mut repo, now) {
-                eprintln!("[clipboard] poll error: {e}");
+        let inserted = if let Ok(mut repo) = state.repo.lock() {
+            match monitor.poll_once(&mut repo, now) {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("[clipboard] poll error: {e}");
+                    None
+                }
             }
+        } else {
+            None
+        };
+        if let Some(id) = inserted {
+            let _ = app.emit("clipboard:changed", id);
         }
         thread::sleep(Duration::from_millis(CLIPBOARD_POLL_MS));
     }
