@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "stash-app",
+  "productName": "Stash",
   "version": "0.1.0",
   "identifier": "com.opsrv.stash",
   "build": {
@@ -12,14 +12,24 @@
   "app": {
     "windows": [
       {
-        "title": "stash-app",
-        "width": 800,
-        "height": 600
+        "label": "popup",
+        "title": "Stash",
+        "width": 560,
+        "height": 480,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": true,
+        "shadow": false
       }
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
@@ -30,6 +40,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
   }
 }
