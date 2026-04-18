@@ -3,7 +3,7 @@ use crate::modules::downloader::{
     installer,
     jobs::DownloadJob,
     platform::Platform,
-    runner::{cancel_download, spawn_download, RunnerState},
+    runner::{cancel_download, spawn_download, CachedDetection, RunnerState},
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -35,17 +35,40 @@ fn resolve_yt_dlp(state: &RunnerState) -> Result<std::path::PathBuf, String> {
     Ok(path)
 }
 
+const DETECT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
 #[tauri::command]
 pub async fn dl_detect(
     state: State<'_, Arc<RunnerState>>,
     url: String,
 ) -> Result<DetectedVideo, String> {
+    // Fast path: cached result within TTL.
+    if let Some(hit) = state.detect_cache.lock().unwrap().get(&url) {
+        if hit.fetched_at.elapsed() < DETECT_CACHE_TTL {
+            let qualities = pick_quality_options(&hit.info);
+            return Ok(DetectedVideo {
+                platform: Platform::from_url(&url),
+                info: hit.info.clone(),
+                qualities,
+            });
+        }
+    }
+
     let yt_dlp = resolve_yt_dlp(&state)?;
     let url_clone = url.clone();
     let info = tauri::async_runtime::spawn_blocking(move || fetch_info(&yt_dlp, &url_clone))
         .await
         .map_err(|e| e.to_string())??;
     let qualities = pick_quality_options(&info);
+
+    state.detect_cache.lock().unwrap().insert(
+        url.clone(),
+        CachedDetection {
+            info: info.clone(),
+            fetched_at: std::time::Instant::now(),
+        },
+    );
+
     Ok(DetectedVideo {
         platform: Platform::from_url(&url),
         info,

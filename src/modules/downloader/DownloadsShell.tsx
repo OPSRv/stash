@@ -38,6 +38,8 @@ const statusLabel = (s: DownloadJob['status']) =>
 export const DownloadsShell = () => {
   const [url, setUrl] = useState('');
   const [detecting, setDetecting] = useState(false);
+  const [detectStartedAt, setDetectStartedAt] = useState<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const [detected, setDetected] = useState<DetectedVideo | null>(null);
   const [detectError, setDetectError] = useState<string | null>(null);
   const [pickedFormat, setPickedFormat] = useState<QualityOption | null>(null);
@@ -109,6 +111,8 @@ export const DownloadsShell = () => {
       const trimmed = u.trim();
       if (!trimmed) return;
       setDetecting(true);
+      setDetectStartedAt(Date.now());
+      setElapsed(0);
       setDetectError(null);
       setDetected(null);
       setPickedFormat(null);
@@ -120,10 +124,17 @@ export const DownloadsShell = () => {
         setDetectError(String(e));
       } finally {
         setDetecting(false);
+        setDetectStartedAt(null);
       }
     },
     []
   );
+
+  useEffect(() => {
+    if (!detectStartedAt) return;
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - detectStartedAt) / 1000)), 200);
+    return () => clearInterval(t);
+  }, [detectStartedAt]);
 
   const handlePaste = async () => {
     try {
@@ -216,10 +227,17 @@ export const DownloadsShell = () => {
         <button
           onClick={() => runDetect(url)}
           disabled={!url.trim() || detecting}
-          className="px-3 py-2 rounded-lg t-primary text-body"
+          className="px-3 py-2 rounded-lg t-primary text-body flex items-center gap-1.5"
           style={{ background: 'rgba(255,255,255,0.06)' }}
         >
-          {detecting ? 'Detecting…' : 'Detect'}
+          {detecting ? (
+            <>
+              <span className="inline-block w-3 h-3 rounded-full border-2 border-white/30 border-t-white/90 animate-spin" />
+              <span>Detecting · {elapsed}s</span>
+            </>
+          ) : (
+            'Detect'
+          )}
         </button>
       </div>
 

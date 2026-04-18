@@ -7,12 +7,20 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 
+use crate::modules::downloader::detector::VideoInfo;
+
+pub struct CachedDetection {
+    pub info: VideoInfo,
+    pub fetched_at: std::time::Instant,
+}
+
 pub struct RunnerState {
     pub jobs: Mutex<JobRepo>,
     pub active: Mutex<std::collections::HashMap<i64, Child>>,
     pub yt_dlp_path: Mutex<Option<PathBuf>>,
     pub downloads_dir: Mutex<PathBuf>,
     pub default_downloads_dir: PathBuf,
+    pub detect_cache: Mutex<std::collections::HashMap<String, CachedDetection>>,
 }
 
 impl RunnerState {
@@ -23,6 +31,7 @@ impl RunnerState {
             yt_dlp_path: Mutex::new(None),
             downloads_dir: Mutex::new(downloads_dir.clone()),
             default_downloads_dir: downloads_dir,
+            detect_cache: Mutex::new(std::collections::HashMap::new()),
         }
     }
 }

@@ -130,6 +130,19 @@ pub fn run() {
             let runner_state = Arc::new(RunnerState::new(dl_repo, downloads_dir));
             app.manage(Arc::clone(&runner_state));
 
+            // Warm-up yt-dlp in the background so the first Detect doesn't
+            // include an install round-trip.
+            let warmup_state = Arc::clone(&runner_state);
+            std::thread::spawn(move || {
+                let bin_dir = warmup_state.default_downloads_dir.join("bin");
+                match modules::downloader::installer::resolve(&bin_dir) {
+                    Ok(path) => {
+                        *warmup_state.yt_dlp_path.lock().unwrap() = Some(path);
+                    }
+                    Err(e) => eprintln!("[downloader] warmup failed: {e}"),
+                }
+            });
+
             let show = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
