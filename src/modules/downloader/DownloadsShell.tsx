@@ -122,7 +122,7 @@ export const DownloadsShell = () => {
   }, [jobs]);
 
   return (
-    <div className="h-screen flex flex-col bg-bg-canvas">
+    <div className="h-full flex flex-col">
       {/* URL bar */}
       <div className="px-4 py-3 flex items-center gap-2 border-b hair">
         <div className="input-field rounded-lg flex-1 flex items-center gap-2 px-3 py-2">

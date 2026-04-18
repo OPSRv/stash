@@ -127,22 +127,8 @@ pub fn run() {
             app.manage(Arc::clone(&runner_state));
 
             let show = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
-            let downloads_menu = MenuItem::with_id(
-                app,
-                "downloads",
-                "Downloads…",
-                true,
-                Some("CmdOrCtrl+Shift+D"),
-            )?;
-            let prefs = MenuItem::with_id(
-                app,
-                "prefs",
-                "Preferences…",
-                true,
-                Some("CmdOrCtrl+,"),
-            )?;
             let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &downloads_menu, &prefs, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &quit])?;
 
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -154,18 +140,6 @@ pub fn run() {
                     "show" => {
                         if let Some(win) = app.get_webview_window("popup") {
                             let _ = win.move_window(Position::TrayCenter);
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
-                    }
-                    "prefs" => {
-                        if let Some(win) = app.get_webview_window("settings") {
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
-                    }
-                    "downloads" => {
-                        if let Some(win) = app.get_webview_window("downloads") {
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -207,25 +181,6 @@ pub fn run() {
                 });
             }
 
-            if let Some(settings) = app.get_webview_window("settings") {
-                let settings_clone = settings.clone();
-                settings.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = settings_clone.hide();
-                    }
-                });
-            }
-
-            if let Some(downloads_win) = app.get_webview_window("downloads") {
-                let dl_clone = downloads_win.clone();
-                downloads_win.on_window_event(move |event| {
-                    if let WindowEvent::CloseRequested { api, .. } = event {
-                        api.prevent_close();
-                        let _ = dl_clone.hide();
-                    }
-                });
-            }
 
             Ok(())
         })

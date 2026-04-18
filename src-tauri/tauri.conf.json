@@ -14,8 +14,8 @@
       {
         "label": "popup",
         "title": "Stash",
-        "width": 560,
-        "height": 480,
+        "width": 720,
+        "height": 520,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -24,26 +24,6 @@
         "visible": false,
         "focus": true,
         "shadow": false
-      },
-      {
-        "label": "settings",
-        "title": "Stash Settings",
-        "width": 720,
-        "height": 520,
-        "resizable": false,
-        "visible": false,
-        "center": true,
-        "url": "index.html?window=settings"
-      },
-      {
-        "label": "downloads",
-        "title": "Downloads",
-        "width": 720,
-        "height": 520,
-        "resizable": true,
-        "visible": false,
-        "center": true,
-        "url": "index.html?window=downloads"
       }
     ],
     "security": {

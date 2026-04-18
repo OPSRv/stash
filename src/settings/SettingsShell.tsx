@@ -38,7 +38,7 @@ export const SettingsShell = () => {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-bg-canvas">
+    <div className="h-full flex flex-col">
       <nav className="px-4 py-2 flex items-center gap-1 border-b hair">
         {tabs.map((t) => (
           <button
