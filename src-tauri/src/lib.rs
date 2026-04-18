@@ -19,6 +19,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
 };
+use tauri_plugin_positioner::{Position, WindowExt};
 
 const CLIPBOARD_POLL_MS: u64 = 500;
 const CLIPBOARD_MAX_UNPINNED: usize = 1000;
@@ -26,7 +27,9 @@ const CLIPBOARD_TRIM_EVERY_N_POLLS: u32 = 120; // ~once per minute at 500ms poll
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_positioner::init());
 
     #[cfg(desktop)]
     {
@@ -107,6 +110,7 @@ pub fn run() {
                     "quit" => app.exit(0),
                     "show" => {
                         if let Some(win) = app.get_webview_window("popup") {
+                            let _ = win.move_window(Position::TrayCenter);
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -114,13 +118,14 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
+                    let app = tray.app_handle();
+                    tauri_plugin_positioner::on_tray_event(app, &event);
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
                         if let Some(win) = app.get_webview_window("popup") {
                             toggle_popup(&win);
                         }
@@ -204,6 +209,7 @@ fn toggle_popup(win: &tauri::WebviewWindow) {
             let _ = win.hide();
         }
         _ => {
+            let _ = win.move_window(Position::TrayCenter);
             let _ = win.show();
             let _ = win.set_focus();
         }
