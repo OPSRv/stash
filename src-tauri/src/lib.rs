@@ -17,7 +17,7 @@ use rusqlite::Connection;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Manager, WindowEvent,
 };
 
 const CLIPBOARD_POLL_MS: u64 = 500;
@@ -120,6 +120,15 @@ pub fn run() {
                     Code::KeyV,
                 );
                 app.global_shortcut().register(toggle)?;
+            }
+
+            if let Some(win) = app.get_webview_window("popup") {
+                let win_clone = win.clone();
+                win.on_window_event(move |event| {
+                    if let WindowEvent::Focused(false) = event {
+                        let _ = win_clone.hide();
+                    }
+                });
             }
 
             Ok(())

@@ -1,15 +1,16 @@
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
 import { PopupShell } from './PopupShell';
 
 describe('PopupShell', () => {
-  it('renders a tab for every registered module', () => {
-    render(<PopupShell />);
-    expect(screen.getByRole('button', { name: /Clipboard/ })).toBeInTheDocument();
+  it('renders the active module popup view', () => {
+    const { container } = render(<PopupShell />);
+    // Default module is clipboard; its popup renders a search input.
+    expect(container.querySelector('[role="searchbox"]')).toBeInTheDocument();
   });
 
-  it('marks the first module as active on mount', () => {
-    render(<PopupShell />);
-    expect(screen.getByRole('button', { name: /Clipboard/ })).toHaveAttribute('aria-current', 'true');
+  it('wraps content in a pane container', () => {
+    const { container } = render(<PopupShell />);
+    expect(container.querySelector('.pane')).toBeInTheDocument();
   });
 });

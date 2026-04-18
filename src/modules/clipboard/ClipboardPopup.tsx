@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Kbd } from '../../shared/ui/Kbd';
 import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
@@ -6,6 +6,8 @@ import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
 import type { ClipboardItem } from './api';
 import { deleteItem, listItems, pasteItem, searchItems, togglePin } from './api';
+import { detectType, type ContentType } from './contentType';
+import { iconFor, typeTint } from './icons';
 
 const iso = (ts: number) => {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
@@ -15,21 +17,42 @@ const iso = (ts: number) => {
   return `${Math.floor(diff / 86400)}d`;
 };
 
+type Filter = 'all' | ContentType;
+
+const filters: { id: Filter; label: string; hint: string }[] = [
+  { id: 'all', label: 'All', hint: '⌘1' },
+  { id: 'text', label: 'Text', hint: '⌘2' },
+  { id: 'image', label: 'Images', hint: '⌘3' },
+  { id: 'link', label: 'Links', hint: '⌘4' },
+];
+
 export const ClipboardPopup = () => {
-  const [items, setItems] = useState<ClipboardItem[]>([]);
+  const [rawItems, setRawItems] = useState<ClipboardItem[]>([]);
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
   const [reloadNonce, setReloadNonce] = useState(0);
+  const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const load = query.trim() ? searchItems(query) : listItems();
     load.then((data) => {
-      if (!cancelled) setItems(data);
+      if (!cancelled) setRawItems(data);
     });
     return () => {
       cancelled = true;
     };
   }, [query, reloadNonce]);
+
+  const typed = useMemo(
+    () => rawItems.map((i) => ({ ...i, type: detectType(i.content) })),
+    [rawItems]
+  );
+
+  const items = useMemo(
+    () => (filter === 'all' ? typed : typed.filter((i) => i.type === filter)),
+    [typed, filter]
+  );
 
   const { pinned, recent } = useMemo(
     () => ({
@@ -56,12 +79,22 @@ export const ClipboardPopup = () => {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.metaKey && ['1', '2', '3', '4'].includes(e.key)) {
+        e.preventDefault();
+        setFilter(filters[Number(e.key) - 1].id);
+        return;
+      }
+      if (e.metaKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+        return;
+      }
       const item = flat[index];
       if (!item) return;
       if (e.metaKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         togglePin(item.id).then(() => setReloadNonce((n) => n + 1));
-      } else if (e.key === 'Backspace' && document.activeElement?.tagName !== 'INPUT') {
+      } else if (e.key === 'Backspace' && (e.target as HTMLElement | null)?.tagName !== 'INPUT') {
         e.preventDefault();
         deleteItem(item.id).then(() => setReloadNonce((n) => n + 1));
       }
@@ -70,43 +103,63 @@ export const ClipboardPopup = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [flat, index]);
 
-  if (flat.length === 0 && !query) {
-    return (
-      <div className="flex flex-col h-full">
-        <SearchInput value={query} onChange={setQuery} placeholder="Search clipboard" shortcutHint="⌘K" />
-        <div className="flex-1 flex items-center justify-center t-tertiary text-meta">
-          No clipboard items yet — copy something.
-        </div>
-      </div>
-    );
-  }
-
-  const renderRow = (item: ClipboardItem, flatIndex: number) => (
-    <Row
-      key={item.id}
-      primary={item.content}
-      meta={
-        <>
-          <span className="t-tertiary text-meta font-mono">{iso(item.created_at)}</span>
-          {index === flatIndex && <Kbd>↵</Kbd>}
-        </>
-      }
-      pinned={item.pinned}
-      active={index === flatIndex}
-      onSelect={() => {
-        setIndex(flatIndex);
-        onPaste(flatIndex);
-      }}
-    />
+  const totalBytes = useMemo(
+    () => typed.reduce((sum, i) => sum + i.content.length, 0),
+    [typed]
   );
+  const formatBytes = (n: number) =>
+    n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+  const renderRow = (item: (typeof typed)[number], flatIndex: number) => {
+    const tint = typeTint[item.type];
+    return (
+      <Row
+        key={item.id}
+        primary={item.content}
+        icon={iconFor(item.type)}
+        iconTint={tint.bg}
+        iconColor={tint.fg}
+        meta={
+          <>
+            <span className="t-tertiary text-meta font-mono">{iso(item.created_at)}</span>
+            {index === flatIndex && <Kbd>↵</Kbd>}
+          </>
+        }
+        pinned={item.pinned}
+        active={index === flatIndex}
+        onSelect={() => {
+          setIndex(flatIndex);
+          onPaste(flatIndex);
+        }}
+      />
+    );
+  };
+
+  const isEmpty = flat.length === 0;
 
   return (
     <div className="flex flex-col h-full">
-      <SearchInput value={query} onChange={setQuery} placeholder="Search clipboard" shortcutHint="⌘K" />
+      <SearchInput
+        value={query}
+        onChange={setQuery}
+        placeholder="Search clipboard"
+        shortcutHint="⌘K"
+        inputRef={searchRef}
+      />
+
       <div className="flex-1 overflow-y-auto nice-scroll" role="listbox">
+        {isEmpty && !query && (
+          <div className="h-full flex items-center justify-center t-tertiary text-meta">
+            No clipboard items yet — copy something.
+          </div>
+        )}
+        {isEmpty && query && (
+          <div className="p-4 t-tertiary text-meta text-center">No clipboard items match.</div>
+        )}
+
         {pinned.length > 0 && (
           <>
-            <div className="px-3 pt-3 pb-1">
+            <div className="px-3 pt-3 pb-1 flex items-center gap-2">
               <SectionLabel>Pinned</SectionLabel>
             </div>
             {pinned.map((item, i) => renderRow(item, i))}
@@ -120,10 +173,31 @@ export const ClipboardPopup = () => {
             {recent.map((item, i) => renderRow(item, pinned.length + i))}
           </>
         )}
-        {flat.length === 0 && query && (
-          <div className="p-4 t-tertiary text-meta text-center">No clipboard items match.</div>
-        )}
       </div>
+
+      <footer
+        className="flex items-center justify-between px-3 py-2 border-t hair"
+        style={{ background: 'rgba(0,0,0,0.18)' }}
+      >
+        <div className="flex items-center gap-1">
+          {filters.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => setFilter(f.id)}
+              className={`px-2 py-1 rounded-md flex items-center gap-1.5 text-meta font-medium ${
+                filter === f.id ? 't-primary' : 't-secondary'
+              }`}
+              style={filter === f.id ? { background: 'rgba(255,255,255,0.06)' } : undefined}
+            >
+              <Kbd>{f.hint}</Kbd>
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <span className="t-tertiary text-meta">
+          {typed.length} items · {formatBytes(totalBytes)}
+        </span>
+      </footer>
     </div>
   );
 };

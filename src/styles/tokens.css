@@ -33,19 +33,21 @@
 
 @layer base {
   html,
-  body {
-    background: var(--color-bg-canvas);
+  body,
+  #root {
+    background: transparent;
     color: rgba(255, 255, 255, 0.92);
     font-family: var(--font-sys);
     -webkit-font-smoothing: antialiased;
+    height: 100%;
   }
   html.light,
   html.light body {
-    background: #eceef2;
     color: rgba(20, 22, 28, 0.92);
   }
   body {
     margin: 0;
+    overflow: hidden;
   }
 }
 
