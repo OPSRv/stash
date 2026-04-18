@@ -43,6 +43,8 @@ export const DownloadsShell = () => {
   const [pickedFormat, setPickedFormat] = useState<QualityOption | null>(null);
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
   const [playing, setPlaying] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [view, setView] = useState<'list' | 'grid'>('list');
 
   // On mount: if clipboard holds a supported URL, auto-fill and detect.
   useEffect(() => {
@@ -167,8 +169,27 @@ export const DownloadsShell = () => {
     };
   }, [jobs]);
 
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const text = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain');
+    if (text) {
+      const t = text.trim();
+      setUrl(t);
+      runDetect(t);
+    }
+  };
+
   return (
-    <div className="h-full flex flex-col">
+    <div
+      className="h-full flex flex-col relative"
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+    >
       {/* URL bar */}
       <div className="px-4 py-3 flex items-center gap-2 border-b hair">
         <div className="input-field rounded-lg flex-1 flex items-center gap-2 px-3 py-2">
@@ -275,24 +296,53 @@ export const DownloadsShell = () => {
           <>
             <div className="px-4 pt-4 pb-1 flex items-center justify-between">
               <SectionLabel>Completed</SectionLabel>
-              <button
-                onClick={() => clearCompleted().then(reload)}
-                className="t-tertiary text-meta hover:t-secondary"
-              >
-                Clear
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="seg flex text-meta font-medium">
+                  <button
+                    onClick={() => setView('list')}
+                    className={`px-2 py-0.5 rounded-md ${view === 'list' ? 'on' : ''}`}
+                  >
+                    List
+                  </button>
+                  <button
+                    onClick={() => setView('grid')}
+                    className={`px-2 py-0.5 rounded-md ${view === 'grid' ? 'on' : ''}`}
+                  >
+                    Grid
+                  </button>
+                </div>
+                <button
+                  onClick={() => clearCompleted().then(reload)}
+                  className="t-tertiary text-meta hover:t-secondary"
+                >
+                  Clear
+                </button>
+              </div>
             </div>
-            <div className="mx-3 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.05)' }}>
-              {completed.map((j, i) => (
-                <CompletedRow
-                  key={j.id}
-                  job={j}
-                  zebra={i % 2 === 0}
-                  onDelete={() => deleteJob(j.id).then(reload)}
-                  onPlay={() => j.target_path && setPlaying(j.target_path)}
-                />
-              ))}
-            </div>
+            {view === 'list' ? (
+              <div className="mx-3 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.05)' }}>
+                {completed.map((j, i) => (
+                  <CompletedRow
+                    key={j.id}
+                    job={j}
+                    zebra={i % 2 === 0}
+                    onDelete={() => deleteJob(j.id).then(reload)}
+                    onPlay={() => j.target_path && setPlaying(j.target_path)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="mx-3 grid grid-cols-4 gap-2">
+                {completed.map((j) => (
+                  <CompletedTile
+                    key={j.id}
+                    job={j}
+                    onPlay={() => j.target_path && setPlaying(j.target_path)}
+                    onDelete={() => deleteJob(j.id).then(reload)}
+                  />
+                ))}
+              </div>
+            )}
           </>
         )}
         {active.length === 0 && completed.length === 0 && !detected && (
@@ -304,6 +354,75 @@ export const DownloadsShell = () => {
       </div>
 
       {playing && <VideoPlayer src={playing} onClose={() => setPlaying(null)} />}
+
+      {dragOver && (
+        <div
+          className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none"
+          style={{
+            background: 'rgba(47,122,229,0.12)',
+            border: '2px dashed rgba(47,122,229,0.6)',
+            borderRadius: 14,
+          }}
+        >
+          <div className="t-primary text-title font-medium">Drop URL to download</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const CompletedTile = ({
+  job,
+  onPlay,
+  onDelete,
+}: {
+  job: DownloadJob;
+  onPlay: () => void;
+  onDelete: () => void;
+}) => {
+  const isFail = job.status === 'failed' || job.status === 'cancelled';
+  return (
+    <div
+      className="group relative rounded-lg overflow-hidden cursor-pointer"
+      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}
+      onClick={!isFail ? onPlay : undefined}
+    >
+      <div className="aspect-video bg-black/50 relative">
+        {job.thumbnail_url ? (
+          <img src={job.thumbnail_url} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center t-tertiary text-meta">
+            {isFail ? 'Failed' : 'No preview'}
+          </div>
+        )}
+        {!isFail && (
+          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'rgba(0,0,0,0.4)' }}>
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor" className="text-white">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="absolute top-1 right-1 w-6 h-6 rounded-md items-center justify-center hidden group-hover:flex"
+          style={{ background: 'rgba(0,0,0,0.55)' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-white">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div className="px-2 py-1.5">
+        <div className="flex items-center gap-1 mb-0.5">
+          <PlatformBadge platform={job.platform} />
+        </div>
+        <div className="t-primary text-meta font-medium truncate">
+          {job.title ?? (job.target_path?.split('/').pop() ?? job.url)}
+        </div>
+      </div>
     </div>
   );
 };

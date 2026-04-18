@@ -31,6 +31,7 @@ impl Platform {
         }
     }
 
+    #[allow(dead_code)]
     pub fn as_badge(&self) -> &'static str {
         match self {
             Platform::YouTube => "YOUTUBE",
@@ -54,6 +55,7 @@ fn extract_host(url: &str) -> Option<&str> {
     Some(hostport.split(':').next().unwrap_or(hostport))
 }
 
+#[allow(dead_code)]
 pub fn is_supported_video_url(url: &str) -> bool {
     Platform::from_url(url) != Platform::Generic
 }

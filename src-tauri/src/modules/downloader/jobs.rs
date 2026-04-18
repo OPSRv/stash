@@ -110,6 +110,7 @@ impl JobRepo {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn get(&self, id: i64) -> Result<Option<DownloadJob>> {
         self.conn
             .query_row(

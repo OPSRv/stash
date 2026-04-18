@@ -6,6 +6,7 @@ use tauri::State;
 
 pub struct ClipboardState {
     pub repo: Mutex<ClipboardRepo>,
+    #[allow(dead_code)]
     pub images_dir: PathBuf,
 }
 
@@ -39,6 +40,7 @@ pub fn clear_all(state: &ClipboardState) -> Result<usize> {
     state.repo.lock().unwrap().clear_all()
 }
 
+#[allow(dead_code)]
 pub fn trim_to_cap(state: &ClipboardState, cap: usize) -> Result<usize> {
     state.repo.lock().unwrap().trim_to_cap(cap)
 }

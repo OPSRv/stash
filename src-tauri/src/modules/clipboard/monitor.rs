@@ -24,6 +24,7 @@ pub struct Monitor<R: ClipboardReader> {
 }
 
 impl<R: ClipboardReader> Monitor<R> {
+    #[allow(dead_code)]
     pub fn new(reader: R) -> Self {
         Self {
             reader,
