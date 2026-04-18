@@ -54,7 +54,7 @@ pub fn spawn_download(
     yt_dlp: &Path,
     job_id: i64,
     url: &str,
-    format_id: Option<&str>,
+    height: Option<u32>,
     kind: &str, // "video" | "audio"
 ) -> Result<(), String> {
     let downloads_dir = state.downloads_dir.lock().unwrap().clone();
@@ -82,13 +82,22 @@ pub fn spawn_download(
     }
 
     if kind == "audio" {
-        cmd.args(["-x", "--audio-format", "m4a"]);
-        if let Some(fid) = format_id {
-            cmd.arg("-f").arg(fid);
-        }
-    } else if let Some(fid) = format_id {
-        // Merge chosen video with best audio.
-        cmd.arg("-f").arg(format!("{fid}+bestaudio/best"));
+        cmd.args(["-x", "--audio-format", "m4a", "-f", "bestaudio/best"]);
+    } else {
+        let selector = match height {
+            Some(h) => format!(
+                "bestvideo[height<={h}]+bestaudio/best[height<={h}]/bestvideo+bestaudio/best"
+            ),
+            None => "bestvideo+bestaudio/best".to_string(),
+        };
+        cmd.args([
+            "-f",
+            &selector,
+            "--merge-output-format",
+            "mp4",
+            "--extractor-args",
+            "youtube:player_client=ios,web",
+        ]);
     }
 
     cmd.arg(url);

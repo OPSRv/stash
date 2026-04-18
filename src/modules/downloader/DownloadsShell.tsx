@@ -162,6 +162,7 @@ export const DownloadsShell = () => {
         title: detected.info.title,
         thumbnail: detected.info.thumbnail,
         format_id: pickedFormat.format_id,
+        height: pickedFormat.height ?? null,
         kind: pickedFormat.kind,
       });
       setDetected(null);

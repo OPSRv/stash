@@ -59,6 +59,7 @@ export const start = (args: {
   title?: string | null;
   thumbnail?: string | null;
   format_id?: string | null;
+  height?: number | null;
   kind: 'video' | 'audio';
 }): Promise<number> =>
   invoke('dl_start', {
@@ -66,6 +67,7 @@ export const start = (args: {
     title: args.title ?? null,
     thumbnail: args.thumbnail ?? null,
     formatId: args.format_id ?? null,
+    height: args.height ?? null,
     kind: args.kind,
   });
 

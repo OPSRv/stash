@@ -110,7 +110,11 @@ export const ClipboardPopup = () => {
     };
   }, [rawItems, videoBannerUrl]);
 
-  const downloadFromBanner = async (kind: 'video' | 'audio', formatId?: string) => {
+  const downloadFromBanner = async (
+    kind: 'video' | 'audio',
+    formatId?: string,
+    height?: number | null
+  ) => {
     if (!videoBanner || !videoBannerUrl) return;
     try {
       await startDownload({
@@ -118,6 +122,7 @@ export const ClipboardPopup = () => {
         title: videoBanner.info.title,
         thumbnail: videoBanner.info.thumbnail,
         format_id: formatId ?? null,
+        height: height ?? null,
         kind,
       });
       setVideoBanner(null);
@@ -316,7 +321,7 @@ export const ClipboardPopup = () => {
             {videoBanner.qualities.slice(0, 3).map((q) => (
               <button
                 key={q.format_id}
-                onClick={() => downloadFromBanner(q.kind, q.format_id)}
+                onClick={() => downloadFromBanner(q.kind, q.format_id, q.height)}
                 className="px-2 py-1 rounded-md text-meta font-medium t-primary"
                 style={{ background: 'rgba(47,122,229,0.15)' }}
               >

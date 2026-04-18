@@ -87,6 +87,7 @@ pub fn dl_start(
     title: Option<String>,
     thumbnail: Option<String>,
     format_id: Option<String>,
+    height: Option<u32>,
     kind: String,
 ) -> Result<i64, String> {
     let yt_dlp = resolve_yt_dlp(&state)?;
@@ -115,7 +116,7 @@ pub fn dl_start(
         &yt_dlp,
         id,
         &url,
-        format_id.as_deref(),
+        height,
         &kind,
     )?;
     Ok(id)
