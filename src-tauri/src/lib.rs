@@ -402,13 +402,13 @@ fn init_tracing(data_dir: &std::path::Path) {
     });
 }
 
-/// macOS uses a categorical vibrancy API, but the user's mental model is just
-/// "frosted glass on/off". We pick one material that consistently blurs what's
-/// behind the popup and let the CSS `backdrop-filter` on `.pane` add extra
-/// strength on top.
+/// macOS vibrancy material for the popup. UnderWindowBackground is the same
+/// frosted glass macOS Notification/Control Centers use — it's the most
+/// "see-through with blur" material rather than HudWindow (which is dark grey
+/// and reads as solid black/white when the pane background is translucent).
 #[cfg(target_os = "macos")]
 fn material_for_strength(_strength: u32) -> window_vibrancy::NSVisualEffectMaterial {
-    window_vibrancy::NSVisualEffectMaterial::HudWindow
+    window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground
 }
 
 /// Re-apply the vibrancy effect with a material derived from `strength`.

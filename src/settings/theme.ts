@@ -17,7 +17,7 @@ export type ThemeSettings = {
 export const DEFAULT_THEME: ThemeSettings = {
   mode: 'dark',
   blur: 24,
-  paneOpacity: 0.55,
+  paneOpacity: 0.35,
   accent: 'blue',
 };
 

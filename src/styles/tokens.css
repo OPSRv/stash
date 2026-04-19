@@ -35,8 +35,8 @@
   :root {
     /* Runtime-tunable (see settings/theme.ts). */
     --stash-blur: 24px;
-    --stash-pane-opacity-dark: 0.55;
-    --stash-pane-opacity-light: 0.7;
+    --stash-pane-opacity-dark: 0.35;
+    --stash-pane-opacity-light: 0.5;
     --stash-accent: #2f7ae5;
     --stash-accent-rgb: 47, 122, 229;
   }
