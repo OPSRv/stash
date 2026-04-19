@@ -163,3 +163,30 @@ export const UploadIcon = ({ size = 14, className }: IconProps) => (
     <path d="M12 20V8m0 0-4 4m4-4 4 4M5 4h14" />
   </svg>
 );
+
+export const SpeakerIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M11 5 6 9H3v6h3l5 4V5z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+  </svg>
+);
+
+export const SwapIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M4 7h14m0 0-4-4m4 4-4 4M20 17H6m0 0 4 4m-4-4 4-4" />
+  </svg>
+);
+
+export const SearchIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-3.5-3.5" />
+  </svg>
+);
+
+export const ReuseIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M3 12a9 9 0 1 0 3-6.7" />
+    <path d="M3 4v5h5" />
+  </svg>
+);

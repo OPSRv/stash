@@ -47,7 +47,11 @@ describe('TARGET_LANGUAGES', () => {
     expect(TARGET_LANGUAGES.some((l) => l.code === 'ru')).toBe(false);
   });
 
-  it('defaults to Ukrainian first in the list', () => {
-    expect(TARGET_LANGUAGES[0].code).toBe('uk');
+  it('exposes English first (matches the default target in settings)', () => {
+    expect(TARGET_LANGUAGES[0].code).toBe('en');
+  });
+
+  it('includes Ukrainian for Ukrainian-first workflows', () => {
+    expect(TARGET_LANGUAGES.some((l) => l.code === 'uk')).toBe(true);
   });
 });
