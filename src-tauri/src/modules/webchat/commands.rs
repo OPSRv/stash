@@ -1,5 +1,42 @@
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 
+/// Injected into every webchat page before any site script runs. Goal is to
+/// look as un-WebView-y as we can so Google's embedded-browser detector
+/// ("There was an error logging you in") falls through. What it does:
+///
+/// 1. Drops `window.webkit.messageHandlers` — the most reliable WKWebView
+///    tell. Many scripts probe `!!window.webkit` as a first check.
+/// 2. Installs a minimal `window.chrome` so feature-sniffers that look for
+///    "am I running in Chrome?" get a plausible answer instead of undefined.
+/// 3. Pins `navigator.webdriver` to `false` — some bot-detection scripts
+///    take its presence as a decisive signal.
+///
+/// We do NOT strip Tauri's own IPC bridge — the host page is a trusted
+/// external chat UI and never calls Tauri APIs. Runs once, idempotent.
+const WEBVIEW_DISGUISE: &str = r#"
+(function(){
+  try {
+    if (typeof window.webkit === 'object' && window.webkit && 'messageHandlers' in window.webkit) {
+      try { delete window.webkit; } catch(_) { window.webkit = undefined; }
+    }
+    if (!window.chrome) {
+      Object.defineProperty(window, 'chrome', {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: { runtime: {}, app: { isInstalled: false } },
+      });
+    }
+    try {
+      Object.defineProperty(navigator, 'webdriver', {
+        configurable: true,
+        get: function() { return false; },
+      });
+    } catch(_) {}
+  } catch(_) {}
+})();
+"#;
+
 /// Every child webview we own is labelled `webchat-<service-id>` so we can
 /// find/hide/close them without needing to know their URLs at cleanup time.
 const LABEL_PREFIX: &str = "webchat-";
@@ -74,7 +111,8 @@ pub fn webchat_embed(
         .unwrap_or_else(|| SAFARI_UA.to_string());
     let mut builder =
         tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed))
-            .user_agent(&ua);
+            .user_agent(&ua)
+            .initialization_script(WEBVIEW_DISGUISE);
     #[cfg(debug_assertions)]
     {
         builder = builder.devtools(true);

@@ -33,7 +33,11 @@ export const EmbeddedWebChat = ({ service }: Props) => {
     if (rect.width < 10 || rect.height < 10) return;
     try {
       const settings = await loadSettings();
-      const userAgent = userAgentFor(settings.cookiesFromBrowser);
+      // Per-service UA override wins; otherwise fall back to the default
+      // browser UA from settings (same Safari on macOS).
+      const userAgent =
+        (service.userAgent && service.userAgent.trim()) ||
+        userAgentFor(settings.cookiesFromBrowser);
       await webchatEmbed({
         service: service.id,
         url: service.url,

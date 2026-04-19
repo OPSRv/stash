@@ -59,6 +59,13 @@ export type WebChatService = {
   id: string;
   label: string;
   url: string;
+  /**
+   * Optional UA override for this service. Leave unset to use the
+   * default-browser UA (Safari on macOS). Useful when a provider rejects
+   * the default — e.g. some Google surfaces behave differently for Chrome
+   * vs Safari UAs.
+   */
+  userAgent?: string | null;
 };
 
 export const DEFAULT_WEB_SERVICES: WebChatService[] = [
