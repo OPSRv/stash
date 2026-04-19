@@ -124,7 +124,7 @@ export const SettingsShell = () => {
               role="tab"
               aria-selected={active}
               onClick={() => setTab(t.id)}
-              className={`px-3 py-1.5 rounded-md text-body font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded-md text-body font-medium transition-colors cursor-pointer ${
                 active ? 't-primary bg-white/[0.06]' : 't-secondary hover:bg-white/[0.04]'
               }`}
             >

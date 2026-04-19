@@ -47,6 +47,44 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn().mockResolvedValue(null),
 }));
 
+// jsdom doesn't ship ResizeObserver; @tanstack/react-virtual uses it to react
+// to scroll-element resizes. A stub is enough — tests render at fixed sizes.
+class ResizeObserverStub {
+  constructor(_cb: ResizeObserverCallback) {}
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+
+// jsdom doesn't run layout, so HTMLElement.clientHeight/getBoundingClientRect
+// return 0 — which makes @tanstack/react-virtual think the scroll container
+// is empty and render nothing. Override the defaults so virtualised lists
+// actually have a viewport in tests.
+Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+  configurable: true,
+  get: () => 600,
+});
+Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+  configurable: true,
+  get: () => 600,
+});
+HTMLElement.prototype.getBoundingClientRect = function () {
+  return {
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 600,
+    bottom: 600,
+    width: 600,
+    height: 600,
+    toJSON: () => ({}),
+  } as DOMRect;
+};
+
 afterEach(() => {
   cleanup();
 });

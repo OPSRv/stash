@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Kbd } from '../../shared/ui/Kbd';
 import { IconButton } from '../../shared/ui/IconButton';
@@ -508,33 +509,13 @@ export const ClipboardPopup = () => {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto nice-scroll" role="listbox">
-        {isEmpty && !query && (
-          <div className="h-full flex items-center justify-center t-tertiary text-meta">
-            No clipboard items yet — copy something.
-          </div>
-        )}
-        {isEmpty && query && (
-          <div className="p-4 t-tertiary text-meta text-center">No clipboard items match.</div>
-        )}
-
-        {pinned.length > 0 && (
-          <>
-            <div className="px-3 pt-3 pb-1">
-              <SectionLabel>Pinned</SectionLabel>
-            </div>
-            {pinned.map((item, i) => renderRow(item, i))}
-          </>
-        )}
-        {recent.length > 0 && (
-          <>
-            <div className="px-3 pt-3 pb-1">
-              <SectionLabel>Recent</SectionLabel>
-            </div>
-            {recent.map((item, i) => renderRow(item, pinned.length + i))}
-          </>
-        )}
-      </div>
+      <VirtualList
+        empty={isEmpty}
+        query={query}
+        pinned={pinned}
+        recent={recent}
+        renderRow={renderRow}
+      />
 
       <footer
         className="flex items-center justify-between px-3 py-2 border-t hair"
@@ -576,7 +557,132 @@ export const ClipboardPopup = () => {
   );
 };
 
-type LinkRowItem = ClipboardItem & { type: ContentType };
+type VirtualEntry =
+  | { kind: 'label'; key: string; label: string }
+  | { kind: 'row'; key: number; item: TypedItem; flatIndex: number };
+
+type TypedItem = ClipboardItem & { type: ContentType };
+
+interface VirtualListProps {
+  empty: boolean;
+  query: string;
+  pinned: TypedItem[];
+  recent: TypedItem[];
+  renderRow: (item: TypedItem, flatIndex: number) => React.ReactNode;
+}
+
+// Below this many entries the cost of measuring/positioning rows outweighs
+// the savings from virtualisation, so we render the list normally.
+const VIRTUALIZE_THRESHOLD = 60;
+
+const buildEntries = (pinned: TypedItem[], recent: TypedItem[]): VirtualEntry[] => {
+  const out: VirtualEntry[] = [];
+  if (pinned.length) {
+    out.push({ kind: 'label', key: 'label-pinned', label: 'Pinned' });
+    pinned.forEach((item, i) => out.push({ kind: 'row', key: item.id, item, flatIndex: i }));
+  }
+  if (recent.length) {
+    out.push({ kind: 'label', key: 'label-recent', label: 'Recent' });
+    recent.forEach((item, i) =>
+      out.push({ kind: 'row', key: item.id, item, flatIndex: pinned.length + i })
+    );
+  }
+  return out;
+};
+
+const renderEntry = (
+  entry: VirtualEntry,
+  renderRow: VirtualListProps['renderRow']
+) =>
+  entry.kind === 'label' ? (
+    <div className="px-3 pt-3 pb-1">
+      <SectionLabel>{entry.label}</SectionLabel>
+    </div>
+  ) : (
+    renderRow(entry.item, entry.flatIndex)
+  );
+
+/// Renders the clipboard list. Switches to react-virtual once the entry
+/// count crosses `VIRTUALIZE_THRESHOLD`; otherwise falls back to a normal
+/// .map render so unit tests (which can't measure layout in jsdom) still
+/// see every row.
+const VirtualList = ({ empty, query, pinned, recent, renderRow }: VirtualListProps) => {
+  const entries = useMemo(() => buildEntries(pinned, recent), [pinned, recent]);
+
+  if (empty && !query) {
+    return (
+      <div className="flex-1 overflow-hidden flex items-center justify-center t-tertiary text-meta">
+        No clipboard items yet — copy something.
+      </div>
+    );
+  }
+  if (empty && query) {
+    return (
+      <div className="flex-1 overflow-hidden p-4 t-tertiary text-meta text-center">
+        No clipboard items match.
+      </div>
+    );
+  }
+
+  if (entries.length < VIRTUALIZE_THRESHOLD) {
+    return (
+      <div className="flex-1 overflow-y-auto nice-scroll" role="listbox">
+        {entries.map((entry) => (
+          <div key={entry.key}>{renderEntry(entry, renderRow)}</div>
+        ))}
+      </div>
+    );
+  }
+
+  return <VirtualListBody entries={entries} renderRow={renderRow} />;
+};
+
+const VirtualListBody = ({
+  entries,
+  renderRow,
+}: {
+  entries: VirtualEntry[];
+  renderRow: VirtualListProps['renderRow'];
+}) => {
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (i) => (entries[i]?.kind === 'label' ? 32 : 52),
+    overscan: 8,
+    getItemKey: (i) => entries[i]?.key ?? i,
+  });
+  const items = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+  return (
+    <div ref={parentRef} className="flex-1 overflow-y-auto nice-scroll" role="listbox">
+      <div style={{ height: totalSize, width: '100%', position: 'relative' }}>
+        {items.map((vi) => {
+          const entry = entries[vi.index];
+          if (!entry) return null;
+          return (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${vi.start}px)`,
+              }}
+            >
+              {renderEntry(entry, renderRow)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+type LinkRowItem = TypedItem;
 
 interface LinkRowProps {
   item: LinkRowItem;
