@@ -9,7 +9,6 @@ type Props = {
   sessions: Session[];
   activeId: string | null;
   expanded: boolean;
-  onToggle: () => void;
   onSelect: (id: string) => void;
   onCreate: () => void;
   onRename: (id: string, title: string) => Promise<void> | void;
@@ -40,7 +39,6 @@ export const SessionSidebar = ({
   sessions,
   activeId,
   expanded,
-  onToggle,
   onSelect,
   onCreate,
   onRename,
@@ -70,39 +68,6 @@ export const SessionSidebar = ({
         className={`${width} h-full border-r hair flex flex-col transition-[width] duration-150`}
         style={{ background: 'var(--color-surface)' }}
       >
-        <div className="flex items-center gap-1 px-1 py-2 border-b hair">
-          <Button
-            variant="ghost"
-            size="sm"
-            shape="square"
-            aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
-            title={expanded ? 'Collapse' : 'Expand'}
-            onClick={onToggle}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-              <path
-                d={expanded ? 'M9 3 L5 7 L9 11' : 'M5 3 L9 7 L5 11'}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </Button>
-          <Button
-            variant="soft"
-            tone="accent"
-            size="sm"
-            shape={expanded ? 'default' : 'square'}
-            onClick={onCreate}
-            aria-label="New chat"
-            title="New chat (⌘N)"
-            fullWidth={expanded}
-          >
-            {expanded ? '+ New chat' : '+'}
-          </Button>
-        </div>
         <ul className="flex-1 overflow-y-auto nice-scroll py-1">
           {sessions.length === 0 && expanded && (
             <li className="px-3 py-4 t-tertiary text-meta">No conversations yet.</li>
@@ -183,6 +148,20 @@ export const SessionSidebar = ({
             );
           })}
         </ul>
+        <div className="border-t hair p-1">
+          <Button
+            variant="soft"
+            tone="accent"
+            size="sm"
+            shape={expanded ? 'default' : 'square'}
+            onClick={onCreate}
+            aria-label="New chat"
+            title="New chat (⌘N)"
+            fullWidth={expanded}
+          >
+            {expanded ? '+ New chat' : '+'}
+          </Button>
+        </div>
       </aside>
       <ConfirmDialog
         open={deletingId !== null}

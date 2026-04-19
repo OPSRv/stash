@@ -300,7 +300,27 @@ export const PopupShell = () => {
             onHover={() => m.preloadPopup?.().catch(() => {})}
           />
         ))}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            shape="square"
+            disabled={visitedIds.size <= 1}
+            onClick={() => {
+              // Reset the visited set to just the active tab. Inactive tab
+              // components unmount (their JS stays loaded, but all component
+              // state — streaming buffers, virtualised lists, polls, heavy
+              // webviews — is released).
+              setVisitedIds(new Set(activeId ? [activeId] : []));
+            }}
+            title="Unload inactive tabs"
+            aria-label="Unload inactive tabs"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <rect x="2" y="3" width="10" height="8" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M5 7 L9 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </Button>
           <Button
             size="sm"
             variant={pinned ? 'soft' : 'ghost'}

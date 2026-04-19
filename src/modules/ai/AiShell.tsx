@@ -281,7 +281,6 @@ export const AiShell = () => {
         sessions={sessions}
         activeId={activeId}
         expanded={sidebarExpanded}
-        onToggle={() => setSidebarExpanded((v) => !v)}
         onSelect={setActiveId}
         onCreate={() => {
           createNewSession().catch(() => {});
@@ -290,15 +289,35 @@ export const AiShell = () => {
         onDelete={handleDelete}
       />
       <section className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center gap-2 px-4 py-2 border-b hair">
-          <span
-            className="px-2 py-0.5 rounded-full text-meta"
-            style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
-          >
-            {modelLabel(settings.aiProvider, settings.aiModel)}
-          </span>
+        <header className="flex items-center justify-between gap-2 px-3 py-2 border-b hair">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setSidebarExpanded((v) => !v)}
+              aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+              title={sidebarExpanded ? 'Collapse' : 'Expand'}
+              className="ring-focus w-6 h-6 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors shrink-0"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                <path
+                  d={sidebarExpanded ? 'M9 3 L5 7 L9 11' : 'M5 3 L9 7 L5 11'}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <span
+              className="px-2 py-0.5 rounded-full text-meta truncate"
+              style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
+            >
+              {modelLabel(settings.aiProvider, settings.aiModel)}
+            </span>
+          </div>
           {isStreaming && (
-            <span className="t-tertiary text-meta" aria-live="polite">
+            <span className="t-tertiary text-meta shrink-0" aria-live="polite">
               streaming…
             </span>
           )}
