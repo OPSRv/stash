@@ -33,7 +33,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'clipboard', label: 'Clipboard' },
   { id: 'downloads', label: 'Downloads' },
   { id: 'terminal', label: 'Terminal' },
-  { id: 'ai', label: 'AI' },
+  { id: 'ai', label: 'Web' },
   { id: 'about', label: 'About' },
 ];
 

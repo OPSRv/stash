@@ -21,7 +21,7 @@ import { SessionSidebar } from './SessionSidebar';
 import { useAiSettings } from './useAiSettings';
 import { faviconUrlFor, webchatClose } from './webchatApi';
 
-type Mode = 'api' | string; // 'api' or a web service id
+type Mode = 'api' | '' | string; // '' = tile picker, 'api' or a web service id
 
 const autoTitleFrom = (prompt: string): string => {
   const first = prompt.trim().split('\n')[0] ?? '';
@@ -42,7 +42,17 @@ export const AiShell = () => {
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
-  const [mode, setMode] = useState<Mode>('api');
+
+  // API mode only shows up once a model is configured. Hide it otherwise so
+  // an empty chat configuration doesn't masquerade as a usable tab.
+  const apiAvailable = settings.aiModel.trim().length > 0;
+  const [mode, setMode] = useState<Mode>(() => (apiAvailable ? 'api' : ''));
+
+  // If the API pill vanishes while the user is on it (they cleared the
+  // model), fall back to the tile picker.
+  useEffect(() => {
+    if (!apiAvailable && mode === 'api') setMode('');
+  }, [apiAvailable, mode]);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -56,7 +66,7 @@ export const AiShell = () => {
   // the switcher; clicking it later re-embeds a fresh instance.
   const closeWebService = useCallback(
     async (id: string) => {
-      if (mode === id) setMode('api');
+      if (mode === id) setMode(''); // fall back to the picker tiles
       await webchatClose(id).catch(() => {});
     },
     [mode],
@@ -305,16 +315,38 @@ export const AiShell = () => {
           <button
             type="button"
             role="tab"
-            aria-selected={mode === 'api'}
-            onClick={() => setMode('api')}
-            className={`px-2.5 py-1 rounded-md text-meta transition-colors ${
-              mode === 'api'
+            aria-selected={mode === ''}
+            onClick={() => setMode('')}
+            className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
+              mode === ''
                 ? 't-primary bg-white/[0.08]'
                 : 't-secondary hover:bg-white/[0.04]'
             }`}
+            title="Show all services"
+            aria-label="Show all services"
           >
-            API
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+              <rect x="8" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
           </button>
+          {apiAvailable && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'api'}
+              onClick={() => setMode('api')}
+              className={`px-2.5 py-1 rounded-md text-meta transition-colors ${
+                mode === 'api'
+                  ? 't-primary bg-white/[0.08]'
+                  : 't-secondary hover:bg-white/[0.04]'
+              }`}
+            >
+              API
+            </button>
+          )}
           {settings.aiWebServices.map((s) => {
             const active = mode === s.id;
             const favicon = faviconUrlFor(s.url, 16);
@@ -441,8 +473,54 @@ export const AiShell = () => {
       ) : activeWebService ? (
         <EmbeddedWebChat key={activeWebService.id} service={activeWebService} />
       ) : (
-        <div className="flex-1 flex items-center justify-center t-tertiary text-meta">
-          Unknown service.
+        <div className="flex-1 overflow-y-auto nice-scroll p-6">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-[720px] mx-auto">
+            {settings.aiWebServices.length === 0 && (
+              <div className="col-span-full t-tertiary text-meta text-center py-8">
+                No web services configured. Add one in Settings → Web.
+              </div>
+            )}
+            {settings.aiWebServices.map((s) => {
+              const favicon = faviconUrlFor(s.url, 64);
+              let host = s.url;
+              try {
+                host = new URL(s.url).hostname;
+              } catch {
+                // keep raw URL on parse failure
+              }
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setMode(s.id)}
+                  className="group flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:bg-white/[0.04] transition-colors text-center"
+                  style={{ background: 'var(--color-surface)' }}
+                >
+                  {favicon ? (
+                    <img
+                      src={favicon}
+                      alt=""
+                      width={40}
+                      height={40}
+                      className="rounded-md"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div
+                      className="w-10 h-10 rounded-md flex items-center justify-center t-primary font-semibold"
+                      style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
+                    >
+                      {s.label.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="t-primary text-body font-medium">{s.label}</div>
+                  <div className="t-tertiary text-meta truncate max-w-full">{host}</div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
