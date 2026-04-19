@@ -87,6 +87,19 @@
     --ring-focus:
       0 0 0 2px rgba(var(--stash-accent-rgb), 0.55),
       0 0 0 3px rgba(0, 0, 0, 0.55);
+    /* Compact focus ring for tiny controls (TabButton, xs Button). */
+    --ring-focus-sm:
+      0 0 0 1px rgba(var(--stash-accent-rgb), 0.6),
+      0 0 0 2px rgba(0, 0, 0, 0.55);
+
+    /* Scrims: darkening layers over vibrancy panes. Light theme flips them
+       to translucent whites so cards/toolbars don't turn into black bars. */
+    --color-scrim-soft: rgba(0, 0, 0, 0.18);
+    --color-scrim: rgba(0, 0, 0, 0.3);
+    --color-scrim-strong: rgba(0, 0, 0, 0.55);
+    /* Interactive surfaces on pane (toggle track, tab hover). */
+    --color-surface-muted: rgba(255, 255, 255, 0.12);
+    --color-surface-raised: rgba(255, 255, 255, 0.06);
   }
   html.light {
     --color-danger-bg: rgba(var(--color-danger-rgb), 0.1);
@@ -104,6 +117,15 @@
     --ring-focus:
       0 0 0 2px rgba(var(--stash-accent-rgb), 0.5),
       0 0 0 3px rgba(255, 255, 255, 0.9);
+    --ring-focus-sm:
+      0 0 0 1px rgba(var(--stash-accent-rgb), 0.55),
+      0 0 0 2px rgba(255, 255, 255, 0.9);
+
+    --color-scrim-soft: rgba(20, 22, 28, 0.06);
+    --color-scrim: rgba(20, 22, 28, 0.08);
+    --color-scrim-strong: rgba(20, 22, 28, 0.55);
+    --color-surface-muted: rgba(20, 22, 28, 0.1);
+    --color-surface-raised: rgba(20, 22, 28, 0.05);
   }
   html,
   body,
@@ -467,6 +489,20 @@
     color: var(--color-danger-fg);
   }
 
+  /* Translator history row surface + per-row language pill. Numbers match
+     the old inline styles to preserve the established visual weight. */
+  .translator-row {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .light .translator-row {
+    background: rgba(0, 0, 0, 0.02);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  .translator-pill {
+    background: rgba(var(--stash-accent-rgb), 0.22);
+  }
+
   /* Focus ring utility. Apply :focus-visible ring to any interactive element. */
   .ring-focus:focus-visible {
     outline: none;
@@ -476,6 +512,10 @@
   .ring-focus-within:focus-within {
     outline: none;
     box-shadow: var(--ring-focus);
+  }
+  .ring-focus-sm:focus-visible {
+    outline: none;
+    box-shadow: var(--ring-focus-sm);
   }
 
   /* Row selection outline — replaces inline style on Row.tsx. */

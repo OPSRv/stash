@@ -1,3 +1,4 @@
+import { useRef, type KeyboardEvent } from 'react';
 import { Button } from '../../shared/ui/Button';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { CloseIcon, SearchIcon } from '../../shared/ui/icons';
@@ -30,6 +31,21 @@ export const TranslatorHistoryPanel = ({
 }: TranslatorHistoryPanelProps) => {
   const hasQuery = query.trim().length > 0;
   const isEmptyList = rows.length === 0;
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  /// ↑/↓ on the search input moves focus into the grouped list so users
+  /// can keyboard-navigate to a row without reaching for the mouse. Tab
+  /// takes over once inside — each row's reuse-button is already focusable.
+  const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const rowButtons = listRef.current?.querySelectorAll<HTMLButtonElement>(
+      'button[aria-label="Reuse translation as source"]',
+    );
+    if (!rowButtons || rowButtons.length === 0) return;
+    e.preventDefault();
+    const target = e.key === 'ArrowDown' ? rowButtons[0] : rowButtons[rowButtons.length - 1];
+    target.focus();
+  };
 
   if (isEmptyList && !hasQuery) {
     return (
@@ -51,6 +67,7 @@ export const TranslatorHistoryPanel = ({
           <input
             value={query}
             onChange={(e) => onQueryChange(e.currentTarget.value)}
+            onKeyDown={onSearchKeyDown}
             placeholder="Search history"
             className="flex-1 bg-transparent outline-none text-meta min-w-0"
             aria-label="Search translation history"
@@ -76,13 +93,15 @@ export const TranslatorHistoryPanel = ({
           <EmptyState variant="compact" title="No matches" description="Try a different search." />
         </div>
       ) : (
-        <TranslationHistoryList
-          rows={rows}
-          onCopy={onCopy}
-          onDelete={onDelete}
-          onSpeak={onSpeak}
-          onReuse={onReuse}
-        />
+        <div ref={listRef} className="flex-1 min-h-0 flex flex-col">
+          <TranslationHistoryList
+            rows={rows}
+            onCopy={onCopy}
+            onDelete={onDelete}
+            onSpeak={onSpeak}
+            onReuse={onReuse}
+          />
+        </div>
       )}
     </>
   );

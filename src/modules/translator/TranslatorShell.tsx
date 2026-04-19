@@ -11,20 +11,13 @@ import { TranslatorHistoryPanel } from './TranslatorHistoryPanel';
 import { TARGET_LANGUAGES, languageLabel } from './languages';
 import { useAutoTranslate } from './useAutoTranslate';
 import { useHistorySearch } from './useHistorySearch';
+import { useRunTranslate } from './useRunTranslate';
 import { useTranslatorHotkeys } from './useTranslatorHotkeys';
 import {
-  translate,
   translatorClear,
   translatorDelete,
   type TranslationRow,
 } from './api';
-
-interface LiveResult {
-  original: string;
-  translated: string;
-  from: string;
-  to: string;
-}
 
 /// Top-level Translator module. Owns the state machine (draft, target,
 /// detection, live-result) and wires the composer and history panel
@@ -36,8 +29,6 @@ export const TranslatorShell = () => {
   const [draft, setDraft] = useState('');
   const [sourceHint, setSourceHint] = useState<string | null>(null);
   const [target, setTarget] = useState('en');
-  const [isBusy, setIsBusy] = useState(false);
-  const [liveResult, setLiveResult] = useState<LiveResult | null>(null);
   const [historyQuery, setHistoryQuery] = useState('');
   const [historyReloadKey, setHistoryReloadKey] = useState(0);
   const reloadHistory = useCallback(() => setHistoryReloadKey((k) => k + 1), []);
@@ -52,38 +43,12 @@ export const TranslatorShell = () => {
       .catch(() => {});
   }, []);
 
-  const runTranslate = useCallback(
-    async (rawText: string, to: string, from?: string) => {
-      const text = rawText.trim();
-      if (!text) return;
-      setIsBusy(true);
-      try {
-        const result = await translate(text, to, from);
-        setLiveResult({
-          original: result.original,
-          translated: result.translated,
-          from: result.from,
-          to: result.to,
-        });
-        announce('Translation ready');
-      } catch (error) {
-        console.error('manual translate failed', error);
-        toast({
-          title: 'Translate failed',
-          description: String(error),
-          variant: 'error',
-          action: { label: 'Retry', onClick: () => void runTranslate(text, to, from) },
-        });
-      } finally {
-        setIsBusy(false);
-      }
-    },
-    [toast, announce],
-  );
+  const { liveResult, setLiveResult, isBusy, run: runTranslate, reset: resetRun } =
+    useRunTranslate({ onToast: toast, onAnnounce: announce });
 
   const handleAutoEmpty = useCallback(() => {
-    setLiveResult(null);
-  }, []);
+    resetRun();
+  }, [resetRun]);
 
   const { reset: resetAutoTranslate } = useAutoTranslate({
     draft,

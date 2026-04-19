@@ -95,6 +95,32 @@ describe('TranslatorShell', () => {
     await waitFor(() => expect(listCalls).toBeGreaterThan(before));
   });
 
+  it('ArrowDown from history search focuses the first row', async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'translator_list') {
+        return [
+          {
+            id: 1,
+            original: 'hello',
+            translated: 'привіт',
+            from_lang: 'en',
+            to_lang: 'uk',
+            created_at: Math.floor(Date.now() / 1000),
+          },
+        ];
+      }
+      if (cmd === 'translator_search') return [];
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<TranslatorShell />);
+    const searchInput = await screen.findByLabelText('Search translation history');
+    await user.click(searchInput);
+    await user.keyboard('{ArrowDown}');
+    const reuseBtn = await screen.findByRole('button', { name: 'Reuse translation as source' });
+    expect(document.activeElement).toBe(reuseBtn);
+  });
+
   it('Escape clears a non-empty draft', async () => {
     wire();
     const user = userEvent.setup();

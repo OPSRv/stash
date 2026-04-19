@@ -33,25 +33,13 @@ const languageArrow = (from: string, to: string): ReactNode => {
   );
 };
 
-const pillStyle = { background: 'rgba(var(--stash-accent-rgb), 0.22)' } as const;
-const rowStyle = {
-  background: 'rgba(255,255,255,0.02)',
-  border: '1px solid rgba(255,255,255,0.05)',
-} as const;
-
 /// Memoised so history rows don't re-render on every keystroke in the
 /// composer. Parent callbacks are stable (useCallback) and `row` is
 /// reference-stable across reloads that don't touch the entry.
 export const TranslationRow = memo(
   ({ row, onCopy, onDelete, onSpeak, onReuse }: TranslationRowProps) => (
-    <div
-      className="group mx-3 my-1 rounded-lg p-2.5 flex items-start gap-2 transition-colors hover:bg-white/[0.04]"
-      style={rowStyle}
-    >
-      <span
-        className="px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider t-primary shrink-0 uppercase"
-        style={pillStyle}
-      >
+    <div className="translator-row group mx-3 my-1 rounded-lg p-2.5 flex items-start gap-2 transition-colors hover:bg-white/[0.04]">
+      <span className="translator-pill px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider t-primary shrink-0 uppercase">
         {languageArrow(row.from_lang, row.to_lang)}
       </span>
       <button

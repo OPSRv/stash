@@ -1,5 +1,4 @@
 import { type RefObject } from 'react';
-import { Badge } from '../../shared/ui/Badge';
 import { Button } from '../../shared/ui/Button';
 import { Card } from '../../shared/ui/Card';
 import { IconButton } from '../../shared/ui/IconButton';
@@ -64,10 +63,15 @@ export const TranslatorComposer = ({
   return (
     <>
       <div className="px-3 pt-3 pb-2 flex items-center gap-2 shrink-0">
-        <Badge tone={detectedFrom ? 'accent' : 'neutral'} className="flex-1 justify-start">
-          <span className="opacity-70 mr-1">From</span>
-          {fromLabel}
-        </Badge>
+        <div className="flex-1 flex items-center gap-1.5 min-w-0">
+          <span className="t-tertiary text-meta">From</span>
+          <span
+            className={`text-meta font-medium truncate ${detectedFrom ? '' : 't-secondary'}`}
+            style={detectedFrom ? { color: 'var(--stash-accent)' } : undefined}
+          >
+            {fromLabel}
+          </span>
+        </div>
         <IconButton
           onClick={onSwap}
           title={canSwap ? 'Swap languages (⌘⇧S)' : 'Swap unavailable for auto-detect'}
@@ -121,13 +125,15 @@ export const TranslatorComposer = ({
           />
           <div className="flex items-center justify-between mt-1">
             <span
-              className="text-meta"
+              className={`text-meta ${
+                isCharsOver || isCharsWarn ? '' : 't-tertiary'
+              }`}
               style={
                 isCharsOver
                   ? { color: 'var(--color-danger-fg)' }
                   : isCharsWarn
                     ? { color: 'var(--color-warning-fg)' }
-                    : { color: 'rgba(255,255,255,0.4)' }
+                    : undefined
               }
             >
               {hasDraft
