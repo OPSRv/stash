@@ -187,19 +187,30 @@ export const TerminalShell = () => {
     };
   }, []);
 
-  const launchClaudeCode = useCallback(async () => {
+  const [snippets, setSnippets] = useState<
+    { id: string; label: string; command: string }[]
+  >([]);
+  useEffect(() => {
+    const read = () =>
+      loadSettings()
+        .then((s) => setSnippets(s.terminalSnippets))
+        .catch(() => {});
+    read();
+    window.addEventListener('stash:settings-changed', read);
+    return () => window.removeEventListener('stash:settings-changed', read);
+  }, []);
+
+  const runSnippet = useCallback(async (command: string) => {
+    const cmd = command.trim();
+    if (!cmd) return;
     try {
-      const settings = await loadSettings();
-      const cmd = settings.claudeCodeCommand.trim();
-      if (!cmd) return;
-      // Trailing \r as if the user pressed Enter. ptyWrite expects base64
-      // on the wire because the terminal normally forwards raw keystrokes,
-      // including control sequences, through the same channel.
+      // Trailing \r mimics Enter. ptyWrite expects base64 on the wire so
+      // control bytes forwarded by keystrokes survive round-trip.
       await ptyWrite(encodeBase64(`${cmd}\r`));
       termRef.current?.focus();
     } catch (e) {
       termRef.current?.write(
-        `\r\n\x1b[31mclaude code launch failed: ${String(e)}\x1b[0m\r\n`,
+        `\r\n\x1b[31msnippet failed: ${String(e)}\x1b[0m\r\n`,
       );
     }
   }, []);
@@ -232,16 +243,21 @@ export const TerminalShell = () => {
             shell exited
           </span>
         )}
-        <Button
-          size="xs"
-          variant="soft"
-          tone="accent"
-          onClick={launchClaudeCode}
-          disabled={dead}
-          title="Run the configured Claude Code command in this terminal"
-        >
-          Claude Code
-        </Button>
+        {snippets.map((sn) => (
+          <Button
+            key={sn.id}
+            size="xs"
+            variant="soft"
+            tone="accent"
+            onClick={() => {
+              runSnippet(sn.command).catch(() => {});
+            }}
+            disabled={dead || !sn.command.trim()}
+            title={`Send: ${sn.command}`}
+          >
+            {sn.label}
+          </Button>
+        ))}
         <Button size="xs" variant="ghost" onClick={restart}>
           Restart
         </Button>

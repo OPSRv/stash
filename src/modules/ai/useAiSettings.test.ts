@@ -19,17 +19,14 @@ describe('useAiSettings', () => {
     vi.mocked(loadSettings).mockReset();
   });
 
-  test('returns defaults immediately, then reads from store', async () => {
+  test('reads provider/model from the store', async () => {
     vi.mocked(loadSettings).mockResolvedValue({
       ...DEFAULT_SETTINGS,
-      aiEnabled: true,
       aiProvider: 'anthropic',
       aiModel: 'claude-opus-4-7',
     });
     const { result } = renderHook(() => useAiSettings());
-    expect(result.current.aiEnabled).toBe(false); // default, before promise
     await waitFor(() => {
-      expect(result.current.aiEnabled).toBe(true);
       expect(result.current.aiProvider).toBe('anthropic');
       expect(result.current.aiModel).toBe('claude-opus-4-7');
     });
@@ -38,22 +35,22 @@ describe('useAiSettings', () => {
   test('re-reads on stash:settings-changed event', async () => {
     vi.mocked(loadSettings).mockResolvedValue({
       ...DEFAULT_SETTINGS,
-      aiEnabled: false,
+      aiProvider: 'openai',
     });
     const { result } = renderHook(() => useAiSettings());
-    await waitFor(() => expect(result.current.aiEnabled).toBe(false));
+    await waitFor(() => expect(result.current.aiProvider).toBe('openai'));
 
     vi.mocked(loadSettings).mockResolvedValue({
       ...DEFAULT_SETTINGS,
-      aiEnabled: true,
       aiProvider: 'google',
+      aiModel: 'gemini-2.5-pro',
     });
     await act(async () => {
       window.dispatchEvent(new CustomEvent('stash:settings-changed'));
     });
     await waitFor(() => {
-      expect(result.current.aiEnabled).toBe(true);
       expect(result.current.aiProvider).toBe('google');
+      expect(result.current.aiModel).toBe('gemini-2.5-pro');
     });
   });
 });

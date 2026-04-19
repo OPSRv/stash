@@ -6,7 +6,6 @@ import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
 import { SegmentedControl } from '../shared/ui/SegmentedControl';
 import { Textarea } from '../shared/ui/Textarea';
-import { Toggle } from '../shared/ui/Toggle';
 import { useToast } from '../shared/ui/Toast';
 
 import { SettingRow } from './SettingRow';
@@ -139,23 +138,9 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
     }
   };
 
-  const enabled = settings.aiEnabled;
-  const disabledClass = enabled ? '' : 'opacity-40 pointer-events-none';
-
   return (
     <div className="divide-y divide-white/5">
-      <SettingRow
-        title="Enable AI"
-        description="Adds an AI Chat tab and unlocks AI-powered actions in other modules."
-        control={
-          <Toggle
-            checked={enabled}
-            onChange={(v) => onChange('aiEnabled', v)}
-            label="Enable AI"
-          />
-        }
-      />
-      <div className={disabledClass}>
+      <div>
         <SettingRow
           title="Provider"
           description="OpenAI / Anthropic / Google use their native APIs. Custom points at any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter, …)."

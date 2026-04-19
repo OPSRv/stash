@@ -29,7 +29,6 @@ export type Settings = {
   translateTarget: string;
   translateMinChars: number;
   translateShowNotification: boolean;
-  aiEnabled: boolean;
   aiProvider: AiProvider;
   aiModel: string;
   aiBaseUrl: string | null;
@@ -55,12 +54,23 @@ export type Settings = {
   popupWidth: number;
   popupHeight: number;
   /**
-   * Exact command the Terminal's "Claude Code" shortcut writes to the PTY,
-   * including any flags the user runs habitually. Full line, shell-compatible
-   * (e.g. `claude --dangerously-skip-permissions --model opus`).
+   * Per-user quick-commands surfaced as buttons in the Terminal header.
+   * Each writes its `command` followed by a newline into the PTY when
+   * clicked, so habitual invocations (claude code, nvim, gh, …) never
+   * have to be retyped.
    */
-  claudeCodeCommand: string;
+  terminalSnippets: TerminalSnippet[];
 };
+
+export type TerminalSnippet = {
+  id: string;
+  label: string;
+  command: string;
+};
+
+export const DEFAULT_TERMINAL_SNIPPETS: TerminalSnippet[] = [
+  { id: 'claude', label: 'Claude Code', command: 'claude' },
+];
 
 export type AiProvider = 'openai' | 'anthropic' | 'google' | 'custom';
 export type WhisperModelSize = 'tiny' | 'base' | 'small' | 'medium';
@@ -98,7 +108,6 @@ export const DEFAULT_SETTINGS: Settings = {
   translateTarget: 'uk',
   translateMinChars: 6,
   translateShowNotification: true,
-  aiEnabled: false,
   aiProvider: 'google',
   aiModel: '',
   aiBaseUrl: null,
@@ -109,7 +118,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceActiveModel: null,
   popupWidth: 920,
   popupHeight: 520,
-  claudeCodeCommand: 'claude',
+  terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

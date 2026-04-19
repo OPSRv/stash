@@ -4,7 +4,6 @@ import { DEFAULT_SETTINGS, loadSettings, type Settings } from '../../settings/st
 
 export type AiSettings = Pick<
   Settings,
-  | 'aiEnabled'
   | 'aiProvider'
   | 'aiModel'
   | 'aiBaseUrl'
@@ -14,7 +13,6 @@ export type AiSettings = Pick<
 >;
 
 const pick = (s: Settings): AiSettings => ({
-  aiEnabled: s.aiEnabled,
   aiProvider: s.aiProvider,
   aiModel: s.aiModel,
   aiBaseUrl: s.aiBaseUrl,

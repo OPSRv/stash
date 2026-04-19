@@ -14,16 +14,25 @@ import { AppearanceTab } from './AppearanceTab';
 import { ClipboardTab } from './ClipboardTab';
 import { DownloadsTab } from './DownloadsTab';
 import { GeneralTab } from './GeneralTab';
+import { TerminalTab } from './TerminalTab';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
 import { applyTheme, broadcastTheme } from './theme';
 
-type Tab = 'general' | 'appearance' | 'clipboard' | 'downloads' | 'ai' | 'about';
+type Tab =
+  | 'general'
+  | 'appearance'
+  | 'clipboard'
+  | 'downloads'
+  | 'terminal'
+  | 'ai'
+  | 'about';
 
 const tabs: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'clipboard', label: 'Clipboard' },
   { id: 'downloads', label: 'Downloads' },
+  { id: 'terminal', label: 'Terminal' },
   { id: 'ai', label: 'AI' },
   { id: 'about', label: 'About' },
 ];
@@ -137,16 +146,12 @@ export const SettingsShell = () => {
       </nav>
       <main className="flex-1 overflow-y-auto nice-scroll px-6 py-5">
         {tab === 'general' && (
-          <GeneralTab
-            autostartOn={autostartOn}
-            onToggleAutostart={toggleAutostart}
-            settings={settings}
-            onChange={update}
-          />
+          <GeneralTab autostartOn={autostartOn} onToggleAutostart={toggleAutostart} />
         )}
         {tab === 'appearance' && <AppearanceTab settings={settings} onChange={update} />}
         {tab === 'clipboard' && <ClipboardTab settings={settings} onChange={update} />}
         {tab === 'downloads' && <DownloadsTab settings={settings} onChange={update} />}
+        {tab === 'terminal' && <TerminalTab settings={settings} onChange={update} />}
         {tab === 'ai' && <AiTab settings={settings} onChange={update} />}
         {tab === 'about' && <AboutTab />}
       </main>
