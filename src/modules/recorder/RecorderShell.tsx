@@ -215,6 +215,16 @@ export const RecorderShell = () => {
     recProbePermissions().catch(() => {});
   }, []);
 
+  useEffect(
+    () => () => {
+      if (countdownRef.current !== null) {
+        window.clearTimeout(countdownRef.current);
+        countdownRef.current = null;
+      }
+    },
+    [],
+  );
+
   const selectedDisplay = devices.displays.find((d) => d.id === displayId);
   const selectedCamera = devices.cameras.find((c) => c.id === cameraId);
   const needsPip = mode === 'cam' || mode === 'screen+cam';

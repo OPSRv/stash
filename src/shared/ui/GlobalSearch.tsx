@@ -52,12 +52,12 @@ export const GlobalSearch = ({
   }, []);
 
   useEffect(() => {
-    if (open) {
-      setQ('');
-      setHits([]);
-      setActive(0);
-      window.setTimeout(() => inputRef.current?.focus(), 10);
-    }
+    if (!open) return;
+    setQ('');
+    setHits([]);
+    setActive(0);
+    const t = window.setTimeout(() => inputRef.current?.focus(), 10);
+    return () => window.clearTimeout(t);
   }, [open]);
 
   useEffect(() => {

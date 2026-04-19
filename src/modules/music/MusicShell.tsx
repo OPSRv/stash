@@ -67,14 +67,11 @@ export const MusicShell = () => {
     // Defer the first embed call until the browser has laid out the sizer.
     // Two rAFs ≈ one full paint cycle — enough for the tab switch's height
     // change to settle before we read getBoundingClientRect.
-    const raf1 = requestAnimationFrame(() => {
-      const raf2 = requestAnimationFrame(() => {
+    let scheduledRaf = requestAnimationFrame(() => {
+      scheduledRaf = requestAnimationFrame(() => {
         void syncBounds();
       });
-      // Store second rAF handle on the outer closure for cleanup.
-      cancelHandle = raf2;
     });
-    let cancelHandle = raf1;
 
     const el = sizerRef.current;
     const ro = el
@@ -108,8 +105,7 @@ export const MusicShell = () => {
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(cancelHandle);
+      cancelAnimationFrame(scheduledRaf);
       ro?.disconnect();
       io?.disconnect();
       window.removeEventListener('resize', syncBounds);

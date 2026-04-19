@@ -43,6 +43,10 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   const cfgRef = useRef(cfg);
   const listenersRef = useRef<Set<(beatDot: number, accent: boolean) => void>>(new Set());
   const currentBeatRef = useRef<number>(0);
+  /// Pending on-beat `setTimeout` ids so `stop()` can cancel queued flashes
+  /// instead of letting the beat strip pulse for up to `SCHEDULE_AHEAD_S`
+  /// after the user hit Stop.
+  const pendingBeatTimersRef = useRef<Set<number>>(new Set());
 
   cfgRef.current = cfg;
 
@@ -84,10 +88,12 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
 
     if (isOnBeat) {
       const delayMs = Math.max(0, (time - ctx.currentTime) * 1000);
-      window.setTimeout(() => {
+      const handle = window.setTimeout(() => {
+        pendingBeatTimersRef.current.delete(handle);
         currentBeatRef.current = beatDot;
         listenersRef.current.forEach((cb) => cb(beatDot, isAccent));
       }, delayMs);
+      pendingBeatTimersRef.current.add(handle);
     }
   }, []);
 
@@ -118,6 +124,8 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
       window.clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
+    pendingBeatTimersRef.current.clear();
     setIsPlaying(false);
   }, []);
 
@@ -140,6 +148,8 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   useEffect(() => {
     return () => {
       if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
+      for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
+      pendingBeatTimersRef.current.clear();
       ctxRef.current?.close().catch(() => {});
     };
   }, []);

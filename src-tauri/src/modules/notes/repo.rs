@@ -1,6 +1,19 @@
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::Serialize;
 
+/// Escape SQL LIKE wildcards so user input matches literally. Paired with
+/// `LIKE ? ESCAPE '\'` in the query.
+fn escape_like(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Note {
     pub id: i64,
@@ -65,19 +78,21 @@ impl NotesRepo {
     }
 
     pub fn list(&self) -> Result<Vec<Note>> {
+        // Cap unconditionally so a user with thousands of notes doesn't stall
+        // the UI thread on every reload. UI flows that need more could page.
         let mut stmt = self
             .conn
-            .prepare("SELECT * FROM notes ORDER BY updated_at DESC")?;
+            .prepare("SELECT * FROM notes ORDER BY updated_at DESC LIMIT 500")?;
         let rows = stmt.query_map([], Self::map_row)?;
         rows.collect()
     }
 
     /// Case-insensitive LIKE search over title + body.
     pub fn search(&self, query: &str) -> Result<Vec<Note>> {
-        let like = format!("%{}%", query.trim());
+        let like = format!("%{}%", escape_like(query.trim()));
         let mut stmt = self.conn.prepare(
             "SELECT * FROM notes
-             WHERE title LIKE ?1 COLLATE NOCASE OR body LIKE ?1 COLLATE NOCASE
+             WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE OR body LIKE ?1 ESCAPE '\\' COLLATE NOCASE
              ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map(params![like], Self::map_row)?;
@@ -146,6 +161,18 @@ mod tests {
         assert_eq!(hits[0].title, "Meeting");
         let title_hits = repo.search("RECIPE").unwrap();
         assert_eq!(title_hits.len(), 1);
+    }
+
+    #[test]
+    fn search_treats_like_wildcards_as_literals() {
+        let mut repo = fresh();
+        repo.create("foo_bar", "", 1).unwrap();
+        repo.create("fooXbar", "", 2).unwrap();
+        let hits = repo.search("foo_bar").unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "foo_bar");
+        let pct = repo.search("50%").unwrap();
+        assert_eq!(pct.len(), 0);
     }
 
     #[test]

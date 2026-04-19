@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../shared/ui/Button';
 import { updateYtDlp, ytDlpVersion, type YtDlpVersionInfo } from '../modules/downloader/api';
 import { SettingRow } from './SettingRow';
@@ -11,18 +11,25 @@ export const YtDlpUpdateRow = () => {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const mountedRef = useRef(true);
+
   const refresh = async () => {
     try {
-      setInfo(await ytDlpVersion());
+      const next = await ytDlpVersion();
+      if (mountedRef.current) setInfo(next);
     } catch (e) {
-      setError(String(e));
+      if (mountedRef.current) setError(String(e));
     }
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     refresh();
     const interval = setInterval(refresh, 24 * 60 * 60 * 1000);
-    return () => clearInterval(interval);
+    return () => {
+      mountedRef.current = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const handleUpdate = async () => {

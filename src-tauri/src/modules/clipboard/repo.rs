@@ -1,6 +1,20 @@
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::Serialize;
 
+/// Escape SQL LIKE wildcards (`%`, `_`) and the escape character (`\`) so
+/// literal user input is matched verbatim rather than interpreted as a
+/// pattern. Paired with `LIKE ? ESCAPE '\'` in the query.
+fn escape_like(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 #[derive(Debug, Serialize, PartialEq, Clone)]
 pub struct ClipboardItem {
     pub id: i64,
@@ -87,10 +101,10 @@ impl ClipboardRepo {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<ClipboardItem>> {
-        let like = format!("%{}%", query);
+        let like = format!("%{}%", escape_like(query));
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items
-             WHERE kind = 'text' AND content LIKE ?1 COLLATE NOCASE
+             WHERE kind = 'text' AND content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
              ORDER BY pinned DESC, created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![like, limit as i64], Self::map_row)?;
@@ -198,6 +212,18 @@ mod tests {
             item.meta.as_deref(),
             Some(r#"{"path":"/tmp/a.png","w":10,"h":10}"#)
         );
+    }
+
+    #[test]
+    fn search_treats_like_wildcards_as_literals() {
+        let mut repo = fresh_repo();
+        repo.insert_text("foo_bar", 1).unwrap();
+        repo.insert_text("fooXbar", 2).unwrap();
+        let hits = repo.search("foo_bar", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].content, "foo_bar");
+        let pct = repo.search("50%", 10).unwrap();
+        assert_eq!(pct.len(), 0);
     }
 
     #[test]

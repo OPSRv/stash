@@ -270,6 +270,9 @@ pub fn spawn_download(
                     serde_json::json!({ "id": job_id, "path": path }),
                 );
                 drop(repo);
+                // Clear any retry-counter state we accumulated before success so
+                // the `retry_counts` map doesn't grow unbounded across sessions.
+                state_clone.retry_counts.lock().unwrap().remove(&job_id);
                 drain_queue(app_clone.clone(), Arc::clone(&state_clone), &yt_dlp_owned);
             } else {
                 let tail: String = stderr_buf_for_final
@@ -300,6 +303,10 @@ pub fn spawn_download(
                     if let Some(spec) = state_clone.job_specs.lock().unwrap().get_mut(&job_id) {
                         spec.skip_cookies = true;
                     }
+                    // The slot freed at the child-wait above is now available
+                    // — kick the queue so other pending jobs don't idle while
+                    // this job re-spins.
+                    drain_queue(app_clone.clone(), Arc::clone(&state_clone), &yt_dlp_owned);
                     let app_retry = app_clone.clone();
                     let state_retry = Arc::clone(&state_clone);
                     let yt_dlp_retry = yt_dlp_owned.clone();
@@ -326,6 +333,10 @@ pub fn spawn_download(
                 };
                 if attempts <= 2 && is_transient_error(&tail) {
                     let backoff = std::time::Duration::from_secs(2 * (3u64.pow(attempts - 1)));
+                    // Free-slot semantics: the queue drain must happen now so
+                    // other pending jobs can run during this job's backoff
+                    // sleep instead of waiting up to 6 s.
+                    drain_queue(app_clone.clone(), Arc::clone(&state_clone), &yt_dlp_owned);
                     let app_retry = app_clone.clone();
                     let state_retry = Arc::clone(&state_clone);
                     let yt_dlp_retry = yt_dlp_owned.clone();

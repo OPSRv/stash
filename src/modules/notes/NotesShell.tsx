@@ -53,7 +53,19 @@ export const NotesShell = () => {
   const savedClearTimer = useRef<number | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  /// Guards against duplicate `notesCreate` when the initial save round-trip
+  /// is slower than the debounce window — a pending create sets this to the
+  /// in-flight promise so later saves wait for `activeId` to land.
+  const pendingCreateRef = useRef<Promise<number> | null>(null);
   const { toast } = useToast();
+
+  useEffect(
+    () => () => {
+      if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+      if (savedClearTimer.current !== null) window.clearTimeout(savedClearTimer.current);
+    },
+    [],
+  );
 
   const reload = useCallback(async () => {
     const data = query.trim() ? await notesSearch(query) : await notesList();
@@ -94,16 +106,34 @@ export const NotesShell = () => {
       setSaveStatus('saving');
       saveTimer.current = window.setTimeout(async () => {
         try {
-          if (activeId == null) {
-            if (!nextTitle && !nextBody) {
-              setSaveStatus('idle');
+          let targetId = activeId;
+          if (targetId == null) {
+            // If an initial create is already in flight, await its id instead
+            // of issuing a second `notesCreate` that would produce a duplicate.
+            if (pendingCreateRef.current) {
+              targetId = await pendingCreateRef.current;
+            } else {
+              if (!nextTitle && !nextBody) {
+                setSaveStatus('idle');
+                return;
+              }
+              const p = notesCreate(nextTitle, nextBody);
+              pendingCreateRef.current = p;
+              try {
+                targetId = await p;
+                setActiveId(targetId);
+              } finally {
+                pendingCreateRef.current = null;
+              }
+              // The create already persisted `nextTitle`/`nextBody`, no update
+              // needed on this tick.
+              reload();
+              setSaveStatus('saved');
+              savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);
               return;
             }
-            const id = await notesCreate(nextTitle, nextBody);
-            setActiveId(id);
-          } else {
-            await notesUpdate(activeId, nextTitle, nextBody);
           }
+          await notesUpdate(targetId, nextTitle, nextBody);
           reload();
           setSaveStatus('saved');
           savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);

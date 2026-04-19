@@ -67,6 +67,7 @@ export const ClipboardPopup = () => {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [copyFlash, setCopyFlash] = useState(false);
+  const copyFlashTimer = useRef<number | null>(null);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const deleteConfirm = useSuppressibleConfirm<number>('clipboard.delete');
   const [previewId, setPreviewId] = useState<number | null>(null);
@@ -98,12 +99,23 @@ export const ClipboardPopup = () => {
       reload();
       // A new clipboard capture happened — flash the popup border briefly.
       setCopyFlash(true);
-      window.setTimeout(() => setCopyFlash(false), 450);
+      if (copyFlashTimer.current !== null) window.clearTimeout(copyFlashTimer.current);
+      copyFlashTimer.current = window.setTimeout(() => {
+        setCopyFlash(false);
+        copyFlashTimer.current = null;
+      }, 450);
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [reload]);
+
+  useEffect(
+    () => () => {
+      if (copyFlashTimer.current !== null) window.clearTimeout(copyFlashTimer.current);
+    },
+    [],
+  );
 
 
   // Auto-detect video downloads when the newest text item is a video URL.
