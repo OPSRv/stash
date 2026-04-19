@@ -11,12 +11,11 @@ import {
 } from './api';
 
 const toolbarStyle = {
-  background: 'rgba(0,0,0,0.3)',
-  borderBottom: '1px solid rgba(255,255,255,0.06)',
+  background: 'var(--color-scrim)',
 } as const;
 
 const placeholderStyle = {
-  background: 'rgba(0,0,0,0.35)',
+  background: 'var(--color-scrim)',
 } as const;
 
 /// Renders a thin toolbar plus an invisible sizer that the native child
@@ -138,7 +137,7 @@ export const MusicShell = () => {
   return (
     <div className="h-full flex flex-col">
       <div
-        className="px-3 py-2 flex items-center gap-2"
+        className="px-3 py-2 flex items-center gap-2 border-b hair"
         style={toolbarStyle}
       >
         <span className="t-primary text-body font-medium">YouTube Music</span>

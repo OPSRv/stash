@@ -55,7 +55,7 @@ export const Row = ({
         {secondary && <div className="t-tertiary text-meta truncate">{secondary}</div>}
       </div>
       {actions && (
-        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
           {actions}
         </div>
       )}

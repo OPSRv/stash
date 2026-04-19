@@ -11,12 +11,14 @@ export const Toggle = ({ checked, onChange, label }: ToggleProps) => (
     aria-checked={checked}
     aria-label={label}
     onClick={() => onChange(!checked)}
-    className="relative w-[34px] h-[20px] rounded-full transition"
-    style={{ background: checked ? '#2F7AE5' : 'rgba(255,255,255,0.12)' }}
+    className="relative w-[34px] h-[20px] rounded-full ring-focus transition-colors duration-150"
+    style={{
+      background: checked ? 'var(--stash-accent)' : 'var(--color-surface-muted)',
+    }}
   >
     <span
-      className="absolute top-[2px] w-4 h-4 bg-white rounded-full shadow transition-[left]"
-      style={{ left: checked ? 16 : 2 }}
+      className="absolute top-[2px] w-4 h-4 bg-white rounded-full transition-[left] duration-150"
+      style={{ left: checked ? 16 : 2, boxShadow: 'var(--shadow-sm)' }}
     />
   </button>
 );

@@ -6,6 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Kbd } from '../../shared/ui/Kbd';
 import { IconButton } from '../../shared/ui/IconButton';
 import { Button } from '../../shared/ui/Button';
+import { Card } from '../../shared/ui/Card';
 import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
@@ -523,7 +524,7 @@ export const ClipboardPopup = () => {
     >
       {selectionCount > 0 && (
         <div
-          className="px-3 py-1.5 flex items-center justify-between border-b hair"
+          className="px-3 py-2 flex items-center justify-between border-b hair"
           style={{ background: 'rgba(var(--stash-accent-rgb),0.08)' }}
         >
           <span className="t-primary text-meta font-medium">
@@ -551,7 +552,7 @@ export const ClipboardPopup = () => {
       />
 
       {videoBanner && (
-        <div className="mx-2 mt-2 p-2 rounded-lg flex items-center gap-2" style={{ background: 'rgba(var(--stash-accent-rgb),0.08)', border: '1px solid rgba(var(--stash-accent-rgb),0.25)' }}>
+        <Card tone="accent" padding="sm" rounded="lg" className="mx-2 mt-2 flex items-center gap-2">
           <div className="w-10 h-7 rounded overflow-hidden shrink-0 bg-black/50">
             {videoBanner.info.thumbnail && (
               <img src={videoBanner.info.thumbnail} alt="" className="w-full h-full object-cover" />
@@ -589,7 +590,7 @@ export const ClipboardPopup = () => {
           >
             ×
           </Button>
-        </div>
+        </Card>
       )}
 
       <ClipboardVirtualList
@@ -602,15 +603,17 @@ export const ClipboardPopup = () => {
 
       <footer
         className="flex items-center justify-between px-3 py-2 border-t hair"
-        style={{ background: 'rgba(0,0,0,0.18)' }}
+        style={{ background: 'var(--color-scrim-soft)' }}
       >
         <div className="flex items-center gap-1">
           {filters.map((f) => (
             <button
               key={f.id}
               onClick={() => setFilter(f.id)}
-              className={`px-2 py-1 rounded-md flex items-center gap-1.5 text-meta font-medium ${
-                filter === f.id ? 't-primary bg-white/5' : 't-secondary hover:bg-white/[0.04]'
+              className={`h-7 px-2.5 rounded-md flex items-center gap-1.5 text-meta font-medium ring-focus-sm transition-colors duration-150 ${
+                filter === f.id
+                  ? 't-primary bg-[var(--color-surface-raised)]'
+                  : 't-secondary hover:bg-[var(--color-surface-raised)]'
               }`}
             >
               <Kbd>{f.hint}</Kbd>

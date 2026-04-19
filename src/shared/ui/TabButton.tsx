@@ -21,10 +21,11 @@ export const TabButton = ({
       onFocus={onHover}
       aria-current={active ? 'true' : undefined}
       title={shortcutHint ? `${label} (${shortcutHint})` : label}
-      className={`px-2 py-1 rounded-md text-meta font-medium flex items-center gap-1.5 cursor-pointer ${
-        active ? 't-primary' : 't-secondary'
+      className={`h-7 px-2.5 rounded-md text-meta font-medium flex items-center gap-1.5 cursor-pointer ring-focus-sm transition-colors duration-150 ${
+        active
+          ? 't-primary bg-[var(--color-surface-raised)]'
+          : 't-secondary hover:bg-[var(--color-surface-raised)]'
       }`}
-      style={active ? { background: 'rgba(255,255,255,0.06)' } : undefined}
     >
       {active && shortcutHint && (
         <span className="kbd" aria-hidden="true">

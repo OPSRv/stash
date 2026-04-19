@@ -113,7 +113,7 @@ export const Button = ({
 }: ButtonProps) => {
   const isDisabled = disabled || loading;
   const classes = [
-    'inline-flex items-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed ring-focus',
+    'inline-flex items-center transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed ring-focus',
     sizeClass[size],
     shapeClass[shape],
     variantTone(variant, tone),
