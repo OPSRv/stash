@@ -15,7 +15,7 @@ import { setTranslatorSettings } from '../modules/translator/api';
 import { Cheatsheet } from '../shared/ui/Cheatsheet';
 import { GlobalSearch } from '../shared/ui/GlobalSearch';
 import { TranslationBanner } from '../modules/clipboard/TranslationBanner';
-import { applyTheme } from '../settings/theme';
+import { applyTheme, subscribeTheme } from '../settings/theme';
 
 export const PopupShell = () => {
   const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
@@ -52,6 +52,13 @@ export const PopupShell = () => {
         ]);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const unlisten = subscribeTheme(applyTheme);
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
   }, []);
 
   useEffect(() => {

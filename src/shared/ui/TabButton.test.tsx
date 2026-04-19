@@ -4,10 +4,22 @@ import { describe, it, expect, vi } from 'vitest';
 import { TabButton } from './TabButton';
 
 describe('TabButton', () => {
-  it('renders label and shortcut hint', () => {
-    render(<TabButton label="Clipboard" shortcutHint="⌘1" active={false} onClick={() => {}} />);
+  it('shows shortcut hint only on the active tab', () => {
+    const { rerender } = render(
+      <TabButton label="Clipboard" shortcutHint="⌘1" active={false} onClick={() => {}} />
+    );
     expect(screen.getByRole('button', { name: /Clipboard/ })).toBeInTheDocument();
+    expect(screen.queryByText('⌘1')).not.toBeInTheDocument();
+    rerender(<TabButton label="Clipboard" shortcutHint="⌘1" active onClick={() => {}} />);
     expect(screen.getByText('⌘1')).toBeInTheDocument();
+  });
+
+  it('exposes the shortcut via the title attribute on hover', () => {
+    render(<TabButton label="Clipboard" shortcutHint="⌘1" active={false} onClick={() => {}} />);
+    expect(screen.getByRole('button', { name: /Clipboard/ })).toHaveAttribute(
+      'title',
+      'Clipboard (⌘1)'
+    );
   });
 
   it('calls onClick when clicked', async () => {

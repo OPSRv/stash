@@ -1,4 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
+import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
+
+const THEME_EVENT = 'stash:theme-changed';
 
 export type ThemeMode = 'dark' | 'light' | 'auto';
 
@@ -54,3 +57,14 @@ export const applyTheme = (t: ThemeSettings) => {
   invoke('set_popup_vibrancy', { strength: blur }).catch(() => {});
 };
 
+/// Broadcast a theme change to every open Tauri window so floating shells
+/// (popup, recorder, notes, music, translator) re-apply CSS vars without
+/// needing a restart.
+export const broadcastTheme = (t: ThemeSettings) => {
+  emit(THEME_EVENT, t).catch(() => {});
+};
+
+/// Subscribe to remote theme changes; call from any shell that does not own
+/// the Settings window so its document picks up new accent/blur/opacity.
+export const subscribeTheme = (onChange: (t: ThemeSettings) => void): Promise<UnlistenFn> =>
+  listen<ThemeSettings>(THEME_EVENT, (e) => onChange(e.payload));
