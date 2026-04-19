@@ -215,6 +215,33 @@ pub fn webchat_hide_all(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Destroy every attached webchat webview. Unlike `webchat_hide_all` which
+/// only toggles visibility (preserving the session + its memory), this drops
+/// the underlying webviews so the OS can reclaim the web process memory.
+/// If `keep` is `Some`, the webview for that service id is left alone — used
+/// by the "Unload inactive tabs" shell button when the AI tab is active and
+/// the user is mid-session with a specific service.
+#[tauri::command]
+pub fn webchat_close_all(app: AppHandle, keep: Option<String>) -> Result<(), String> {
+    let keep_label = match keep.as_deref() {
+        Some(s) if !s.trim().is_empty() => label_for(s).ok(),
+        _ => None,
+    };
+    let labels: Vec<String> = app
+        .webviews()
+        .keys()
+        .filter(|k| k.starts_with(LABEL_PREFIX))
+        .filter(|k| keep_label.as_deref() != Some(k.as_str()))
+        .cloned()
+        .collect();
+    for label in labels {
+        if let Some(wv) = app.webviews().get(&label).cloned() {
+            let _ = wv.close();
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn webchat_reload(app: AppHandle, service: String, url: String) -> Result<(), String> {
     let label = label_for(&service)?;

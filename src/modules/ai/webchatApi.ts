@@ -30,6 +30,12 @@ export const webchatReload = (service: string, url: string): Promise<void> =>
 export const webchatClose = (service: string): Promise<void> =>
   invoke('webchat_close', { service });
 
+/// Destroy every attached webchat webview (reclaims the web process memory).
+/// Pass `keep` to preserve a single service — useful when the AI tab is
+/// active and the user is mid-session with one specific chat.
+export const webchatCloseAll = (keep?: string | null): Promise<void> =>
+  invoke('webchat_close_all', { keep: keep ?? null });
+
 export const webchatTogglePlay = (service: string): Promise<void> =>
   invoke('webchat_toggle_play', { service });
 

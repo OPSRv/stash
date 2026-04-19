@@ -27,7 +27,7 @@ import { TranslationBanner } from '../modules/clipboard/TranslationBanner';
 import { NowPlayingBar } from '../modules/music/NowPlayingBar';
 import { musicHide, type NowPlaying } from '../modules/music/api';
 import { WebchatNowPlayingBar } from '../modules/ai/WebchatNowPlayingBar';
-import type { WebchatNowPlaying } from '../modules/ai/webchatApi';
+import { webchatCloseAll, type WebchatNowPlaying } from '../modules/ai/webchatApi';
 import { applyTheme, subscribeTheme } from '../settings/theme';
 
 export const PopupShell = () => {
@@ -368,9 +368,24 @@ export const PopupShell = () => {
             onClick={() => {
               // Reset the visited set to just the active tab. Inactive tab
               // components unmount (their JS stays loaded, but all component
-              // state — streaming buffers, virtualised lists, polls, heavy
-              // webviews — is released).
+              // state — streaming buffers, virtualised lists, polls — is
+              // released).
               setVisitedIds(new Set(activeId ? [activeId] : []));
+              // React unmount alone doesn't destroy webchat webviews —
+              // they're attached at the Tauri window level and survive a
+              // React teardown. Close them explicitly here. If the AI tab is
+              // the active one, keep the current service's webview so we
+              // don't log the user out mid-session.
+              let keep: string | null = null;
+              if (activeId === 'ai') {
+                try {
+                  const m = localStorage.getItem('stash.ai.lastMode');
+                  if (m && m !== 'api' && m !== '') keep = m;
+                } catch {
+                  // localStorage may be unavailable in some contexts
+                }
+              }
+              void webchatCloseAll(keep).catch(() => {});
             }}
             title="Unload inactive tabs"
             aria-label="Unload inactive tabs"

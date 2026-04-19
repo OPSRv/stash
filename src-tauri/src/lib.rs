@@ -65,8 +65,8 @@ use modules::search::commands::global_search;
 use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
 use modules::terminal::state::TerminalState;
 use modules::webchat::commands::{
-    webchat_close, webchat_embed, webchat_hide, webchat_hide_all, webchat_reload,
-    webchat_toggle_play,
+    webchat_close, webchat_close_all, webchat_embed, webchat_hide, webchat_hide_all,
+    webchat_reload, webchat_toggle_play,
 };
 use modules::translator::{
     commands::{
@@ -280,6 +280,7 @@ pub fn run() {
             webchat_hide_all,
             webchat_reload,
             webchat_close,
+            webchat_close_all,
             webchat_toggle_play,
         ])
         .setup(|app| {
