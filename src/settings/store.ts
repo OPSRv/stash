@@ -51,6 +51,9 @@ export type Settings = {
   aiWebServices: WebChatService[];
   voiceEnabled: boolean;
   voiceActiveModel: WhisperModelSize | null;
+  /** Persisted popup size in logical pixels. Never stored below the 920×520 floor. */
+  popupWidth: number;
+  popupHeight: number;
 };
 
 export type AiProvider = 'openai' | 'anthropic' | 'google' | 'custom';
@@ -98,6 +101,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiWebServices: DEFAULT_WEB_SERVICES,
   voiceEnabled: false,
   voiceActiveModel: null,
+  popupWidth: 920,
+  popupHeight: 520,
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

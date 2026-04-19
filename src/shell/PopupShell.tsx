@@ -3,12 +3,16 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { LogicalSize } from '@tauri-apps/api/dpi';
 import { modules } from '../modules/registry';
 import { SUPPORTED_VIDEO_URL } from '../modules/downloader/downloads.constants';
 import { TabButton } from '../shared/ui/TabButton';
 import { Button } from '../shared/ui/Button';
 import { PinIcon } from '../shared/ui/icons';
-import { loadSettings } from '../settings/store';
+import { loadSettings, saveSetting } from '../settings/store';
+
+const MIN_WIDTH = 920;
+const MIN_HEIGHT = 520;
 import {
   pruneHistory,
   setCookiesBrowser,
@@ -54,6 +58,60 @@ export const PopupShell = () => {
     setActiveId(id);
     setVisitedIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   };
+
+  // Restore persisted popup size on first mount. Tauri's window defaults to
+  // the size declared in tauri.conf.json; if the user stretched it in a
+  // previous session, apply the saved logical size here. Saving is wired in
+  // a separate effect below, debounced so dragging the edge doesn't hammer
+  // the settings file.
+  useEffect(() => {
+    loadSettings()
+      .then(async (s) => {
+        const w = Math.max(MIN_WIDTH, s.popupWidth);
+        const h = Math.max(MIN_HEIGHT, s.popupHeight);
+        if (w > MIN_WIDTH || h > MIN_HEIGHT) {
+          try {
+            await getCurrentWindow().setSize(new LogicalSize(w, h));
+          } catch {
+            // Best-effort: the window may not be ready or the API may be
+            // unavailable in tests.
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Save size on resize, debounced. Tauri emits a Resized event for every
+  // frame of a drag, so we coalesce to one settings write ~250ms after the
+  // user stops moving the edge.
+  useEffect(() => {
+    let timer: number | null = null;
+    let unlisten: (() => void) | null = null;
+    const win = getCurrentWindow();
+    win
+      .onResized(({ payload }) => {
+        if (timer !== null) window.clearTimeout(timer);
+        timer = window.setTimeout(async () => {
+          try {
+            const scale = await win.scaleFactor();
+            const w = Math.max(MIN_WIDTH, Math.round(payload.width / scale));
+            const h = Math.max(MIN_HEIGHT, Math.round(payload.height / scale));
+            await saveSetting('popupWidth', w);
+            await saveSetting('popupHeight', h);
+          } catch {
+            // ignore — resize is a nice-to-have
+          }
+        }, 250);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     const read = () => {
