@@ -402,19 +402,13 @@ fn init_tracing(data_dir: &std::path::Path) {
     });
 }
 
-/// Map a 0–60 "blur strength" to one of the macOS visual-effect materials.
-/// Higher values pick heavier frosted-glass materials so the slider feels
-/// continuous to the user even though the underlying API is categorical.
+/// macOS uses a categorical vibrancy API, but the user's mental model is just
+/// "frosted glass on/off". We pick one material that consistently blurs what's
+/// behind the popup and let the CSS `backdrop-filter` on `.pane` add extra
+/// strength on top.
 #[cfg(target_os = "macos")]
-fn material_for_strength(strength: u32) -> window_vibrancy::NSVisualEffectMaterial {
-    use window_vibrancy::NSVisualEffectMaterial as M;
-    match strength {
-        0..=9 => M::Sidebar,
-        10..=24 => M::HudWindow,
-        25..=39 => M::UnderWindowBackground,
-        40..=54 => M::FullScreenUI,
-        _ => M::UnderPageBackground,
-    }
+fn material_for_strength(_strength: u32) -> window_vibrancy::NSVisualEffectMaterial {
+    window_vibrancy::NSVisualEffectMaterial::HudWindow
 }
 
 /// Re-apply the vibrancy effect with a material derived from `strength`.

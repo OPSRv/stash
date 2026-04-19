@@ -559,15 +559,7 @@ const YtDlpUpdateRow = () => {
   );
 };
 
-// Matches the Rust-side `material_for_strength` bucketing.
-const blurLabel = (v: number) => {
-  if (v === 0) return 'Off';
-  if (v < 10) return 'Sidebar (thin)';
-  if (v < 25) return 'HUD (medium)';
-  if (v < 40) return 'Under-window';
-  if (v < 55) return 'Fullscreen';
-  return 'Under-page (heaviest)';
-};
+const blurLabel = (v: number) => (v === 0 ? 'Off' : `${v} px`);
 
 const SunIcon = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -769,8 +761,8 @@ const AppearanceTab = ({
         <SectionHeader label="SURFACE" />
         <div className="divide-y divide-white/5 [.light_&]:divide-black/5">
           <SliderField
-            label="Popup blur"
-            description="Vibrancy strength behind the popup."
+            label="Background blur"
+            description="Frosts whatever is behind the popup."
             value={settings.themeBlur}
             min={0}
             max={60}
@@ -780,7 +772,7 @@ const AppearanceTab = ({
           />
           <SliderField
             label="Translucency"
-            description="How see-through the popup background is."
+            description="How much of the desktop shows through."
             value={Math.round(settings.themePaneOpacity * 100)}
             min={0}
             max={100}
