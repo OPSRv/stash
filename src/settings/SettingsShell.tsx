@@ -9,6 +9,7 @@ import { useToast } from '../shared/ui/Toast';
 import { Button } from '../shared/ui/Button';
 import { SegmentedControl } from '../shared/ui/SegmentedControl';
 import { Surface } from '../shared/ui/Surface';
+import { TrafficLights } from '../shared/ui/TrafficLights';
 import {
   purgeCookies,
   setCookiesBrowser,
@@ -566,11 +567,127 @@ const blurLabel = (v: number) => {
   return 'Under-page (heaviest)';
 };
 
-const THEME_MODES: { id: ThemeMode; label: string }[] = [
-  { id: 'dark', label: 'Dark' },
-  { id: 'light', label: 'Light' },
-  { id: 'auto', label: 'Auto' },
+const SunIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+  </svg>
+);
+
+const MoonIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+  </svg>
+);
+
+const AutoIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 3v18" />
+  </svg>
+);
+
+const THEME_MODE_OPTIONS = [
+  { value: 'auto' as ThemeMode, label: 'System', icon: <AutoIcon /> },
+  { value: 'light' as ThemeMode, label: 'Light', icon: <SunIcon /> },
+  { value: 'dark' as ThemeMode, label: 'Dark', icon: <MoonIcon /> },
 ];
+
+const SectionHeader = ({ label }: { label: string }) => (
+  <div className="flex items-baseline gap-3 mb-3 mt-1">
+    <span className="screen-label">{label}</span>
+    <span className="hair h-px flex-1" />
+  </div>
+);
+
+const AppearancePreview = ({ settings }: { settings: Settings }) => {
+  const accentHex = ACCENTS[settings.themeAccent].hex;
+  return (
+    <Surface
+      rounded="2xl"
+      className="overflow-hidden"
+      style={{ width: '100%', maxWidth: 360 }}
+    >
+      <div
+        className="flex items-center px-3 py-2 border-b hair relative"
+        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+      >
+        <TrafficLights />
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <span className="t-primary text-meta font-medium">Preview</span>
+        </div>
+      </div>
+      <div className="px-3 pt-2 pb-1">
+        <span className="section-label">Recent</span>
+      </div>
+      <div className="mx-2 mb-1 rounded-lg flex items-center gap-2.5 px-2.5 py-2 row-active">
+        <span
+          className="w-6 h-6 rounded-md inline-flex items-center justify-center shrink-0"
+          style={{ background: 'rgba(255,255,255,0.08)' }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="t-primary" aria-hidden>
+            <path d="M5 6h14M5 12h14M5 18h10" />
+          </svg>
+        </span>
+        <span className="t-primary text-meta truncate flex-1">Active row · uses accent</span>
+        <span className="kbd">↵</span>
+      </div>
+      <div className="mx-2 mb-1 rounded-lg flex items-center gap-2.5 px-2.5 py-2">
+        <span
+          className="w-6 h-6 rounded-md inline-flex items-center justify-center shrink-0"
+          style={{ background: `rgba(${ACCENTS[settings.themeAccent].rgb}, 0.16)`, color: accentHex }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 1 0-7.07-7.07l-1.5 1.5" />
+            <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 1 0 7.07 7.07l1.5-1.5" />
+          </svg>
+        </span>
+        <span className="t-primary text-meta truncate flex-1">Idle row · accent tint</span>
+      </div>
+      <div
+        className="flex items-center justify-between px-3 py-2 border-t hair"
+        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+      >
+        <span className="t-tertiary text-meta">Sample popup</span>
+        <Button size="xs" variant="solid" tone="accent">
+          Action
+        </Button>
+      </div>
+    </Surface>
+  );
+};
+
+const Slider = ({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  display,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+  display: string;
+}) => (
+  <div className="flex items-center gap-3">
+    <input
+      aria-label={label}
+      type="range"
+      min={min}
+      max={max}
+      step={step}
+      value={value}
+      onChange={(e) => onChange(Number(e.currentTarget.value))}
+      className="w-44 accent-[var(--stash-accent)]"
+    />
+    <span className="t-tertiary text-meta font-mono w-24 text-right">{display}</span>
+  </div>
+);
 
 const AppearanceTab = ({
   settings,
@@ -578,124 +695,130 @@ const AppearanceTab = ({
 }: {
   settings: Settings;
   onChange: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
-}) => (
-  <div className="space-y-5">
-    <Surface rounded="xl" elevation="raised" className="p-4 flex items-center gap-3">
-      <div className="flex-1">
-        <div className="t-primary text-body font-medium">Live preview</div>
-        <div className="t-tertiary text-meta">Reflects current blur, translucency, and accent.</div>
-      </div>
-      <span
-        className="inline-block w-7 h-7 rounded-full"
-        style={{ background: ACCENTS[settings.themeAccent].hex }}
-        aria-hidden
-      />
-    </Surface>
+}) => {
+  const accentKeys = Object.keys(ACCENTS) as AccentKey[];
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-6 items-start flex-wrap">
+        <div className="flex-1 min-w-[260px]">
+          <SectionHeader label="LIVE PREVIEW" />
+          <AppearancePreview settings={settings} />
+        </div>
 
-    <div className="divide-y divide-white/5">
-      <SettingRow
-        title="Theme"
-        description="Dark, light, or follow the system appearance."
-        control={
-          <SegmentedControl
-            ariaLabel="Theme mode"
-            options={THEME_MODES.map((m) => ({ value: m.id, label: m.label }))}
-            value={settings.themeMode}
-            onChange={(v) => onChange('themeMode', v as ThemeMode)}
-          />
-        }
-      />
-      <SettingRow
-        title="Popup blur"
-        description={`Vibrancy strength · ${blurLabel(settings.themeBlur)}`}
-        control={
-          <input
-            aria-label="Popup blur"
-            type="range"
-            min={0}
-            max={60}
-            step={2}
-            value={settings.themeBlur}
-            onChange={(e) => onChange('themeBlur', Number(e.currentTarget.value))}
-            className="w-40"
-          />
-        }
-      />
-      <SettingRow
-        title="Popup translucency"
-        description={`How see-through the popup is · ${Math.round(
-          settings.themePaneOpacity * 100
-        )}%`}
-        control={
-          <input
-            aria-label="Popup translucency"
-            type="range"
-            min={0}
-            max={100}
-            step={2}
-            value={Math.round(settings.themePaneOpacity * 100)}
-            onChange={(e) =>
-              onChange(
-                'themePaneOpacity',
-                Math.max(0, Math.min(1, Number(e.currentTarget.value) / 100))
-              )
-            }
-            className="w-40"
-          />
-        }
-      />
-      <SettingRow
-        title="Accent color"
-        description="Used for active selections, links, and primary buttons."
-        control={
-          <div className="flex items-center gap-1.5" role="radiogroup" aria-label="Accent">
-            {(Object.keys(ACCENTS) as AccentKey[]).map((k) => {
-              const a = ACCENTS[k];
-              const selected = settings.themeAccent === k;
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => onChange('themeAccent', k)}
-                  title={a.label}
-                  aria-label={`Accent ${a.label}`}
-                  className="w-6 h-6 rounded-full transition-transform"
-                  style={{
-                    background: a.hex,
-                    outline: selected
-                      ? `2px solid rgba(255,255,255,0.9)`
-                      : '1px solid rgba(255,255,255,0.15)',
-                    outlineOffset: selected ? 2 : 0,
-                    transform: selected ? 'scale(1.05)' : 'scale(1)',
-                  }}
-                />
-              );
-            })}
-          </div>
-        }
-      />
-      <SettingRow
-        title="Reset to defaults"
-        description="Theme only — other settings are unchanged."
-        control={
-          <Button
-            size="sm"
-            onClick={() => {
-              onChange('themeMode', DEFAULT_SETTINGS.themeMode);
-              onChange('themeBlur', DEFAULT_SETTINGS.themeBlur);
-              onChange('themePaneOpacity', DEFAULT_SETTINGS.themePaneOpacity);
-              onChange('themeAccent', DEFAULT_SETTINGS.themeAccent);
-            }}
-          >
-            Reset
-          </Button>
-        }
-      />
+        <div className="flex-1 min-w-[280px] space-y-6">
+          <section>
+            <SectionHeader label="THEME" />
+            <div className="divide-y divide-white/5">
+              <SettingRow
+                title="Mode"
+                description="Dark, light, or follow the system appearance."
+                control={
+                  <SegmentedControl
+                    ariaLabel="Theme mode"
+                    options={THEME_MODE_OPTIONS}
+                    value={settings.themeMode}
+                    onChange={(v) => onChange('themeMode', v)}
+                  />
+                }
+              />
+              <SettingRow
+                title="Reset to defaults"
+                description="Theme only — other settings are unchanged."
+                control={
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      onChange('themeMode', DEFAULT_SETTINGS.themeMode);
+                      onChange('themeBlur', DEFAULT_SETTINGS.themeBlur);
+                      onChange('themePaneOpacity', DEFAULT_SETTINGS.themePaneOpacity);
+                      onChange('themeAccent', DEFAULT_SETTINGS.themeAccent);
+                    }}
+                  >
+                    Reset
+                  </Button>
+                }
+              />
+            </div>
+          </section>
+
+          <section>
+            <SectionHeader label="ACCENT" />
+            <div className="grid grid-cols-6 gap-2" role="radiogroup" aria-label="Accent">
+              {accentKeys.map((k) => {
+                const a = ACCENTS[k];
+                const selected = settings.themeAccent === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => onChange('themeAccent', k)}
+                    title={a.label}
+                    aria-label={`Accent ${a.label}`}
+                    className="aspect-square rounded-xl transition-transform"
+                    style={{
+                      background: a.hex,
+                      outline: selected
+                        ? `2px solid rgba(255,255,255,0.9)`
+                        : '1px solid rgba(255,255,255,0.12)',
+                      outlineOffset: selected ? 2 : 0,
+                      transform: selected ? 'scale(1.05)' : 'scale(1)',
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <div className="mt-2 t-tertiary text-meta">
+              {ACCENTS[settings.themeAccent].label} · <span className="font-mono">{ACCENTS[settings.themeAccent].hex}</span>
+            </div>
+          </section>
+
+          <section>
+            <SectionHeader label="SURFACE" />
+            <div className="divide-y divide-white/5">
+              <SettingRow
+                title="Popup blur"
+                description="Vibrancy strength behind the popup."
+                control={
+                  <Slider
+                    label="Popup blur"
+                    value={settings.themeBlur}
+                    min={0}
+                    max={60}
+                    step={2}
+                    onChange={(v) => onChange('themeBlur', v)}
+                    display={blurLabel(settings.themeBlur)}
+                  />
+                }
+              />
+              <SettingRow
+                title="Translucency"
+                description="How see-through the popup background is."
+                control={
+                  <Slider
+                    label="Popup translucency"
+                    value={Math.round(settings.themePaneOpacity * 100)}
+                    min={0}
+                    max={100}
+                    step={2}
+                    onChange={(v) =>
+                      onChange(
+                        'themePaneOpacity',
+                        Math.max(0, Math.min(1, v / 100))
+                      )
+                    }
+                    display={`${Math.round(settings.themePaneOpacity * 100)} %`}
+                  />
+                }
+              />
+            </div>
+          </section>
+        </div>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const AboutTab = () => {
   const [ytVersion, setYtVersion] = useState<string | null>(null);
