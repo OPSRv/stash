@@ -420,7 +420,7 @@ export const PopupShell = () => {
       </header>
       {(translation ||
         (nowPlaying && nowPlaying.title && activeId !== 'music') ||
-        (webchatNp && webchatNp.playing && activeId !== 'ai')) && (
+        (webchatNp && webchatNp.title && activeId !== 'ai')) && (
         <div className="flex flex-col gap-2 p-2">
           {translation && (
             <TranslationBanner
@@ -440,7 +440,7 @@ export const PopupShell = () => {
               }
             />
           )}
-          {webchatNp && webchatNp.playing && activeId !== 'ai' && (
+          {webchatNp && webchatNp.title && activeId !== 'ai' && (
             <WebchatNowPlayingBar
               state={webchatNp}
               serviceUrl={webchatServices.find((w) => w.id === webchatNp.service)?.url}
