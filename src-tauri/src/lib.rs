@@ -66,6 +66,7 @@ use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
 use modules::terminal::state::TerminalState;
 use modules::webchat::commands::{
     webchat_close, webchat_embed, webchat_hide, webchat_hide_all, webchat_reload,
+    webchat_toggle_play,
 };
 use modules::translator::{
     commands::{
@@ -102,6 +103,7 @@ pub fn run() {
                 let mut title = String::new();
                 let mut artist = String::new();
                 let mut artwork = String::new();
+                let mut service = String::new();
                 for pair in q.split('&') {
                     let mut it = pair.splitn(2, '=');
                     let key = it.next().unwrap_or("");
@@ -112,12 +114,23 @@ pub fn run() {
                         "title" => title = decoded,
                         "artist" => artist = decoded,
                         "artwork" => artwork = decoded,
+                        "service" => service = decoded,
                         _ => {}
                     }
                 }
+                // `service` distinguishes a webchat report (YouTube running
+                // inside the Gemini/ChatGPT web pane, etc.) from the YT Music
+                // report — we fan them out on different events so the shell
+                // renders them through independent now-playing bars.
+                let event = if service.is_empty() {
+                    "music:nowplaying"
+                } else {
+                    "webchat:nowplaying"
+                };
                 let _ = ctx.app_handle().emit(
-                    "music:nowplaying",
+                    event,
                     serde_json::json!({
+                        "service": service,
                         "playing": playing,
                         "title": title,
                         "artist": artist,
@@ -267,6 +280,7 @@ pub fn run() {
             webchat_hide_all,
             webchat_reload,
             webchat_close,
+            webchat_toggle_play,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

@@ -30,6 +30,17 @@ export const webchatReload = (service: string, url: string): Promise<void> =>
 export const webchatClose = (service: string): Promise<void> =>
   invoke('webchat_close', { service });
 
+export const webchatTogglePlay = (service: string): Promise<void> =>
+  invoke('webchat_toggle_play', { service });
+
+export type WebchatNowPlaying = {
+  service: string;
+  playing: boolean;
+  title: string;
+  artist: string;
+  artwork: string;
+};
+
 /// Google's s2 favicon service — returns a 32×32 icon for any public domain,
 /// no API key, CORS-friendly for <img> tags. Accepts a full URL and extracts
 /// the hostname.

@@ -46,13 +46,47 @@ export const AiShell = () => {
   // API mode only shows up once a model is configured. Hide it otherwise so
   // an empty chat configuration doesn't masquerade as a usable tab.
   const apiAvailable = settings.aiModel.trim().length > 0;
-  const [mode, setMode] = useState<Mode>(() => (apiAvailable ? 'api' : ''));
+
+  // Persist the last-active mode so dropping back into the Web tab (even
+  // after Unload-Inactive-Tabs or an app restart) lands on the surface the
+  // user was using, not the picker. Stored in localStorage keyed simply so
+  // we don't need Rust round-trips for what's essentially UI state.
+  const LAST_MODE_KEY = 'stash.ai.lastMode';
+  const [mode, setMode] = useState<Mode>(() => {
+    try {
+      const stashed = localStorage.getItem(LAST_MODE_KEY);
+      if (stashed === 'api' && apiAvailable) return 'api';
+      if (stashed && stashed !== 'api' && stashed !== '') return stashed;
+    } catch {
+      // localStorage may be unavailable in some contexts
+    }
+    return apiAvailable ? 'api' : '';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAST_MODE_KEY, mode);
+    } catch {
+      // ignore
+    }
+  }, [mode]);
 
   // If the API pill vanishes while the user is on it (they cleared the
   // model), fall back to the tile picker.
   useEffect(() => {
     if (!apiAvailable && mode === 'api') setMode('');
   }, [apiAvailable, mode]);
+
+  // External nudge (e.g. clicking the webchat Now Playing bar in the popup
+  // shell) that wants us to surface a specific service.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (typeof id === 'string' && id) setMode(id);
+    };
+    window.addEventListener('stash:ai-open-service', onOpen);
+    return () => window.removeEventListener('stash:ai-open-service', onOpen);
+  }, []);
 
   const abortRef = useRef<AbortController | null>(null);
 

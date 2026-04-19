@@ -10,10 +10,15 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 ///    "am I running in Chrome?" get a plausible answer instead of undefined.
 /// 3. Pins `navigator.webdriver` to `false` — some bot-detection scripts
 ///    take its presence as a decisive signal.
+/// 4. Installs a now-playing poller that reports `<video>`/`mediaSession`
+///    state back through the `stashnp://` scheme with a `service` param,
+///    so the shell can surface a NowPlayingBar for any chat that happens
+///    to be hosting a video (YouTube, Gemini's video answers, …).
 ///
 /// We do NOT strip Tauri's own IPC bridge — the host page is a trusted
 /// external chat UI and never calls Tauri APIs. Runs once, idempotent.
-const WEBVIEW_DISGUISE: &str = r#"
+/// `{SERVICE_ID}` is substituted with the caller's service id at embed time.
+const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
 (function(){
   try {
     if (typeof window.webkit === 'object' && window.webkit && 'messageHandlers' in window.webkit) {
@@ -34,6 +39,59 @@ const WEBVIEW_DISGUISE: &str = r#"
       });
     } catch(_) {}
   } catch(_) {}
+
+  // Now-playing reporter — same pattern as the Music webview. Reports to
+  // stashnp://report/np with a `service` param so the shell can attribute
+  // the playback to this webchat instead of YouTube Music.
+  if (window.__stashWebchatNpInstalled) return;
+  window.__stashWebchatNpInstalled = true;
+  var SERVICE_ID = "{SERVICE_ID}";
+  var last = '';
+  function pickArtwork(m){
+    try {
+      if (!m || !m.artwork || !m.artwork.length) return '';
+      var best = m.artwork[0];
+      for (var i = 1; i < m.artwork.length; i++) {
+        var cur = m.artwork[i];
+        if ((cur.sizes || '').length > (best.sizes || '').length) best = cur;
+      }
+      return best.src || '';
+    } catch(_) { return ''; }
+  }
+  function send(payload){
+    var params = new URLSearchParams({
+      service: SERVICE_ID,
+      playing: payload.playing ? '1' : '0',
+      title: payload.title,
+      artist: payload.artist,
+      artwork: payload.artwork
+    });
+    var url = 'stashnp://report/np?' + params.toString();
+    try { new Image().src = url; } catch(_) {}
+  }
+  function tick(){
+    try {
+      var v = document.querySelector('video');
+      var m = (navigator.mediaSession && navigator.mediaSession.metadata) || null;
+      var hasMedia = !!(v || m);
+      var payload = {
+        playing: !!(v && !v.paused && !v.ended && v.readyState > 2),
+        title: m ? (m.title || '') : (document.title || ''),
+        artist: m ? (m.artist || '') : '',
+        artwork: pickArtwork(m)
+      };
+      if (!hasMedia) payload.playing = false;
+      // Only emit when the page actually has a video element or mediaSession;
+      // otherwise regular chat pages keep flooding with "nothing playing".
+      if (!hasMedia && !last) return;
+      var key = JSON.stringify(payload);
+      if (key === last) return;
+      last = key;
+      send(payload);
+    } catch(_) {}
+  }
+  setInterval(tick, 2000);
+  setTimeout(tick, 800);
 })();
 "#;
 
@@ -109,10 +167,11 @@ pub fn webchat_embed(
     let ua = user_agent
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| SAFARI_UA.to_string());
+    let script = WEBVIEW_DISGUISE_TEMPLATE.replace("{SERVICE_ID}", &service);
     let mut builder =
         tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed))
             .user_agent(&ua)
-            .initialization_script(WEBVIEW_DISGUISE);
+            .initialization_script(&script);
     #[cfg(debug_assertions)]
     {
         builder = builder.devtools(true);
@@ -165,6 +224,24 @@ pub fn webchat_reload(app: AppHandle, service: String, url: String) -> Result<()
         let escaped = url.replace('\\', "\\\\").replace('\'', "\\'");
         wv.eval(&format!("window.location.href = '{escaped}'"))
             .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Toggle playback of the first `<video>` element on the page. Works for
+/// YouTube, embedded media in Gemini answers, Twitter video, etc. — we just
+/// pick the first one and flip `.paused`. The poller's next tick updates
+/// the now-playing bar's play/pause icon to the real state.
+#[tauri::command]
+pub fn webchat_toggle_play(app: AppHandle, service: String) -> Result<(), String> {
+    let label = label_for(&service)?;
+    if let Some(wv) = app.webviews().get(&label).cloned() {
+        let script = r#"(function(){
+            var v = document.querySelector('video');
+            if (!v) return;
+            if (v.paused) v.play(); else v.pause();
+        })();"#;
+        wv.eval(script).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

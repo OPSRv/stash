@@ -26,6 +26,8 @@ import { GlobalSearch } from '../shared/ui/GlobalSearch';
 import { TranslationBanner } from '../modules/clipboard/TranslationBanner';
 import { NowPlayingBar } from '../modules/music/NowPlayingBar';
 import { musicHide, type NowPlaying } from '../modules/music/api';
+import { WebchatNowPlayingBar } from '../modules/ai/WebchatNowPlayingBar';
+import type { WebchatNowPlaying } from '../modules/ai/webchatApi';
 import { applyTheme, subscribeTheme } from '../settings/theme';
 
 export const PopupShell = () => {
@@ -46,6 +48,10 @@ export const PopupShell = () => {
     to: string;
   }>(null);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+  const [webchatNp, setWebchatNp] = useState<WebchatNowPlaying | null>(null);
+  const [webchatServices, setWebchatServices] = useState<
+    { id: string; url: string }[]
+  >([]);
 
   const openTab = (id: string) => {
     setActiveId(id);
@@ -116,6 +122,9 @@ export const PopupShell = () => {
     const read = () => {
       loadSettings()
         .then((s) => {
+          setWebchatServices(
+            s.aiWebServices.map((w) => ({ id: w.id, url: w.url })),
+          );
           applyTheme({
             mode: s.themeMode,
             blur: s.themeBlur,
@@ -325,6 +334,15 @@ export const PopupShell = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const unlisten = listen<WebchatNowPlaying>('webchat:nowplaying', (e) => {
+      setWebchatNp(e.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
+
   return (
     <div className="pane h-full w-full rounded-2xl overflow-hidden flex flex-col relative">
       <header
@@ -401,7 +419,8 @@ export const PopupShell = () => {
         </div>
       </header>
       {(translation ||
-        (nowPlaying && nowPlaying.title && activeId !== 'music')) && (
+        (nowPlaying && nowPlaying.title && activeId !== 'music') ||
+        (webchatNp && webchatNp.playing && activeId !== 'ai')) && (
         <div className="flex flex-col gap-2 p-2">
           {translation && (
             <TranslationBanner
@@ -418,6 +437,30 @@ export const PopupShell = () => {
               onClose={() => setNowPlaying(null)}
               onOptimistic={(patch) =>
                 setNowPlaying((prev) => (prev ? { ...prev, ...patch } : prev))
+              }
+            />
+          )}
+          {webchatNp && webchatNp.playing && activeId !== 'ai' && (
+            <WebchatNowPlayingBar
+              state={webchatNp}
+              serviceUrl={webchatServices.find((w) => w.id === webchatNp.service)?.url}
+              onOpen={() => {
+                openTab('ai');
+                // Tell AiShell which service to surface when it mounts.
+                try {
+                  localStorage.setItem('stash.ai.lastMode', webchatNp.service);
+                } catch {
+                  // ignore
+                }
+                window.dispatchEvent(
+                  new CustomEvent('stash:ai-open-service', {
+                    detail: webchatNp.service,
+                  }),
+                );
+              }}
+              onClose={() => setWebchatNp(null)}
+              onOptimistic={(patch) =>
+                setWebchatNp((prev) => (prev ? { ...prev, ...patch } : prev))
               }
             />
           )}
