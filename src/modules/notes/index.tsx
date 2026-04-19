@@ -1,8 +1,13 @@
+import { lazy } from 'react';
 import type { ModuleDefinition } from '../types';
-import { NotesShell } from './NotesShell';
+
+const load = () =>
+  import('./NotesShell').then((m) => ({ default: m.NotesShell }));
 
 export const notesModule: ModuleDefinition = {
   id: 'notes',
   title: 'Notes',
-  PopupView: NotesShell,
+  tabShortcutDigit: 4,
+  PopupView: lazy(load),
+  preloadPopup: load,
 };

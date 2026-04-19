@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { modules } from '../modules/registry';
 import { TabButton } from '../shared/ui/TabButton';
 import { Button } from '../shared/ui/Button';
+import { PinIcon } from '../shared/ui/icons';
 import { loadSettings } from '../settings/store';
 import {
   pruneHistory,
@@ -16,19 +18,32 @@ import { setTranslatorSettings } from '../modules/translator/api';
 import { Cheatsheet } from '../shared/ui/Cheatsheet';
 import { GlobalSearch } from '../shared/ui/GlobalSearch';
 import { TranslationBanner } from '../modules/clipboard/TranslationBanner';
+import { NowPlayingBar } from '../modules/music/NowPlayingBar';
+import { musicHide, type NowPlaying } from '../modules/music/api';
 import { applyTheme, subscribeTheme } from '../settings/theme';
 
 export const PopupShell = () => {
   const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  // Soft-lazy: once a tab is opened its view stays mounted (hidden when
+  // inactive) to preserve state and avoid re-fetches. Tabs that were never
+  // opened are never loaded — their JS chunk stays off-heap.
+  const [visitedIds, setVisitedIds] = useState<Set<string>>(
+    () => new Set(activeId ? [activeId] : []),
+  );
   const [translation, setTranslation] = useState<null | {
     original: string;
     translated: string;
     to: string;
   }>(null);
-  const active = modules.find((m) => m.id === activeId);
-  const Popup = active?.PopupView;
+  const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
+
+  const openTab = (id: string) => {
+    setActiveId(id);
+    setVisitedIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  };
 
   useEffect(() => {
     loadSettings()
@@ -80,12 +95,18 @@ export const PopupShell = () => {
           .catch(() => {});
         return;
       }
-      // ⌘⌥1/2/3 switch modules (leaves ⌘1-4 free for clipboard filters)
+      // ⌘⌥1/2/3 switch modules. Each module declares a stable
+      // `tabShortcutDigit` so inserting/reordering modules in registry.ts
+      // never shifts muscle memory for existing users. Falls back to the
+      // positional default for modules that haven't been migrated.
       if (e.metaKey && e.altKey && /^[1-9]$/.test(e.key)) {
-        const idx = Number(e.key) - 1;
-        if (modules[idx]) {
+        const digit = Number(e.key);
+        const target =
+          modules.find((m) => m.tabShortcutDigit === digit) ??
+          modules[digit - 1];
+        if (target) {
           e.preventDefault();
-          setActiveId(modules[idx].id);
+          openTab(target.id);
         }
         return;
       }
@@ -107,11 +128,23 @@ export const PopupShell = () => {
   // Rust can ask us to activate a specific tab (e.g. ⌘⇧N opens Notes).
   useEffect(() => {
     const unlisten = listen<string>('nav:activate', (e) => {
-      if (modules.some((m) => m.id === e.payload)) setActiveId(e.payload);
+      if (modules.some((m) => m.id === e.payload)) openTab(e.payload);
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
+  }, []);
+
+  // In-app navigation requests (e.g. clipboard → notes after "Save to note").
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (typeof id === 'string' && modules.some((m) => m.id === id)) {
+        openTab(id);
+      }
+    };
+    window.addEventListener('stash:navigate', onNavigate);
+    return () => window.removeEventListener('stash:navigate', onNavigate);
   }, []);
 
   // Global listener: translation banner lives at shell level so it renders
@@ -166,6 +199,28 @@ export const PopupShell = () => {
     return () => window.clearTimeout(t);
   }, [translation]);
 
+  // Music is a native child webview overlay — the React `hidden` attribute
+  // collapses its sizer but the native surface keeps rendering over whatever
+  // tab is now active. Force-hide it here the moment the user leaves the
+  // Music tab so the overlay does not bleed through e.g. Translator.
+  useEffect(() => {
+    if (activeId !== 'music') {
+      musicHide().catch(() => {});
+    }
+  }, [activeId]);
+
+  // Music webview reports now-playing state every few seconds via the
+  // injected poller. We keep the latest snapshot and render a compact bar
+  // on every tab (except Music itself) whenever a track is playing.
+  useEffect(() => {
+    const unlisten = listen<NowPlaying>('music:nowplaying', (e) => {
+      setNowPlaying(e.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
+
   return (
     <div className="pane h-full w-full rounded-2xl overflow-hidden flex flex-col relative">
       <header className="flex items-center gap-1 px-2 py-1.5 border-b hair">
@@ -175,19 +230,33 @@ export const PopupShell = () => {
             label={m.title}
             shortcutHint={`⌘⌥${i + 1}`}
             active={m.id === activeId}
-            onClick={() => setActiveId(m.id)}
+            onClick={() => openTab(m.id)}
+            onHover={() => m.preloadPopup?.().catch(() => {})}
           />
         ))}
         <div className="ml-auto">
           <Button
             size="sm"
-            variant="ghost"
+            variant={pinned ? 'soft' : 'ghost'}
+            tone={pinned ? 'accent' : 'neutral'}
             shape="square"
-            onClick={() => setCheatsheetOpen(true)}
-            title="Shortcuts (?)"
-            aria-label="Shortcuts"
+            onClick={async () => {
+              const next = !pinned;
+              setPinned(next);
+              try {
+                await getCurrentWindow().setAlwaysOnTop(next);
+              } catch {
+                // ignored: window API may be unavailable in tests
+              }
+              await invoke('set_popup_auto_hide', { enabled: !next }).catch(
+                () => {},
+              );
+            }}
+            title={pinned ? 'Unpin window' : 'Pin window on top'}
+            aria-label={pinned ? 'Unpin window' : 'Pin window on top'}
+            aria-pressed={pinned}
           >
-            ?
+            <PinIcon size={14} filled={pinned} />
           </Button>
         </div>
       </header>
@@ -199,8 +268,41 @@ export const PopupShell = () => {
           onDismiss={() => setTranslation(null)}
         />
       )}
-      <main className="flex-1 overflow-hidden">
-        {Popup ? <Popup /> : <div className="p-4 t-tertiary text-meta">No view.</div>}
+      {nowPlaying && nowPlaying.title && activeId !== 'music' && (
+        <NowPlayingBar
+          state={nowPlaying}
+          onOpen={() => openTab('music')}
+          onClose={() => setNowPlaying(null)}
+          onOptimistic={(patch) =>
+            setNowPlaying((prev) => (prev ? { ...prev, ...patch } : prev))
+          }
+        />
+      )}
+      <main className="flex-1 overflow-hidden relative">
+        {modules
+          .filter((m) => visitedIds.has(m.id) && m.PopupView)
+          .map((m) => {
+            const View = m.PopupView!;
+            const isActive = m.id === activeId;
+            return (
+              <div
+                key={m.id}
+                hidden={!isActive}
+                className={isActive ? 'h-full w-full' : ''}
+              >
+                <Suspense
+                  fallback={
+                    <div className="p-4 t-tertiary text-meta">Loading…</div>
+                  }
+                >
+                  <View />
+                </Suspense>
+              </div>
+            );
+          })}
+        {!modules.some((m) => m.id === activeId && m.PopupView) && (
+          <div className="p-4 t-tertiary text-meta">No view.</div>
+        )}
       </main>
       <Cheatsheet
         open={cheatsheetOpen}
@@ -210,7 +312,7 @@ export const PopupShell = () => {
       <GlobalSearch
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
-        onNavigate={(tab) => setActiveId(tab)}
+        onNavigate={(tab) => openTab(tab)}
       />
     </div>
   );

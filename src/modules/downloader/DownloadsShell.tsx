@@ -5,6 +5,7 @@ import { VideoPlayer } from '../../shared/ui/VideoPlayer';
 import { ActiveDownloadRow } from './ActiveDownloadRow';
 import { CompletedDownloadRow } from './CompletedDownloadRow';
 import { CompletedDownloadTile } from './CompletedDownloadTile';
+import { DetectSkeletonCard } from './DetectSkeletonCard';
 import { DetectedPreviewCard } from './DetectedPreviewCard';
 import { DownloadUrlBar } from './DownloadUrlBar';
 import { DropOverlay } from './DropOverlay';
@@ -256,7 +257,11 @@ export const DownloadsShell = () => {
         onCancel={cancelDetect}
       />
 
-      {detecting && elapsedSec > DETECT_SLOW_HINT_THRESHOLD_SEC && (
+      {detecting && !detected && !quick && (
+        <DetectSkeletonCard elapsedSec={elapsedSec} />
+      )}
+
+      {detecting && elapsedSec > DETECT_SLOW_HINT_THRESHOLD_SEC && (quick || detected) && (
         <div className="mx-4 mt-1 t-tertiary text-meta">
           YouTube and a few other sites can take 20–40 seconds on the first
           fetch; subsequent detects of the same URL are instant.

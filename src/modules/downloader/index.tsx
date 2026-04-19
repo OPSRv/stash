@@ -1,8 +1,13 @@
+import { lazy } from 'react';
 import type { ModuleDefinition } from '../types';
-import { DownloadsShell } from './DownloadsShell';
+
+const load = () =>
+  import('./DownloadsShell').then((m) => ({ default: m.DownloadsShell }));
 
 export const downloaderModule: ModuleDefinition = {
   id: 'downloads',
   title: 'Downloads',
-  PopupView: DownloadsShell,
+  tabShortcutDigit: 2,
+  PopupView: lazy(load),
+  preloadPopup: load,
 };

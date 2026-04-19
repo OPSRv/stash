@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Card } from '../../shared/ui/Card';
 import { PlatformBadge } from './PlatformBadge';
 import type { Platform } from './api';
 
@@ -12,13 +13,6 @@ interface DetectedPreviewCardProps {
   trailing?: ReactNode;
   muted?: boolean;
 }
-
-const cardStyle = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.05)',
-} as const;
-
-const mutedCardStyle = { ...cardStyle, opacity: 0.85 } as const;
 
 const thumbStyle = { background: 'rgba(0,0,0,0.6)' } as const;
 
@@ -37,9 +31,10 @@ export const DetectedPreviewCard = ({
   trailing,
   muted = false,
 }: DetectedPreviewCardProps) => (
-  <div
-    className="mx-4 mt-3 rounded-xl p-3 flex flex-wrap gap-3 items-center"
-    style={muted ? mutedCardStyle : cardStyle}
+  <Card
+    padding="md"
+    rounded="xl"
+    className={`mx-4 mt-3 flex flex-wrap gap-3 items-center${muted ? ' opacity-85' : ''}`}
   >
     <div
       className="w-27.5 h-15.5 rounded-md overflow-hidden relative shrink-0"
@@ -65,5 +60,5 @@ export const DetectedPreviewCard = ({
         {trailing}
       </div>
     )}
-  </div>
+  </Card>
 );
