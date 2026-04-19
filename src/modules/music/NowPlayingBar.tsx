@@ -1,38 +1,9 @@
 import { memo } from 'react';
 import { IconButton } from '../../shared/ui/IconButton';
+import { CloseIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon } from '../../shared/ui/icons';
 import { musicNext, musicPlayPause, musicPrev, type NowPlaying } from './api';
 
-const PlayIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M8 5v14l11-7z" />
-  </svg>
-);
-
-const PauseIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M6 5h4v14H6zm8 0h4v14h-4z" />
-  </svg>
-);
-
-const PrevIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
-  </svg>
-);
-
-const NextIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z" />
-  </svg>
-);
-
-const CloseIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M6 6l12 12M18 6L6 18" />
-  </svg>
-);
-
-interface Props {
+interface NowPlayingBarProps {
   state: NowPlaying;
   onOpen: () => void;
   onClose: () => void;
@@ -43,7 +14,7 @@ interface Props {
 /// playing and the user is *not* on the Music tab. Clicking the body jumps
 /// to the Music tab; the transport buttons drive YT Music via the Rust
 /// bridge so the user doesn't have to switch tabs to skip a song.
-export const NowPlayingBar = memo(({ state, onOpen, onClose, onOptimistic }: Props) => {
+export const NowPlayingBar = memo(({ state, onOpen, onClose, onOptimistic }: NowPlayingBarProps) => {
   const title = state.title || 'YouTube Music';
   const subtitle = state.artist || (state.playing ? 'Playing' : 'Paused');
 

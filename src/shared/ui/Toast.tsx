@@ -7,30 +7,19 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { ToastCard } from './ToastCard';
+import type { ToastInput, ToastItem } from './Toast.types';
 
-type Variant = 'default' | 'success' | 'error';
-
-type ToastAction = { label: string; onClick: () => void };
-
-export type ToastInput = {
-  title: string;
-  description?: string;
-  variant?: Variant;
-  action?: ToastAction;
-  durationMs?: number;
-};
-
-type ToastItem = Required<Pick<ToastInput, 'title'>> &
-  ToastInput & { id: number };
+export type { ToastInput, ToastVariant, ToastAction, ToastItem } from './Toast.types';
 
 const MAX_VISIBLE = 3;
 
-type Ctx = {
+interface ToastCtx {
   toast: (input: ToastInput) => () => void;
   dismiss: (id: number) => void;
-};
+}
 
-const ToastContext = createContext<Ctx | null>(null);
+const ToastContext = createContext<ToastCtx | null>(null);
 
 export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const [items, setItems] = useState<ToastItem[]>([]);
@@ -49,10 +38,15 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
   const toast = useCallback(
     (input: ToastInput) => {
       const id = ++idRef.current;
-      const variant = input.variant ?? 'default';
-      const duration =
-        input.durationMs ?? (variant === 'error' ? 7000 : 4500);
-      setItems((prev) => [...prev, { id, ...input, variant }]);
+      // Error variants stick around longer so users can actually read what
+      // went wrong before the toast fades.
+      const defaultDuration = input.variant === 'error' ? 7500 : 4000;
+      const duration = input.durationMs ?? defaultDuration;
+      setItems((prev) => {
+        const next = [...prev, { ...input, id }];
+        // Cap visible stack — oldest toasts drop off first.
+        return next.slice(-MAX_VISIBLE);
+      });
       if (duration > 0) {
         const timer = window.setTimeout(() => dismiss(id), duration);
         timersRef.current.set(id, timer);
@@ -62,93 +56,33 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
     [dismiss],
   );
 
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       timersRef.current.forEach((t) => window.clearTimeout(t));
       timersRef.current.clear();
-    };
-  }, []);
-
-  const visible = items.slice(-MAX_VISIBLE);
+    },
+    [],
+  );
 
   return (
     <ToastContext.Provider value={{ toast, dismiss }}>
       {children}
       <div
+        className="pointer-events-none absolute bottom-3 right-3 flex flex-col gap-2 max-w-[340px] z-50"
         aria-live="polite"
-        className="pointer-events-none absolute bottom-2 right-2 z-[60] flex flex-col gap-1.5 max-w-[320px]"
       >
-        {visible.map((t) => (
-          <ToastCard key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+        {items.map((item) => (
+          <ToastCard key={item.id} toast={item} onDismiss={() => dismiss(item.id)} />
         ))}
       </div>
     </ToastContext.Provider>
   );
 };
 
-const variantStyle: Record<Variant, string> = {
-  default: 'bg-white/10 border-white/10 t-primary',
-  success: 'border-emerald-400/30 t-primary',
-  error: 'border-red-400/40 t-primary',
-};
-
-const ToastCard = ({
-  toast,
-  onDismiss,
-}: {
-  toast: ToastItem;
-  onDismiss: () => void;
-}) => {
-  const variant = toast.variant ?? 'default';
-  return (
-    <div
-      role={variant === 'error' ? 'alert' : 'status'}
-      className={`pointer-events-auto pane rounded-md px-3 py-2 text-[13px] shadow-lg border stash-fade-in ${variantStyle[variant]} flex items-start gap-2`}
-      style={
-        variant === 'success'
-          ? { background: 'var(--color-success-bg)' }
-          : variant === 'error'
-          ? { background: 'var(--color-danger-bg)' }
-          : undefined
-      }
-    >
-      <div className="flex-1 min-w-0">
-        <div className="font-medium truncate">{toast.title}</div>
-        {toast.description ? (
-          <div className="t-secondary text-meta mt-0.5 line-clamp-3">
-            {toast.description}
-          </div>
-        ) : null}
-      </div>
-      {toast.action ? (
-        <button
-          type="button"
-          onClick={() => {
-            toast.action?.onClick();
-            onDismiss();
-          }}
-          className="shrink-0 text-meta px-2 py-0.5 rounded-md"
-          style={{ background: 'rgba(255,255,255,0.12)' }}
-        >
-          {toast.action.label}
-        </button>
-      ) : null}
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label="Dismiss"
-        className="shrink-0 t-tertiary hover:t-primary"
-      >
-        ×
-      </button>
-    </div>
-  );
-};
-
-export const useToast = () => {
+export const useToast = (): ToastCtx => {
   const ctx = useContext(ToastContext);
   if (!ctx) {
-    return { toast: () => () => {}, dismiss: () => {} } as Ctx;
+    return { toast: () => () => {}, dismiss: () => {} };
   }
   return ctx;
 };

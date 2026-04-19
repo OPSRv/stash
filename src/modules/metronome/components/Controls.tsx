@@ -7,51 +7,16 @@ import {
   type MetronomeState,
   type SoundId,
 } from '../metronome.constants';
+import { VolumeSlider } from './VolumeSlider';
 
-type Props = {
+interface ControlsProps {
   state: MetronomeState;
   onPatch: (patch: Partial<MetronomeState>) => void;
-};
+}
 
-const sigKey = (n: number, d: number) => `${n}/${d}`;
+const sigKey = (n: number, d: number): string => `${n}/${d}`;
 
-const Slider = ({
-  value,
-  onChange,
-  label,
-  testId,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  label: string;
-  testId?: string;
-}) => {
-  const pct = Math.round(value * 100);
-  return (
-    <label className="flex flex-col gap-0.5" style={{ width: 76 }}>
-      <span
-        className="flex items-baseline justify-between t-tertiary"
-        style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}
-      >
-        <span>{label}</span>
-        <span className="font-mono">{pct}</span>
-      </span>
-      <input
-        type="range"
-        min={0}
-        max={100}
-        value={pct}
-        onChange={(e) => onChange(Number(e.target.value) / 100)}
-        data-testid={testId}
-        aria-label={label}
-        className="metronome-slider"
-        style={{ width: '100%' }}
-      />
-    </label>
-  );
-};
-
-export const Controls = ({ state, onPatch }: Props) => {
+export const Controls = ({ state, onPatch }: ControlsProps) => {
   return (
     <div className="flex items-center gap-4 px-4 py-2 border-t hair">
       <SegmentedControl
@@ -100,13 +65,13 @@ export const Controls = ({ state, onPatch }: Props) => {
         label="Sound"
       />
       <div className="hair w-px h-6" />
-      <Slider
+      <VolumeSlider
         value={state.click_volume}
         onChange={(v) => onPatch({ click_volume: v })}
         label="Click"
         testId="vol-click"
       />
-      <Slider
+      <VolumeSlider
         value={state.accent_volume}
         onChange={(v) => onPatch({ accent_volume: v })}
         label="Accent"

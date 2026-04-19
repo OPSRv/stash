@@ -3,8 +3,8 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { VideoPlayer } from '../../shared/ui/VideoPlayer';
 import { ActiveDownloadRow } from './ActiveDownloadRow';
-import { CompletedDownloadRow } from './CompletedDownloadRow';
-import { CompletedDownloadTile } from './CompletedDownloadTile';
+import { CompletedGrid } from './CompletedGrid';
+import { CompletedList } from './CompletedList';
 import { DetectSkeletonCard } from './DetectSkeletonCard';
 import { DetectedPreviewCard } from './DetectedPreviewCard';
 import { DownloadUrlBar } from './DownloadUrlBar';
@@ -413,47 +413,3 @@ export const DownloadsShell = () => {
   );
 };
 
-interface ListProps {
-  jobs: ReturnType<typeof useDownloadJobs>['completed'];
-  onPlay: (path: string | null) => () => void;
-  onDelete: (id: number) => () => void;
-  onRetry: (id: number) => () => void;
-}
-
-const completedListBorderStyle = {
-  border: '1px solid rgba(255,255,255,0.05)',
-} as const;
-
-const CompletedList = ({ jobs, onPlay, onDelete, onRetry }: ListProps) => (
-  <div className="mx-3 rounded-xl overflow-hidden" style={completedListBorderStyle}>
-    {jobs.map((job, i) => (
-      <CompletedDownloadRow
-        key={job.id}
-        job={job}
-        zebra={i % 2 === 0}
-        onDelete={onDelete(job.id)}
-        onPlay={onPlay(job.target_path)}
-        onRetry={onRetry(job.id)}
-      />
-    ))}
-  </div>
-);
-
-interface GridProps {
-  jobs: ReturnType<typeof useDownloadJobs>['completed'];
-  onPlay: (path: string | null) => () => void;
-  onDelete: (id: number) => () => void;
-}
-
-const CompletedGrid = ({ jobs, onPlay, onDelete }: GridProps) => (
-  <div className="mx-3 grid grid-cols-4 gap-2">
-    {jobs.map((job) => (
-      <CompletedDownloadTile
-        key={job.id}
-        job={job}
-        onPlay={onPlay(job.target_path)}
-        onDelete={onDelete(job.id)}
-      />
-    ))}
-  </div>
-);

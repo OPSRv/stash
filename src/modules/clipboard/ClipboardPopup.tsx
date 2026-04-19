@@ -1,17 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useVirtualizer } from '@tanstack/react-virtual';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Kbd } from '../../shared/ui/Kbd';
 import { IconButton } from '../../shared/ui/IconButton';
 import { Button } from '../../shared/ui/Button';
 import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
-import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
-import { EmptyState } from '../../shared/ui/EmptyState';
+import { EyeIcon, PinIcon, TrashIcon } from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
@@ -28,7 +26,8 @@ import {
 } from './api';
 import { detectType, type ContentType } from './contentType';
 import { iconFor, typeTint } from './icons';
-import { useLinkPreview } from './useLinkPreview';
+import { ClipboardVirtualList } from './ClipboardVirtualList';
+import { LinkRow } from './LinkRow';
 import { detect as detectVideo, start as startDownload, type DetectedVideo } from '../downloader/api';
 import { PlatformBadge } from '../downloader/PlatformBadge';
 import { notesCreate } from '../notes/api';
@@ -51,25 +50,6 @@ const filters: { id: Filter; label: string; hint: string }[] = [
   { id: 'image', label: 'Images', hint: '⌘3' },
   { id: 'link', label: 'Links', hint: '⌘4' },
 ];
-
-const PinIcon = ({ filled }: { filled: boolean }) => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M16 3.5 13 6v5l-4 3v2h5v5l1 1 1-1v-5h5v-2l-4-3V6l-3-2.5z" />
-  </svg>
-);
-
-const TrashIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6" />
-  </svg>
-);
-
-const EyeIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
-    <circle cx="12" cy="12" r="3" />
-  </svg>
-);
 
 const PREVIEW_MIN_CHARS = 280;
 const PREVIEW_MIN_LINES = 4;
@@ -496,14 +476,14 @@ export const ClipboardPopup = () => {
                 onClick={() => setPreviewId(item.id)}
                 title="Preview (Space)"
               >
-                <EyeIcon />
+                <EyeIcon size={12} />
               </IconButton>
             )}
             <IconButton onClick={() => handleTogglePin(item.id)} title={item.pinned ? 'Unpin' : 'Pin'}>
-              <PinIcon filled={item.pinned} />
+              <PinIcon size={12} filled={item.pinned} />
             </IconButton>
             <IconButton onClick={() => handleDelete(item.id)} title="Delete" tone="danger">
-              <TrashIcon />
+              <TrashIcon size={12} />
             </IconButton>
           </>
         }
@@ -600,7 +580,7 @@ export const ClipboardPopup = () => {
         </div>
       )}
 
-      <VirtualList
+      <ClipboardVirtualList
         empty={isEmpty}
         query={query}
         pinned={pinned}
@@ -662,201 +642,5 @@ export const ClipboardPopup = () => {
         onSaveToNote={handleSaveToNote}
       />
     </div>
-  );
-};
-
-type VirtualEntry =
-  | { kind: 'label'; key: string; label: string }
-  | { kind: 'row'; key: number; item: TypedItem; flatIndex: number };
-
-type TypedItem = ClipboardItem & { type: ContentType };
-
-interface VirtualListProps {
-  empty: boolean;
-  query: string;
-  pinned: TypedItem[];
-  recent: TypedItem[];
-  renderRow: (item: TypedItem, flatIndex: number) => React.ReactNode;
-}
-
-// Below this many entries the cost of measuring/positioning rows outweighs
-// the savings from virtualisation, so we render the list normally.
-const VIRTUALIZE_THRESHOLD = 60;
-
-const buildEntries = (pinned: TypedItem[], recent: TypedItem[]): VirtualEntry[] => {
-  const out: VirtualEntry[] = [];
-  if (pinned.length) {
-    out.push({ kind: 'label', key: 'label-pinned', label: 'Pinned' });
-    pinned.forEach((item, i) => out.push({ kind: 'row', key: item.id, item, flatIndex: i }));
-  }
-  if (recent.length) {
-    out.push({ kind: 'label', key: 'label-recent', label: 'Recent' });
-    recent.forEach((item, i) =>
-      out.push({ kind: 'row', key: item.id, item, flatIndex: pinned.length + i })
-    );
-  }
-  return out;
-};
-
-const renderEntry = (
-  entry: VirtualEntry,
-  renderRow: VirtualListProps['renderRow']
-) =>
-  entry.kind === 'label' ? (
-    <div className="px-3 pt-3 pb-1">
-      <SectionLabel>{entry.label}</SectionLabel>
-    </div>
-  ) : (
-    renderRow(entry.item, entry.flatIndex)
-  );
-
-/// Renders the clipboard list. Switches to react-virtual once the entry
-/// count crosses `VIRTUALIZE_THRESHOLD`; otherwise falls back to a normal
-/// .map render so unit tests (which can't measure layout in jsdom) still
-/// see every row.
-const VirtualList = ({ empty, query, pinned, recent, renderRow }: VirtualListProps) => {
-  const entries = useMemo(() => buildEntries(pinned, recent), [pinned, recent]);
-
-  if (empty && !query) {
-    return (
-      <div className="flex-1 overflow-hidden flex items-center justify-center">
-        <EmptyState
-          title="Nothing copied yet"
-          description="Copy anything — text, a link, an image — and it shows up here. Press Enter to paste at the cursor."
-        />
-      </div>
-    );
-  }
-  if (empty && query) {
-    return (
-      <div className="flex-1 overflow-hidden flex items-center justify-center">
-        <EmptyState variant="compact" title="No matches" description="Try a different search." />
-      </div>
-    );
-  }
-
-  if (entries.length < VIRTUALIZE_THRESHOLD) {
-    return (
-      <div className="flex-1 overflow-y-auto nice-scroll" role="listbox">
-        {entries.map((entry) => (
-          <div key={entry.key}>{renderEntry(entry, renderRow)}</div>
-        ))}
-      </div>
-    );
-  }
-
-  return <VirtualListBody entries={entries} renderRow={renderRow} />;
-};
-
-const VirtualListBody = ({
-  entries,
-  renderRow,
-}: {
-  entries: VirtualEntry[];
-  renderRow: VirtualListProps['renderRow'];
-}) => {
-  const parentRef = useRef<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    count: entries.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: (i) => (entries[i]?.kind === 'label' ? 32 : 52),
-    overscan: 8,
-    getItemKey: (i) => entries[i]?.key ?? i,
-  });
-  const items = virtualizer.getVirtualItems();
-  const totalSize = virtualizer.getTotalSize();
-  return (
-    <div ref={parentRef} className="flex-1 overflow-y-auto nice-scroll" role="listbox">
-      <div style={{ height: totalSize, width: '100%', position: 'relative' }}>
-        {items.map((vi) => {
-          const entry = entries[vi.index];
-          if (!entry) return null;
-          return (
-            <div
-              key={vi.key}
-              data-index={vi.index}
-              ref={virtualizer.measureElement}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                transform: `translateY(${vi.start}px)`,
-              }}
-            >
-              {renderEntry(entry, renderRow)}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
-type LinkRowItem = TypedItem;
-
-interface LinkRowProps {
-  item: LinkRowItem;
-  flatIndex: number;
-  active: boolean;
-  selected: boolean;
-  onTogglePin: (id: number) => void;
-  onDelete: (id: number) => void;
-  onClick: (flatIndex: number, e?: React.MouseEvent) => void;
-}
-
-/// A clipboard row for URL items. Lazy-fetches og:image / og:title from the
-/// Rust side and renders a thumbnail + title pulled from the page metadata,
-/// falling back to the default link icon when the page exposes no preview.
-const LinkRow = ({
-  item,
-  flatIndex,
-  active,
-  selected,
-  onTogglePin,
-  onDelete,
-  onClick,
-}: LinkRowProps) => {
-  const preview = useLinkPreview(item.content);
-  const tint = typeTint[item.type];
-  const [imgBroken, setImgBroken] = useState(false);
-  const thumb = preview?.image && !imgBroken ? (
-    <img
-      src={preview.image}
-      alt=""
-      onError={() => setImgBroken(true)}
-      className="w-7 h-7 rounded-md object-cover"
-    />
-  ) : (
-    iconFor(item.type)
-  );
-  const primary = preview?.title ?? item.content;
-  return (
-    <Row
-      primary={primary}
-      icon={thumb}
-      iconTint={preview?.image && !imgBroken ? 'transparent' : tint.bg}
-      iconColor={tint.fg}
-      actions={
-        <>
-          <IconButton onClick={() => onTogglePin(item.id)} title={item.pinned ? 'Unpin' : 'Pin'}>
-            <PinIcon filled={item.pinned} />
-          </IconButton>
-          <IconButton onClick={() => onDelete(item.id)} title="Delete" tone="danger">
-            <TrashIcon />
-          </IconButton>
-        </>
-      }
-      meta={
-        <>
-          <span className="t-tertiary text-meta font-mono">{iso(item.created_at)}</span>
-          {active && <Kbd>↵</Kbd>}
-        </>
-      }
-      pinned={item.pinned}
-      active={active}
-      selected={selected}
-      onSelect={(e) => onClick(flatIndex, e)}
-    />
   );
 };

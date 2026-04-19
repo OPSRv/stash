@@ -53,6 +53,18 @@ export const PauseIcon = ({ size = 13, className }: IconProps) => (
   </svg>
 );
 
+export const PrevIcon = ({ size = 13, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="currentColor">
+    <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
+  </svg>
+);
+
+export const NextIcon = ({ size = 13, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="currentColor">
+    <path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z" />
+  </svg>
+);
+
 export const PinIcon = ({
   size = 14,
   className,
@@ -143,6 +155,13 @@ export const ChecklistIcon = ({ size = 14, className }: IconProps) => (
 export const QuoteIcon = ({ size = 14, className }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
     <path d="M7 7H4v5h3a2 2 0 0 1-2 2v2a4 4 0 0 0 4-4V7zM18 7h-3v5h3a2 2 0 0 1-2 2v2a4 4 0 0 0 4-4V7z" />
+  </svg>
+);
+
+export const EyeIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+    <circle cx="12" cy="12" r="3" />
   </svg>
 );
 
