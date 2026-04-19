@@ -4,6 +4,8 @@ export type SegmentOption<T extends string = string> = {
   value: T;
   label: ReactNode;
   icon?: ReactNode;
+  disabled?: boolean;
+  title?: string;
 };
 
 type SegmentedControlProps<T extends string> = {
@@ -37,8 +39,10 @@ export const SegmentedControl = <T extends string>({
           type="button"
           role="radio"
           aria-checked={active}
+          disabled={opt.disabled}
+          title={opt.title}
           onClick={() => onChange(opt.value)}
-          className={`rounded-md inline-flex items-center gap-1.5 ${padding[size]} ${active ? 'on' : ''}`}
+          className={`rounded-md inline-flex items-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed ${padding[size]} ${active ? 'on' : ''}`}
         >
           {opt.icon}
           {opt.label}

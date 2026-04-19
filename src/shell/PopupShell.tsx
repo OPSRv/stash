@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { modules } from '../modules/registry';
 import { TabButton } from '../shared/ui/TabButton';
+import { Button } from '../shared/ui/Button';
 import { loadSettings } from '../settings/store';
 import {
   pruneHistory,
@@ -178,14 +179,16 @@ export const PopupShell = () => {
           />
         ))}
         <div className="ml-auto">
-          <button
+          <Button
+            size="sm"
+            variant="ghost"
+            shape="square"
             onClick={() => setCheatsheetOpen(true)}
-            className="t-tertiary hover:t-primary text-meta px-2 py-1 rounded"
             title="Shortcuts (?)"
             aria-label="Shortcuts"
           >
             ?
-          </button>
+          </Button>
         </div>
       </header>
       {translation && (

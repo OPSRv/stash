@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadSettings } from '../../settings/store';
 import { userAgentFor } from '../../shared/browserUA';
+import { Button } from '../../shared/ui/Button';
 import {
   musicClose,
   musicEmbed,
@@ -12,16 +13,6 @@ import {
 const toolbarStyle = {
   background: 'rgba(0,0,0,0.3)',
   borderBottom: '1px solid rgba(255,255,255,0.06)',
-} as const;
-
-const iconButtonStyle = {
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.08)',
-} as const;
-
-const warningPillStyle = {
-  background: 'rgba(235,72,72,0.18)',
-  color: '#FF9B9B',
 } as const;
 
 const placeholderStyle = {
@@ -134,22 +125,12 @@ export const MusicShell = () => {
         <span className="t-primary text-body font-medium">YouTube Music</span>
         <span className="t-tertiary text-meta">music.youtube.com</span>
         <div className="flex-1" />
-        <button
-          onClick={reload}
-          className="px-2.5 py-1 rounded-md text-meta t-primary"
-          style={iconButtonStyle}
-          title="Reload"
-        >
+        <Button size="sm" variant="soft" onClick={reload} title="Reload">
           Reload
-        </button>
-        <button
-          onClick={hardClose}
-          className="px-2.5 py-1 rounded-md text-meta"
-          style={warningPillStyle}
-          title="Sign out & reset"
-        >
+        </Button>
+        <Button size="sm" variant="soft" tone="danger" onClick={hardClose} title="Sign out & reset">
           Reset
-        </button>
+        </Button>
       </div>
       <div ref={sizerRef} className="flex-1 relative" style={placeholderStyle}>
         {!attached && !error && (

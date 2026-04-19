@@ -14,14 +14,14 @@ describe('SettingsShell', () => {
 
   it('renders tabs and defaults to General', () => {
     render(<SettingsShell />);
-    expect(screen.getByRole('button', { name: 'General' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'General' })).toBeInTheDocument();
     expect(screen.getByText(/Launch at login/)).toBeInTheDocument();
   });
 
   it('switches to Clipboard tab and shows history cap input', async () => {
     const user = userEvent.setup();
     render(<SettingsShell />);
-    await user.click(screen.getByRole('button', { name: 'Clipboard' }));
+    await user.click(screen.getByRole('tab', { name: 'Clipboard' }));
     await waitFor(() => {
       expect(screen.getByText(/Max history items/)).toBeInTheDocument();
     });
@@ -30,7 +30,7 @@ describe('SettingsShell', () => {
   it('switches to About tab', async () => {
     const user = userEvent.setup();
     render(<SettingsShell />);
-    await user.click(screen.getByRole('button', { name: 'About' }));
+    await user.click(screen.getByRole('tab', { name: 'About' }));
     expect(screen.getByText('Stash')).toBeInTheDocument();
   });
 
@@ -51,7 +51,7 @@ describe('SettingsShell', () => {
     });
 
     render(<SettingsShell />);
-    await user.click(screen.getByRole('button', { name: 'Downloads' }));
+    await user.click(screen.getByRole('tab', { name: 'Downloads' }));
     await user.click(await screen.findByRole('button', { name: /Choose/ }));
 
     await waitFor(() => {
@@ -75,7 +75,7 @@ describe('SettingsShell', () => {
     vi.mocked(openDialog).mockResolvedValue(null as never);
 
     render(<SettingsShell />);
-    await user.click(screen.getByRole('button', { name: 'Downloads' }));
+    await user.click(screen.getByRole('tab', { name: 'Downloads' }));
     await user.click(await screen.findByRole('button', { name: /Choose/ }));
 
     await waitFor(() => {

@@ -1,4 +1,5 @@
 import { Kbd } from '../../shared/ui/Kbd';
+import { Button } from '../../shared/ui/Button';
 import { formatBytes, type QualityOption } from './api';
 
 interface QualityPickerProps {
@@ -8,12 +9,6 @@ interface QualityPickerProps {
   onDownload: () => void;
 }
 
-const downloadButtonStyle = {
-  background: 'rgba(var(--stash-accent-rgb), 0.9)',
-  boxShadow:
-    '0 1px 0 rgba(0,0,0,0.25), inset 0 0.5px 0 rgba(255,255,255,0.18)',
-} as const;
-
 export const QualityPicker = ({
   options,
   selected,
@@ -21,11 +16,13 @@ export const QualityPicker = ({
   onDownload,
 }: QualityPickerProps) => (
   <>
-    <div className="seg flex text-meta font-medium shrink-0">
+    <div className="seg flex text-meta font-medium shrink-0" role="group" aria-label="Quality">
       {options.map((q) => (
         <button
           key={q.format_id}
+          type="button"
           onClick={() => onSelect(q)}
+          aria-pressed={selected?.format_id === q.format_id}
           className={`px-2.5 py-1 rounded-md ${
             selected?.format_id === q.format_id ? 'on' : ''
           }`}
@@ -37,13 +34,14 @@ export const QualityPicker = ({
         </button>
       ))}
     </div>
-    <button
+    <Button
+      variant="solid"
+      tone="accent"
       onClick={onDownload}
       disabled={!selected}
-      className="px-3.5 py-2 rounded-lg text-body font-medium text-white flex items-center gap-1.5"
-      style={downloadButtonStyle}
+      trailingIcon={<Kbd>↵</Kbd>}
     >
-      Download <Kbd>↵</Kbd>
-    </button>
+      Download
+    </Button>
   </>
 );

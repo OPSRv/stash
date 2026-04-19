@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
   isPermissionGranted,
@@ -22,16 +22,13 @@ const COMPLETED_STATUSES = new Set<DownloadJob['status']>([
   'cancelled',
 ]);
 
-const notifyIfEnabled = async (title: string, body: string) => {
-  try {
-    const settings = await loadSettings();
-    if (!settings.notifyOnDownloadComplete) return;
-    const granted =
-      (await isPermissionGranted()) || (await requestPermission()) === 'granted';
-    if (granted) sendNotification({ title, body });
-  } catch (e) {
-    console.error('notify failed', e);
-  }
+type ProgressPayload = {
+  id: number;
+  update: {
+    percent: number;
+    bytes_done: number | null;
+    bytes_total: number | null;
+  };
 };
 
 /// Subscribes to downloader events and keeps a derived {active, completed}
@@ -39,6 +36,10 @@ const notifyIfEnabled = async (title: string, body: string) => {
 /// stays declarative.
 export const useDownloadJobs = (): UseDownloadJobsResult => {
   const [jobs, setJobs] = useState<DownloadJob[]>([]);
+  // Cache the notify-on-complete flag so we don't hit loadSettings() on every
+  // download completion. Refreshed once per mount; users toggling the option
+  // mid-session will see it apply on the next app launch (acceptable).
+  const notifyOnCompleteRef = useRef(false);
 
   const reload = useCallback(() => {
     list()
@@ -46,24 +47,68 @@ export const useDownloadJobs = (): UseDownloadJobsResult => {
       .catch((e) => console.error('list failed', e));
   }, []);
 
+  const notify = useCallback(async (title: string, body: string) => {
+    if (!notifyOnCompleteRef.current) return;
+    try {
+      const granted =
+        (await isPermissionGranted()) || (await requestPermission()) === 'granted';
+      if (granted) sendNotification({ title, body });
+    } catch (e) {
+      console.error('notify failed', e);
+    }
+  }, []);
+
   useEffect(() => {
     reload();
+    loadSettings()
+      .then((s) => {
+        notifyOnCompleteRef.current = s.notifyOnDownloadComplete;
+      })
+      .catch(() => {});
+
     const unlisten = Promise.all([
-      listen('downloader:progress', reload),
+      // Patch the matching job in place rather than re-fetching the full list
+      // for every single yt-dlp progress tick (could be 5–10 events/sec/job).
+      listen<ProgressPayload>('downloader:progress', (e) => {
+        const { id, update } = e.payload;
+        setJobs((prev) => {
+          const idx = prev.findIndex((j) => j.id === id);
+          if (idx === -1) return prev;
+          const current = prev[idx];
+          const nextProgress = update.percent / 100;
+          const nextBytesDone = update.bytes_done ?? current.bytes_done;
+          const nextBytesTotal = update.bytes_total ?? current.bytes_total;
+          if (
+            current.progress === nextProgress &&
+            current.bytes_done === nextBytesDone &&
+            current.bytes_total === nextBytesTotal
+          ) {
+            return prev;
+          }
+          const next = prev.slice();
+          next[idx] = {
+            ...current,
+            progress: nextProgress,
+            bytes_done: nextBytesDone,
+            bytes_total: nextBytesTotal,
+          };
+          return next;
+        });
+      }),
       listen<{ id: number; path: string }>('downloader:completed', (e) => {
         reload();
         const name = e.payload.path.split('/').pop() ?? 'Download';
-        notifyIfEnabled('Download finished', name);
+        notify('Download finished', name);
       }),
       listen<{ id: number }>('downloader:failed', () => {
         reload();
-        notifyIfEnabled('Download failed', 'See Downloads for details.');
+        notify('Download failed', 'See Downloads for details.');
       }),
     ]);
     return () => {
       unlisten.then((fns) => fns.forEach((f) => f())).catch(() => {});
     };
-  }, [reload]);
+  }, [reload, notify]);
 
   const { active, completed } = useMemo(
     () => ({

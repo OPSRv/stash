@@ -115,19 +115,23 @@ export const SettingsShell = () => {
 
   return (
     <div className="h-full flex flex-col">
-      <nav className="px-4 py-2 flex items-center gap-1 border-b hair">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-3 py-1.5 rounded-md text-body font-medium ${
-              tab === t.id ? 't-primary' : 't-secondary'
-            }`}
-            style={tab === t.id ? { background: 'rgba(255,255,255,0.06)' } : undefined}
-          >
-            {t.label}
-          </button>
-        ))}
+      <nav className="px-4 py-2 flex items-center gap-1 border-b hair" role="tablist">
+        {tabs.map((t) => {
+          const active = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={active}
+              onClick={() => setTab(t.id)}
+              className={`px-3 py-1.5 rounded-md text-body font-medium transition-colors ${
+                active ? 't-primary bg-white/[0.06]' : 't-secondary hover:bg-white/[0.04]'
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
       </nav>
       <main className="flex-1 overflow-y-auto nice-scroll px-6 py-5">
         {tab === 'general' && (
@@ -300,14 +304,9 @@ const TranslatorTestRow = ({ target }: { target: string }) => {
         result ?? 'Sends a short sentence through the pipeline to verify the network and target language.'
       }
       control={
-        <button
-          onClick={run}
-          disabled={busy}
-          className="px-3 py-1 rounded-md t-primary text-meta"
-          style={{ background: 'rgba(255,255,255,0.06)', opacity: busy ? 0.6 : 1 }}
-        >
+        <Button variant="soft" size="sm" onClick={run} loading={busy}>
           {busy ? 'Testing…' : 'Run test'}
-        </button>
+        </Button>
       }
     />
   );
@@ -459,13 +458,9 @@ const DownloadsTab = ({
         title="Forget cookies"
         description="Remove the exported cookies file and disconnect the browser."
         control={
-          <button
-            onClick={() => setForgetOpen(true)}
-            className="px-3 py-1 rounded-md t-primary text-meta"
-            style={{ background: 'rgba(235,72,72,0.15)', color: '#FF7878' }}
-          >
+          <Button variant="soft" tone="danger" size="sm" onClick={() => setForgetOpen(true)}>
             Forget
-          </button>
+          </Button>
         }
       />
       <ConfirmDialog
@@ -543,17 +538,15 @@ const YtDlpUpdateRow = () => {
             : 'Checking…'
       }
       control={
-        <button
+        <Button
+          variant="soft"
+          tone={outdated ? 'accent' : 'neutral'}
+          size="sm"
+          loading={busy}
           onClick={update}
-          disabled={busy}
-          className="px-3 py-1 rounded-md t-primary text-meta"
-          style={{
-            background: outdated ? 'rgba(47,122,229,0.22)' : 'rgba(255,255,255,0.06)',
-            opacity: busy ? 0.6 : 1,
-          }}
         >
           {busy ? 'Updating…' : outdated ? 'Update now' : 'Re-install'}
-        </button>
+        </Button>
       }
     />
   );

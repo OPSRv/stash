@@ -15,6 +15,8 @@ import {
   type RecorderStatus,
 } from './api';
 import { VideoPlayer } from '../../shared/ui/VideoPlayer';
+import { Button } from '../../shared/ui/Button';
+import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { TrimDialog } from './TrimDialog';
 
 const modes: { id: RecorderMode; label: string; available: boolean }[] = [
@@ -166,13 +168,9 @@ export const RecorderShell = () => {
           <code className="mx-1">helpers/recorder-swift</code> or drop{' '}
           <code>stash-recorder</code> into the app's data directory <code>bin/</code> folder.
         </div>
-        <button
-          onClick={reloadStatus}
-          className="px-3 py-1.5 rounded-md t-primary text-meta"
-          style={{ background: 'rgba(255,255,255,0.06)' }}
-        >
+        <Button variant="soft" onClick={reloadStatus}>
           Check again
-        </button>
+        </Button>
       </div>
     );
   }
@@ -183,13 +181,9 @@ export const RecorderShell = () => {
         <div className="text-[96px] font-semibold t-primary tabular-nums">
           {countdown}
         </div>
-        <button
-          onClick={cancelCountdown}
-          className="px-3 py-1.5 rounded-md t-primary text-meta"
-          style={{ background: 'rgba(235,72,72,0.18)', color: '#FF7878' }}
-        >
+        <Button variant="soft" tone="danger" onClick={cancelCountdown}>
           Cancel · Esc
-        </button>
+        </Button>
       </div>
     );
   }
@@ -202,13 +196,9 @@ export const RecorderShell = () => {
           <span className="t-primary text-heading font-mono tabular-nums">
             {formatElapsed(elapsed)}
           </span>
-          <button
-            onClick={stop}
-            className="ml-2 px-3 py-1 rounded-md text-meta font-medium"
-            style={{ background: 'rgba(255,255,255,0.14)', color: '#fff' }}
-          >
+          <Button className="ml-2" size="sm" variant="soft" onClick={stop}>
             Stop
-          </button>
+          </Button>
         </div>
         <div className="t-tertiary text-meta">Screen recording in progress…</div>
       </div>
@@ -220,20 +210,17 @@ export const RecorderShell = () => {
       <div className="flex-1 overflow-y-auto nice-scroll px-6 py-5 flex flex-col gap-5">
         <section>
           <div className="t-tertiary text-meta uppercase tracking-wider mb-2">Mode</div>
-          <div className="seg flex text-meta font-medium">
-            {modes.map((m) => (
-              <button
-                key={m.id}
-                disabled={!m.available}
-                onClick={() => setMode(m.id)}
-                className={`px-3 py-1.5 rounded-md ${mode === m.id ? 'on' : ''}`}
-                style={!m.available ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-                title={m.available ? m.label : 'Coming soon'}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            ariaLabel="Recording mode"
+            value={mode}
+            onChange={setMode}
+            options={modes.map((m) => ({
+              value: m.id,
+              label: m.label,
+              disabled: !m.available,
+              title: m.available ? m.label : 'Coming soon',
+            }))}
+          />
         </section>
 
         <section>
@@ -305,30 +292,26 @@ export const RecorderShell = () => {
                       {formatBytes(r.bytes)}
                     </div>
                   </div>
-                  <button
-                    onClick={() => setPlaying(r.path)}
-                    className="px-2 py-1 rounded text-meta t-primary"
-                    style={{ background: 'rgba(var(--stash-accent-rgb),0.18)' }}
-                  >
+                  <Button size="sm" variant="soft" tone="accent" onClick={() => setPlaying(r.path)}>
                     Play
-                  </button>
-                  <button
-                    onClick={() => setTrimTarget(r.path)}
-                    className="px-2 py-1 rounded text-meta t-primary"
-                    style={{ background: 'rgba(255,255,255,0.06)' }}
-                  >
+                  </Button>
+                  <Button size="sm" variant="soft" onClick={() => setTrimTarget(r.path)}>
                     Trim
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    tone="danger"
+                    shape="square"
+                    aria-label="Delete recording"
+                    title="Delete recording"
                     onClick={async () => {
                       await recDelete(r.path);
                       reloadStatus();
                     }}
-                    className="t-secondary hover:text-red-400 text-meta px-2 py-1 rounded"
-                    style={{ background: 'rgba(255,255,255,0.04)' }}
                   >
                     ×
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -336,13 +319,9 @@ export const RecorderShell = () => {
         )}
       </div>
       <footer className="px-6 py-4 border-t hair flex items-center justify-end gap-2">
-        <button
-          onClick={beginCountdown}
-          className="px-4 py-2 rounded-md text-body font-medium text-white"
-          style={{ background: '#E04F4F', boxShadow: 'inset 0 0.5px 0 rgba(255,255,255,0.2)' }}
-        >
+        <Button size="lg" variant="solid" tone="danger" onClick={beginCountdown}>
           Record
-        </button>
+        </Button>
       </footer>
       {playing && <VideoPlayer src={playing} onClose={() => setPlaying(null)} />}
       {trimTarget && (
@@ -372,12 +351,12 @@ const PermissionBanner = ({
     style={{ background: 'rgba(235,72,72,0.08)', color: '#FF9B9B' }}
   >
     <span>{label}</span>
-    <button
+    <Button
+      size="sm"
+      variant="soft"
       onClick={() => invoke('open_system_settings', { pane }).catch(() => {})}
-      className="px-2 py-1 rounded t-primary"
-      style={{ background: 'rgba(255,255,255,0.08)' }}
     >
       Open Settings
-    </button>
+    </Button>
   </div>
 );

@@ -1,4 +1,5 @@
 import { CheckIcon, CloseIcon } from '../../shared/ui/icons';
+import { Button } from '../../shared/ui/Button';
 import { useToast } from '../../shared/ui/Toast';
 import { PlatformBadge } from './PlatformBadge';
 import { formatBytes, type DownloadJob } from './api';
@@ -20,8 +21,6 @@ const failBadgeStyle = {
   background: 'rgba(235,72,72,0.14)',
   color: '#FF6B6B',
 } as const;
-const playButtonStyle = { background: 'rgba(var(--stash-accent-rgb),0.18)' } as const;
-const neutralButtonStyle = { background: 'rgba(255,255,255,0.04)' } as const;
 
 const isFailure = (status: DownloadJob['status']) =>
   status === 'failed' || status === 'cancelled';
@@ -63,40 +62,37 @@ export const CompletedDownloadRow = ({
         <span className="t-tertiary text-meta font-mono">{formatBytes(job.bytes_total)}</span>
       )}
       {job.target_path && !failed && (
-        <button
-          onClick={onPlay}
-          className="t-primary text-meta px-2 py-1 rounded"
-          style={playButtonStyle}
-        >
+        <Button size="sm" variant="soft" tone="accent" onClick={onPlay}>
           Play
-        </button>
+        </Button>
       )}
       {failed && (
-        <button
+        <Button
+          size="sm"
+          variant="soft"
+          tone="accent"
           onClick={onRetry}
-          className="t-primary text-meta px-2 py-1 rounded"
-          style={playButtonStyle}
           title={job.error ?? 'Retry download'}
         >
           Retry
-        </button>
+        </Button>
       )}
       {job.target_path && (
-        <button
-          onClick={reveal}
-          className="t-secondary hover:t-primary text-meta px-2 py-1 rounded"
-          style={neutralButtonStyle}
-        >
+        <Button size="sm" variant="soft" onClick={reveal}>
           Reveal
-        </button>
+        </Button>
       )}
-      <button
+      <Button
+        size="sm"
+        variant="ghost"
+        tone="danger"
+        shape="square"
+        aria-label="Delete"
+        title="Delete"
         onClick={onDelete}
-        className="t-secondary hover:text-red-400 text-meta px-2 py-1 rounded"
-        style={neutralButtonStyle}
       >
         ×
-      </button>
+      </Button>
     </div>
   );
 };

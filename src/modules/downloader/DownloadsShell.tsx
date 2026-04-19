@@ -10,6 +10,8 @@ import { DownloadUrlBar } from './DownloadUrlBar';
 import { DropOverlay } from './DropOverlay';
 import { QualityPicker } from './QualityPicker';
 import { Spinner } from '../../shared/ui/Spinner';
+import { Button } from '../../shared/ui/Button';
+import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
@@ -278,26 +280,19 @@ export const DownloadsShell = () => {
             <div className="px-4 pt-4 pb-1 flex items-center justify-between">
               <SectionLabel>Completed</SectionLabel>
               <div className="flex items-center gap-2">
-                <div className="seg flex text-meta font-medium">
-                  <button
-                    onClick={() => setCompletedView('list')}
-                    className={`px-2 py-0.5 rounded-md ${completedView === 'list' ? 'on' : ''}`}
-                  >
-                    List
-                  </button>
-                  <button
-                    onClick={() => setCompletedView('grid')}
-                    className={`px-2 py-0.5 rounded-md ${completedView === 'grid' ? 'on' : ''}`}
-                  >
-                    Grid
-                  </button>
-                </div>
-                <button
-                  onClick={() => setClearCompletedOpen(true)}
-                  className="t-tertiary text-meta hover:t-secondary"
-                >
+                <SegmentedControl
+                  size="sm"
+                  ariaLabel="Completed view"
+                  value={completedView}
+                  onChange={setCompletedView}
+                  options={[
+                    { value: 'list', label: 'List' },
+                    { value: 'grid', label: 'Grid' },
+                  ]}
+                />
+                <Button size="xs" variant="ghost" onClick={() => setClearCompletedOpen(true)}>
                   Clear
-                </button>
+                </Button>
               </div>
             </div>
             {completedView === 'list' ? (

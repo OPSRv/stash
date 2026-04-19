@@ -204,21 +204,26 @@ export const TranslatorShell = () => {
             <div className="flex-1 min-w-0 t-primary text-body leading-snug break-words">
               {liveResult.translated}
             </div>
-            <button
+            <Button
+              size="xs"
+              variant="soft"
               onClick={() => onCopy(liveResult.translated)}
-              className="t-secondary hover:t-primary text-meta px-2 py-0.5 rounded shrink-0"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
               title="Copy translation"
+              className="shrink-0"
             >
               Copy
-            </button>
-            <button
-              onClick={() => setLiveResult(null)}
-              className="t-tertiary hover:t-primary p-1 shrink-0"
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              shape="square"
+              className="shrink-0"
               aria-label="Dismiss"
+              title="Dismiss"
+              onClick={() => setLiveResult(null)}
             >
               <CloseIcon size={12} />
-            </button>
+            </Button>
           </div>
         )}
       </div>
@@ -232,12 +237,9 @@ export const TranslatorShell = () => {
           <>
             <div className="px-3 pt-3 pb-1 flex items-center justify-between">
               <SectionLabel>History · {rows.length}</SectionLabel>
-              <button
-                onClick={onClearAll}
-                className="t-tertiary text-meta hover:t-secondary"
-              >
+              <Button size="xs" variant="ghost" onClick={onClearAll}>
                 Clear all
-              </button>
+              </Button>
             </div>
             {rows.map((row) => (
               <TranslationRowView
@@ -278,8 +280,6 @@ const langPillStyle = {
   background: 'rgba(var(--stash-accent-rgb), 0.22)',
 } as const;
 
-const copyButtonStyle = { background: 'rgba(255,255,255,0.06)' } as const;
-
 const TranslationRowView = ({ row, onCopy, onDelete }: RowViewProps) => (
   <div
     className="mx-2 my-1 rounded-lg p-2.5 flex items-start gap-2"
@@ -302,20 +302,26 @@ const TranslationRowView = ({ row, onCopy, onDelete }: RowViewProps) => (
         {iso(row.created_at)}
       </div>
     </div>
-    <button
+    <Button
+      size="xs"
+      variant="soft"
       onClick={() => onCopy(row.translated)}
-      className="t-secondary hover:t-primary text-meta px-2 py-0.5 rounded shrink-0"
-      style={copyButtonStyle}
       title="Copy translation"
+      className="shrink-0"
     >
       Copy
-    </button>
-    <button
+    </Button>
+    <Button
+      size="xs"
+      variant="ghost"
+      tone="danger"
+      shape="square"
       onClick={() => onDelete(row.id)}
-      className="t-tertiary hover:text-red-400 p-1 shrink-0"
       aria-label="Delete"
+      title="Delete"
+      className="shrink-0"
     >
       <CloseIcon size={12} />
-    </button>
+    </Button>
   </div>
 );

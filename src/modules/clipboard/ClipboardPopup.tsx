@@ -77,12 +77,19 @@ export const ClipboardPopup = () => {
 
   useEffect(() => {
     let cancelled = false;
-    const load = query.trim() ? searchItems(query) : listItems();
-    load.then((data) => {
-      if (!cancelled) setRawItems(data);
-    });
+    const trimmed = query.trim();
+    // Bare list() / change events apply immediately; only typed search is
+    // debounced to avoid an IPC round-trip per keystroke.
+    const delay = trimmed ? 120 : 0;
+    const timer = window.setTimeout(() => {
+      const load = trimmed ? searchItems(trimmed) : listItems();
+      load.then((data) => {
+        if (!cancelled) setRawItems(data);
+      });
+    }, delay);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [query, reloadNonce]);
 
@@ -100,14 +107,20 @@ export const ClipboardPopup = () => {
 
 
   // Auto-detect video downloads when the newest text item is a video URL.
+  // Depend only on the newest text item's identity — re-running this effect
+  // on every progress tick / metadata refresh would cancel an in-flight
+  // detect for a URL that hasn't actually changed.
+  const newestText = useMemo(
+    () => rawItems.find((i) => i.kind === 'text') ?? null,
+    [rawItems]
+  );
   useEffect(() => {
-    const newest = rawItems.find((i) => i.kind === 'text');
-    if (!newest) {
+    if (!newestText) {
       setVideoBanner(null);
       setVideoBannerUrl(null);
       return;
     }
-    const candidate = newest.content.trim();
+    const candidate = newestText.content.trim();
     const supported = /https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|reddit\.com|vimeo\.com|twitch\.tv|facebook\.com|fb\.watch)/i.test(
       candidate
     );
@@ -125,7 +138,7 @@ export const ClipboardPopup = () => {
     return () => {
       cancelled = true;
     };
-  }, [rawItems, videoBannerUrl]);
+  }, [newestText?.id, newestText?.content, videoBannerUrl]);
 
   const downloadFromBanner = async (
     kind: 'video' | 'audio',

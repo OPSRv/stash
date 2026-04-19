@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { Button } from '../../shared/ui/Button';
 
 const fmt = (s: number) => {
   const m = Math.floor(s / 60);
@@ -172,24 +173,18 @@ export const TrimDialog = ({
           )}
 
           <div className="flex items-center justify-end gap-2">
-            <button
-              onClick={onClose}
-              className="px-3 py-1.5 rounded-md t-secondary text-meta"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
-            >
+            <Button variant="soft" onClick={onClose}>
               Cancel
-            </button>
-            <button
-              disabled={busy || end <= start}
+            </Button>
+            <Button
+              variant="solid"
+              tone="accent"
+              disabled={end <= start}
+              loading={busy}
               onClick={confirm}
-              className="px-3 py-1.5 rounded-md text-meta font-medium text-white"
-              style={{
-                background: 'rgba(var(--stash-accent-rgb), 0.85)',
-                opacity: busy || end <= start ? 0.6 : 1,
-              }}
             >
               {busy ? 'Trimming…' : 'Save trimmed copy'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
