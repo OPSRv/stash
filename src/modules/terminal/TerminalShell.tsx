@@ -192,9 +192,10 @@ export const TerminalShell = () => {
       const settings = await loadSettings();
       const cmd = settings.claudeCodeCommand.trim();
       if (!cmd) return;
-      // Trailing \r as if the user pressed Enter — same path ptyWrite takes
-      // for any keystroke, so the running shell sees it as a real command.
-      await ptyWrite(`${cmd}\r`);
+      // Trailing \r as if the user pressed Enter. ptyWrite expects base64
+      // on the wire because the terminal normally forwards raw keystrokes,
+      // including control sequences, through the same channel.
+      await ptyWrite(encodeBase64(`${cmd}\r`));
       termRef.current?.focus();
     } catch (e) {
       termRef.current?.write(
