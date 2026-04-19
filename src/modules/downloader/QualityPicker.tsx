@@ -16,7 +16,7 @@ export const QualityPicker = ({
   onDownload,
 }: QualityPickerProps) => (
   <>
-    <div className="seg flex text-meta font-medium shrink-0" role="group" aria-label="Quality">
+    <div className="seg flex flex-wrap text-meta font-medium" role="group" aria-label="Quality">
       {options.map((q) => (
         <button
           key={q.format_id}

@@ -24,7 +24,9 @@ const thumbStyle = { background: 'rgba(0,0,0,0.6)' } as const;
 
 /// Shared visual for the "we know what this video is" row. Used both for the
 /// instant oEmbed preview (muted, footer = spinner) and the full yt-dlp
-/// preview (trailing = quality tabs + Download button).
+/// preview (trailing = quality tabs + Download button). Trailing wraps onto
+/// its own row when it can't fit beside the title — long quality lists no
+/// longer crush the uploader name or clip the Download button.
 export const DetectedPreviewCard = ({
   platform,
   title,
@@ -36,7 +38,7 @@ export const DetectedPreviewCard = ({
   muted = false,
 }: DetectedPreviewCardProps) => (
   <div
-    className="mx-4 mt-3 rounded-xl p-3 flex gap-3 items-center"
+    className="mx-4 mt-3 rounded-xl p-3 flex flex-wrap gap-3 items-center"
     style={muted ? mutedCardStyle : cardStyle}
   >
     <div
@@ -48,14 +50,20 @@ export const DetectedPreviewCard = ({
       )}
       {overlayBadge}
     </div>
-    <div className="flex-1 min-w-0">
+    <div className="flex-1 min-w-0 basis-[200px]">
       <div className="flex items-center gap-2 mb-0.5">
         <PlatformBadge platform={platform} />
-        {uploader && <span className="t-tertiary text-meta">{uploader}</span>}
+        {uploader && (
+          <span className="t-tertiary text-meta truncate">{uploader}</span>
+        )}
       </div>
       <div className="t-primary text-body font-medium truncate">{title}</div>
       {footerText && <div className="t-tertiary text-meta truncate">{footerText}</div>}
     </div>
-    {trailing}
+    {trailing && (
+      <div className="flex items-center gap-2 flex-wrap basis-full md:basis-auto justify-end">
+        {trailing}
+      </div>
+    )}
   </div>
 );

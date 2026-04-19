@@ -215,11 +215,25 @@ fn run_dump_json(
     cookies_browser: Option<&str>,
 ) -> Result<VideoInfo, String> {
     let mut cmd = Command::new(yt_dlp);
-    cmd.args(["--dump-json", "--no-playlist", "--no-warnings"]);
+    cmd.args([
+        "--dump-json",
+        "--no-playlist",
+        "--no-warnings",
+        // 10 s per request — without this a stalled YouTube endpoint can hang
+        // the detect for the full TCP timeout (~75 s) per player_client.
+        "--socket-timeout",
+        "10",
+    ]);
     if url.contains("youtube.com") || url.contains("youtu.be") {
+        // Order matters — yt-dlp tries clients in this order until one returns
+        // formats. mweb is currently the fastest reliable client for public
+        // videos; android is the cheapest fallback; web_safari is a last
+        // resort because it's the slowest. We dropped `default` (the `web`
+        // client) entirely — it almost always fails first with the new PO
+        // token requirement and only adds ~20 s of dead wait.
         cmd.args([
             "--extractor-args",
-            "youtube:player_client=default,web_safari,mweb,android",
+            "youtube:player_client=mweb,android,web_safari",
         ]);
     }
     if let Some(browser) = cookies_browser {
