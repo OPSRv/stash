@@ -8,7 +8,6 @@ import {
   aiAppendMessage,
   aiCreateSession,
   aiDeleteSession,
-  aiGetApiKey,
   aiListMessages,
   aiListSessions,
   aiRenameSession,
@@ -42,6 +41,17 @@ export const AiShell = () => {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  // Focus transitions during streaming (textarea disable, new-message scroll,
+  // etc.) sometimes blur the popup for a frame, and Stash's blur handler
+  // hides it. Suspend auto-hide for the lifetime of this shell — same policy
+  // the Terminal tab uses.
+  useEffect(() => {
+    invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
+    return () => {
+      invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     aiListSessions()
@@ -113,12 +123,7 @@ export const AiShell = () => {
       );
     }
 
-    let key: string | null = null;
-    try {
-      key = await aiGetApiKey(settings.aiProvider);
-    } catch {
-      key = null;
-    }
+    const key = settings.aiApiKeys[settings.aiProvider];
     if (!key) {
       toast({
         title: 'No API key',
@@ -151,7 +156,6 @@ export const AiShell = () => {
     abortRef.current = abort;
     setIsStreaming(true);
     setStreamingContent('');
-    await invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
 
     let acc = '';
     let failed = false;
@@ -194,7 +198,6 @@ export const AiShell = () => {
     setIsStreaming(false);
     setStreamingContent(null);
     abortRef.current = null;
-    await invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
 
     if (!failed) {
       // Touch the session so it bubbles to the top of the sidebar.
@@ -212,6 +215,7 @@ export const AiShell = () => {
     isStreaming,
     messages,
     sessions,
+    settings.aiApiKeys,
     settings.aiBaseUrl,
     settings.aiModel,
     settings.aiProvider,

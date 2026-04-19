@@ -34,6 +34,14 @@ export type Settings = {
   aiModel: string;
   aiBaseUrl: string | null;
   aiSystemPrompt: string;
+  /**
+   * Per-provider API keys, stored alongside other settings in `settings.json`
+   * under the app data dir. Not as locked-down as a proper keychain entry,
+   * but reliable across `tauri dev` rebuilds (unsigned binaries lose macOS
+   * Keychain ACL after each recompile, which breaks the Keychain approach
+   * entirely in development).
+   */
+  aiApiKeys: Partial<Record<AiProvider, string>>;
   voiceEnabled: boolean;
   voiceActiveModel: WhisperModelSize | null;
 };
@@ -63,6 +71,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiModel: '',
   aiBaseUrl: null,
   aiSystemPrompt: '',
+  aiApiKeys: {},
   voiceEnabled: false,
   voiceActiveModel: null,
 };

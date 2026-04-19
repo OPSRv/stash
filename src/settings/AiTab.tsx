@@ -1,11 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { generateText } from 'ai';
 
-import {
-  aiDeleteApiKey,
-  aiHasApiKey,
-  aiSetApiKey,
-} from '../modules/ai/api';
 import { buildModel } from '../modules/ai/provider';
 import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
@@ -51,40 +46,29 @@ type TestResult =
 export const AiTab = ({ settings, onChange }: AiTabProps) => {
   const { toast } = useToast();
   const [keyInput, setKeyInput] = useState('');
-  const [keyStored, setKeyStored] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [test, setTest] = useState<TestResult>({ kind: 'idle' });
 
-  // Reflect keychain state in the password field placeholder so the user
-  // sees whether a key is already saved without ever exposing the value.
-  useEffect(() => {
-    aiHasApiKey(settings.aiProvider)
-      .then(setKeyStored)
-      .catch(() => setKeyStored(false));
-  }, [settings.aiProvider]);
+  const currentKey = settings.aiApiKeys[settings.aiProvider] ?? '';
+  const keyStored = currentKey.length > 0;
 
-  const saveKey = async () => {
+  const saveKey = () => {
     const trimmed = keyInput.trim();
     if (!trimmed) return;
-    try {
-      await aiSetApiKey(settings.aiProvider, trimmed);
-      setKeyInput('');
-      setKeyStored(true);
-      toast({ title: 'API key saved', variant: 'success' });
-    } catch (e) {
-      toast({ title: 'Save failed', description: String(e), variant: 'error' });
-    }
+    onChange('aiApiKeys', {
+      ...settings.aiApiKeys,
+      [settings.aiProvider]: trimmed,
+    });
+    setKeyInput('');
+    toast({ title: 'API key saved', variant: 'success' });
   };
 
-  const clearKey = async () => {
-    try {
-      await aiDeleteApiKey(settings.aiProvider);
-      setKeyStored(false);
-      setKeyInput('');
-      toast({ title: 'API key cleared' });
-    } catch (e) {
-      toast({ title: 'Clear failed', description: String(e), variant: 'error' });
-    }
+  const clearKey = () => {
+    const next = { ...settings.aiApiKeys };
+    delete next[settings.aiProvider];
+    onChange('aiApiKeys', next);
+    setKeyInput('');
+    toast({ title: 'API key cleared' });
   };
 
   const runTest = async () => {
@@ -96,19 +80,16 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
       if (settings.aiProvider === 'custom' && !settings.aiBaseUrl) {
         throw new Error('Custom provider requires a base URL');
       }
-      // Read the key back from keychain so the test uses exactly what chat
-      // will use at runtime.
-      const key = await (await import('../modules/ai/api')).aiGetApiKey(
-        settings.aiProvider,
-      );
-      if (!key) throw new Error('No API key saved for this provider');
+      if (!currentKey) {
+        throw new Error('No API key saved for this provider');
+      }
       const model = buildModel(
         {
           provider: settings.aiProvider,
           model: settings.aiModel,
           baseUrl: settings.aiBaseUrl,
         },
-        key,
+        currentKey,
       );
       const started = performance.now();
       await generateText({ model, prompt: 'ping', maxOutputTokens: 1 });
@@ -167,8 +148,8 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
           title="API key"
           description={
             keyStored
-              ? 'A key is saved in the system keychain. Type a new value to replace it.'
-              : 'Stored in the macOS Keychain, never written to disk in plain text.'
+              ? 'A key is saved for this provider. Type a new value and Save to replace.'
+              : 'Saved to the app settings file. No internet round-trip, no keychain.'
           }
           control={
             <div className="flex items-center gap-2">
