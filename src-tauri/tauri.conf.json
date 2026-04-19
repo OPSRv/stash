@@ -14,7 +14,7 @@
       {
         "label": "popup",
         "title": "Stash",
-        "width": 720,
+        "width": 920,
         "height": 520,
         "resizable": false,
         "decorations": false,

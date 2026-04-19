@@ -42,7 +42,7 @@ export const NowPlayingBar = memo(({ state, onOpen, onClose, onOptimistic }: Now
           onOpen();
         }
       }}
-      className="mx-2 mt-2 px-2 py-1.5 rounded-lg flex items-center gap-2 cursor-pointer select-none"
+      className="px-2 py-1.5 rounded-lg flex items-center gap-2 cursor-pointer select-none"
       style={{
         background: 'rgba(var(--stash-accent-rgb), 0.08)',
         border: '1px solid rgba(var(--stash-accent-rgb), 0.22)',

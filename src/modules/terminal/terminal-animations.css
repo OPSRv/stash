@@ -1,0 +1,35 @@
+/* Terminal module styling. xterm injects its own internals; we just size
+   the host element and keep the popup background visible around it. */
+
+.terminal-host {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  padding: 6px 8px;
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+.terminal-host .xterm-viewport {
+  background: transparent !important;
+}
+
+.terminal-host .xterm-screen {
+  background: transparent !important;
+}
+
+@keyframes terminal-dead-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.terminal-dead-banner {
+  animation: terminal-dead-in var(--duration-fast) var(--easing-standard) both;
+}

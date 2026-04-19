@@ -1,5 +1,4 @@
 import { SegmentedControl } from '../../../shared/ui/SegmentedControl';
-import { Select } from '../../../shared/ui/Select';
 import {
   SOUND_PRESETS,
   SUBDIVISIONS,
@@ -58,11 +57,12 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
         })}
       </div>
       <div className="hair w-px h-6" />
-      <Select<SoundId>
+      <SegmentedControl<SoundId>
+        ariaLabel="Sound"
+        size="sm"
         value={state.sound}
         onChange={(v) => onPatch({ sound: v })}
         options={SOUND_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
-        label="Sound"
       />
       <div className="hair w-px h-6" />
       <VolumeSlider

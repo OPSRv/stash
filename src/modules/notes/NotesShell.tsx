@@ -36,9 +36,9 @@ const iso = (ts: number) => {
 const AUTOSAVE_DEBOUNCE_MS = 400;
 
 const VIEW_MODE_OPTIONS = [
+  { value: 'preview' as const, label: 'Preview', title: 'Preview only' },
   { value: 'edit' as const, label: 'Edit', title: 'Editor only' },
   { value: 'split' as const, label: 'Split', title: 'Editor + preview' },
-  { value: 'preview' as const, label: 'Preview', title: 'Preview only' },
 ];
 
 export const NotesShell = () => {
@@ -47,7 +47,7 @@ export const NotesShell = () => {
   const [query, setQuery] = useState('');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [viewMode, setViewMode] = useState<NotesViewMode>('split');
+  const [viewMode, setViewMode] = useState<NotesViewMode>('preview');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saveTimer = useRef<number | null>(null);
   const savedClearTimer = useRef<number | null>(null);

@@ -6,7 +6,7 @@ import { Kbd } from '../../shared/ui/Kbd';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { Select } from '../../shared/ui/Select';
 import { Spinner } from '../../shared/ui/Spinner';
-import { CloseIcon, SpeakerIcon, SwapIcon } from '../../shared/ui/icons';
+import { CloseIcon, HistoryIcon, SpeakerIcon, SwapIcon } from '../../shared/ui/icons';
 import { TARGET_LANGUAGES, isRtl, languageLabel } from './languages';
 import { MAX_CHARS, WARN_CHARS } from './translator.constants';
 
@@ -22,11 +22,13 @@ interface TranslatorComposerProps {
   liveTo: string | null;
   isBusy: boolean;
   canSwap: boolean;
+  historyCount: number;
   onSwap: () => void;
   onClearDraft: () => void;
   onCopy: (text: string) => void;
   onSpeak: (text: string, lang: string) => void;
   onTranslateNow: () => void;
+  onToggleHistory: () => void;
 }
 
 /// Header (from / swap / to) + dual-pane composer (source | target).
@@ -43,11 +45,13 @@ export const TranslatorComposer = ({
   liveTo,
   isBusy,
   canSwap,
+  historyCount,
   onSwap,
   onClearDraft,
   onCopy,
   onSpeak,
   onTranslateNow,
+  onToggleHistory,
 }: TranslatorComposerProps) => {
   const isCharsOver = draft.length > MAX_CHARS;
   const isCharsWarn = draft.length > WARN_CHARS && !isCharsOver;
@@ -88,10 +92,31 @@ export const TranslatorComposer = ({
             options={TARGET_LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
           />
         </div>
+        <button
+          type="button"
+          onClick={onToggleHistory}
+          className="input-field ring-focus rounded-md px-2 py-1 text-meta inline-flex items-center gap-1.5"
+          title="Show history"
+          aria-label="Show translation history"
+        >
+          <HistoryIcon size={12} />
+          <span>History</span>
+          {historyCount > 0 && (
+            <span
+              className="text-meta rounded-full px-1.5 leading-[1.2]"
+              style={{
+                background: 'rgba(var(--stash-accent-rgb), 0.18)',
+                color: 'var(--stash-accent)',
+              }}
+            >
+              {historyCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      <div className="mx-3 mb-2 grid grid-cols-2 gap-2 shrink-0">
-        <Card padding="sm" rounded="lg" className="flex flex-col min-h-[120px]">
+      <div className="mx-3 mb-2 grid grid-cols-2 grid-rows-1 gap-2 flex-1 min-h-0">
+        <Card padding="sm" rounded="lg" className="flex flex-col min-h-[120px] h-full min-h-0">
           <div className="flex items-center justify-between mb-1">
             <SectionLabel>{fromLabel}</SectionLabel>
             {hasDraft && (
@@ -121,7 +146,7 @@ export const TranslatorComposer = ({
             placeholder="Paste or type — auto-translates"
             rows={4}
             maxLength={MAX_CHARS + 200}
-            className="bg-transparent outline-none resize-none t-primary text-body leading-snug flex-1"
+            className="bg-transparent outline-none resize-none t-primary text-body leading-snug flex-1 min-h-0 overflow-y-auto"
           />
           <div className="flex items-center justify-between mt-1">
             <span
@@ -156,7 +181,7 @@ export const TranslatorComposer = ({
           padding="sm"
           rounded="lg"
           tone={hasLiveResult ? 'accent' : 'neutral'}
-          className="flex flex-col min-h-[120px] relative"
+          className="flex flex-col min-h-[120px] h-full min-h-0 relative"
         >
           <div className="flex items-center justify-between mb-1">
             <SectionLabel>{toLabel}</SectionLabel>

@@ -100,6 +100,11 @@
     /* Interactive surfaces on pane (toggle track, tab hover). */
     --color-surface-muted: rgba(255, 255, 255, 0.12);
     --color-surface-raised: rgba(255, 255, 255, 0.06);
+
+    /* Scrollbar (dark). Thumb sits on translucent panes, so keep it visible
+       but quiet; hover raises contrast. Track is intentionally transparent. */
+    --scrollbar-thumb: rgba(255, 255, 255, 0.22);
+    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
   }
   html.light {
     --color-danger-bg: rgba(var(--color-danger-rgb), 0.1);
@@ -126,6 +131,9 @@
     --color-scrim-strong: rgba(20, 22, 28, 0.55);
     --color-surface-muted: rgba(20, 22, 28, 0.1);
     --color-surface-raised: rgba(20, 22, 28, 0.05);
+
+    --scrollbar-thumb: rgba(20, 22, 28, 0.28);
+    --scrollbar-thumb-hover: rgba(20, 22, 28, 0.45);
   }
   html,
   body,
@@ -528,18 +536,6 @@
     box-shadow: var(--ring-focus);
   }
 
-  .nice-scroll::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-  .nice-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 99px;
-  }
-  .light .nice-scroll::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.15);
-  }
-
   @keyframes clip-flash-anim {
     0% {
       box-shadow: inset 0 0 0 0 rgba(47, 122, 229, 0);
@@ -649,6 +645,39 @@
   }
 }
 
+/* Scrollbars — thin, theme-tinted, unlayered so they beat any lingering UA
+   or layered rule. `html` prefix gives them non-zero specificity. */
+html ::-webkit-scrollbar,
+html::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+  background: transparent !important;
+}
+html ::-webkit-scrollbar-track,
+html::-webkit-scrollbar-track {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+html ::-webkit-scrollbar-thumb,
+html::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb) !important;
+  border: 0 !important;
+  border-radius: 99px !important;
+}
+html ::-webkit-scrollbar-thumb:hover,
+html::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover) !important;
+}
+html ::-webkit-scrollbar-corner,
+html::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -659,3 +688,54 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Markdown preview (Notes). Scoped to .notes-md so it doesn't leak. */
+.notes-md { line-height: 1.55; }
+.notes-md h1 { font-size: 20px; font-weight: 600; margin: 12px 0 8px; }
+.notes-md h2 { font-size: 16px; font-weight: 600; margin: 12px 0 6px; }
+.notes-md h3 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; }
+.notes-md h4, .notes-md h5, .notes-md h6 { font-size: 13px; font-weight: 600; margin: 6px 0 2px; }
+.notes-md p { margin: 4px 0; }
+.notes-md ul, .notes-md ol { margin: 4px 0; padding-left: 20px; }
+.notes-md ul { list-style: disc; }
+.notes-md ol { list-style: decimal; }
+.notes-md li { margin: 2px 0; }
+.notes-md li.task-list-item { list-style: none; margin-left: -18px; display: flex; align-items: flex-start; gap: 8px; }
+.notes-md li.task-list-item input[type="checkbox"] { margin-top: 4px; }
+.notes-md blockquote {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 2px solid rgba(var(--stash-accent-rgb), 0.5);
+  color: rgba(255, 255, 255, 0.72);
+  font-style: italic;
+}
+.notes-md hr { margin: 12px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.notes-md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.notes-md pre {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.notes-md pre code { padding: 0; background: transparent; font-size: inherit; }
+.notes-md table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
+.notes-md th, .notes-md td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 4px 8px;
+  text-align: left;
+}
+.notes-md th { background: rgba(255, 255, 255, 0.06); font-weight: 600; }
+.notes-md del { text-decoration: line-through; opacity: 0.7; }
+.notes-md img { max-width: 100%; border-radius: 6px; margin: 8px 0; }
+.notes-md a { color: rgba(var(--stash-accent-rgb), 1); text-decoration: underline; text-decoration-style: dotted; }
+

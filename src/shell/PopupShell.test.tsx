@@ -1,8 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { PopupShell } from './PopupShell';
 
 describe('PopupShell', () => {
@@ -63,6 +65,51 @@ describe('PopupShell', () => {
     expect(invoke).toHaveBeenLastCalledWith('set_popup_auto_hide', {
       enabled: true,
     });
+  });
+
+  it('auto-switches to Downloader when clipboard lands a supported URL', async () => {
+    const handlers: Record<string, (e: { payload: unknown }) => void> = {};
+    vi.mocked(listen).mockImplementation(
+      (event: string, cb: (e: { payload: unknown }) => void) => {
+        handlers[event] = cb;
+        return Promise.resolve(() => {});
+      },
+    );
+    vi.mocked(readText).mockResolvedValue('https://youtu.be/abc123');
+    const prefill = vi.fn();
+    window.addEventListener('stash:downloader-prefill', prefill as EventListener);
+
+    render(<PopupShell />);
+    await screen.findByRole('searchbox');
+    await waitFor(() => expect(handlers['clipboard:changed']).toBeDefined());
+    handlers['clipboard:changed']!({ payload: 42 });
+
+    await waitFor(() => expect(prefill).toHaveBeenCalled());
+    const ev = prefill.mock.calls[0][0] as CustomEvent<string>;
+    expect(ev.detail).toBe('https://youtu.be/abc123');
+    window.removeEventListener('stash:downloader-prefill', prefill as EventListener);
+  });
+
+  it('ignores non-supported URLs from clipboard', async () => {
+    const handlers: Record<string, (e: { payload: unknown }) => void> = {};
+    vi.mocked(listen).mockImplementation(
+      (event: string, cb: (e: { payload: unknown }) => void) => {
+        handlers[event] = cb;
+        return Promise.resolve(() => {});
+      },
+    );
+    vi.mocked(readText).mockResolvedValue('https://example.com/page');
+    const prefill = vi.fn();
+    window.addEventListener('stash:downloader-prefill', prefill as EventListener);
+
+    render(<PopupShell />);
+    await screen.findByRole('searchbox');
+    await waitFor(() => expect(handlers['clipboard:changed']).toBeDefined());
+    handlers['clipboard:changed']!({ payload: 1 });
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(prefill).not.toHaveBeenCalled();
+    window.removeEventListener('stash:downloader-prefill', prefill as EventListener);
   });
 
   it('⌘⌥4 switches to the Notes module (bound to tabShortcutDigit, not index)', async () => {

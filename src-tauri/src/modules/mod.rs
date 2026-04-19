@@ -5,4 +5,5 @@ pub mod music;
 pub mod notes;
 pub mod recorder;
 pub mod search;
+pub mod terminal;
 pub mod translator;

@@ -116,6 +116,22 @@ export const DownloadsShell = () => {
     })();
   }, [runDetect]);
 
+  // PopupShell routes freshly-copied supported URLs here via CustomEvent so
+  // the detect flow kicks in even when the Downloader tab is already mounted.
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const candidate = (e as CustomEvent<string>).detail;
+      if (typeof candidate !== 'string') return;
+      const trimmed = candidate.trim();
+      if (!trimmed || !SUPPORTED_VIDEO_URL.test(trimmed)) return;
+      if (trimmed === url) return;
+      setUrl(trimmed);
+      runDetect(trimmed);
+    };
+    window.addEventListener('stash:downloader-prefill', onPrefill);
+    return () => window.removeEventListener('stash:downloader-prefill', onPrefill);
+  }, [runDetect, url]);
+
   const onUrlDropped = useCallback(
     (dropped: string) => {
       setUrl(dropped);

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 /// Popup auto-hide suppression flag. When `true`, the window's blur handler
 /// will NOT hide the popup — used while a native modal (e.g. folder picker)
 /// is open so taking focus from the popup does not dismiss the modal.
-struct PopupAutoHide(AtomicBool);
+pub struct PopupAutoHide(pub AtomicBool);
 
 #[tauri::command]
 fn set_popup_auto_hide(state: tauri::State<'_, Arc<PopupAutoHide>>, enabled: bool) {
@@ -53,6 +53,8 @@ use modules::music::commands::{
     music_show, music_status,
 };
 use modules::search::commands::global_search;
+use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
+use modules::terminal::state::TerminalState;
 use modules::translator::{
     commands::{
         translator_clear, translator_delete, translator_list, translator_run, translator_search,
@@ -234,6 +236,10 @@ pub fn run() {
             translator_clear,
             metronome_get_state,
             metronome_save_state,
+            pty_open,
+            pty_write,
+            pty_resize,
+            pty_close,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -334,6 +340,11 @@ pub fn run() {
             // Metronome — single JSON blob in app data dir.
             let metronome_path = data_dir.join("metronome.json");
             app.manage(MetronomeStateHandle::new(metronome_path));
+
+            // Terminal — PTY session lazily opened by the first `pty_open`
+            // call from the frontend (once the xterm fit addon knows the
+            // actual cell grid).
+            app.manage(Arc::new(TerminalState::new()));
 
             let warmup_state = Arc::clone(&runner_state);
             std::thread::spawn(move || {

@@ -38,14 +38,17 @@ const languageArrow = (from: string, to: string): ReactNode => {
 /// reference-stable across reloads that don't touch the entry.
 export const TranslationRow = memo(
   ({ row, onCopy, onDelete, onSpeak, onReuse }: TranslationRowProps) => (
-    <div className="translator-row group mx-3 my-1 rounded-lg p-2.5 flex items-start gap-2 transition-colors hover:bg-white/[0.04]">
-      <span className="translator-pill px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider t-primary shrink-0 uppercase">
-        {languageArrow(row.from_lang, row.to_lang)}
-      </span>
+    <div className="translator-row group relative mx-3 my-1 rounded-lg p-2.5 transition-colors hover:bg-white/[0.04]">
+      <div className="flex items-center gap-2 mb-1">
+        <span className="translator-pill px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider t-primary uppercase">
+          {languageArrow(row.from_lang, row.to_lang)}
+        </span>
+        <span className="t-tertiary text-[10px] font-mono">{isoAge(row.created_at)}</span>
+      </div>
       <button
         type="button"
         onClick={() => onReuse(row)}
-        className="flex-1 min-w-0 text-left ring-focus rounded"
+        className="block w-full min-w-0 text-left ring-focus rounded"
         title="Reuse as source (click)"
         aria-label="Reuse translation as source"
       >
@@ -61,9 +64,8 @@ export const TranslationRow = memo(
         >
           {row.original}
         </div>
-        <div className="t-tertiary text-[10px] font-mono mt-1">{isoAge(row.created_at)}</div>
       </button>
-      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+      <div className="absolute top-2 right-2 hidden group-hover:flex group-focus-within:flex items-center gap-1 rounded-md px-1 py-0.5 bg-[var(--color-bg-pane)]/90 backdrop-blur-sm shadow-sm">
         <IconButton onClick={() => onReuse(row)} title="Reuse as source">
           <ReuseIcon size={12} />
         </IconButton>

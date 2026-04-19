@@ -2,7 +2,7 @@
 
 ## Project
 
-Stash — macOS menubar app, **Tauri 2 + React 19 + TS + Rust**. Single 720×520 popup hosts features as tabs. Global toggle `⌘⇧V`; tab switch `⌘⌥1..7`. ROADMAP.md is the canonical living spec (Ukrainian).
+Stash — macOS menubar app, **Tauri 2 + React 19 + TS + Rust**. Single 920×520 popup hosts features as tabs. Global toggle `⌘⇧V`; tab switch `⌘⌥1..7`. ROADMAP.md is the canonical living spec (Ukrainian).
 
 ## Module system
 

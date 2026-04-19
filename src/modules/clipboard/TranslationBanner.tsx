@@ -33,7 +33,7 @@ export const TranslationBanner = ({
 
   return (
     <div
-      className="mx-2 mt-2 p-2.5 rounded-lg flex items-start gap-2"
+      className="p-2.5 rounded-lg flex items-start gap-2"
       style={bannerStyle}
     >
       <span

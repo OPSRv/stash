@@ -283,6 +283,17 @@ fn friendly_error(stderr: &str) -> String {
              Settings → Downloads → Auth cookies from browser.\n\n{stderr}"
         );
     }
+    if lower.contains("no video formats found") {
+        let hint = if lower.contains("[instagram]") {
+            "Instagram now requires a logged-in session to download reels and \
+             posts. Open Settings → Downloads → Auth cookies from browser and \
+             pick the browser you're logged in to Instagram with."
+        } else {
+            "This host returned no downloadable formats. Try Settings → \
+             Downloads → Auth cookies from browser, or run yt-dlp -U to update."
+        };
+        return format!("{hint}\n\n{stderr}");
+    }
     format!("yt-dlp failed: {stderr}")
 }
 
@@ -383,6 +394,24 @@ mod tests {
     fn friendly_error_passes_unknown_messages_through() {
         let msg = friendly_error("ERROR: Network unreachable");
         assert!(msg.contains("Network unreachable"));
+    }
+
+    #[test]
+    fn friendly_error_flags_instagram_no_formats() {
+        let msg = friendly_error(
+            "ERROR: [Instagram] DXUqwFBDJvI: No video formats found!",
+        );
+        let lower = msg.to_lowercase();
+        assert!(lower.contains("instagram"));
+        assert!(lower.contains("cookies"));
+        assert!(msg.contains("No video formats found"));
+    }
+
+    #[test]
+    fn friendly_error_flags_generic_no_formats() {
+        let msg = friendly_error("ERROR: [Foo] id: No video formats found!");
+        let lower = msg.to_lowercase();
+        assert!(lower.contains("cookies") || lower.contains("yt-dlp -u"));
     }
 
     #[test]

@@ -1,8 +1,10 @@
 import { Suspense, useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { modules } from '../modules/registry';
+import { SUPPORTED_VIDEO_URL } from '../modules/downloader/downloads.constants';
 import { TabButton } from '../shared/ui/TabButton';
 import { Button } from '../shared/ui/Button';
 import { PinIcon } from '../shared/ui/icons';
@@ -147,6 +149,28 @@ export const PopupShell = () => {
     return () => window.removeEventListener('stash:navigate', onNavigate);
   }, []);
 
+  // When a new clipboard entry is a downloadable social-media URL, jump the
+  // user into the Downloader tab and prefill the URL bar. We re-read the
+  // clipboard ourselves because `clipboard:changed` only carries the new row
+  // id — reading raw text keeps the handshake simple.
+  useEffect(() => {
+    const unlisten = listen<number>('clipboard:changed', async () => {
+      try {
+        const text = (await readText())?.trim();
+        if (!text || !SUPPORTED_VIDEO_URL.test(text)) return;
+        openTab('downloader');
+        window.dispatchEvent(
+          new CustomEvent('stash:downloader-prefill', { detail: text }),
+        );
+      } catch {
+        // ignore clipboard read failures — this is a nice-to-have.
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
+
   // Global listener: translation banner lives at shell level so it renders
   // on every tab, regardless of which module is active when the translation
   // lands. We also unconditionally fire a native notification so the user
@@ -260,23 +284,28 @@ export const PopupShell = () => {
           </Button>
         </div>
       </header>
-      {translation && (
-        <TranslationBanner
-          original={translation.original}
-          translated={translation.translated}
-          to={translation.to}
-          onDismiss={() => setTranslation(null)}
-        />
-      )}
-      {nowPlaying && nowPlaying.title && activeId !== 'music' && (
-        <NowPlayingBar
-          state={nowPlaying}
-          onOpen={() => openTab('music')}
-          onClose={() => setNowPlaying(null)}
-          onOptimistic={(patch) =>
-            setNowPlaying((prev) => (prev ? { ...prev, ...patch } : prev))
-          }
-        />
+      {(translation ||
+        (nowPlaying && nowPlaying.title && activeId !== 'music')) && (
+        <div className="flex flex-col gap-2 p-2">
+          {translation && (
+            <TranslationBanner
+              original={translation.original}
+              translated={translation.translated}
+              to={translation.to}
+              onDismiss={() => setTranslation(null)}
+            />
+          )}
+          {nowPlaying && nowPlaying.title && activeId !== 'music' && (
+            <NowPlayingBar
+              state={nowPlaying}
+              onOpen={() => openTab('music')}
+              onClose={() => setNowPlaying(null)}
+              onOptimistic={(patch) =>
+                setNowPlaying((prev) => (prev ? { ...prev, ...patch } : prev))
+              }
+            />
+          )}
+        </div>
       )}
       <main className="flex-1 overflow-hidden relative">
         {modules

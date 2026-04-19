@@ -8,6 +8,7 @@ import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfir
 import { loadSettings, saveSetting } from '../../settings/store';
 import { TranslatorComposer } from './TranslatorComposer';
 import { TranslatorHistoryPanel } from './TranslatorHistoryPanel';
+import './translator-animations.css';
 import { TARGET_LANGUAGES, languageLabel } from './languages';
 import { useAutoTranslate } from './useAutoTranslate';
 import { useHistorySearch } from './useHistorySearch';
@@ -26,6 +27,7 @@ import {
 export const TranslatorShell = () => {
   const [rows, setRows] = useState<TranslationRow[]>([]);
   const [isClearOpen, setIsClearOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [sourceHint, setSourceHint] = useState<string | null>(null);
   const [target, setTarget] = useState('en');
@@ -188,7 +190,7 @@ export const TranslatorShell = () => {
   });
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col relative">
       <TranslatorComposer
         sourceRef={sourceRef}
         draft={draft}
@@ -201,14 +203,18 @@ export const TranslatorShell = () => {
         liveTo={liveResult?.to ?? null}
         isBusy={isBusy}
         canSwap={canSwap}
+        historyCount={rows.length}
         onSwap={handleSwap}
         onClearDraft={handleClearDraft}
         onCopy={handleCopy}
         onSpeak={handleSpeak}
         onTranslateNow={handleTranslateNow}
+        onToggleHistory={() => setIsHistoryOpen((v) => !v)}
       />
 
       <TranslatorHistoryPanel
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
         rows={rows}
         query={historyQuery}
         onQueryChange={setHistoryQuery}
