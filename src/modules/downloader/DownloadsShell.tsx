@@ -13,9 +13,15 @@ import { Spinner } from '../../shared/ui/Spinner';
 import { Button } from '../../shared/ui/Button';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { EmptyState } from '../../shared/ui/EmptyState';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
-import { DETECT_SLOW_HINT_THRESHOLD_SEC, SUPPORTED_VIDEO_URL } from './downloads.constants';
+import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
+import {
+  DEFAULT_QUALITY_OPTIONS,
+  DETECT_SLOW_HINT_THRESHOLD_SEC,
+  SUPPORTED_VIDEO_URL,
+} from './downloads.constants';
 import { useDownloadJobs } from './useDownloadJobs';
 import { useUrlDropTarget } from './useUrlDropTarget';
 import { useVideoDetect } from './useVideoDetect';
@@ -35,8 +41,9 @@ type CompletedView = 'list' | 'grid';
 
 const durationBadgeStyle = { background: 'rgba(0,0,0,0.55)' } as const;
 const errorBannerStyle = {
-  background: 'rgba(235,72,72,0.08)',
-  color: '#FF7878',
+  background: 'var(--color-danger-bg)',
+  color: 'var(--color-danger-fg)',
+  border: '1px solid var(--color-danger-border)',
 } as const;
 
 export const DownloadsShell = () => {
@@ -45,6 +52,7 @@ export const DownloadsShell = () => {
   const [playing, setPlaying] = useState<string | null>(null);
   const [completedView, setCompletedView] = useState<CompletedView>('grid');
   const [clearCompletedOpen, setClearCompletedOpen] = useState(false);
+  const cancelConfirm = useSuppressibleConfirm<number>('downloader.cancel');
   const { toast } = useToast();
   const { announce } = useAnnounce();
 
@@ -52,10 +60,35 @@ export const DownloadsShell = () => {
   const { detecting, elapsedSec, quick, detected, error: detectError, run, cancel: cancelDetect, reset } = detectState;
   const { active, completed, reload } = useDownloadJobs();
 
-  // Keep the selected quality in sync with whatever the detect pipeline
-  // last surfaced. Picking manually later overrides this.
+  // Quality options we actually render: real ones from the full detect when
+  // available, otherwise the generic ladder so the user can pick + download
+  // immediately after pasting a URL instead of waiting ~20 s for
+  // `yt-dlp --dump-json`. The runner resolves format at download time from
+  // `height` + `kind`, so placeholder `format_id`s on the defaults are fine.
+  const qualityOptions: QualityOption[] =
+    detected?.qualities && detected.qualities.length > 0
+      ? detected.qualities
+      : (DEFAULT_QUALITY_OPTIONS as unknown as QualityOption[]);
+
+  // When the full detect resolves, swap the user's selected placeholder for
+  // the matching real option (same height + kind) so the eventual Download
+  // click carries the richer format_id. If they haven't picked yet, seed to
+  // 1080p by default.
   useEffect(() => {
-    if (detected) setPickedFormat(detected.qualities[0] ?? null);
+    if (!detected) return;
+    setPickedFormat((prev) => {
+      if (!prev) {
+        return (
+          detected.qualities.find((q) => q.kind === 'video' && q.height === 1080) ??
+          detected.qualities[0] ??
+          null
+        );
+      }
+      const matched = detected.qualities.find(
+        (q) => q.kind === prev.kind && q.height === prev.height
+      );
+      return matched ?? prev;
+    });
   }, [detected]);
 
   const runDetect = useCallback(
@@ -93,15 +126,21 @@ export const DownloadsShell = () => {
   const { isDragOver, handlers: dropHandlers } = useUrlDropTarget(onUrlDropped);
 
   const startDownload = useCallback(async () => {
-    if (!detected || !pickedFormat) return;
+    const chosen = pickedFormat ?? qualityOptions[0] ?? null;
+    if (!url.trim() || !chosen) return;
+    // Prefer full-detect metadata if it already landed; otherwise use the
+    // oEmbed quick preview. Neither is required — the backend can download
+    // from just a URL + height/kind.
+    const title = detected?.info.title ?? quick?.preview.title ?? null;
+    const thumbnail = detected?.info.thumbnail ?? quick?.preview.thumbnail ?? null;
     try {
       await start({
         url: url.trim(),
-        title: detected.info.title,
-        thumbnail: detected.info.thumbnail,
-        format_id: pickedFormat.format_id,
-        height: pickedFormat.height ?? null,
-        kind: pickedFormat.kind,
+        title,
+        thumbnail,
+        format_id: chosen.format_id.startsWith('auto-') ? null : chosen.format_id,
+        height: chosen.height ?? null,
+        kind: chosen.kind,
       });
       reset();
       setPickedFormat(null);
@@ -118,11 +157,24 @@ export const DownloadsShell = () => {
         action: { label: 'Retry', onClick: () => void startDownload() },
       });
     }
-  }, [detected, pickedFormat, url, reset, reload, toast, announce]);
+  }, [detected, quick, pickedFormat, qualityOptions, url, reset, reload, toast, announce]);
 
+  const performCancel = useCallback(
+    (id: number) => {
+      cancel(id)
+        .then(() => {
+          reload();
+          announce('Download cancelled');
+        })
+        .catch((err) =>
+          toast({ title: 'Cancel failed', description: String(err), variant: 'error' }),
+        );
+    },
+    [reload, toast, announce],
+  );
   const handleCancelJob = useCallback(
-    (id: number) => () => cancel(id).then(reload),
-    [reload]
+    (id: number) => () => cancelConfirm.request(id, performCancel),
+    [cancelConfirm, performCancel]
   );
   const handlePauseJob = useCallback(
     (id: number) => () => pause(id).then(reload),
@@ -171,18 +223,12 @@ export const DownloadsShell = () => {
           .catch((err) => toast({ title: 'Action failed', description: String(err), variant: 'error' }));
       } else if (e.key === 'Backspace' && active.length > 0) {
         e.preventDefault();
-        const job = active[0];
-        cancel(job.id)
-          .then(() => {
-            reload();
-            announce('Download cancelled');
-          })
-          .catch((err) => toast({ title: 'Cancel failed', description: String(err), variant: 'error' }));
+        cancelConfirm.request(active[0].id, performCancel);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [active, reload, toast, announce]);
+  }, [active, reload, toast, cancelConfirm, performCancel]);
 
   return (
     <div
@@ -205,29 +251,14 @@ export const DownloadsShell = () => {
         </div>
       )}
 
-      {quick && !detected && (
+      {(detected || quick) && (
         <DetectedPreviewCard
-          muted
-          platform={quick.platform}
-          title={quick.preview.title}
-          uploader={quick.preview.uploader}
-          thumbnail={quick.preview.thumbnail}
-          footerText={
-            <span className="flex items-center gap-1.5">
-              <Spinner size={12} /> Resolving quality options…
-            </span>
-          }
-        />
-      )}
-
-      {detected && (
-        <DetectedPreviewCard
-          platform={detected.platform}
-          title={detected.info.title}
-          uploader={detected.info.uploader}
-          thumbnail={detected.info.thumbnail}
+          platform={detected?.platform ?? quick!.platform}
+          title={detected?.info.title ?? quick!.preview.title}
+          uploader={detected?.info.uploader ?? quick!.preview.uploader}
+          thumbnail={detected?.info.thumbnail ?? quick!.preview.thumbnail}
           overlayBadge={
-            detected.info.duration ? (
+            detected?.info.duration ? (
               <div
                 className="absolute bottom-1 right-1 text-[10px] font-mono text-white/90 px-1 rounded"
                 style={durationBadgeStyle}
@@ -236,11 +267,19 @@ export const DownloadsShell = () => {
               </div>
             ) : undefined
           }
-          footerText={`${detected.qualities.length} quality options`}
+          footerText={
+            detected
+              ? `${detected.qualities.length} quality options`
+              : (
+                <span className="flex items-center gap-1.5">
+                  <Spinner size={12} /> Fetching exact sizes — pick a quality and download now
+                </span>
+              )
+          }
           trailing={
             <QualityPicker
-              options={detected.qualities}
-              selected={pickedFormat}
+              options={qualityOptions}
+              selected={pickedFormat ?? qualityOptions[0] ?? null}
               onSelect={setPickedFormat}
               onDownload={startDownload}
             />
@@ -313,9 +352,10 @@ export const DownloadsShell = () => {
         )}
 
         {active.length === 0 && completed.length === 0 && !detected && (
-          <div className="h-full flex items-center justify-center t-tertiary text-meta pt-24">
-            No downloads yet — paste a URL above.
-          </div>
+          <EmptyState
+            title="No downloads yet"
+            description="Paste a video URL above or drop one in — YouTube, TikTok, Instagram, X, Reddit, Vimeo, Twitch and more."
+          />
         )}
         <div className="h-6" />
       </div>
@@ -340,6 +380,17 @@ export const DownloadsShell = () => {
             );
         }}
         onCancel={() => setClearCompletedOpen(false)}
+      />
+      <ConfirmDialog
+        open={cancelConfirm.open}
+        title="Cancel this download?"
+        description="The in-progress file will be removed and the job stopped."
+        confirmLabel="Cancel download"
+        cancelLabel="Keep downloading"
+        tone="danger"
+        suppressibleLabel="Don't ask again"
+        onConfirm={(suppress) => cancelConfirm.confirm(!!suppress)}
+        onCancel={cancelConfirm.cancel}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from './Button';
 import { useFocusTrap } from './useFocusTrap';
 
@@ -9,7 +9,9 @@ type Props = {
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: 'default' | 'danger';
-  onConfirm: () => void;
+  /** When provided, renders a "Don't ask again" checkbox. */
+  suppressibleLabel?: string;
+  onConfirm: (suppress?: boolean) => void;
   onCancel: () => void;
 };
 
@@ -20,12 +22,18 @@ export const ConfirmDialog = ({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   tone = 'default',
+  suppressibleLabel,
   onConfirm,
   onCancel,
 }: Props) => {
   const panelRef = useRef<HTMLDivElement>(null);
+  const [suppress, setSuppress] = useState(false);
 
   useFocusTrap(panelRef, open, { initialFocus: tone === 'danger' ? 'first' : 'last' });
+
+  useEffect(() => {
+    if (!open) setSuppress(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -37,12 +45,12 @@ export const ConfirmDialog = ({
         const active = document.activeElement as HTMLElement | null;
         if (active?.dataset.role === 'confirm-cancel') return;
         e.preventDefault();
-        onConfirm();
+        onConfirm(suppressibleLabel ? suppress : undefined);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onConfirm, onCancel]);
+  }, [open, onConfirm, onCancel, suppress, suppressibleLabel]);
 
   if (!open) return null;
   return (
@@ -66,17 +74,32 @@ export const ConfirmDialog = ({
         ) : (
           <div className="mb-2" />
         )}
-        <div className="flex justify-end gap-2 mt-2">
-          <Button onClick={onCancel} variant="ghost" data-role="confirm-cancel">
-            {cancelLabel}
-          </Button>
-          <Button
-            onClick={onConfirm}
-            variant={tone === 'danger' ? 'soft' : 'solid'}
-            tone={tone === 'danger' ? 'danger' : 'accent'}
-          >
-            {confirmLabel}
-          </Button>
+        <div className="flex items-center justify-between gap-2 mt-2">
+          {suppressibleLabel ? (
+            <label className="flex items-center gap-1.5 t-secondary text-meta select-none cursor-pointer">
+              <input
+                type="checkbox"
+                checked={suppress}
+                onChange={(e) => setSuppress(e.target.checked)}
+                className="ring-focus"
+              />
+              {suppressibleLabel}
+            </label>
+          ) : (
+            <span />
+          )}
+          <div className="flex items-center gap-2">
+            <Button onClick={onCancel} variant="ghost" data-role="confirm-cancel">
+              {cancelLabel}
+            </Button>
+            <Button
+              onClick={() => onConfirm(suppressibleLabel ? suppress : undefined)}
+              variant={tone === 'danger' ? 'soft' : 'solid'}
+              tone={tone === 'danger' ? 'danger' : 'accent'}
+            >
+              {confirmLabel}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

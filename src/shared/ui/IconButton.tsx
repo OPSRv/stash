@@ -25,7 +25,7 @@ export const IconButton = ({
         if (stopPropagation) e.stopPropagation();
         onClick(e);
       }}
-      className={`w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors ${toneClass}`}
+      className={`ring-focus w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors ${toneClass}`}
     >
       {children}
     </button>

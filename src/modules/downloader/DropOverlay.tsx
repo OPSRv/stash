@@ -1,7 +1,7 @@
 const overlayStyle = {
   background: 'rgba(var(--stash-accent-rgb),0.12)',
   border: '2px dashed rgba(var(--stash-accent-rgb),0.6)',
-  borderRadius: 14,
+  borderRadius: 'var(--radius-lg)',
 } as const;
 
 export const DropOverlay = () => (

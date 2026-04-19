@@ -42,4 +42,17 @@ describe('Row', () => {
     render(<Row primary="x" pinned />);
     expect(screen.getByRole('option')).toHaveClass('row-pinned');
   });
+
+  it('disables native text selection so clicks do not highlight content', () => {
+    render(<Row primary="x" />);
+    expect(screen.getByRole('option')).toHaveClass('select-none');
+  });
+
+  it('applies row-selected class (tokenised outline) when selected', () => {
+    render(<Row primary="x" selected />);
+    const row = screen.getByRole('option');
+    expect(row).toHaveClass('row-selected');
+    // Inline outline style must be gone — styling comes from .row-selected in tokens.css.
+    expect(row.getAttribute('style')).toBeNull();
+  });
 });

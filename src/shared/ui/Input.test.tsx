@@ -45,4 +45,16 @@ describe('Input', () => {
     render(<Input ref={ref} placeholder="r" />);
     expect(ref.current).toBeInstanceOf(HTMLInputElement);
   });
+
+  it('has focus-visible ring utility class (bare input)', () => {
+    const { container } = render(<Input placeholder="r" />);
+    expect((container.firstChild as HTMLElement).className).toContain('ring-focus');
+  });
+
+  it('has focus-within ring on wrapper when decorated', () => {
+    const { container } = render(
+      <Input placeholder="r" leadingIcon={<span data-testid="l" />} />,
+    );
+    expect((container.firstChild as HTMLElement).className).toContain('ring-focus-within');
+  });
 });

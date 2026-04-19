@@ -59,4 +59,50 @@ describe('ConfirmDialog', () => {
     fireEvent.click(screen.getByText('Yes'));
     expect(onConfirm).toHaveBeenCalledOnce();
   });
+
+  it('renders "Don\'t ask again" checkbox when suppressibleLabel is set', () => {
+    render(
+      <ConfirmDialog
+        open
+        title="T"
+        suppressibleLabel="Don't ask again"
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText("Don't ask again")).toBeInTheDocument();
+  });
+
+  it('passes suppress flag to onConfirm when checkbox is ticked', () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        title="T"
+        confirmLabel="Yes"
+        suppressibleLabel="Don't ask again"
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByText('Yes'));
+    expect(onConfirm).toHaveBeenCalledWith(true);
+  });
+
+  it('passes false when suppressible but unchecked', () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        open
+        title="T"
+        confirmLabel="Yes"
+        suppressibleLabel="Don't ask again"
+        onConfirm={onConfirm}
+        onCancel={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByText('Yes'));
+    expect(onConfirm).toHaveBeenCalledWith(false);
+  });
 });

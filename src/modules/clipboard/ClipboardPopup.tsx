@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -10,6 +11,7 @@ import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { EmptyState } from '../../shared/ui/EmptyState';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
@@ -29,6 +31,9 @@ import { iconFor, typeTint } from './icons';
 import { useLinkPreview } from './useLinkPreview';
 import { detect as detectVideo, start as startDownload, type DetectedVideo } from '../downloader/api';
 import { PlatformBadge } from '../downloader/PlatformBadge';
+import { notesCreate } from '../notes/api';
+import { PreviewDialog } from './PreviewDialog';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 const iso = (ts: number) => {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
@@ -59,6 +64,18 @@ const TrashIcon = () => (
   </svg>
 );
 
+const EyeIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z" />
+    <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+const PREVIEW_MIN_CHARS = 280;
+const PREVIEW_MIN_LINES = 4;
+const isLongText = (s: string) =>
+  s.length >= PREVIEW_MIN_CHARS || s.split('\n').length >= PREVIEW_MIN_LINES;
+
 export const ClipboardPopup = () => {
   const [rawItems, setRawItems] = useState<ClipboardItem[]>([]);
   const [query, setQuery] = useState('');
@@ -71,6 +88,8 @@ export const ClipboardPopup = () => {
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [copyFlash, setCopyFlash] = useState(false);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const deleteConfirm = useSuppressibleConfirm<number>('clipboard.delete');
+  const [previewId, setPreviewId] = useState<number | null>(null);
   const { toast } = useToast();
   const { announce } = useAnnounce();
 
@@ -229,7 +248,7 @@ export const ClipboardPopup = () => {
     [reload]
   );
 
-  const handleDelete = useCallback(
+  const performDelete = useCallback(
     (id: number) => {
       deleteItem(id)
         .then(reload)
@@ -241,9 +260,57 @@ export const ClipboardPopup = () => {
     [reload, toast]
   );
 
+  const handleDelete = useCallback(
+    (id: number) => {
+      deleteConfirm.request(id, performDelete);
+    },
+    [deleteConfirm, performDelete]
+  );
+
   const handleClearAll = useCallback(() => {
     setClearConfirmOpen(true);
   }, []);
+
+  const previewItem = useMemo(
+    () => (previewId == null ? null : rawItems.find((i) => i.id === previewId) ?? null),
+    [previewId, rawItems]
+  );
+
+  const closePreview = useCallback(() => setPreviewId(null), []);
+
+  const handlePreviewCopy = useCallback(async () => {
+    if (!previewItem) return;
+    try {
+      await writeText(previewItem.content);
+      toast({ title: 'Copied', variant: 'success', durationMs: 2000 });
+    } catch (e) {
+      console.error('copy failed:', e);
+      toast({ title: 'Copy failed', description: String(e), variant: 'error' });
+    }
+  }, [previewItem, toast]);
+
+  const handleSaveToNote = useCallback(async () => {
+    if (!previewItem) return;
+    const body = previewItem.content;
+    const firstLine = body.split('\n').find((l) => l.trim().length > 0) ?? '';
+    const title = firstLine.length > 60 ? `${firstLine.slice(0, 57).trimEnd()}…` : firstLine;
+    try {
+      await notesCreate(title, body);
+      toast({
+        title: 'Saved to notes',
+        variant: 'success',
+        action: {
+          label: 'Open Notes',
+          onClick: () =>
+            window.dispatchEvent(new CustomEvent('stash:navigate', { detail: 'notes' })),
+        },
+      });
+      setPreviewId(null);
+    } catch (e) {
+      console.error('save to note failed:', e);
+      toast({ title: 'Save failed', description: String(e), variant: 'error' });
+    }
+  }, [previewItem, toast]);
 
   const confirmClearAll = useCallback(() => {
     setClearConfirmOpen(false);
@@ -353,10 +420,14 @@ export const ClipboardPopup = () => {
       }
       const item = flat[index];
       if (!item) return;
+      const typingInInput = (e.target as HTMLElement | null)?.tagName === 'INPUT';
       if (e.metaKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         handleTogglePin(item.id);
-      } else if (e.key === 'Backspace' && (e.target as HTMLElement | null)?.tagName !== 'INPUT') {
+      } else if (e.key === ' ' && !typingInInput && item.kind === 'text') {
+        e.preventDefault();
+        setPreviewId(item.id);
+      } else if (e.key === 'Backspace' && !typingInInput) {
         e.preventDefault();
         handleDelete(item.id);
       }
@@ -408,6 +479,14 @@ export const ClipboardPopup = () => {
         iconColor={tint.fg}
         actions={
           <>
+            {item.kind === 'text' && isLongText(item.content) && (
+              <IconButton
+                onClick={() => setPreviewId(item.id)}
+                title="Preview (Space)"
+              >
+                <EyeIcon />
+              </IconButton>
+            )}
             <IconButton onClick={() => handleTogglePin(item.id)} title={item.pinned ? 'Unpin' : 'Pin'}>
               <PinIcon filled={item.pinned} />
             </IconButton>
@@ -441,7 +520,7 @@ export const ClipboardPopup = () => {
       {selectionCount > 0 && (
         <div
           className="px-3 py-1.5 flex items-center justify-between border-b hair"
-          style={{ background: 'rgba(47,122,229,0.08)' }}
+          style={{ background: 'rgba(var(--stash-accent-rgb),0.08)' }}
         >
           <span className="t-primary text-meta font-medium">
             {selectionCount} selected
@@ -468,7 +547,7 @@ export const ClipboardPopup = () => {
       />
 
       {videoBanner && (
-        <div className="mx-2 mt-2 p-2 rounded-lg flex items-center gap-2" style={{ background: 'rgba(47,122,229,0.08)', border: '1px solid rgba(47,122,229,0.25)' }}>
+        <div className="mx-2 mt-2 p-2 rounded-lg flex items-center gap-2" style={{ background: 'rgba(var(--stash-accent-rgb),0.08)', border: '1px solid rgba(var(--stash-accent-rgb),0.25)' }}>
           <div className="w-10 h-7 rounded overflow-hidden shrink-0 bg-black/50">
             {videoBanner.info.thumbnail && (
               <img src={videoBanner.info.thumbnail} alt="" className="w-full h-full object-cover" />
@@ -553,6 +632,23 @@ export const ClipboardPopup = () => {
         onConfirm={confirmClearAll}
         onCancel={() => setClearConfirmOpen(false)}
       />
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        title="Delete this item?"
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        tone="danger"
+        suppressibleLabel="Don't ask again"
+        onConfirm={(suppress) => deleteConfirm.confirm(!!suppress)}
+        onCancel={deleteConfirm.cancel}
+      />
+      <PreviewDialog
+        open={previewItem !== null && previewItem.kind === 'text'}
+        text={previewItem?.content ?? ''}
+        onClose={closePreview}
+        onCopy={handlePreviewCopy}
+        onSaveToNote={handleSaveToNote}
+      />
     </div>
   );
 };
@@ -611,15 +707,18 @@ const VirtualList = ({ empty, query, pinned, recent, renderRow }: VirtualListPro
 
   if (empty && !query) {
     return (
-      <div className="flex-1 overflow-hidden flex items-center justify-center t-tertiary text-meta">
-        No clipboard items yet — copy something.
+      <div className="flex-1 overflow-hidden flex items-center justify-center">
+        <EmptyState
+          title="Nothing copied yet"
+          description="Copy anything — text, a link, an image — and it shows up here. Press Enter to paste at the cursor."
+        />
       </div>
     );
   }
   if (empty && query) {
     return (
-      <div className="flex-1 overflow-hidden p-4 t-tertiary text-meta text-center">
-        No clipboard items match.
+      <div className="flex-1 overflow-hidden flex items-center justify-center">
+        <EmptyState variant="compact" title="No matches" description="Try a different search." />
       </div>
     );
   }

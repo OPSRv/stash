@@ -1,12 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { invoke } from '@tauri-apps/api/core';
 import { SearchInput } from '../../shared/ui/SearchInput';
-import { SectionLabel } from '../../shared/ui/SectionLabel';
+import { Button } from '../../shared/ui/Button';
+import { IconButton } from '../../shared/ui/IconButton';
+import { SegmentedControl } from '../../shared/ui/SegmentedControl';
+import { DownloadIcon, TrashIcon, UploadIcon } from '../../shared/ui/icons';
+import { useToast } from '../../shared/ui/Toast';
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { EmptyState } from '../../shared/ui/EmptyState';
+import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
+import { NoteEditor, type NotesViewMode } from './NoteEditor';
+import { MarkdownPreview } from './MarkdownPreview';
+import { toggleCheckboxAtLine } from './markdown';
 import {
   notesCreate,
   notesDelete,
   notesList,
+  notesReadFile,
   notesSearch,
   notesUpdate,
+  notesWriteFile,
   type Note,
 } from './api';
 
@@ -20,14 +34,23 @@ const iso = (ts: number) => {
 
 const AUTOSAVE_DEBOUNCE_MS = 400;
 
+const VIEW_MODE_OPTIONS = [
+  { value: 'edit' as const, label: 'Edit', title: 'Editor only' },
+  { value: 'split' as const, label: 'Split', title: 'Editor + preview' },
+  { value: 'preview' as const, label: 'Preview', title: 'Preview only' },
+];
+
 export const NotesShell = () => {
   const [notes, setNotes] = useState<Note[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
+  const [viewMode, setViewMode] = useState<NotesViewMode>('split');
   const saveTimer = useRef<number | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const { toast } = useToast();
 
   const reload = useCallback(async () => {
     const data = query.trim() ? await notesSearch(query) : await notesList();
@@ -37,7 +60,6 @@ export const NotesShell = () => {
 
   useEffect(() => {
     reload().then((data) => {
-      // If no active note, select the most recent one.
       if (activeId == null && data.length > 0) {
         setActiveId(data[0].id);
       }
@@ -50,7 +72,6 @@ export const NotesShell = () => {
     [notes, activeId]
   );
 
-  // Load the selected note into the editor whenever the selection changes.
   useEffect(() => {
     if (active) {
       setTitle(active.title);
@@ -94,20 +115,89 @@ export const NotesShell = () => {
     scheduleSave(title, v);
   };
 
+  const onToggleCheckbox = useCallback(
+    (line: number) => {
+      const next = toggleCheckboxAtLine(body, line);
+      if (next !== body) {
+        setBody(next);
+        scheduleSave(title, next);
+      }
+    },
+    [body, title, scheduleSave]
+  );
+
   const newNote = async () => {
     const id = await notesCreate('', '');
     setActiveId(id);
     await reload();
   };
 
-  const removeActive = async () => {
+  const deleteConfirm = useSuppressibleConfirm<number>('notes.delete');
+
+  const performDelete = useCallback(
+    async (id: number) => {
+      await notesDelete(id);
+      setActiveId(null);
+      setTitle('');
+      setBody('');
+      await reload();
+    },
+    [reload]
+  );
+
+  const removeActive = () => {
     if (activeId == null) return;
-    await notesDelete(activeId);
-    setActiveId(null);
-    setTitle('');
-    setBody('');
-    await reload();
+    deleteConfirm.request(activeId, performDelete);
   };
+
+  const onImport = useCallback(async () => {
+    // Suspend popup auto-hide so focus shifting to the native file picker
+    // does not blur-dismiss the popup and immediately close the dialog.
+    await invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        directory: false,
+        filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
+      });
+      if (!picked || typeof picked !== 'string') return;
+      const result = await notesReadFile(picked);
+      const id = await notesCreate(result.name, result.contents);
+      setActiveId(id);
+      await reload();
+      toast({ title: 'Imported', description: result.name, variant: 'success' });
+    } catch (e) {
+      console.error('import failed', e);
+      toast({ title: 'Import failed', description: String(e), variant: 'error' });
+    } finally {
+      await invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
+    }
+  }, [reload, toast]);
+
+  const onExport = useCallback(async () => {
+    await invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
+    try {
+      const defaultName = (title.trim() || 'note').replace(/[\\/:*?"<>|]/g, '-');
+      const picked = await saveDialog({
+        defaultPath: `${defaultName}.md`,
+        filters: [{ name: 'Markdown', extensions: ['md'] }],
+      });
+      if (!picked) return;
+      const contents = title.trim() ? `# ${title.trim()}\n\n${body}` : body;
+      await notesWriteFile(picked, contents);
+      toast({ title: 'Exported', description: picked, variant: 'success' });
+    } catch (e) {
+      console.error('export failed', e);
+      toast({ title: 'Export failed', description: String(e), variant: 'error' });
+    } finally {
+      await invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
+    }
+  }, [title, body, toast]);
+
+  const isEditing = active || (activeId === null && (title || body));
+  const exportDisabled = !body && !title;
+  const showEditor = viewMode !== 'preview';
+  const showPreview = viewMode !== 'edit';
 
   return (
     <div className="h-full flex">
@@ -119,80 +209,147 @@ export const NotesShell = () => {
           shortcutHint="⌘K"
           inputRef={searchRef}
         />
-        <div className="px-2 py-1 flex items-center justify-between">
-          <SectionLabel>{notes.length} notes</SectionLabel>
-          <button
+        <div className="px-3 pt-1 pb-2">
+          <Button
+            size="sm"
+            variant="soft"
+            tone="accent"
             onClick={newNote}
-            className="t-primary text-meta px-2 py-0.5 rounded"
-            style={{ background: 'rgba(var(--stash-accent-rgb), 0.22)' }}
             title="New note (⌘N)"
+            className="w-full justify-center"
           >
-            + New
-          </button>
+            + New note
+          </Button>
         </div>
         <div className="flex-1 overflow-y-auto nice-scroll">
           {notes.map((n) => (
             <button
               key={n.id}
               onClick={() => setActiveId(n.id)}
-              className={`w-full text-left px-3 py-2 flex flex-col gap-0.5 ${
+              className={`w-full text-left px-3 py-2 cursor-pointer ${
                 n.id === activeId ? 'row-active' : ''
               }`}
             >
-              <span className="t-primary text-body font-medium truncate">
-                {n.title || <span className="t-tertiary">Untitled</span>}
-              </span>
-              <span className="t-tertiary text-meta truncate">
-                {n.body.split('\n')[0] || 'No content'}
-              </span>
-              <span className="t-tertiary text-[10px] font-mono">
-                {iso(n.updated_at)}
-              </span>
+              <div className="flex items-baseline gap-2">
+                <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
+                  {n.title || <span className="t-tertiary">Untitled</span>}
+                </span>
+                <span className="t-tertiary text-[10px] font-mono shrink-0">
+                  {iso(n.updated_at)}
+                </span>
+              </div>
+              <div className="t-tertiary text-meta truncate mt-0.5">
+                {n.body.split('\n').find((l) => l.trim()) || 'No content'}
+              </div>
             </button>
           ))}
           {notes.length === 0 && (
-            <div className="p-4 t-tertiary text-meta text-center">
-              {query ? 'No matches.' : 'No notes yet. Click + New.'}
-            </div>
+            <EmptyState
+              variant="compact"
+              title={query ? 'No matches' : 'No notes yet'}
+              description={query ? 'Try a different search.' : 'Create your first note below.'}
+            />
           )}
+        </div>
+        <div className="px-3 py-2 border-t hair">
+          <button
+            type="button"
+            onClick={onImport}
+            className="w-full inline-flex items-center justify-center gap-1.5 t-tertiary hover:t-secondary text-meta"
+            title="Import .md file"
+          >
+            <UploadIcon size={12} />
+            Import .md file
+          </button>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col">
-        {active || (activeId === null && (title || body)) ? (
+      <main className="flex-1 flex flex-col min-w-0">
+        {isEditing ? (
           <>
-            <div className="px-4 pt-3 pb-2 flex items-center gap-2 border-b hair">
+            <div className="px-4 pt-3 pb-2 flex items-center gap-3 border-b hair">
               <input
                 value={title}
                 onChange={(e) => onTitleChange(e.currentTarget.value)}
-                placeholder="Title"
-                className="flex-1 bg-transparent outline-none t-primary text-heading font-medium"
+                placeholder="Untitled"
+                className="flex-1 bg-transparent outline-none t-primary text-heading font-medium min-w-0"
               />
-              {activeId !== null && (
-                <button
-                  onClick={removeActive}
-                  className="t-tertiary hover:text-red-400 text-meta px-2 py-1 rounded"
-                  style={{ background: 'rgba(255,255,255,0.04)' }}
-                  title="Delete note"
+              <SegmentedControl
+                size="sm"
+                options={VIEW_MODE_OPTIONS}
+                value={viewMode}
+                onChange={setViewMode}
+                ariaLabel="View mode"
+              />
+              <div className="flex items-center gap-1 shrink-0">
+                <IconButton
+                  onClick={onExport}
+                  title={exportDisabled ? 'Nothing to export' : 'Export as .md'}
+                  stopPropagation={false}
                 >
-                  Delete
-                </button>
+                  <DownloadIcon size={13} />
+                </IconButton>
+                {activeId !== null && (
+                  <IconButton
+                    onClick={removeActive}
+                    title="Delete note"
+                    tone="danger"
+                    stopPropagation={false}
+                  >
+                    <TrashIcon size={13} />
+                  </IconButton>
+                )}
+              </div>
+            </div>
+            <div className="flex-1 flex min-h-0">
+              {showEditor && (
+                <div
+                  className={`flex flex-col min-h-0 ${showPreview ? 'w-1/2 border-r hair' : 'flex-1'}`}
+                >
+                  <NoteEditor
+                    value={body}
+                    onChange={onBodyChange}
+                    placeholder="Write markdown — headings, lists, - [ ] checklists…"
+                    textareaRef={editorRef}
+                  />
+                </div>
+              )}
+              {showPreview && (
+                <div
+                  className={`${showEditor ? 'w-1/2' : 'flex-1'} overflow-y-auto nice-scroll px-5 py-4`}
+                >
+                  <MarkdownPreview source={body} onToggleCheckbox={onToggleCheckbox} />
+                </div>
               )}
             </div>
-            <textarea
-              value={body}
-              onChange={(e) => onBodyChange(e.currentTarget.value)}
-              placeholder="Write markdown or plain text…"
-              className="flex-1 bg-transparent outline-none resize-none px-4 py-3 t-primary text-body font-mono leading-relaxed"
-              spellCheck={false}
-            />
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center t-tertiary text-meta">
-            Select a note or click + New.
-          </div>
+          <EmptyState
+            title="Your scratchpad"
+            description="Markdown notes with live preview. Press ⌘⇧N anywhere to quick-open."
+            action={
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="soft" tone="accent" onClick={newNote}>
+                  + New note
+                </Button>
+                <Button size="sm" variant="ghost" onClick={onImport}>
+                  Import .md
+                </Button>
+              </div>
+            }
+          />
         )}
       </main>
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        title="Delete this note?"
+        description="The note and its contents will be removed. This cannot be undone."
+        confirmLabel="Delete"
+        tone="danger"
+        suppressibleLabel="Don't ask again"
+        onConfirm={(suppress) => deleteConfirm.confirm(!!suppress)}
+        onCancel={deleteConfirm.cancel}
+      />
     </div>
   );
 };

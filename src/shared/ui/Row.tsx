@@ -28,7 +28,7 @@ export const Row = ({
   selected = false,
 }: RowProps) => {
   const classes = [
-    'group mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2 cursor-pointer',
+    'group mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2 cursor-pointer select-none',
     selected ? 'row-selected' : '',
     active ? 'row-active' : pinned ? 'row-pinned' : '',
   ]
@@ -41,7 +41,6 @@ export const Row = ({
       aria-selected={active ? 'true' : 'false'}
       onClick={(e) => onSelect?.(e)}
       className={classes}
-      style={selected ? { outline: '1px solid rgba(47,122,229,0.55)', background: 'rgba(47,122,229,0.08)' } : undefined}
     >
       {icon && (
         <div

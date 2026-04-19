@@ -1,4 +1,5 @@
 import { CloseIcon, PauseIcon, PlayIcon } from '../../shared/ui/icons';
+import { Card } from '../../shared/ui/Card';
 import { PlatformBadge } from './PlatformBadge';
 import { formatBytes, type DownloadJob } from './api';
 import { STATUS_LABELS } from './downloads.constants';
@@ -9,11 +10,6 @@ interface ActiveDownloadRowProps {
   onPause: () => void;
   onResume: () => void;
 }
-
-const cardStyle = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.05)',
-} as const;
 
 const thumbStyle = { background: 'rgba(0,0,0,0.4)' } as const;
 const trackStyle = { background: 'rgba(255,255,255,0.08)' } as const;
@@ -32,9 +28,10 @@ export const ActiveDownloadRow = ({
   const isPaused = job.status === 'paused';
 
   return (
-    <div
-      className="mx-3 my-1 p-3 rounded-xl flex items-center gap-3"
-      style={cardStyle}
+    <Card
+      padding="md"
+      rounded="xl"
+      className="mx-3 my-1 flex items-center gap-3"
     >
       <div
         className="w-13 h-8 rounded-md shrink-0 overflow-hidden"
@@ -91,6 +88,6 @@ export const ActiveDownloadRow = ({
       >
         <CloseIcon />
       </button>
-    </div>
+    </Card>
   );
 };

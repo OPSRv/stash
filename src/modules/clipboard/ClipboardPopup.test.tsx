@@ -63,7 +63,7 @@ describe('ClipboardPopup', () => {
     mockInvoke.mockImplementation(async () => []);
     render(<ClipboardPopup />);
     await waitFor(() => {
-      expect(screen.getByText(/no clipboard items/i)).toBeInTheDocument();
+      expect(screen.getByText(/nothing copied yet/i)).toBeInTheDocument();
     });
   });
 
@@ -91,12 +91,26 @@ describe('ClipboardPopup', () => {
     });
   });
 
-  it('Backspace deletes active item', async () => {
+  it('Backspace opens a delete confirmation (not immediate delete)', async () => {
     const user = userEvent.setup();
     render(<ClipboardPopup />);
     await waitFor(() => expect(screen.getByText('pinned link')).toBeInTheDocument());
 
     await user.keyboard('{Backspace}');
+
+    expect(await screen.findByText('Delete this item?')).toBeInTheDocument();
+    expect(mockInvoke).not.toHaveBeenCalledWith('clipboard_delete', { id: 1 });
+  });
+
+  it('confirming the dialog performs the delete', async () => {
+    const user = userEvent.setup();
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('pinned link')).toBeInTheDocument());
+
+    await user.keyboard('{Backspace}');
+    await screen.findByText('Delete this item?');
+    const deleteButtons = screen.getAllByText('Delete').filter((el) => el.tagName === 'BUTTON');
+    await user.click(deleteButtons[deleteButtons.length - 1]!);
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith('clipboard_delete', { id: 1 });
