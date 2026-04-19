@@ -14,3 +14,15 @@ export const STATUS_LABELS = {
 } as const;
 
 export const DETECT_SLOW_HINT_THRESHOLD_SEC = 8;
+
+/// Generic quality ladder shown the instant we know a URL is a video — lets
+/// the user pick + start a download without waiting for the full yt-dlp
+/// `--dump-json` round-trip (which can take 20+ s on YouTube). The runner
+/// only needs `height` + `kind` to build its format selector, so the empty
+/// `format_id` is fine — it's purely a UI-side key.
+export const DEFAULT_QUALITY_OPTIONS = [
+  { label: '1080p', format_id: 'auto-1080', kind: 'video', height: 1080 },
+  { label: '720p', format_id: 'auto-720', kind: 'video', height: 720 },
+  { label: '480p', format_id: 'auto-480', kind: 'video', height: 480 },
+  { label: 'Audio', format_id: 'auto-audio', kind: 'audio', height: null },
+] as const;

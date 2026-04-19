@@ -12,6 +12,7 @@
     "clipboard-manager:allow-read-text",
     "opener:allow-reveal-item-in-dir",
     "notification:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }

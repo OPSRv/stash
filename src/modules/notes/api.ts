@@ -20,3 +20,11 @@ export const notesUpdate = (
 ): Promise<void> => invoke('notes_update', { id, title, body });
 export const notesDelete = (id: number): Promise<void> =>
   invoke('notes_delete', { id });
+
+export type ReadFileResult = { name: string; contents: string };
+
+export const notesReadFile = (path: string): Promise<ReadFileResult> =>
+  invoke('notes_read_file', { path });
+
+export const notesWriteFile = (path: string, content: string): Promise<void> =>
+  invoke('notes_write_file', { path, content });

@@ -1,8 +1,12 @@
+import { lazy } from 'react';
 import type { ModuleDefinition } from '../modules/types';
-import { SettingsShell } from './SettingsShell';
+
+const load = () =>
+  import('./SettingsShell').then((m) => ({ default: m.SettingsShell }));
 
 export const settingsModule: ModuleDefinition = {
   id: 'settings',
   title: 'Settings',
-  PopupView: SettingsShell,
+  PopupView: lazy(load),
+  preloadPopup: load,
 };

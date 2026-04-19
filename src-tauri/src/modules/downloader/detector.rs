@@ -223,18 +223,20 @@ fn run_dump_json(
         // the detect for the full TCP timeout (~75 s) per player_client.
         "--socket-timeout",
         "10",
+        // Cap yt-dlp's own retry loop so a flaky endpoint can't turn a single
+        // detect into minutes of dead wait.
+        "--extractor-retries",
+        "1",
     ]);
     if url.contains("youtube.com") || url.contains("youtu.be") {
-        // Order matters — yt-dlp tries clients in this order until one returns
-        // formats. mweb is currently the fastest reliable client for public
-        // videos; android is the cheapest fallback; web_safari is a last
-        // resort because it's the slowest. We dropped `default` (the `web`
-        // client) entirely — it almost always fails first with the new PO
-        // token requirement and only adds ~20 s of dead wait.
-        cmd.args([
-            "--extractor-args",
-            "youtube:player_client=mweb,android,web_safari",
-        ]);
+        // Single client: `default` (web) currently returns the full adaptive
+        // format ladder (144p–1080p+) in ~20 s. Older combos like
+        // `mweb,android,web_safari` now return only the combined 360p format
+        // (format 18) because of YouTube's PO-token requirement — that's
+        // what caused "1 quality options" in the UI. Adding more clients
+        // roughly doubles detect time because yt-dlp queries each one
+        // sequentially and merges the results, so stick to a single client.
+        cmd.args(["--extractor-args", "youtube:player_client=default"]);
     }
     if let Some(browser) = cookies_browser {
         if let Some(file) = browser.strip_prefix("file:") {

@@ -78,10 +78,17 @@ export const useDownloadJobs = (): UseDownloadJobsResult => {
           const nextProgress = update.percent / 100;
           const nextBytesDone = update.bytes_done ?? current.bytes_done;
           const nextBytesTotal = update.bytes_total ?? current.bytes_total;
+          // Flip status → 'active' on first progress tick so the UI stops
+          // showing "Queued"/inactive bar. Backend already does this in the DB
+          // (set_progress); without mirroring it here the frontend would stay
+          // at 'pending' until the next full reload.
+          const nextStatus: DownloadJob['status'] =
+            current.status === 'pending' ? 'active' : current.status;
           if (
             current.progress === nextProgress &&
             current.bytes_done === nextBytesDone &&
-            current.bytes_total === nextBytesTotal
+            current.bytes_total === nextBytesTotal &&
+            current.status === nextStatus
           ) {
             return prev;
           }
@@ -91,6 +98,7 @@ export const useDownloadJobs = (): UseDownloadJobsResult => {
             progress: nextProgress,
             bytes_done: nextBytesDone,
             bytes_total: nextBytesTotal,
+            status: nextStatus,
           };
           return next;
         });

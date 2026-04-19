@@ -2,7 +2,10 @@ use crate::modules::recorder::helper::{resolve_helper, Helper, HelperEvent};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, WebviewUrl,
+    WebviewWindowBuilder,
+};
 
 /// Shared Tauri state for the recorder module.
 pub struct RecorderState {
@@ -182,6 +185,7 @@ fn recorder_bin_dir(app: &AppHandle) -> PathBuf {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn rec_start(
     app: AppHandle,
     state: State<'_, Arc<RecorderState>>,
@@ -189,6 +193,14 @@ pub fn rec_start(
     mic: Option<bool>,
     fps: Option<u32>,
     filename: Option<String>,
+    display_id: Option<String>,
+    mic_ids: Option<Vec<String>>,
+    system_audio: Option<bool>,
+    camera_id: Option<String>,
+    cam_overlay: Option<serde_json::Value>,
+    excluded_window_titles: Option<Vec<String>>,
+    source_gains: Option<serde_json::Value>,
+    muted_sources: Option<Vec<String>>,
 ) -> Result<String, String> {
     let bin_dir = recorder_bin_dir(&app);
     ensure_helper(&app, &state, &bin_dir)?;
@@ -208,11 +220,22 @@ pub fn rec_start(
     let helper = guard
         .as_ref()
         .ok_or_else(|| "helper not running".to_string())?;
+    let mic_ids_vec = mic_ids.unwrap_or_default();
+    let excluded = excluded_window_titles.unwrap_or_default();
+    let muted = muted_sources.unwrap_or_default();
     helper.start(
         &output,
         mode.as_deref().unwrap_or("screen"),
         mic.unwrap_or(false),
         fps.unwrap_or(60),
+        display_id.as_deref(),
+        &mic_ids_vec,
+        system_audio.unwrap_or(false),
+        camera_id.as_deref(),
+        cam_overlay.as_ref(),
+        &excluded,
+        source_gains.as_ref(),
+        &muted,
     )?;
     Ok(output.display().to_string())
 }
@@ -248,6 +271,32 @@ pub fn rec_status(
         available,
         recording,
         last_saved,
+    })
+}
+
+#[derive(Serialize)]
+pub struct DevicesList {
+    pub displays: serde_json::Value,
+    pub cameras: serde_json::Value,
+    pub microphones: serde_json::Value,
+}
+
+#[tauri::command]
+pub fn rec_list_devices(
+    app: AppHandle,
+    state: State<'_, Arc<RecorderState>>,
+) -> Result<DevicesList, String> {
+    let bin_dir = recorder_bin_dir(&app);
+    ensure_helper(&app, &state, &bin_dir)?;
+    let guard = state.helper.lock().unwrap();
+    let helper = guard
+        .as_ref()
+        .ok_or_else(|| "helper not running".to_string())?;
+    let ev = helper.list_devices()?;
+    Ok(DevicesList {
+        displays: ev.displays.unwrap_or(serde_json::Value::Array(vec![])),
+        cameras: ev.cameras.unwrap_or(serde_json::Value::Array(vec![])),
+        microphones: ev.microphones.unwrap_or(serde_json::Value::Array(vec![])),
     })
 }
 
@@ -374,6 +423,76 @@ pub async fn rec_trim(
     };
     state.history.lock().unwrap().insert(0, entry);
     Ok(out.display().to_string())
+}
+
+/// Label and title used for the live camera PIP window. Swift needs the
+/// exact `Title` to exclude the window from SCStream capture.
+pub const CAM_PIP_LABEL: &str = "camera-pip";
+pub const CAM_PIP_TITLE: &str = "Stash Camera";
+
+#[tauri::command]
+pub fn cam_pip_show(
+    app: AppHandle,
+    camera_label: Option<String>,
+    shape: Option<String>,
+) -> Result<(), String> {
+    // Square when the preview is a circle — otherwise `border-radius: 50%`
+    // on a 4:3 frame gives an ellipse (the exact bug the user flagged).
+    let is_circle = shape.as_deref() == Some("circle");
+    let (w, h) = if is_circle { (280.0, 280.0) } else { (320.0, 240.0) };
+
+    if let Some(win) = app.get_webview_window(CAM_PIP_LABEL) {
+        // Already open — just re-show and resize so a shape switch is
+        // reflected immediately.
+        win.set_size(LogicalSize::new(w, h)).map_err(|e| e.to_string())?;
+        win.show().map_err(|e| e.to_string())?;
+        win.set_focus().ok();
+        return Ok(());
+    }
+    // Encode the camera preview hint into the URL hash + query so the
+    // webview picks it up without an IPC round-trip. `url::form_urlencoded`
+    // matches how the `URLSearchParams` API on the frontend decodes it.
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    if let Some(l) = camera_label.as_deref().filter(|s| !s.is_empty()) {
+        serializer.append_pair("label", l);
+    }
+    if let Some(s) = shape.as_deref().filter(|s| !s.is_empty()) {
+        serializer.append_pair("shape", s);
+    }
+    let query = serializer.finish();
+    let url_str = if query.is_empty() {
+        "index.html#camera-pip".to_string()
+    } else {
+        format!("index.html?{query}#camera-pip")
+    };
+    let parsed = WebviewUrl::App(std::path::PathBuf::from(url_str));
+    let window = WebviewWindowBuilder::new(&app, CAM_PIP_LABEL, parsed)
+        .title(CAM_PIP_TITLE)
+        .inner_size(w, h)
+        .min_inner_size(160.0, 160.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(true)
+        .shadow(false)
+        .build()
+        .map_err(|e| format!("pip build: {e}"))?;
+    window
+        .set_position(LogicalPosition::new(40.0, 40.0))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_size(LogicalSize::new(w, h))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cam_pip_hide(app: AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(CAM_PIP_LABEL) {
+        win.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

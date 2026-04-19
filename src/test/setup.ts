@@ -11,9 +11,13 @@ vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
-vi.mock('@tauri-apps/api/window', () => ({
-  getCurrentWindow: () => ({ hide: vi.fn().mockResolvedValue(undefined) }),
-}));
+vi.mock('@tauri-apps/api/window', () => {
+  const win = {
+    hide: vi.fn().mockResolvedValue(undefined),
+    setAlwaysOnTop: vi.fn().mockResolvedValue(undefined),
+  };
+  return { getCurrentWindow: () => win };
+});
 
 vi.mock('@tauri-apps/plugin-store', () => ({
   LazyStore: class {
@@ -57,6 +61,23 @@ class ResizeObserverStub {
 }
 if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+
+class IntersectionObserverStub {
+  constructor(_cb: IntersectionObserverCallback) {}
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+  root = null;
+  rootMargin = '';
+  thresholds = [];
+}
+if (typeof globalThis.IntersectionObserver === 'undefined') {
+  globalThis.IntersectionObserver =
+    IntersectionObserverStub as unknown as typeof IntersectionObserver;
 }
 
 // jsdom doesn't run layout, so HTMLElement.clientHeight/getBoundingClientRect

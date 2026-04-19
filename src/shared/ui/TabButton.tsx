@@ -3,13 +3,22 @@ type TabButtonProps = {
   shortcutHint?: string;
   active: boolean;
   onClick: () => void;
+  onHover?: () => void;
 };
 
-export const TabButton = ({ label, shortcutHint, active, onClick }: TabButtonProps) => {
+export const TabButton = ({
+  label,
+  shortcutHint,
+  active,
+  onClick,
+  onHover,
+}: TabButtonProps) => {
   return (
     <button
       type="button"
       onClick={onClick}
+      onMouseEnter={onHover}
+      onFocus={onHover}
       aria-current={active ? 'true' : undefined}
       title={shortcutHint ? `${label} (${shortcutHint})` : label}
       className={`px-2 py-1 rounded-md text-meta font-medium flex items-center gap-1.5 cursor-pointer ${

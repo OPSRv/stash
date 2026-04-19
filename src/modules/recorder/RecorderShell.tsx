@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { availableMonitors } from '@tauri-apps/api/window';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import {
+  camPipHide,
+  camPipShow,
+  CAMERA_PIP_TITLE,
   recDelete,
   recList,
+  recListDevices,
   recProbePermissions,
   recStart,
   recStatus,
   recStop,
   recTrim,
+  type CamOverlay,
+  type DevicesList,
+  type DisplayDevice,
   type Recording,
   type RecorderEvent,
   type RecorderMode,
@@ -17,13 +26,47 @@ import {
 import { VideoPlayer } from '../../shared/ui/VideoPlayer';
 import { Button } from '../../shared/ui/Button';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
+import { Select } from '../../shared/ui/Select';
 import { TrimDialog } from './TrimDialog';
+import { LevelMeter } from './LevelMeter';
 
-const modes: { id: RecorderMode; label: string; available: boolean }[] = [
-  { id: 'screen', label: 'Screen', available: true },
-  { id: 'screen+cam', label: 'Screen + Cam', available: false },
-  { id: 'cam', label: 'Camera only', available: false },
+const modes: { id: RecorderMode; label: string; Icon: () => React.ReactNode }[] = [
+  { id: 'screen', label: 'Screen', Icon: ScreenIcon },
+  { id: 'screen+cam', label: 'Screen + Cam', Icon: ScreenCamIcon },
+  { id: 'cam', label: 'Camera only', Icon: CamIcon },
 ];
+
+type OverlayShape = 'rect' | 'circle';
+
+const SYSTEM_SOURCE_ID = 'system';
+const micSourceId = (deviceId: string) => `mic:${deviceId}`;
+
+/// Read the camera PIP window's current position/size from the OS and
+/// express it as a `CamOverlay` in the pixel space of `display`. Returns
+/// null when the PIP is gone or on a different monitor than the one being
+/// recorded — the caller treats that as "no overlay".
+const captureOverlayFromPip = async (
+  display: DisplayDevice | undefined,
+  shape: OverlayShape,
+): Promise<CamOverlay | null> => {
+  if (!display) return null;
+  const pip = await WebviewWindow.getByLabel('camera-pip');
+  if (!pip) return null;
+  const pos = await pip.outerPosition();
+  const size = await pip.outerSize();
+  const monitors = await availableMonitors();
+  const mon = monitors.find(
+    (m) => m.size.width === display.width && m.size.height === display.height,
+  );
+  if (!mon) return null;
+  return {
+    x: pos.x - mon.position.x,
+    y: pos.y - mon.position.y,
+    w: size.width,
+    h: size.height,
+    shape,
+  };
+};
 
 const formatBytes = (n: number) => {
   if (n < 1024) return `${n} B`;
@@ -39,8 +82,22 @@ const formatElapsed = (seconds: number) => {
 };
 
 export const RecorderShell = () => {
+  const [devices, setDevices] = useState<DevicesList>({
+    displays: [],
+    cameras: [],
+    microphones: [],
+  });
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+
   const [mode, setMode] = useState<RecorderMode>('screen');
-  const [mic, setMic] = useState(false);
+  const [displayId, setDisplayId] = useState<string>('');
+  const [cameraId, setCameraId] = useState<string>('');
+  const [micIds, setMicIds] = useState<string[]>([]);
+  const [systemAudio, setSystemAudio] = useState(false);
+  const [overlayShape, setOverlayShape] = useState<OverlayShape>('circle');
+  const [gains, setGains] = useState<Record<string, number>>({});
+  const [muted, setMuted] = useState<Set<string>>(new Set());
+
   const [status, setStatus] = useState<RecorderStatus | null>(null);
   const [permissions, setPermissions] = useState<{
     screen?: boolean;
@@ -55,6 +112,8 @@ export const RecorderShell = () => {
   const [history, setHistory] = useState<Recording[]>([]);
   const countdownRef = useRef<number | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [levels, setLevels] = useState<Record<string, number>>({});
+  const [pipDismissed, setPipDismissed] = useState(false);
 
   const reloadStatus = useCallback(() => {
     recStatus()
@@ -65,9 +124,36 @@ export const RecorderShell = () => {
       .catch(() => {});
   }, []);
 
+  const reloadDevices = useCallback(async () => {
+    try {
+      const list = await recListDevices();
+      setDevices(list);
+      setDevicesError(null);
+      setDisplayId((cur) => {
+        if (cur && list.displays.some((d) => d.id === cur)) return cur;
+        return list.displays.find((d) => d.primary)?.id ?? list.displays[0]?.id ?? '';
+      });
+      setCameraId((cur) => {
+        if (cur && list.cameras.some((c) => c.id === cur)) return cur;
+        return list.cameras[0]?.id ?? '';
+      });
+      setMicIds((cur) => {
+        const valid = cur.filter((id) => list.microphones.some((m) => m.id === id));
+        if (valid.length) return valid;
+        return list.microphones[0] ? [list.microphones[0].id] : [];
+      });
+    } catch (e) {
+      setDevicesError(String(e));
+    }
+  }, []);
+
   useEffect(() => {
     reloadStatus();
   }, [reloadStatus]);
+
+  useEffect(() => {
+    if (status?.available) reloadDevices();
+  }, [status?.available, reloadDevices]);
 
   useEffect(() => {
     const unlisten = listen<RecorderEvent>('recorder:event', (e) => {
@@ -81,6 +167,7 @@ export const RecorderShell = () => {
         case 'stopped':
           setStartedAt(null);
           setElapsed(0);
+          setLevels({});
           reloadStatus();
           break;
         case 'error':
@@ -93,6 +180,15 @@ export const RecorderShell = () => {
             microphone: ev.microphone,
             camera: ev.camera,
           });
+          break;
+        case 'audio_level':
+          if (ev.source_id && typeof ev.rms === 'number') {
+            const id = ev.source_id;
+            const rms = ev.rms;
+            setLevels((prev) =>
+              prev[id] === rms ? prev : { ...prev, [id]: rms }
+            );
+          }
           break;
       }
     });
@@ -111,9 +207,71 @@ export const RecorderShell = () => {
   }, [startedAt]);
 
   useEffect(() => {
-    // Ask the helper for permission status on mount (best effort).
     recProbePermissions().catch(() => {});
   }, []);
+
+  const selectedDisplay = devices.displays.find((d) => d.id === displayId);
+  const selectedCamera = devices.cameras.find((c) => c.id === cameraId);
+  const needsPip = mode === 'cam' || mode === 'screen+cam';
+
+  useEffect(() => {
+    setPipDismissed(false);
+  }, [mode, cameraId]);
+
+  useEffect(() => {
+    const unlisten = listen('camera-pip:closed', () => setPipDismissed(true));
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (needsPip && selectedCamera && !pipDismissed) {
+        try {
+          await camPipHide();
+          if (cancelled) return;
+          await camPipShow({
+            cameraLabel: selectedCamera.name,
+            shape: overlayShape,
+          });
+        } catch (e) {
+          setError(String(e));
+        }
+      } else {
+        camPipHide().catch(() => {});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [needsPip, selectedCamera, overlayShape, pipDismissed]);
+
+  useEffect(() => {
+    return () => {
+      camPipHide().catch(() => {});
+    };
+  }, []);
+
+  const toggleMic = (id: string) => {
+    setMicIds((cur) =>
+      cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
+    );
+  };
+
+  const toggleMute = (sourceId: string) => {
+    setMuted((cur) => {
+      const next = new Set(cur);
+      if (next.has(sourceId)) next.delete(sourceId);
+      else next.add(sourceId);
+      return next;
+    });
+  };
+
+  const setGain = (sourceId: string, value: number) => {
+    setGains((cur) => ({ ...cur, [sourceId]: value }));
+  };
 
   const beginCountdown = () => {
     setError(null);
@@ -143,7 +301,57 @@ export const RecorderShell = () => {
 
   const startRecording = async () => {
     try {
-      await recStart({ mode, mic });
+      if ((mode === 'cam' || mode === 'screen+cam') && !cameraId) {
+        setError('Select a camera first');
+        return;
+      }
+      if (mode !== 'cam' && !displayId) {
+        setError('Select a display first');
+        return;
+      }
+      let overlay: CamOverlay | undefined;
+      if (mode === 'screen+cam') {
+        const snapshot = await captureOverlayFromPip(selectedDisplay, overlayShape);
+        if (!snapshot) {
+          setError(
+            'Camera preview is not on the selected display — drag it onto ' +
+              (selectedDisplay?.name ?? 'the selected display') +
+              ' before recording.',
+          );
+          return;
+        }
+        overlay = snapshot;
+      }
+      // Materialise gains/mute in the source-id space the Swift helper
+      // expects. Omit unity/absent gains so the default path stays cheap.
+      const sourceGains: Record<string, number> = {};
+      for (const id of micIds) {
+        const g = gains[micSourceId(id)];
+        if (g !== undefined && g !== 1) sourceGains[micSourceId(id)] = g;
+      }
+      if (systemAudio) {
+        const g = gains[SYSTEM_SOURCE_ID];
+        if (g !== undefined && g !== 1) sourceGains[SYSTEM_SOURCE_ID] = g;
+      }
+      const mutedSources: string[] = [];
+      for (const id of micIds) {
+        if (muted.has(micSourceId(id))) mutedSources.push(micSourceId(id));
+      }
+      if (systemAudio && muted.has(SYSTEM_SOURCE_ID)) {
+        mutedSources.push(SYSTEM_SOURCE_ID);
+      }
+      await recStart({
+        mode,
+        displayId: mode === 'cam' ? null : displayId,
+        cameraId: mode === 'screen' ? null : cameraId,
+        micIds,
+        systemAudio: mode === 'cam' ? false : systemAudio,
+        camOverlay: overlay,
+        excludedWindowTitles:
+          mode === 'screen+cam' ? [CAMERA_PIP_TITLE] : undefined,
+        sourceGains: Object.keys(sourceGains).length ? sourceGains : undefined,
+        mutedSources: mutedSources.length ? mutedSources : undefined,
+      });
     } catch (e) {
       setError(String(e));
     }
@@ -176,31 +384,78 @@ export const RecorderShell = () => {
   }
 
   if (countdown !== null) {
+    const sub =
+      mode === 'cam'
+        ? selectedCamera?.name
+        : mode === 'screen+cam'
+          ? `${selectedDisplay?.name ?? 'Display'} · ${selectedCamera?.name ?? 'camera'}`
+          : selectedDisplay?.name ?? 'Display';
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-4">
-        <div className="text-[96px] font-semibold t-primary tabular-nums">
-          {countdown}
+      <div className="h-full flex items-center justify-center">
+        <div className="pane rounded-2xl px-4 py-3 flex items-center gap-4" style={{ width: 360 }}>
+          <div
+            className="w-12 h-12 rounded-full flex items-center justify-center text-white text-[22px] font-medium"
+            style={{
+              background: '#EB4848',
+              boxShadow: '0 0 0 3px rgba(235,72,72,0.18)',
+            }}
+          >
+            {countdown}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="t-primary text-body font-medium">Starting in {countdown}…</div>
+            <div className="t-tertiary text-meta truncate">{sub}</div>
+          </div>
+          <button
+            onClick={cancelCountdown}
+            className="t-secondary hover:t-primary px-2 py-1 rounded-md text-meta"
+            style={{ background: 'rgba(255,255,255,0.05)' }}
+          >
+            <span className="kbd mr-1">Esc</span>
+            Cancel
+          </button>
         </div>
-        <Button variant="soft" tone="danger" onClick={cancelCountdown}>
-          Cancel · Esc
-        </Button>
       </div>
     );
   }
 
   if (isRecording) {
+    const primaryLevel = Math.max(0, ...Object.values(levels));
     return (
-      <div className="h-full flex flex-col items-center justify-center gap-3">
-        <div className="flex items-center gap-3 rounded-full px-5 py-2" style={{ background: 'rgba(235,72,72,0.14)', border: '1px solid rgba(235,72,72,0.35)' }}>
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: '#FF5454', boxShadow: '0 0 0 0 rgba(255,84,84,0.8)', animation: 'rec-pulse 1.3s ease-out infinite' }} />
-          <span className="t-primary text-heading font-mono tabular-nums">
+      <div className="h-full flex flex-col items-center justify-center gap-4">
+        <div
+          className="pane rounded-full pl-2 pr-1 py-1 flex items-center gap-2"
+          style={{ width: 260 }}
+        >
+          <span
+            className="w-2.5 h-2.5 rounded-full rec-dot ml-1"
+            style={{ background: '#EB4848' }}
+          />
+          <span className="t-primary text-body font-mono tabular-nums">
             {formatElapsed(elapsed)}
           </span>
-          <Button className="ml-2" size="sm" variant="soft" onClick={stop}>
-            Stop
-          </Button>
+          {(micIds.length > 0 || systemAudio) && (
+            <LevelMeter level={primaryLevel} height={12} bars={5} />
+          )}
+          <div className="flex-1" />
+          <button
+            onClick={stop}
+            aria-label="Stop recording"
+            className="w-7 h-7 rounded-full flex items-center justify-center text-white"
+            style={{ background: '#EB4848' }}
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="5" y="5" width="14" height="14" rx="1" />
+            </svg>
+          </button>
         </div>
-        <div className="t-tertiary text-meta">Screen recording in progress…</div>
+        <div className="t-tertiary text-meta">
+          {mode === 'cam'
+            ? 'Camera recording'
+            : mode === 'screen+cam'
+              ? 'Screen + camera recording'
+              : 'Screen recording'}
+        </div>
       </div>
     );
   }
@@ -209,7 +464,7 @@ export const RecorderShell = () => {
     <div className="h-full flex flex-col">
       <div className="flex-1 overflow-y-auto nice-scroll px-6 py-5 flex flex-col gap-5">
         <section>
-          <div className="t-tertiary text-meta uppercase tracking-wider mb-2">Mode</div>
+          <SectionHeader>Mode</SectionHeader>
           <SegmentedControl
             ariaLabel="Recording mode"
             value={mode}
@@ -217,37 +472,152 @@ export const RecorderShell = () => {
             options={modes.map((m) => ({
               value: m.id,
               label: m.label,
-              disabled: !m.available,
-              title: m.available ? m.label : 'Coming soon',
+              icon: <m.Icon />,
             }))}
           />
         </section>
 
-        <section>
-          <div className="t-tertiary text-meta uppercase tracking-wider mb-2">Audio</div>
-          <label className="flex items-center gap-2 t-primary text-body cursor-pointer">
-            <input
-              type="checkbox"
-              checked={mic}
-              onChange={(e) => setMic(e.currentTarget.checked)}
-            />
-            <span>Record microphone</span>
-            {permissions?.microphone === false && (
-              <span className="t-tertiary text-meta">(permission required)</span>
+        {mode !== 'cam' && (
+          <section>
+            <SectionHeader>Display</SectionHeader>
+            {devices.displays.length === 0 ? (
+              <div className="t-tertiary text-meta">No displays detected.</div>
+            ) : (
+              <Select
+                label="Display"
+                value={displayId}
+                onChange={setDisplayId}
+                options={devices.displays.map((d) => ({
+                  value: d.id,
+                  label: `${d.name} · ${d.width}×${d.height}${d.primary ? ' · primary' : ''}`,
+                }))}
+              />
             )}
-          </label>
+          </section>
+        )}
+
+        {mode !== 'screen' && (
+          <section>
+            <SectionHeader>Camera</SectionHeader>
+            {devices.cameras.length === 0 ? (
+              <div className="t-tertiary text-meta">No cameras detected.</div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Select
+                  label="Camera"
+                  value={cameraId}
+                  onChange={setCameraId}
+                  options={devices.cameras.map((c) => ({ value: c.id, label: c.name }))}
+                />
+                {pipDismissed && (
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    onClick={() => setPipDismissed(false)}
+                  >
+                    Show preview
+                  </Button>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {mode === 'screen+cam' && (
+          <section className="flex flex-col gap-2">
+            <SectionHeader>Camera overlay</SectionHeader>
+            <div className="flex items-center gap-3 flex-wrap">
+              <SegmentedControl
+                ariaLabel="Overlay shape"
+                value={overlayShape}
+                onChange={setOverlayShape}
+                options={[
+                  { value: 'rect', label: 'Rect' },
+                  { value: 'circle', label: 'Circle' },
+                ]}
+              />
+              <span className="t-tertiary text-meta">
+                Drag and resize the camera preview. Where it sits on Record is where it lands in the file.
+              </span>
+            </div>
+          </section>
+        )}
+
+        <section>
+          <div className="flex items-baseline justify-between mb-2">
+            <SectionHeader>Audio mixer</SectionHeader>
+            {mode !== 'cam' && !systemAudio && (
+              <button
+                onClick={() => setSystemAudio(true)}
+                className="t-tertiary text-meta hover:t-secondary"
+              >
+                + Add system audio
+              </button>
+            )}
+          </div>
+          {devices.microphones.length === 0 && !systemAudio ? (
+            <div className="t-tertiary text-meta">No microphones detected.</div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {devices.microphones.map((m) => {
+                const sourceId = micSourceId(m.id);
+                const enabled = micIds.includes(m.id);
+                return (
+                  <AudioSourceRow
+                    key={m.id}
+                    name={m.name}
+                    enabled={enabled}
+                    onToggle={() => toggleMic(m.id)}
+                    muted={muted.has(sourceId)}
+                    onMuteToggle={() => toggleMute(sourceId)}
+                    gain={gains[sourceId] ?? 1}
+                    onGain={(v) => setGain(sourceId, v)}
+                    level={levels[sourceId] ?? 0}
+                  />
+                );
+              })}
+              {mode !== 'cam' && systemAudio && (
+                <AudioSourceRow
+                  name="System audio"
+                  enabled={systemAudio}
+                  onToggle={() => setSystemAudio(false)}
+                  muted={muted.has(SYSTEM_SOURCE_ID)}
+                  onMuteToggle={() => toggleMute(SYSTEM_SOURCE_ID)}
+                  gain={gains[SYSTEM_SOURCE_ID] ?? 1}
+                  onGain={(v) => setGain(SYSTEM_SOURCE_ID, v)}
+                  level={levels[SYSTEM_SOURCE_ID] ?? 0}
+                  removable
+                />
+              )}
+            </div>
+          )}
         </section>
 
-        {permissions && permissions.screen === false && (
+        {devicesError && (
+          <div
+            className="rounded-md px-3 py-2 text-meta"
+            style={{ background: 'rgba(235,72,72,0.08)', color: '#FF9B9B' }}
+          >
+            Failed to enumerate devices: {devicesError}
+          </div>
+        )}
+
+        {permissions && permissions.screen === false && mode !== 'cam' && (
           <PermissionBanner
             pane="screen-recording"
             label="Screen recording permission is off."
           />
         )}
-        {permissions && mic && permissions.microphone === false && (
+        {permissions && micIds.length > 0 && permissions.microphone === false && (
           <PermissionBanner
             pane="microphone"
-            label="Microphone permission is off — recording will have no audio."
+            label="Microphone permission is off — audio tracks will be silent."
+          />
+        )}
+        {permissions && mode !== 'screen' && permissions.camera === false && (
+          <PermissionBanner
+            pane="camera"
+            label="Camera permission is off."
           />
         )}
 
@@ -262,9 +632,7 @@ export const RecorderShell = () => {
 
         {history.length > 0 && (
           <section>
-            <div className="t-tertiary text-meta uppercase tracking-wider mb-2">
-              Recordings · {history.length}
-            </div>
+            <SectionHeader>Recordings · {history.length}</SectionHeader>
             <div className="divide-y divide-white/5">
               {history.map((r) => (
                 <div key={r.path} className="flex items-center gap-3 py-2">
@@ -318,10 +686,11 @@ export const RecorderShell = () => {
           </section>
         )}
       </div>
-      <footer className="px-6 py-4 border-t hair flex items-center justify-end gap-2">
-        <Button size="lg" variant="solid" tone="danger" onClick={beginCountdown}>
-          Record
-        </Button>
+      <footer className="px-6 py-4 border-t hair flex items-center justify-between gap-2">
+        <div className="t-tertiary text-meta truncate">
+          {recorderMetaLine(mode, selectedDisplay, selectedCamera)}
+        </div>
+        <RecordPill onClick={beginCountdown} />
       </footer>
       {playing && <VideoPlayer src={playing} onClose={() => setPlaying(null)} />}
       {trimTarget && (
@@ -338,6 +707,155 @@ export const RecorderShell = () => {
     </div>
   );
 };
+
+const recorderMetaLine = (
+  mode: RecorderMode,
+  display: DisplayDevice | undefined,
+  camera: { name: string } | undefined,
+): string => {
+  const parts: string[] = [];
+  if (mode !== 'cam' && display) parts.push(`${display.width}p`);
+  if (mode !== 'screen' && camera) parts.push(camera.name);
+  parts.push('60 fps', 'H.264');
+  return parts.join(' · ');
+};
+
+const SectionHeader = ({ children }: { children: React.ReactNode }) => (
+  <div className="t-tertiary text-meta uppercase tracking-wider mb-2 font-medium">
+    {children}
+  </div>
+);
+
+type AudioSourceRowProps = {
+  name: string;
+  enabled: boolean;
+  onToggle: () => void;
+  muted: boolean;
+  onMuteToggle: () => void;
+  gain: number;
+  onGain: (next: number) => void;
+  level: number;
+  removable?: boolean;
+};
+
+/// Mixer row: left toggle for track on/off, mute icon, name, live wbar meter,
+/// gain slider (0–200%), % label. Follows the design's "compact horizontal
+/// audio pill" feel inside a vertical list.
+const AudioSourceRow = ({
+  name,
+  enabled,
+  onToggle,
+  muted,
+  onMuteToggle,
+  gain,
+  onGain,
+  level,
+  removable,
+}: AudioSourceRowProps) => {
+  const percent = Math.round(gain * 100);
+  return (
+    <div
+      className="flex items-center gap-2 py-1.5 px-2 rounded-md"
+      style={{
+        background: enabled ? 'rgba(255,255,255,0.03)' : 'transparent',
+      }}
+    >
+      <button
+        type="button"
+        role="switch"
+        aria-checked={enabled}
+        aria-label={`Enable ${name}`}
+        onClick={onToggle}
+        className="relative w-[28px] h-[16px] rounded-full transition shrink-0"
+        style={{
+          background: enabled ? 'var(--stash-accent)' : 'rgba(255,255,255,0.12)',
+        }}
+      >
+        <span
+          className="absolute top-[2px] w-3 h-3 bg-white rounded-full shadow transition-[left]"
+          style={{ left: enabled ? 13 : 2 }}
+        />
+      </button>
+      <button
+        type="button"
+        onClick={onMuteToggle}
+        disabled={!enabled}
+        aria-label={muted ? 'Unmute' : 'Mute'}
+        className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 disabled:opacity-40"
+        style={{
+          background: muted ? 'rgba(235,72,72,0.18)' : 'rgba(255,255,255,0.04)',
+          color: muted ? '#FF7878' : 'rgba(255,255,255,0.6)',
+        }}
+      >
+        {muted ? <MuteIcon /> : <SpeakerIcon />}
+      </button>
+      <span
+        className="t-primary text-body truncate"
+        style={{ flex: '1 1 0', minWidth: 60 }}
+      >
+        {name}
+      </span>
+      <div className="shrink-0">
+        <LevelMeter
+          level={enabled && !muted ? level : 0}
+          muted={muted || !enabled}
+          height={12}
+          bars={6}
+        />
+      </div>
+      <input
+        type="range"
+        min={0}
+        max={200}
+        step={1}
+        value={percent}
+        onChange={(e) => onGain(Number(e.target.value) / 100)}
+        disabled={!enabled}
+        aria-label={`${name} gain`}
+        className="stash-fader shrink-0"
+        style={{ width: 96 }}
+      />
+      <span
+        className="t-tertiary text-meta font-mono tabular-nums shrink-0"
+        style={{ width: 34, textAlign: 'right' }}
+      >
+        {percent}%
+      </span>
+      {removable && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={`Remove ${name}`}
+          className="t-tertiary hover:t-primary w-5 h-5 rounded flex items-center justify-center shrink-0"
+          title="Remove"
+        >
+          ×
+        </button>
+      )}
+    </div>
+  );
+};
+
+const RecordPill = ({ onClick }: { onClick: () => void }) => (
+  <button
+    onClick={onClick}
+    className="flex items-center gap-2 pr-3 pl-1 py-1 rounded-full"
+    style={{
+      background: 'rgba(235,72,72,0.14)',
+      border: '1px solid rgba(235,72,72,0.32)',
+    }}
+  >
+    <span
+      className="w-6 h-6 rounded-full flex items-center justify-center rec-dot"
+      style={{ background: '#EB4848' }}
+    >
+      <span className="w-2.5 h-2.5 rounded-full bg-white/85" />
+    </span>
+    <span className="text-body font-medium" style={{ color: '#FF7878' }}>
+      Record
+    </span>
+  </button>
+);
 
 const PermissionBanner = ({
   pane,
@@ -360,3 +878,50 @@ const PermissionBanner = ({
     </Button>
   </div>
 );
+
+// ---- icons (taken from design/Menubar Utility.html) ----
+
+function ScreenIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="14" rx="2" />
+      <path d="M8 22h8M12 18v4" />
+    </svg>
+  );
+}
+
+function ScreenCamIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="14" rx="2" />
+      <circle cx="17" cy="15" r="3" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
+function CamIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+function SpeakerIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 5 6 9H3v6h3l5 4V5z" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />
+    </svg>
+  );
+}
+
+function MuteIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M11 5 6 9H3v6h3l5 4V5z" />
+      <path d="m17 9 5 5M22 9l-5 5" />
+    </svg>
+  );
+}

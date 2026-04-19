@@ -52,3 +52,114 @@ export const PauseIcon = ({ size = 13, className }: IconProps) => (
     <rect x="14" y="5" width="4" height="14" />
   </svg>
 );
+
+export const PinIcon = ({
+  size = 14,
+  className,
+  filled = false,
+}: IconProps & { filled?: boolean }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    className={className}
+    fill={filled ? 'currentColor' : 'none'}
+    stroke="currentColor"
+    strokeWidth={1.5}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M12 17v5" />
+    <path d="M9 3h6l-1 6 3 3H7l3-3-1-6z" />
+  </svg>
+);
+
+export const CodeIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="m8 6-6 6 6 6" />
+    <path d="m16 6 6 6-6 6" />
+  </svg>
+);
+
+export const CodeBlockIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="m9 10-2 2 2 2" />
+    <path d="m15 10 2 2-2 2" />
+  </svg>
+);
+
+export const BoldIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z" />
+  </svg>
+);
+
+export const ItalicIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M14 5h5M6 19h5M15 5 10 19" />
+  </svg>
+);
+
+export const Heading1Icon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M5 5v14M13 5v14M5 12h8" />
+    <path d="M17 8.5 19 7v12" />
+  </svg>
+);
+
+export const Heading2Icon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 5v14M11 5v14M4 12h7" />
+    <path d="M15 9a2.5 2.5 0 1 1 5 0c0 1.5-1 2.5-2.5 3.8L15 19h5" />
+  </svg>
+);
+
+export const BulletListIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M9 6h12M9 12h12M9 18h12" />
+    <circle cx="4" cy="6" r="1" fill="currentColor" />
+    <circle cx="4" cy="12" r="1" fill="currentColor" />
+    <circle cx="4" cy="18" r="1" fill="currentColor" />
+  </svg>
+);
+
+export const OrderedListIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M10 6h11M10 12h11M10 18h11" />
+    <path d="M4 4v4M3 8h2M3 14h3l-3 4h3" />
+  </svg>
+);
+
+export const ChecklistIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <rect x="3" y="4" width="6" height="6" rx="1.2" />
+    <rect x="3" y="14" width="6" height="6" rx="1.2" />
+    <path d="m4.5 17 1.2 1.2L8 16" />
+    <path d="M12 7h9M12 17h9" />
+  </svg>
+);
+
+export const QuoteIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M7 7H4v5h3a2 2 0 0 1-2 2v2a4 4 0 0 0 4-4V7zM18 7h-3v5h3a2 2 0 0 1-2 2v2a4 4 0 0 0 4-4V7z" />
+  </svg>
+);
+
+export const TrashIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M4 7h16M10 11v6M14 11v6M9 7V4h6v3M6 7l1 13h10l1-13" />
+  </svg>
+);
+
+export const DownloadIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M12 4v12m0 0-4-4m4 4 4-4M5 20h14" />
+  </svg>
+);
+
+export const UploadIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M12 20V8m0 0-4 4m4-4 4 4M5 4h14" />
+  </svg>
+);

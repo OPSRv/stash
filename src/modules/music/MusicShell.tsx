@@ -84,11 +84,34 @@ export const MusicShell = () => {
       : null;
     ro?.observe(el!);
     window.addEventListener('resize', syncBounds);
+
+    // Tab switches: PopupShell keeps us mounted (hidden) to preserve state,
+    // so unmount cleanup no longer fires on tab change. Track visibility via
+    // IntersectionObserver — a `hidden` ancestor collapses our box, so the
+    // sizer stops intersecting the viewport. When that happens, hide the
+    // native webview; when we become visible again, re-embed at the new rect.
+    const io = el
+      ? new IntersectionObserver(
+          (entries) => {
+            const visible = entries[0]?.isIntersecting ?? false;
+            if (visible) {
+              void syncBounds();
+            } else {
+              setAttached(false);
+              void musicHide().catch(() => {});
+            }
+          },
+          { threshold: 0 },
+        )
+      : null;
+    io?.observe(el!);
+
     return () => {
       cancelled = true;
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(cancelHandle);
       ro?.disconnect();
+      io?.disconnect();
       window.removeEventListener('resize', syncBounds);
       // Hide without destroying — login cookies + playback state persist.
       void musicHide().catch(() => {});

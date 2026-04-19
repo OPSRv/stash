@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "stash-recorder",
-    platforms: [.macOS(.v12)],
+    platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
             name: "stash-recorder",

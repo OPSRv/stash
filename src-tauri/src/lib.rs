@@ -34,16 +34,23 @@ use modules::downloader::{
     jobs::JobRepo,
     runner::RunnerState,
 };
+use modules::metronome::commands::{
+    metronome_get_state, metronome_save_state, MetronomeStateHandle,
+};
 use modules::notes::{
-    commands::{notes_create, notes_delete, notes_list, notes_search, notes_update, NotesState},
+    commands::{
+        notes_create, notes_delete, notes_list, notes_read_file, notes_search, notes_update,
+        notes_write_file, NotesState,
+    },
     repo::NotesRepo,
 };
 use modules::recorder::commands::{
-    rec_delete, rec_list, rec_probe_permissions, rec_set_output_dir, rec_start, rec_status,
-    rec_stop, rec_trim, RecorderState,
+    cam_pip_hide, cam_pip_show, rec_delete, rec_list, rec_list_devices, rec_probe_permissions,
+    rec_set_output_dir, rec_start, rec_status, rec_stop, rec_trim, RecorderState,
 };
 use modules::music::commands::{
-    music_close, music_embed, music_hide, music_reload, music_show, music_status,
+    music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
+    music_show, music_status,
 };
 use modules::search::commands::global_search;
 use modules::translator::{
@@ -58,7 +65,7 @@ use rusqlite::Connection;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WindowEvent,
+    Emitter, Manager, WindowEvent,
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
@@ -69,6 +76,47 @@ const CLIPBOARD_TRIM_EVERY_N_POLLS: u32 = 120; // ~once per minute at 500ms poll
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        .register_uri_scheme_protocol("stashnp", |ctx, request| {
+            // One-way channel used by the injected YouTube Music poller to
+            // report the now-playing state. We only care about the URL query
+            // string; emit the parsed payload as `music:nowplaying` so the
+            // popup shell can render its compact bar. Always respond 204 so
+            // the WKWebView scheme handler completes cleanly.
+            let uri = request.uri().to_string();
+            if let Some(q) = uri.split('?').nth(1) {
+                let mut playing = false;
+                let mut title = String::new();
+                let mut artist = String::new();
+                let mut artwork = String::new();
+                for pair in q.split('&') {
+                    let mut it = pair.splitn(2, '=');
+                    let key = it.next().unwrap_or("");
+                    let val = it.next().unwrap_or("");
+                    let decoded = percent_decode(val);
+                    match key {
+                        "playing" => playing = decoded == "1",
+                        "title" => title = decoded,
+                        "artist" => artist = decoded,
+                        "artwork" => artwork = decoded,
+                        _ => {}
+                    }
+                }
+                let _ = ctx.app_handle().emit(
+                    "music:nowplaying",
+                    serde_json::json!({
+                        "playing": playing,
+                        "title": title,
+                        "artist": artist,
+                        "artwork": artwork,
+                    }),
+                );
+            }
+            tauri::http::Response::builder()
+                .status(204)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(Vec::new())
+                .unwrap()
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_positioner::init())
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -156,13 +204,18 @@ pub fn run() {
             rec_probe_permissions,
             rec_set_output_dir,
             rec_list,
+            rec_list_devices,
             rec_delete,
             rec_trim,
+            cam_pip_show,
+            cam_pip_hide,
             notes_list,
             notes_search,
             notes_create,
             notes_update,
             notes_delete,
+            notes_read_file,
+            notes_write_file,
             global_search,
             music_status,
             music_embed,
@@ -170,12 +223,17 @@ pub fn run() {
             music_hide,
             music_close,
             music_reload,
+            music_play_pause,
+            music_next,
+            music_prev,
             translator_run,
             translator_set_settings,
             translator_list,
             translator_search,
             translator_delete,
             translator_clear,
+            metronome_get_state,
+            metronome_save_state,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -272,6 +330,10 @@ pub fn run() {
             app.manage(NotesState {
                 repo: Mutex::new(notes_repo),
             });
+
+            // Metronome — single JSON blob in app data dir.
+            let metronome_path = data_dir.join("metronome.json");
+            app.manage(MetronomeStateHandle::new(metronome_path));
 
             let warmup_state = Arc::clone(&runner_state);
             std::thread::spawn(move || {
@@ -558,6 +620,40 @@ async fn collect_logs(
     Ok(out.display().to_string())
 }
 
+/// Minimal percent-decoder — our payloads are small URL-encoded form fields
+/// from `URLSearchParams`, so we decode %XX → byte and `+` → space, then
+/// interpret the bytes as UTF-8. Anything invalid falls back to the raw
+/// input so a malformed field never drops the whole now-playing update.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'+' {
+            out.push(b' ');
+            i += 1;
+        } else if b == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            match (hi, lo) {
+                (Some(h), Some(l)) => {
+                    out.push(((h << 4) | l) as u8);
+                    i += 3;
+                }
+                _ => {
+                    out.push(b);
+                    i += 1;
+                }
+            }
+        } else {
+            out.push(b);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
 pub struct TrayHandle(pub Mutex<Option<tauri::tray::TrayIcon>>);
 
 /// Keep the menubar label tight so it fits alongside the icon even when the
@@ -682,4 +778,23 @@ fn resolve_popup(app: &tauri::AppHandle) -> Option<tauri::Window> {
         return Some(w.as_ref().window().clone());
     }
     app.get_window("popup")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percent_decode;
+
+    #[test]
+    fn percent_decode_handles_plus_and_hex() {
+        assert_eq!(percent_decode("hello+world"), "hello world");
+        assert_eq!(percent_decode("%D0%9F%D1%96%D1%81%D0%BD%D1%8F"), "Пісня");
+        assert_eq!(percent_decode("a%2Fb"), "a/b");
+    }
+
+    #[test]
+    fn percent_decode_preserves_malformed_percent() {
+        // A stray `%` with no hex pair should not eat surrounding bytes.
+        assert_eq!(percent_decode("50%"), "50%");
+        assert_eq!(percent_decode("%ZZ"), "%ZZ");
+    }
 }
