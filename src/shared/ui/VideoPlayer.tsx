@@ -14,31 +14,76 @@ const fmt = (s: number) => {
   return `${m}:${ss.toString().padStart(2, '0')}`;
 };
 
+const SPEED_PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const POSITION_STORAGE_KEY = 'stash:player:positions';
+
+type PositionMap = Record<string, number>;
+
+const loadPositions = (): PositionMap => {
+  try {
+    return JSON.parse(localStorage.getItem(POSITION_STORAGE_KEY) ?? '{}');
+  } catch {
+    return {};
+  }
+};
+
+const savePosition = (src: string, t: number) => {
+  const map = loadPositions();
+  if (t < 5) delete map[src];
+  else map[src] = t;
+  try {
+    localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore quota errors — resuming is best-effort
+  }
+};
+
+// Return the sibling `.vtt` subtitle path for a media file, if one exists
+// based on naming convention `<stem>.vtt` next to the media. The DOM
+// `<track>` element itself will silently ignore non-existent URLs.
+const siblingVtt = (src: string) => src.replace(/\.[^./]+$/, '.vtt');
+
 export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
+  const [rate, setRate] = useState(1);
 
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onTime = () => setProgress(v.currentTime);
-    const onLoad = () => setDuration(v.duration);
+    const onTime = () => {
+      setProgress(v.currentTime);
+      // Persist every 4 seconds so a crash loses at most that much progress.
+      if (Math.floor(v.currentTime) % 4 === 0) savePosition(src, v.currentTime);
+    };
+    const onLoad = () => {
+      setDuration(v.duration);
+      const saved = loadPositions()[src];
+      if (saved && saved > 5 && saved < v.duration - 2) {
+        v.currentTime = saved;
+      }
+    };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
+    const onEnded = () => savePosition(src, 0);
     v.addEventListener('timeupdate', onTime);
     v.addEventListener('loadedmetadata', onLoad);
     v.addEventListener('play', onPlay);
     v.addEventListener('pause', onPause);
+    v.addEventListener('ended', onEnded);
     return () => {
+      // Final persist when the player closes.
+      savePosition(src, v.currentTime);
       v.removeEventListener('timeupdate', onTime);
       v.removeEventListener('loadedmetadata', onLoad);
       v.removeEventListener('play', onPlay);
       v.removeEventListener('pause', onPause);
+      v.removeEventListener('ended', onEnded);
     };
-  }, []);
+  }, [src]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -59,6 +104,24 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
         else v.requestFullscreen();
       } else if (e.key === 'm' || e.key === 'M') {
         v.muted = !v.muted;
+      } else if (e.key === '+' || e.key === '=') {
+        const next = Math.min(2, Math.round((v.playbackRate + 0.25) * 100) / 100);
+        v.playbackRate = next;
+        setRate(next);
+      } else if (e.key === '-' || e.key === '_') {
+        const next = Math.max(0.25, Math.round((v.playbackRate - 0.25) * 100) / 100);
+        v.playbackRate = next;
+        setRate(next);
+      } else if (e.key === 'p' || e.key === 'P') {
+        // Picture-in-Picture — quietly ignore if unsupported.
+        if (document.pictureInPictureElement) {
+          document.exitPictureInPicture().catch(() => {});
+        } else if ((v as HTMLVideoElement).requestPictureInPicture) {
+          (v as HTMLVideoElement).requestPictureInPicture().catch(() => {});
+        }
+      } else if (/^[0-9]$/.test(e.key)) {
+        // Seek to N*10% of duration.
+        v.currentTime = (Number(e.key) / 10) * v.duration;
       }
     };
     window.addEventListener('keydown', handler);
@@ -105,8 +168,18 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
           src={convertFileSrc(src)}
           className="max-h-[80vh] rounded-lg"
           autoPlay
+          crossOrigin="anonymous"
           onClick={togglePlay}
-        />
+        >
+          {/* Pick up a sibling .vtt subtitle track if yt-dlp downloaded one. */}
+          <track
+            kind="subtitles"
+            src={convertFileSrc(siblingVtt(src))}
+            srcLang="en"
+            label="Subtitles"
+            default
+          />
+        </video>
 
         {/* Controls */}
         <div className="mt-2 px-3 py-2 rounded-lg flex items-center gap-3" style={{ background: 'rgba(28,28,32,0.92)', border: '1px solid rgba(255,255,255,0.06)' }}>
@@ -145,6 +218,42 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
             onChange={(e) => changeVolume(Number(e.currentTarget.value))}
             className="w-20 accent-accent"
           />
+          <select
+            value={rate}
+            onChange={(e) => {
+              const r = Number(e.currentTarget.value);
+              setRate(r);
+              if (videoRef.current) videoRef.current.playbackRate = r;
+            }}
+            className="t-primary text-meta bg-transparent rounded px-1 py-0.5"
+            style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+            title="Playback speed (+/-)"
+          >
+            {SPEED_PRESETS.map((r) => (
+              <option key={r} value={r}>
+                {r}×
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() => {
+              const v = videoRef.current;
+              if (!v) return;
+              if (document.pictureInPictureElement) {
+                document.exitPictureInPicture().catch(() => {});
+              } else {
+                v.requestPictureInPicture?.().catch(() => {});
+              }
+            }}
+            className="t-secondary hover:t-primary"
+            title="Picture-in-Picture (P)"
+            aria-label="Picture-in-Picture"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" />
+            </svg>
+          </button>
           <button onClick={toggleFullscreen} className="t-secondary hover:t-primary" title="Fullscreen (F)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" />

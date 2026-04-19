@@ -42,3 +42,16 @@ export const copyOnly = (id: number): Promise<void> =>
   invoke('clipboard_copy_only', { id });
 
 export const clearAll = (): Promise<number> => invoke('clipboard_clear');
+
+export type LinkPreview = {
+  url: string;
+  image: string | null;
+  title: string | null;
+  description: string | null;
+  site_name: string | null;
+};
+
+/// Fetch og:image / og:title for a URL. Returns null when the page has no
+/// usable metadata. The Rust side caches both hits and misses.
+export const linkPreview = (url: string): Promise<LinkPreview | null> =>
+  invoke('clipboard_link_preview', { url });

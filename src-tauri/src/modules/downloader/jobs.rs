@@ -142,6 +142,20 @@ impl JobRepo {
         )?)
     }
 
+    /// Delete terminal-state jobs whose `completed_at` is older than
+    /// `cutoff_ts` (unix seconds). Rows without a completed_at are left
+    /// alone. Returns how many rows were removed. Files on disk are not
+    /// touched — only DB bookkeeping.
+    pub fn prune_completed_older_than(&mut self, cutoff_ts: i64) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM download_jobs
+             WHERE status IN ('completed', 'failed', 'cancelled')
+               AND completed_at IS NOT NULL
+               AND completed_at < ?1",
+            params![cutoff_ts],
+        )?)
+    }
+
     fn map_row(row: &rusqlite::Row<'_>) -> Result<DownloadJob> {
         Ok(DownloadJob {
             id: row.get("id")?,
@@ -242,6 +256,23 @@ mod tests {
         let jobs = repo.list(10).unwrap();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].id, active);
+    }
+
+    #[test]
+    fn prune_completed_older_than_respects_cutoff() {
+        let mut repo = fresh();
+        let old = repo.create("old", "g", None, None, None, 1).unwrap();
+        repo.set_completed(old, "/x", 100).unwrap();
+        let recent = repo.create("recent", "g", None, None, None, 2).unwrap();
+        repo.set_completed(recent, "/y", 900).unwrap();
+        let active = repo.create("active", "g", None, None, None, 3).unwrap();
+        repo.set_progress(active, 0.1, None, None).unwrap();
+
+        let removed = repo.prune_completed_older_than(500).unwrap();
+        assert_eq!(removed, 1);
+        assert!(repo.get(old).unwrap().is_none());
+        assert!(repo.get(recent).unwrap().is_some());
+        assert!(repo.get(active).unwrap().is_some());
     }
 
     #[test]

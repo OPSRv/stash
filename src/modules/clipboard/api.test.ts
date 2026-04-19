@@ -8,6 +8,7 @@ import {
   pasteItem,
   copyOnly,
   clearAll,
+  linkPreview,
 } from './api';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -82,6 +83,29 @@ describe('clipboard api', () => {
       const removed = await clearAll();
       expect(mockInvoke).toHaveBeenCalledWith('clipboard_clear');
       expect(removed).toBe(5);
+    });
+  });
+
+  describe('linkPreview', () => {
+    it('forwards the URL to clipboard_link_preview', async () => {
+      mockInvoke.mockResolvedValueOnce({
+        url: 'https://example.com',
+        image: 'https://cdn/og.png',
+        title: 'Hi',
+        description: null,
+        site_name: null,
+      });
+      const p = await linkPreview('https://example.com');
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_link_preview', {
+        url: 'https://example.com',
+      });
+      expect(p?.image).toBe('https://cdn/og.png');
+    });
+
+    it('resolves to null when backend reports no metadata', async () => {
+      mockInvoke.mockResolvedValueOnce(null);
+      const p = await linkPreview('https://blank.example');
+      expect(p).toBeNull();
     });
   });
 });

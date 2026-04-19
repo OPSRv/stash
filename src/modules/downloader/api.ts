@@ -54,6 +54,14 @@ export type DownloadJob = {
 
 export const detect = (url: string): Promise<DetectedVideo> => invoke('dl_detect', { url });
 
+export type QuickDetect = {
+  platform: Platform;
+  preview: { title: string; uploader: string | null; thumbnail: string | null };
+};
+
+export const detectQuick = (url: string): Promise<QuickDetect | null> =>
+  invoke('dl_detect_quick', { url });
+
 export const start = (args: {
   url: string;
   title?: string | null;
@@ -75,12 +83,33 @@ export const cancel = (id: number): Promise<void> => invoke('dl_cancel', { id })
 export const list = (): Promise<DownloadJob[]> => invoke('dl_list');
 export const deleteJob = (id: number): Promise<void> => invoke('dl_delete', { id });
 export const clearCompleted = (): Promise<number> => invoke('dl_clear_completed');
+export const pause = (id: number): Promise<void> => invoke('dl_pause', { id });
+export const resume = (id: number): Promise<void> => invoke('dl_resume', { id });
+export const retry = (id: number): Promise<void> => invoke('dl_retry', { id });
+
+export type YtDlpVersionInfo = {
+  installed: string | null;
+  latest: string | null;
+  path: string | null;
+};
+export const ytDlpVersion = (): Promise<YtDlpVersionInfo> => invoke('dl_ytdlp_version');
+export const updateYtDlp = (): Promise<string> => invoke('dl_update_binary');
+export const purgeCookies = (): Promise<void> => invoke('dl_purge_cookies');
 
 export const setDownloadsDir = (path: string | null): Promise<void> =>
   invoke('dl_set_downloads_dir', { path });
 
 export const setCookiesBrowser = (browser: string | null): Promise<void> =>
   invoke('dl_set_cookies_browser', { browser });
+
+export const setMaxParallel = (value: number): Promise<void> =>
+  invoke('dl_set_max_parallel', { value });
+
+export const setRateLimit = (value: string | null): Promise<void> =>
+  invoke('dl_set_rate_limit', { value });
+
+export const pruneHistory = (olderThanDays: number): Promise<number> =>
+  invoke('dl_prune_history', { olderThanDays });
 
 export const platformBadge = (p: Platform | string): { label: string; bg: string; fg: string } => {
   const known: Record<string, { label: string; bg: string; fg: string }> = {

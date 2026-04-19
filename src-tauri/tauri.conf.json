@@ -30,7 +30,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$HOME/Movies/Stash/**", "$VIDEO/**"]
+        "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$HOME/Movies/Stash/**", "$HOME/Movies/Stash/.thumbs/**", "$VIDEO/**"]
       }
     },
     "macOSPrivateApi": true

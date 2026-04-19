@@ -1,0 +1,316 @@
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import { ActiveDownloadRow } from './ActiveDownloadRow';
+import { CompletedDownloadRow } from './CompletedDownloadRow';
+import { CompletedDownloadTile } from './CompletedDownloadTile';
+import { DetectedPreviewCard } from './DetectedPreviewCard';
+import { DownloadUrlBar } from './DownloadUrlBar';
+import { DropOverlay } from './DropOverlay';
+import { PlatformBadge } from './PlatformBadge';
+import { QualityPicker } from './QualityPicker';
+import type { DownloadJob, QualityOption } from './api';
+
+const job = (overrides: Partial<DownloadJob> = {}): DownloadJob => ({
+  id: 1,
+  url: 'https://youtu.be/abc',
+  platform: 'youtube',
+  title: 'Some video',
+  thumbnail_url: null,
+  format_id: null,
+  target_path: null,
+  status: 'active',
+  progress: 0.42,
+  bytes_total: 10 * 1024 * 1024,
+  bytes_done: 4 * 1024 * 1024,
+  error: null,
+  created_at: 0,
+  completed_at: null,
+  ...overrides,
+});
+
+describe('PlatformBadge', () => {
+  it('renders the known label', () => {
+    render(<PlatformBadge platform="youtube" />);
+    expect(screen.getByText('YOUTUBE')).toBeInTheDocument();
+  });
+  it('falls back to LINK for unknown platforms', () => {
+    render(<PlatformBadge platform="whatever" />);
+    expect(screen.getByText('LINK')).toBeInTheDocument();
+  });
+});
+
+describe('DropOverlay', () => {
+  it('renders the drop hint', () => {
+    render(<DropOverlay />);
+    expect(screen.getByText(/Drop URL to download/)).toBeInTheDocument();
+  });
+});
+
+describe('DownloadUrlBar', () => {
+  it('calls onUrlChange as the user types', async () => {
+    const user = userEvent.setup();
+    const onUrlChange = vi.fn();
+    render(
+      <DownloadUrlBar
+        url=""
+        detecting={false}
+        elapsedSec={0}
+        onUrlChange={onUrlChange}
+        onDetect={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    await user.type(screen.getByPlaceholderText(/Paste a YouTube/), 'x');
+    expect(onUrlChange).toHaveBeenCalledWith('x');
+  });
+
+  it('fires onDetect on Enter', async () => {
+    const user = userEvent.setup();
+    const onDetect = vi.fn();
+    render(
+      <DownloadUrlBar
+        url="https://youtu.be/abc"
+        detecting={false}
+        elapsedSec={0}
+        onUrlChange={() => {}}
+        onDetect={onDetect}
+        onCancel={() => {}}
+      />
+    );
+    await user.type(screen.getByPlaceholderText(/Paste a YouTube/), '{Enter}');
+    expect(onDetect).toHaveBeenCalled();
+  });
+
+  it('disables Detect when the URL is empty', () => {
+    render(
+      <DownloadUrlBar
+        url="   "
+        detecting={false}
+        elapsedSec={0}
+        onUrlChange={() => {}}
+        onDetect={() => {}}
+        onCancel={() => {}}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'Detect' })).toBeDisabled();
+  });
+
+  it('shows Cancel (with elapsed) while detecting and calls onCancel', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    render(
+      <DownloadUrlBar
+        url="x"
+        detecting={true}
+        elapsedSec={7}
+        onUrlChange={() => {}}
+        onDetect={() => {}}
+        onCancel={onCancel}
+      />
+    );
+    const cancel = screen.getByRole('button', { name: /Cancel · 7s/ });
+    await user.click(cancel);
+    expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+describe('QualityPicker', () => {
+  const options: QualityOption[] = [
+    { label: '1080p', format_id: 'a', kind: 'video', height: 1080, est_size: 2_000_000 },
+    { label: '720p', format_id: 'b', kind: 'video', height: 720, est_size: null },
+  ];
+
+  it('calls onSelect when a quality is picked', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(
+      <QualityPicker options={options} selected={null} onSelect={onSelect} onDownload={() => {}} />
+    );
+    await user.click(screen.getByRole('button', { name: /720p/ }));
+    expect(onSelect).toHaveBeenCalledWith(options[1]);
+  });
+
+  it('disables the Download button until a quality is selected', () => {
+    render(
+      <QualityPicker options={options} selected={null} onSelect={() => {}} onDownload={() => {}} />
+    );
+    expect(screen.getByRole('button', { name: /Download/ })).toBeDisabled();
+  });
+
+  it('enables Download once something is selected', async () => {
+    const user = userEvent.setup();
+    const onDownload = vi.fn();
+    render(
+      <QualityPicker
+        options={options}
+        selected={options[0]}
+        onSelect={() => {}}
+        onDownload={onDownload}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: /Download/ }));
+    expect(onDownload).toHaveBeenCalled();
+  });
+});
+
+describe('DetectedPreviewCard', () => {
+  it('shows title, platform badge, uploader, footer and trailing', () => {
+    render(
+      <DetectedPreviewCard
+        platform="youtube"
+        title="Hello"
+        uploader="Creator"
+        thumbnail={null}
+        footerText="5 quality options"
+        trailing={<button>Trailing</button>}
+      />
+    );
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+    expect(screen.getByText('YOUTUBE')).toBeInTheDocument();
+    expect(screen.getByText('Creator')).toBeInTheDocument();
+    expect(screen.getByText('5 quality options')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Trailing' })).toBeInTheDocument();
+  });
+});
+
+describe('ActiveDownloadRow', () => {
+  it('renders progress percentage and bytes', () => {
+    render(
+      <ActiveDownloadRow
+        job={job()}
+        onCancel={() => {}}
+        onPause={() => {}}
+        onResume={() => {}}
+      />
+    );
+    expect(screen.getByText(/42%/)).toBeInTheDocument();
+    expect(screen.getByText('Downloading')).toBeInTheDocument();
+  });
+
+  it('wires Pause while active and Resume while paused', async () => {
+    const user = userEvent.setup();
+    const onPause = vi.fn();
+    const onResume = vi.fn();
+    const { rerender } = render(
+      <ActiveDownloadRow
+        job={job({ status: 'active' })}
+        onCancel={() => {}}
+        onPause={onPause}
+        onResume={onResume}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(onPause).toHaveBeenCalled();
+
+    rerender(
+      <ActiveDownloadRow
+        job={job({ status: 'paused' })}
+        onCancel={() => {}}
+        onPause={onPause}
+        onResume={onResume}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(onResume).toHaveBeenCalled();
+  });
+
+  it('fires onCancel when the close button is pressed', async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    render(
+      <ActiveDownloadRow
+        job={job()}
+        onCancel={onCancel}
+        onPause={() => {}}
+        onResume={() => {}}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onCancel).toHaveBeenCalled();
+  });
+});
+
+describe('CompletedDownloadRow', () => {
+  it('shows Play & Reveal for a successful download with target_path', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    render(
+      <CompletedDownloadRow
+        job={job({ status: 'completed', target_path: '/tmp/video.mp4' })}
+        zebra={false}
+        onDelete={() => {}}
+        onPlay={onPlay}
+        onRetry={() => {}}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reveal' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Play' }));
+    expect(onPlay).toHaveBeenCalled();
+  });
+
+  it('shows Retry on failure instead of Play', async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn();
+    render(
+      <CompletedDownloadRow
+        job={job({ status: 'failed', target_path: null, error: 'boom' })}
+        zebra
+        onDelete={() => {}}
+        onPlay={() => {}}
+        onRetry={onRetry}
+      />
+    );
+    expect(screen.queryByRole('button', { name: 'Play' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+});
+
+describe('CompletedDownloadTile', () => {
+  it('treats a click on the tile as Play for successful jobs', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
+        onPlay={onPlay}
+        onDelete={() => {}}
+      />
+    );
+    await user.click(screen.getByText('Some video'));
+    expect(onPlay).toHaveBeenCalled();
+  });
+
+  it('does not play a failed job on click', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'failed' })}
+        onPlay={onPlay}
+        onDelete={() => {}}
+      />
+    );
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    await user.click(screen.getByText('Some video'));
+    expect(onPlay).not.toHaveBeenCalled();
+  });
+
+  it('delete button stops propagation and does not trigger play', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
+        onPlay={onPlay}
+        onDelete={onDelete}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(onDelete).toHaveBeenCalled();
+    expect(onPlay).not.toHaveBeenCalled();
+  });
+});

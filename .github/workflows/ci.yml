@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend (Vitest + TSC)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test -- --run
+
+  backend:
+    name: Backend (cargo test)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      # Tauri needs a few system deps on macOS; they are preinstalled on the
+      # GitHub runner image, so no extra steps are required here.
+      - name: cargo fmt --check
+        working-directory: src-tauri
+        run: cargo fmt --check
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --lib
+
+  e2e:
+    name: E2E (Playwright smoke)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  swift-helper:
+    name: Swift helper build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift build
+        working-directory: helpers/recorder-swift
+        run: swift build -c release

@@ -10,7 +10,8 @@ type RowProps = {
   actions?: ReactNode;
   active?: boolean;
   pinned?: boolean;
-  onSelect?: () => void;
+  onSelect?: (e?: React.MouseEvent) => void;
+  selected?: boolean;
 };
 
 export const Row = ({
@@ -24,9 +25,11 @@ export const Row = ({
   active = false,
   pinned = false,
   onSelect,
+  selected = false,
 }: RowProps) => {
   const classes = [
     'group mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2 cursor-pointer',
+    selected ? 'row-selected' : '',
     active ? 'row-active' : pinned ? 'row-pinned' : '',
   ]
     .filter(Boolean)
@@ -36,8 +39,9 @@ export const Row = ({
     <div
       role="option"
       aria-selected={active ? 'true' : 'false'}
-      onClick={onSelect}
+      onClick={(e) => onSelect?.(e)}
       className={classes}
+      style={selected ? { outline: '1px solid rgba(47,122,229,0.55)', background: 'rgba(47,122,229,0.08)' } : undefined}
     >
       {icon && (
         <div

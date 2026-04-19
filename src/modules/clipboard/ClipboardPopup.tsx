@@ -7,6 +7,9 @@ import { IconButton } from '../../shared/ui/IconButton';
 import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { useToast } from '../../shared/ui/Toast';
+import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
 import type { ClipboardItem } from './api';
 import {
@@ -21,6 +24,7 @@ import {
 } from './api';
 import { detectType, type ContentType } from './contentType';
 import { iconFor, typeTint } from './icons';
+import { useLinkPreview } from './useLinkPreview';
 import { detect as detectVideo, start as startDownload, type DetectedVideo } from '../downloader/api';
 import { PlatformBadge } from '../downloader/PlatformBadge';
 
@@ -61,6 +65,12 @@ export const ClipboardPopup = () => {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [videoBanner, setVideoBanner] = useState<DetectedVideo | null>(null);
   const [videoBannerUrl, setVideoBannerUrl] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+  const [copyFlash, setCopyFlash] = useState(false);
+  const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
+  const { toast } = useToast();
+  const { announce } = useAnnounce();
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
 
@@ -76,11 +86,17 @@ export const ClipboardPopup = () => {
   }, [query, reloadNonce]);
 
   useEffect(() => {
-    const unlisten = listen('clipboard:changed', reload);
+    const unlisten = listen('clipboard:changed', () => {
+      reload();
+      // A new clipboard capture happened — flash the popup border briefly.
+      setCopyFlash(true);
+      window.setTimeout(() => setCopyFlash(false), 450);
+    });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [reload]);
+
 
   // Auto-detect video downloads when the newest text item is a video URL.
   useEffect(() => {
@@ -168,10 +184,17 @@ export const ClipboardPopup = () => {
       const item = flat[i];
       if (!item) return;
       copyOnly(item.id)
-        .then(() => getCurrentWindow().hide().catch(() => {}))
-        .catch((e) => console.error('copy failed:', e));
+        .then(() => {
+          announce('Copied to clipboard');
+          toast({ title: 'Copied', variant: 'success', durationMs: 2000 });
+          getCurrentWindow().hide().catch(() => {});
+        })
+        .catch((e) => {
+          console.error('copy failed:', e);
+          toast({ title: 'Copy failed', description: String(e), variant: 'error' });
+        });
     },
-    [flat]
+    [flat, toast, announce]
   );
 
   const onSelect = useCallback(
@@ -193,14 +216,96 @@ export const ClipboardPopup = () => {
 
   const handleDelete = useCallback(
     (id: number) => {
-      deleteItem(id).then(reload).catch((e) => console.error('delete failed:', e));
+      deleteItem(id)
+        .then(reload)
+        .catch((e) => {
+          console.error('delete failed:', e);
+          toast({ title: 'Delete failed', description: String(e), variant: 'error' });
+        });
     },
-    [reload]
+    [reload, toast]
   );
 
   const handleClearAll = useCallback(() => {
-    clearAll().then(reload).catch((e) => console.error('clearAll failed:', e));
-  }, [reload]);
+    setClearConfirmOpen(true);
+  }, []);
+
+  const confirmClearAll = useCallback(() => {
+    setClearConfirmOpen(false);
+    clearAll()
+      .then(() => {
+        reload();
+        toast({ title: 'History cleared', variant: 'success' });
+      })
+      .catch((e) => {
+        console.error('clearAll failed:', e);
+        toast({ title: 'Clear failed', description: String(e), variant: 'error' });
+      });
+  }, [reload, toast]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setSelectionAnchor(null);
+  }, []);
+
+  const handleRowClick = useCallback(
+    (flatIndex: number, e?: React.MouseEvent) => {
+      const item = flat[flatIndex];
+      if (!item) return;
+      if (e?.shiftKey && selectionAnchor !== null) {
+        e.preventDefault();
+        const [from, to] =
+          flatIndex < selectionAnchor
+            ? [flatIndex, selectionAnchor]
+            : [selectionAnchor, flatIndex];
+        const next = new Set<number>();
+        for (let i = from; i <= to; i++) {
+          const it = flat[i];
+          if (it) next.add(it.id);
+        }
+        setSelectedIds(next);
+        return;
+      }
+      if (e?.metaKey || e?.ctrlKey) {
+        e.preventDefault();
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          if (next.has(item.id)) next.delete(item.id);
+          else next.add(item.id);
+          return next;
+        });
+        setSelectionAnchor(flatIndex);
+        return;
+      }
+      // Plain click: clear multi-selection and paste as before.
+      clearSelection();
+      setIndex(flatIndex);
+      pasteAt(flatIndex);
+    },
+    [flat, selectionAnchor, clearSelection, setIndex, pasteAt]
+  );
+
+  const bulkDelete = useCallback(async () => {
+    const ids = [...selectedIds];
+    try {
+      await Promise.all(ids.map((id) => deleteItem(id)));
+      clearSelection();
+      reload();
+    } catch (e) {
+      console.error('bulk delete failed', e);
+    }
+  }, [selectedIds, clearSelection, reload]);
+
+  const bulkPin = useCallback(async () => {
+    const ids = [...selectedIds];
+    try {
+      await Promise.all(ids.map((id) => togglePin(id)));
+      clearSelection();
+      reload();
+    } catch (e) {
+      console.error('bulk pin failed', e);
+    }
+  }, [selectedIds, clearSelection, reload]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -214,10 +319,17 @@ export const ClipboardPopup = () => {
         searchRef.current?.focus();
         return;
       }
-      if (e.key === 'Escape' && query) {
-        e.preventDefault();
-        setQuery('');
-        return;
+      if (e.key === 'Escape') {
+        if (selectedIds.size > 0) {
+          e.preventDefault();
+          clearSelection();
+          return;
+        }
+        if (query) {
+          e.preventDefault();
+          setQuery('');
+          return;
+        }
       }
       if (e.shiftKey && e.key === 'Enter') {
         e.preventDefault();
@@ -236,7 +348,7 @@ export const ClipboardPopup = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [flat, index, query, copyAt, handleTogglePin, handleDelete]);
+  }, [flat, index, query, copyAt, handleTogglePin, handleDelete, selectedIds, clearSelection]);
 
   const totalBytes = useMemo(
     () => typed.reduce((sum, i) => sum + i.content.length, 0),
@@ -246,6 +358,20 @@ export const ClipboardPopup = () => {
     n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
   const renderRow = (item: (typeof typed)[number], flatIndex: number) => {
+    if (item.type === 'link') {
+      return (
+        <LinkRow
+          key={item.id}
+          item={item}
+          flatIndex={flatIndex}
+          active={index === flatIndex}
+          selected={selectedIds.has(item.id)}
+          onTogglePin={handleTogglePin}
+          onDelete={handleDelete}
+          onClick={handleRowClick}
+        />
+      );
+    }
     const tint = typeTint[item.type];
     const imageMeta = item.kind === 'image' ? parseImageMeta(item) : null;
     const icon = imageMeta ? (
@@ -283,18 +409,52 @@ export const ClipboardPopup = () => {
         }
         pinned={item.pinned}
         active={index === flatIndex}
-        onSelect={() => {
-          setIndex(flatIndex);
-          pasteAt(flatIndex);
-        }}
+        selected={selectedIds.has(item.id)}
+        onSelect={(e) => handleRowClick(flatIndex, e)}
       />
     );
   };
 
   const isEmpty = flat.length === 0;
 
+  const selectionCount = selectedIds.size;
+
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className={`flex flex-col h-full relative${copyFlash ? ' clip-flash' : ''}`}
+    >
+      {selectionCount > 0 && (
+        <div
+          className="px-3 py-1.5 flex items-center justify-between border-b hair"
+          style={{ background: 'rgba(47,122,229,0.08)' }}
+        >
+          <span className="t-primary text-meta font-medium">
+            {selectionCount} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={bulkPin}
+              className="t-primary text-meta px-2 py-0.5 rounded"
+              style={{ background: 'rgba(255,255,255,0.06)' }}
+            >
+              Pin
+            </button>
+            <button
+              onClick={bulkDelete}
+              className="text-meta px-2 py-0.5 rounded"
+              style={{ background: 'rgba(235,72,72,0.18)', color: '#FF7878' }}
+            >
+              Delete
+            </button>
+            <button
+              onClick={clearSelection}
+              className="t-tertiary hover:t-secondary text-meta px-2 py-0.5"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
       <SearchInput
         value={query}
         onChange={setQuery}
@@ -403,6 +563,83 @@ export const ClipboardPopup = () => {
           </button>
         </div>
       </footer>
+      <ConfirmDialog
+        open={clearConfirmOpen}
+        title="Clear clipboard history?"
+        description="Unpinned items will be removed. Pinned items will stay."
+        confirmLabel="Clear"
+        tone="danger"
+        onConfirm={confirmClearAll}
+        onCancel={() => setClearConfirmOpen(false)}
+      />
     </div>
+  );
+};
+
+type LinkRowItem = ClipboardItem & { type: ContentType };
+
+interface LinkRowProps {
+  item: LinkRowItem;
+  flatIndex: number;
+  active: boolean;
+  selected: boolean;
+  onTogglePin: (id: number) => void;
+  onDelete: (id: number) => void;
+  onClick: (flatIndex: number, e?: React.MouseEvent) => void;
+}
+
+/// A clipboard row for URL items. Lazy-fetches og:image / og:title from the
+/// Rust side and renders a thumbnail + title pulled from the page metadata,
+/// falling back to the default link icon when the page exposes no preview.
+const LinkRow = ({
+  item,
+  flatIndex,
+  active,
+  selected,
+  onTogglePin,
+  onDelete,
+  onClick,
+}: LinkRowProps) => {
+  const preview = useLinkPreview(item.content);
+  const tint = typeTint[item.type];
+  const [imgBroken, setImgBroken] = useState(false);
+  const thumb = preview?.image && !imgBroken ? (
+    <img
+      src={preview.image}
+      alt=""
+      onError={() => setImgBroken(true)}
+      className="w-7 h-7 rounded-md object-cover"
+    />
+  ) : (
+    iconFor(item.type)
+  );
+  const primary = preview?.title ?? item.content;
+  return (
+    <Row
+      primary={primary}
+      icon={thumb}
+      iconTint={preview?.image && !imgBroken ? 'transparent' : tint.bg}
+      iconColor={tint.fg}
+      actions={
+        <>
+          <IconButton onClick={() => onTogglePin(item.id)} title={item.pinned ? 'Unpin' : 'Pin'}>
+            <PinIcon filled={item.pinned} />
+          </IconButton>
+          <IconButton onClick={() => onDelete(item.id)} title="Delete" tone="danger">
+            <TrashIcon />
+          </IconButton>
+        </>
+      }
+      meta={
+        <>
+          <span className="t-tertiary text-meta font-mono">{iso(item.created_at)}</span>
+          {active && <Kbd>↵</Kbd>}
+        </>
+      }
+      pinned={item.pinned}
+      active={active}
+      selected={selected}
+      onSelect={(e) => onClick(flatIndex, e)}
+    />
   );
 };

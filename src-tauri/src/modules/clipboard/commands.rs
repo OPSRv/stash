@@ -1,8 +1,44 @@
+use crate::modules::clipboard::og::{self, LinkPreview};
 use crate::modules::clipboard::repo::{ClipboardItem, ClipboardRepo};
 use rusqlite::Result;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
+
+/// In-memory cache for LinkPreview lookups. Keyed by URL. Stores both hits
+/// (Some) and misses (None) so the UI never re-hammers a URL that doesn't
+/// expose og metadata.
+pub struct LinkPreviewState {
+    cache: Mutex<HashMap<String, Option<LinkPreview>>>,
+}
+
+const LINK_PREVIEW_CACHE_CAP: usize = 500;
+
+impl LinkPreviewState {
+    pub fn new() -> Self {
+        Self {
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get(&self, url: &str) -> Option<Option<LinkPreview>> {
+        self.cache.lock().unwrap().get(url).cloned()
+    }
+
+    fn put(&self, url: String, value: Option<LinkPreview>) {
+        let mut cache = self.cache.lock().unwrap();
+        if cache.len() >= LINK_PREVIEW_CACHE_CAP {
+            // Very coarse eviction — drop a random chunk. This cache is
+            // per-process and short-lived, so precise LRU is overkill.
+            let to_drop: Vec<String> = cache.keys().take(LINK_PREVIEW_CACHE_CAP / 4).cloned().collect();
+            for k in to_drop {
+                cache.remove(&k);
+            }
+        }
+        cache.insert(url, value);
+    }
+}
 
 pub struct ClipboardState {
     pub repo: Mutex<ClipboardRepo>,
@@ -120,6 +156,28 @@ pub fn clipboard_copy_only(
         _ => {}
     }
     Ok(())
+}
+
+/// Resolve and cache a link preview for the given URL. Returns None when
+/// the page has no usable og/twitter metadata (the miss is also cached).
+#[tauri::command]
+pub async fn clipboard_link_preview(
+    state: State<'_, Arc<LinkPreviewState>>,
+    url: String,
+) -> std::result::Result<Option<LinkPreview>, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Ok(None);
+    }
+    if let Some(cached) = state.get(&url) {
+        return Ok(cached);
+    }
+    let url_for_fetch = url.clone();
+    let preview = tauri::async_runtime::spawn_blocking(move || og::fetch_preview(&url_for_fetch))
+        .await
+        .map_err(|e| e.to_string())?;
+    state.put(url, preview.clone());
+    Ok(preview)
 }
 
 #[tauri::command]
@@ -266,6 +324,24 @@ mod tests {
         let state = fresh_state();
         let result = paste_prepare(&state, 9999, 0);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn link_preview_state_caches_hits_and_misses() {
+        let state = LinkPreviewState::new();
+        let url = "https://example.com/page".to_string();
+        assert!(state.get(&url).is_none());
+        state.put(url.clone(), None);
+        assert_eq!(state.get(&url), Some(None));
+        let hit = LinkPreview {
+            url: url.clone(),
+            image: Some("https://cdn/og.png".into()),
+            title: Some("T".into()),
+            description: None,
+            site_name: None,
+        };
+        state.put(url.clone(), Some(hit.clone()));
+        assert_eq!(state.get(&url), Some(Some(hit)));
     }
 
     #[test]

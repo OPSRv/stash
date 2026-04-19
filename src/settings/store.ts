@@ -1,4 +1,5 @@
 import { LazyStore } from '@tauri-apps/plugin-store';
+import { DEFAULT_THEME, type AccentKey, type ThemeMode } from './theme';
 
 export type CookiesBrowser =
   | 'safari'
@@ -17,6 +18,17 @@ export type Settings = {
   downloadsFolder: string | null;
   notifyOnDownloadComplete: boolean;
   cookiesFromBrowser: CookiesBrowser;
+  maxParallelDownloads: number;
+  downloadRateLimit: string | null;
+  historyRetentionDays: number;
+  themeMode: ThemeMode;
+  themeBlur: number;
+  themePaneOpacity: number;
+  themeAccent: AccentKey;
+  translateEnabled: boolean;
+  translateTarget: string;
+  translateMinChars: number;
+  translateShowNotification: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +37,17 @@ export const DEFAULT_SETTINGS: Settings = {
   downloadsFolder: null,
   notifyOnDownloadComplete: true,
   cookiesFromBrowser: null,
+  maxParallelDownloads: 3,
+  downloadRateLimit: null,
+  historyRetentionDays: 60,
+  themeMode: DEFAULT_THEME.mode,
+  themeBlur: DEFAULT_THEME.blur,
+  themePaneOpacity: DEFAULT_THEME.paneOpacity,
+  themeAccent: DEFAULT_THEME.accent,
+  translateEnabled: false,
+  translateTarget: 'uk',
+  translateMinChars: 6,
+  translateShowNotification: true,
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

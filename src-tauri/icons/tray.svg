@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Stash tray icon — template (macOS): solid shapes in pure black.
+  macOS re-tints the alpha mask per appearance (light/dark menubar).
+  Concept: three stacked rounded cards representing a clipboard / stash of items.
+  22x22 base; viewBox designed so strokes stay crisp at 1x and @2x.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="22" height="22">
+  <g fill="#000000">
+    <!-- back card (faintest by width) -->
+    <rect x="4.5" y="4" width="13" height="3" rx="1.2" opacity="0.45"/>
+    <!-- middle card -->
+    <rect x="3.5" y="8.5" width="15" height="3" rx="1.2" opacity="0.75"/>
+    <!-- front card with a filled dot (selected / current clip) -->
+    <rect x="2.5" y="13" width="17" height="5" rx="1.4"/>
+    <circle cx="5.3" cy="15.5" r="1" fill="#ffffff"/>
+  </g>
+</svg>
