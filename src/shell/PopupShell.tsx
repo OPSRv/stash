@@ -317,8 +317,21 @@ export const PopupShell = () => {
             aria-label="Unload inactive tabs"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-              <rect x="2" y="3" width="10" height="8" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
-              <path d="M5 7 L9 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path
+                d="M11.5 7 A4.5 4.5 0 1 1 7 2.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+              />
+              <path
+                d="M8.5 1 L11.5 2.5 L10 5.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </Button>
           <Button
