@@ -48,7 +48,7 @@ export const Modal = ({
   return (
     <div
       data-modal-backdrop
-      className="absolute inset-0 flex items-center justify-center p-6"
+      className="stash-fade-in absolute inset-0 flex items-center justify-center p-6"
       style={{
         background: 'rgba(0,0,0,0.55)',
         backdropFilter: 'blur(8px)',
@@ -63,7 +63,7 @@ export const Modal = ({
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
-        className={panelClassName}
+        className={`stash-pop-in ${panelClassName}`}
         style={maxWidth ? { maxWidth, width: '100%' } : undefined}
         onClick={(e) => e.stopPropagation()}
       >

@@ -208,9 +208,12 @@ export const ClipboardPopup = () => {
   const pasteAt = useCallback(
     (i: number) => {
       const item = flat[i];
-      if (item) pasteItem(item.id).catch((e) => console.error('paste failed:', e));
+      if (!item) return;
+      pasteItem(item.id)
+        .then(() => announce('Pasted'))
+        .catch((e) => console.error('paste failed:', e));
     },
-    [flat]
+    [flat, announce]
   );
 
   const copyAt = useCallback(
@@ -243,21 +246,30 @@ export const ClipboardPopup = () => {
 
   const handleTogglePin = useCallback(
     (id: number) => {
-      togglePin(id).then(reload).catch((e) => console.error('togglePin failed:', e));
+      const target = rawItems.find((i) => i.id === id);
+      togglePin(id)
+        .then(() => {
+          reload();
+          announce(target?.pinned ? 'Unpinned' : 'Pinned');
+        })
+        .catch((e) => console.error('togglePin failed:', e));
     },
-    [reload]
+    [reload, rawItems, announce]
   );
 
   const performDelete = useCallback(
     (id: number) => {
       deleteItem(id)
-        .then(reload)
+        .then(() => {
+          reload();
+          announce('Item deleted');
+        })
         .catch((e) => {
           console.error('delete failed:', e);
           toast({ title: 'Delete failed', description: String(e), variant: 'error' });
         });
     },
-    [reload, toast]
+    [reload, toast, announce]
   );
 
   const handleDelete = useCallback(

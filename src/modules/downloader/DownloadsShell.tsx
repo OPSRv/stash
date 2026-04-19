@@ -177,16 +177,28 @@ export const DownloadsShell = () => {
     [cancelConfirm, performCancel]
   );
   const handlePauseJob = useCallback(
-    (id: number) => () => pause(id).then(reload),
-    [reload]
+    (id: number) => () =>
+      pause(id).then(() => {
+        reload();
+        announce('Download paused');
+      }),
+    [reload, announce]
   );
   const handleResumeJob = useCallback(
-    (id: number) => () => resume(id).then(reload),
-    [reload]
+    (id: number) => () =>
+      resume(id).then(() => {
+        reload();
+        announce('Download resumed');
+      }),
+    [reload, announce]
   );
   const handleDeleteJob = useCallback(
-    (id: number) => () => deleteJob(id).then(reload),
-    [reload]
+    (id: number) => () =>
+      deleteJob(id).then(() => {
+        reload();
+        announce('Download removed');
+      }),
+    [reload, announce]
   );
   const handleRetryJob = useCallback(
     (id: number) => () =>

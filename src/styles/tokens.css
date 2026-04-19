@@ -375,6 +375,23 @@
     background: rgba(239, 68, 68, 0.28);
   }
 
+  /* Modal + toast fade animations. Honour prefers-reduced-motion via the
+     media query below. */
+  @keyframes stash-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes stash-pop-in {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .stash-fade-in {
+    animation: stash-fade-in var(--duration-base) var(--easing-standard);
+  }
+  .stash-pop-in {
+    animation: stash-pop-in var(--duration-base) var(--easing-emphasized);
+  }
+
   /* Card primitive. Flat variant uses subtle elevated surface; tone variants
      pull from semantic color tokens. Hover treatment only on interactive cards. */
   .stash-card--flat {

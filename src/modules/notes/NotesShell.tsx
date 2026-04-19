@@ -12,6 +12,7 @@ import { EmptyState } from '../../shared/ui/EmptyState';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
 import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
+import { SaveStatusPill } from './SaveStatusPill';
 import { toggleCheckboxAtLine } from './markdown';
 import {
   notesCreate,
@@ -47,7 +48,9 @@ export const NotesShell = () => {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [viewMode, setViewMode] = useState<NotesViewMode>('split');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const saveTimer = useRef<number | null>(null);
+  const savedClearTimer = useRef<number | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const { toast } = useToast();
@@ -87,18 +90,26 @@ export const NotesShell = () => {
   const scheduleSave = useCallback(
     (nextTitle: string, nextBody: string) => {
       if (saveTimer.current) window.clearTimeout(saveTimer.current);
+      if (savedClearTimer.current) window.clearTimeout(savedClearTimer.current);
+      setSaveStatus('saving');
       saveTimer.current = window.setTimeout(async () => {
         try {
           if (activeId == null) {
-            if (!nextTitle && !nextBody) return;
+            if (!nextTitle && !nextBody) {
+              setSaveStatus('idle');
+              return;
+            }
             const id = await notesCreate(nextTitle, nextBody);
             setActiveId(id);
           } else {
             await notesUpdate(activeId, nextTitle, nextBody);
           }
           reload();
+          setSaveStatus('saved');
+          savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);
         } catch (e) {
           console.error('notes save failed', e);
+          setSaveStatus('error');
         }
       }, AUTOSAVE_DEBOUNCE_MS);
     },
@@ -274,6 +285,7 @@ export const NotesShell = () => {
                 placeholder="Untitled"
                 className="flex-1 bg-transparent outline-none t-primary text-heading font-medium min-w-0"
               />
+              <SaveStatusPill status={saveStatus} />
               <SegmentedControl
                 size="sm"
                 options={VIEW_MODE_OPTIONS}
