@@ -102,6 +102,18 @@ export const PopupShell = () => {
     }
   }, [visibleModules, activeId]);
 
+  // Suspend popup auto-hide while the AI tab is active. Chat state
+  // transitions (send, stream, disable-while-streaming) briefly blur the
+  // popup, and the Rust blur handler would otherwise hide it mid-message.
+  useEffect(() => {
+    if (activeId === 'ai') {
+      invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
+      return () => {
+        invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
+      };
+    }
+  }, [activeId]);
+
   useEffect(() => {
     const unlisten = subscribeTheme(applyTheme);
     return () => {

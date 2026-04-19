@@ -99,8 +99,12 @@ export const Markdown = ({ source, className, codeCopy, components }: MarkdownPr
 
   if (!source) return null;
 
+  // `.md-body` carries the shared paragraph/list/code spacing — without it,
+  // the browser default of margin: 0 on <p> etc. squashes everything together.
+  const rootClass = `md-body ${className ?? 't-primary text-body'}`;
+
   return (
-    <div className={className ?? 't-primary text-body'}>
+    <div className={rootClass}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={merged}>
         {source}
       </ReactMarkdown>

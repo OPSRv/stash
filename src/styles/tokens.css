@@ -689,35 +689,41 @@ html {
   }
 }
 
-/* Markdown preview (Notes). Scoped to .notes-md so it doesn't leak. */
-.notes-md { line-height: 1.55; }
-.notes-md h1 { font-size: 20px; font-weight: 600; margin: 12px 0 8px; }
-.notes-md h2 { font-size: 16px; font-weight: 600; margin: 12px 0 6px; }
-.notes-md h3 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; }
+/* Shared markdown rendering styles. Applied to `.md-body` so both Notes and
+ * AI Chat get the same typography (spacing, lists, code blocks) without the
+ * default browser reset collapsing paragraphs into each other. `.notes-md`
+ * stays as an alias for backwards compatibility with older references. */
+.md-body, .notes-md { line-height: 1.55; }
+.md-body h1, .notes-md h1 { font-size: 20px; font-weight: 600; margin: 12px 0 8px; }
+.md-body h2, .notes-md h2 { font-size: 16px; font-weight: 600; margin: 12px 0 6px; }
+.md-body h3, .notes-md h3 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; }
+.md-body h4, .md-body h5, .md-body h6,
 .notes-md h4, .notes-md h5, .notes-md h6 { font-size: 13px; font-weight: 600; margin: 6px 0 2px; }
-.notes-md p { margin: 4px 0; }
-.notes-md ul, .notes-md ol { margin: 4px 0; padding-left: 20px; }
-.notes-md ul { list-style: disc; }
-.notes-md ol { list-style: decimal; }
-.notes-md li { margin: 2px 0; }
+.md-body p, .notes-md p { margin: 6px 0; }
+.md-body ul, .md-body ol, .notes-md ul, .notes-md ol { margin: 4px 0; padding-left: 20px; }
+.md-body ul, .notes-md ul { list-style: disc; }
+.md-body ol, .notes-md ol { list-style: decimal; }
+.md-body li, .notes-md li { margin: 2px 0; }
+.md-body li.task-list-item,
 .notes-md li.task-list-item { list-style: none; margin-left: -18px; display: flex; align-items: flex-start; gap: 8px; }
+.md-body li.task-list-item input[type="checkbox"],
 .notes-md li.task-list-item input[type="checkbox"] { margin-top: 4px; }
-.notes-md blockquote {
+.md-body blockquote, .notes-md blockquote {
   margin: 8px 0;
   padding: 2px 12px;
   border-left: 2px solid rgba(var(--stash-accent-rgb), 0.5);
   color: rgba(255, 255, 255, 0.72);
   font-style: italic;
 }
-.notes-md hr { margin: 12px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
-.notes-md code {
+.md-body hr, .notes-md hr { margin: 12px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.md-body code, .notes-md code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
   padding: 1px 4px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.08);
 }
-.notes-md pre {
+.md-body pre, .notes-md pre {
   margin: 8px 0;
   padding: 10px 12px;
   border-radius: 6px;
@@ -727,6 +733,7 @@ html {
   font-size: 12px;
   line-height: 1.5;
 }
+.md-body pre code, .notes-md pre code { background: transparent; padding: 0; }
 .notes-md pre code { padding: 0; background: transparent; font-size: inherit; }
 .notes-md table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
 .notes-md th, .notes-md td {

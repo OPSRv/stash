@@ -51,7 +51,7 @@ export const ChatComposer = ({
       <textarea
         ref={textareaRef}
         value={value}
-        disabled={disabled || isStreaming}
+        disabled={disabled}
         placeholder={placeholder ?? 'Ask anything. Enter to send, Shift+Enter for newline.'}
         onChange={(e) => onChange(e.currentTarget.value)}
         onKeyDown={handleKey}
@@ -86,7 +86,7 @@ export const ChatComposer = ({
         >
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
             <path
-              d="M2 7 L12 2 L9 7 L12 12 Z"
+              d="M2 2 L12 7 L2 12 L5 7 Z"
               fill="currentColor"
               stroke="currentColor"
               strokeLinejoin="round"

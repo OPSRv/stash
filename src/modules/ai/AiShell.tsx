@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { streamText } from 'ai';
 
 import { useToast } from '../../shared/ui/Toast';
@@ -41,17 +40,6 @@ export const AiShell = () => {
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
 
   const abortRef = useRef<AbortController | null>(null);
-
-  // Focus transitions during streaming (textarea disable, new-message scroll,
-  // etc.) sometimes blur the popup for a frame, and Stash's blur handler
-  // hides it. Suspend auto-hide for the lifetime of this shell — same policy
-  // the Terminal tab uses.
-  useEffect(() => {
-    invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
-    return () => {
-      invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
-    };
-  }, []);
 
   useEffect(() => {
     aiListSessions()
