@@ -103,12 +103,12 @@ const ToastCard = ({
   return (
     <div
       role={variant === 'error' ? 'alert' : 'status'}
-      className={`pointer-events-auto pane rounded-md px-3 py-2 text-[13px] shadow-lg border ${variantStyle[variant]} flex items-start gap-2`}
+      className={`pointer-events-auto pane rounded-md px-3 py-2 text-[13px] shadow-lg border stash-fade-in ${variantStyle[variant]} flex items-start gap-2`}
       style={
         variant === 'success'
-          ? { background: 'rgba(16,185,129,0.14)' }
+          ? { background: 'var(--color-success-bg)' }
           : variant === 'error'
-          ? { background: 'rgba(239,68,68,0.14)' }
+          ? { background: 'var(--color-danger-bg)' }
           : undefined
       }
     >

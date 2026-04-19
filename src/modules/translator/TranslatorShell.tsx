@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { listen } from '@tauri-apps/api/event';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
@@ -8,6 +9,7 @@ import { Select } from '../../shared/ui/Select';
 import { Spinner } from '../../shared/ui/Spinner';
 import { Button } from '../../shared/ui/Button';
 import { useToast } from '../../shared/ui/Toast';
+import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { loadSettings, saveSetting } from '../../settings/store';
 import { TARGET_LANGUAGES } from './languages';
 import {
@@ -36,6 +38,7 @@ export const TranslatorShell = () => {
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const lastTranslatedRef = useRef<{ text: string; to: string } | null>(null);
   const { toast } = useToast();
+  const { announce } = useAnnounce();
 
   useEffect(() => {
     loadSettings()
@@ -52,6 +55,7 @@ export const TranslatorShell = () => {
       try {
         const result = await translate(text, to);
         setLiveResult({ original: result.original, translated: result.translated, to: result.to });
+        announce('Translation ready');
         const list = await translatorList();
         setRows(list);
       } catch (e) {
@@ -66,7 +70,7 @@ export const TranslatorShell = () => {
         setBusy(false);
       }
     },
-    [toast],
+    [toast, announce],
   );
 
   // Auto-translate as the user types or pastes — debounced so short bursts
@@ -108,6 +112,14 @@ export const TranslatorShell = () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [reload]);
+
+  const speak = useCallback((text: string, lang: string) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    window.speechSynthesis.speak(u);
+  }, []);
 
   const onCopy = useCallback(async (text: string) => {
     try {
@@ -206,6 +218,16 @@ export const TranslatorShell = () => {
             </div>
             <Button
               size="xs"
+              variant="ghost"
+              onClick={() => speak(liveResult.translated, liveResult.to)}
+              title="Speak"
+              aria-label="Speak translation"
+              className="shrink-0"
+            >
+              🔊
+            </Button>
+            <Button
+              size="xs"
               variant="soft"
               onClick={() => onCopy(liveResult.translated)}
               title="Copy translation"
@@ -227,31 +249,28 @@ export const TranslatorShell = () => {
           </div>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto nice-scroll">
-        {rows.length === 0 && (
+      {rows.length === 0 ? (
+        <div className="flex-1 overflow-y-auto nice-scroll">
           <div className="h-full flex items-center justify-center t-tertiary text-meta px-6 text-center">
             No translations yet. Type above, or enable auto-translate in Settings → Clipboard and copy foreign text.
           </div>
-        )}
-        {rows.length > 0 && (
-          <>
-            <div className="px-3 pt-3 pb-1 flex items-center justify-between">
-              <SectionLabel>History · {rows.length}</SectionLabel>
-              <Button size="xs" variant="ghost" onClick={onClearAll}>
-                Clear all
-              </Button>
-            </div>
-            {rows.map((row) => (
-              <TranslationRowView
-                key={row.id}
-                row={row}
-                onCopy={onCopy}
-                onDelete={onDelete}
-              />
-            ))}
-          </>
-        )}
-      </div>
+        </div>
+      ) : (
+        <>
+          <div className="px-3 pt-3 pb-1 flex items-center justify-between shrink-0">
+            <SectionLabel>History · {rows.length}</SectionLabel>
+            <Button size="xs" variant="ghost" onClick={onClearAll}>
+              Clear all
+            </Button>
+          </div>
+          <TranslationHistory
+            rows={rows}
+            onCopy={onCopy}
+            onDelete={onDelete}
+            onSpeak={speak}
+          />
+        </>
+      )}
       <ConfirmDialog
         open={clearOpen}
         title="Clear translations?"
@@ -265,10 +284,88 @@ export const TranslatorShell = () => {
   );
 };
 
+interface HistoryProps {
+  rows: TranslationRow[];
+  onCopy: (text: string) => void;
+  onDelete: (id: number) => void;
+  onSpeak: (text: string, lang: string) => void;
+}
+
+/// Beyond this many history entries we switch to a virtualized scroller so
+/// scrolling and typing stay smooth. Below the threshold we keep the plain
+/// `.map` render so unit tests (jsdom can't measure layout) still see every
+/// row, and small lists don't pay the virtualizer's setup cost.
+const VIRTUALIZE_THRESHOLD = 40;
+
+const TranslationHistory = ({ rows, onCopy, onDelete, onSpeak }: HistoryProps) => {
+  if (rows.length < VIRTUALIZE_THRESHOLD) {
+    return (
+      <div className="flex-1 overflow-y-auto nice-scroll">
+        {rows.map((row) => (
+          <TranslationRowView
+            key={row.id}
+            row={row}
+            onCopy={onCopy}
+            onDelete={onDelete}
+            onSpeak={onSpeak}
+          />
+        ))}
+      </div>
+    );
+  }
+  return <VirtualHistory rows={rows} onCopy={onCopy} onDelete={onDelete} onSpeak={onSpeak} />;
+};
+
+const VirtualHistory = ({ rows, onCopy, onDelete, onSpeak }: HistoryProps) => {
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    // Rough estimate; measureElement refines per-row from real DOM height.
+    estimateSize: () => 96,
+    overscan: 6,
+    getItemKey: (i) => rows[i]?.id ?? i,
+  });
+  const items = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+  return (
+    <div ref={parentRef} className="flex-1 overflow-y-auto nice-scroll">
+      <div style={{ height: totalSize, width: '100%', position: 'relative' }}>
+        {items.map((vi) => {
+          const row = rows[vi.index];
+          if (!row) return null;
+          return (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${vi.start}px)`,
+              }}
+            >
+              <TranslationRowView
+                row={row}
+                onCopy={onCopy}
+                onDelete={onDelete}
+                onSpeak={onSpeak}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 interface RowViewProps {
   row: TranslationRow;
   onCopy: (text: string) => void;
   onDelete: (id: number) => void;
+  onSpeak: (text: string, lang: string) => void;
 }
 
 const rowStyle = {
@@ -280,7 +377,11 @@ const langPillStyle = {
   background: 'rgba(var(--stash-accent-rgb), 0.22)',
 } as const;
 
-const TranslationRowView = ({ row, onCopy, onDelete }: RowViewProps) => (
+/// Memoized so history rows don't re-render on every keystroke in the
+/// translate textarea. Parent callbacks are stable (useCallback), and `row`
+/// is reference-stable across reloads that don't touch that entry, so the
+/// default shallow compare is enough.
+const TranslationRowView = memo(({ row, onCopy, onDelete, onSpeak }: RowViewProps) => (
   <div
     className="mx-2 my-1 rounded-lg p-2.5 flex items-start gap-2"
     style={rowStyle}
@@ -304,6 +405,16 @@ const TranslationRowView = ({ row, onCopy, onDelete }: RowViewProps) => (
     </div>
     <Button
       size="xs"
+      variant="ghost"
+      onClick={() => onSpeak(row.translated, row.to_lang)}
+      title="Speak"
+      aria-label="Speak translation"
+      className="shrink-0"
+    >
+      🔊
+    </Button>
+    <Button
+      size="xs"
       variant="soft"
       onClick={() => onCopy(row.translated)}
       title="Copy translation"
@@ -324,4 +435,5 @@ const TranslationRowView = ({ row, onCopy, onDelete }: RowViewProps) => (
       <CloseIcon size={12} />
     </Button>
   </div>
-);
+));
+TranslationRowView.displayName = 'TranslationRowView';
