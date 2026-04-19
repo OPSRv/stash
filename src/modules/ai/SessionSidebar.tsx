@@ -60,16 +60,23 @@ export const SessionSidebar = ({
     setRenamingId(null);
   };
 
-  const width = expanded ? 'w-[220px]' : 'w-[44px]';
+  // Collapsed = fully hidden. The rail of identical "NC" initials was
+  // visually noisy without giving the user useful orientation, and the
+  // chevron in the chat header is now the single entry point for toggling
+  // visibility.
+  const width = expanded ? 'w-[220px]' : 'w-0';
 
   return (
     <>
       <aside
-        className={`${width} h-full border-r hair flex flex-col transition-[width] duration-150`}
+        className={`${width} h-full ${
+          expanded ? 'border-r hair' : ''
+        } flex flex-col overflow-hidden transition-[width] duration-150`}
         style={{ background: 'var(--color-surface)' }}
+        aria-hidden={!expanded}
       >
-        <ul className="flex-1 overflow-y-auto nice-scroll py-1">
-          {sessions.length === 0 && expanded && (
+        <ul className="flex-1 overflow-y-auto nice-scroll py-1 w-[220px]">
+          {sessions.length === 0 && (
             <li className="px-3 py-4 t-tertiary text-meta">No conversations yet.</li>
           )}
           {sessions.map((s) => {
@@ -89,33 +96,31 @@ export const SessionSidebar = ({
                   >
                     {initials(s.title)}
                   </div>
-                  {expanded && (
-                    <div className="flex-1 min-w-0">
-                      {isRenaming ? (
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.currentTarget.value)}
-                          onBlur={commitRename}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitRename();
-                            else if (e.key === 'Escape') setRenamingId(null);
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="input-field w-full px-2 py-0.5 rounded-md text-body"
-                          aria-label="Rename chat"
-                        />
-                      ) : (
-                        <>
-                          <div className="truncate t-primary text-body">{s.title}</div>
-                          <div className="truncate t-tertiary text-meta">
-                            {relativeDay(s.updated_at)}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                  {expanded && !isRenaming && (
+                  <div className="flex-1 min-w-0">
+                    {isRenaming ? (
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.currentTarget.value)}
+                        onBlur={commitRename}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename();
+                          else if (e.key === 'Escape') setRenamingId(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="input-field w-full px-2 py-0.5 rounded-md text-body"
+                        aria-label="Rename chat"
+                      />
+                    ) : (
+                      <>
+                        <div className="truncate t-primary text-body">{s.title}</div>
+                        <div className="truncate t-tertiary text-meta">
+                          {relativeDay(s.updated_at)}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {!isRenaming && (
                     <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
                       <button
                         type="button"
@@ -148,18 +153,17 @@ export const SessionSidebar = ({
             );
           })}
         </ul>
-        <div className="border-t hair p-1">
+        <div className="border-t hair px-3 py-2 w-[220px] flex items-center min-h-[52px]">
           <Button
             variant="soft"
             tone="accent"
-            size="sm"
-            shape={expanded ? 'default' : 'square'}
+            size="md"
             onClick={onCreate}
             aria-label="New chat"
             title="New chat (⌘N)"
-            fullWidth={expanded}
+            fullWidth
           >
-            {expanded ? '+ New chat' : '+'}
+            + New chat
           </Button>
         </div>
       </aside>
