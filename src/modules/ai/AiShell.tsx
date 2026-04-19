@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { streamText } from 'ai';
 
+import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { useToast } from '../../shared/ui/Toast';
 
 import {
@@ -15,9 +16,13 @@ import {
 } from './api';
 import { ChatComposer } from './ChatComposer';
 import { ChatThread } from './ChatThread';
+import { EmbeddedWebChat } from './EmbeddedWebChat';
 import { buildModel } from './provider';
 import { SessionSidebar } from './SessionSidebar';
 import { useAiSettings } from './useAiSettings';
+import { faviconUrlFor } from './webchatApi';
+
+type Mode = 'api' | string; // 'api' or a web service id
 
 const autoTitleFrom = (prompt: string): string => {
   const first = prompt.trim().split('\n')[0] ?? '';
@@ -38,8 +43,42 @@ export const AiShell = () => {
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [mode, setMode] = useState<Mode>('api');
 
   const abortRef = useRef<AbortController | null>(null);
+
+  const modeOptions = useMemo(() => {
+    const opts: Array<{
+      value: string;
+      label: string;
+      icon?: React.ReactNode;
+    }> = [{ value: 'api', label: 'API' }];
+    for (const s of settings.aiWebServices) {
+      const favicon = faviconUrlFor(s.url, 16);
+      opts.push({
+        value: s.id,
+        label: s.label,
+        icon: favicon ? (
+          <img
+            src={favicon}
+            alt=""
+            width={14}
+            height={14}
+            className="rounded-sm"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        ) : undefined,
+      });
+    }
+    return opts;
+  }, [settings.aiWebServices]);
+
+  const activeWebService = useMemo(
+    () => settings.aiWebServices.find((s) => s.id === mode),
+    [mode, settings.aiWebServices],
+  );
 
   useEffect(() => {
     aiListSessions()
@@ -275,78 +314,99 @@ export const AiShell = () => {
     </div>
   );
 
+  const isApi = mode === 'api';
+
   return (
-    <div className="flex h-full w-full" style={{ background: 'var(--color-bg)' }}>
-      <SessionSidebar
-        sessions={sessions}
-        activeId={activeId}
-        expanded={sidebarExpanded}
-        onSelect={setActiveId}
-        onCreate={() => {
-          createNewSession().catch(() => {});
-        }}
-        onRename={handleRename}
-        onDelete={handleDelete}
-      />
-      <section className="flex-1 flex flex-col min-w-0">
-        <header className="flex items-center justify-between gap-2 px-3 py-2 border-b hair">
-          <div className="flex items-center gap-2 min-w-0">
-            <button
-              type="button"
-              onClick={() => setSidebarExpanded((v) => !v)}
-              aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-              title={sidebarExpanded ? 'Collapse' : 'Expand'}
-              className="ring-focus w-6 h-6 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors shrink-0"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-                <path
-                  d={sidebarExpanded ? 'M9 3 L5 7 L9 11' : 'M5 3 L9 7 L5 11'}
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            <span
-              className="px-2 py-0.5 rounded-full text-meta truncate"
-              style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
-            >
-              {modelLabel(settings.aiProvider, settings.aiModel)}
-            </span>
-          </div>
-          {isStreaming && (
-            <span className="t-tertiary text-meta shrink-0" aria-live="polite">
-              streaming…
-            </span>
-          )}
-        </header>
-        {notConfigured ? (
-          configPrompt
-        ) : (
-          <ChatThread
-            messages={messages}
-            streamingContent={streamingContent}
-            emptyHero={emptyHero}
-          />
-        )}
-        <ChatComposer
-          value={input}
-          onChange={setInput}
-          onSend={() => {
-            handleSend().catch(() => {});
-          }}
-          onStop={handleStop}
-          isStreaming={isStreaming}
-          disabled={notConfigured}
-          placeholder={
-            notConfigured
-              ? 'Configure AI in Settings first.'
-              : undefined
-          }
+    <div className="flex flex-col h-full w-full" style={{ background: 'var(--color-bg)' }}>
+      <div className="px-3 py-2 border-b hair flex items-center gap-2">
+        <SegmentedControl<string>
+          value={mode}
+          onChange={setMode}
+          options={modeOptions}
+          size="sm"
+          ariaLabel="Chat mode"
         />
-      </section>
+        <div className="flex-1" />
+        {isApi && (
+          <span
+            className="px-2 py-0.5 rounded-full text-meta truncate"
+            style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
+            title={modelLabel(settings.aiProvider, settings.aiModel)}
+          >
+            {modelLabel(settings.aiProvider, settings.aiModel)}
+          </span>
+        )}
+        {isApi && isStreaming && (
+          <span className="t-tertiary text-meta shrink-0" aria-live="polite">
+            streaming…
+          </span>
+        )}
+      </div>
+      {isApi ? (
+        <div className="flex flex-1 min-h-0 w-full">
+          <SessionSidebar
+            sessions={sessions}
+            activeId={activeId}
+            expanded={sidebarExpanded}
+            onSelect={setActiveId}
+            onCreate={() => {
+              createNewSession().catch(() => {});
+            }}
+            onRename={handleRename}
+            onDelete={handleDelete}
+          />
+          <section className="flex-1 flex flex-col min-w-0">
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b hair">
+              <button
+                type="button"
+                onClick={() => setSidebarExpanded((v) => !v)}
+                aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+                title={sidebarExpanded ? 'Collapse' : 'Expand'}
+                className="ring-focus w-6 h-6 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors shrink-0"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                  <path
+                    d={sidebarExpanded ? 'M9 3 L5 7 L9 11' : 'M5 3 L9 7 L5 11'}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            {notConfigured ? (
+              configPrompt
+            ) : (
+              <ChatThread
+                messages={messages}
+                streamingContent={streamingContent}
+                emptyHero={emptyHero}
+              />
+            )}
+            <ChatComposer
+              value={input}
+              onChange={setInput}
+              onSend={() => {
+                handleSend().catch(() => {});
+              }}
+              onStop={handleStop}
+              isStreaming={isStreaming}
+              disabled={notConfigured}
+              placeholder={
+                notConfigured ? 'Configure AI in Settings first.' : undefined
+              }
+            />
+          </section>
+        </div>
+      ) : activeWebService ? (
+        <EmbeddedWebChat key={activeWebService.id} service={activeWebService} />
+      ) : (
+        <div className="flex-1 flex items-center justify-center t-tertiary text-meta">
+          Unknown service.
+        </div>
+      )}
     </div>
   );
 };

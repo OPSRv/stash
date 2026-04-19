@@ -10,6 +10,7 @@ export type AiSettings = Pick<
   | 'aiBaseUrl'
   | 'aiSystemPrompt'
   | 'aiApiKeys'
+  | 'aiWebServices'
 >;
 
 const pick = (s: Settings): AiSettings => ({
@@ -19,6 +20,7 @@ const pick = (s: Settings): AiSettings => ({
   aiBaseUrl: s.aiBaseUrl,
   aiSystemPrompt: s.aiSystemPrompt,
   aiApiKeys: s.aiApiKeys,
+  aiWebServices: s.aiWebServices,
 });
 
 const defaults: AiSettings = pick(DEFAULT_SETTINGS);

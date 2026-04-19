@@ -64,6 +64,9 @@ use modules::music::commands::{
 use modules::search::commands::global_search;
 use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
 use modules::terminal::state::TerminalState;
+use modules::webchat::commands::{
+    webchat_close, webchat_embed, webchat_hide, webchat_hide_all, webchat_reload,
+};
 use modules::translator::{
     commands::{
         translator_clear, translator_delete, translator_list, translator_run, translator_search,
@@ -259,6 +262,11 @@ pub fn run() {
             ai_set_api_key,
             ai_delete_api_key,
             ai_has_api_key,
+            webchat_embed,
+            webchat_hide,
+            webchat_hide_all,
+            webchat_reload,
+            webchat_close,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

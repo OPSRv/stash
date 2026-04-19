@@ -42,12 +42,30 @@ export type Settings = {
    * entirely in development).
    */
   aiApiKeys: Partial<Record<AiProvider, string>>;
+  /**
+   * Services embedded in the AI tab as native child webviews. Default set
+   * covers Claude / ChatGPT / Gemini; users can add more from Settings →
+   * AI. Each entry is {id, label, url}; id must be a slug that passes the
+   * Rust-side label validator (`[a-zA-Z0-9_-]+`).
+   */
+  aiWebServices: WebChatService[];
   voiceEnabled: boolean;
   voiceActiveModel: WhisperModelSize | null;
 };
 
 export type AiProvider = 'openai' | 'anthropic' | 'google' | 'custom';
 export type WhisperModelSize = 'tiny' | 'base' | 'small' | 'medium';
+export type WebChatService = {
+  id: string;
+  label: string;
+  url: string;
+};
+
+export const DEFAULT_WEB_SERVICES: WebChatService[] = [
+  { id: 'claude', label: 'Claude', url: 'https://claude.ai/' },
+  { id: 'gpt', label: 'ChatGPT', url: 'https://chatgpt.com/' },
+  { id: 'gemini', label: 'Gemini', url: 'https://gemini.google.com/app' },
+];
 
 export const DEFAULT_SETTINGS: Settings = {
   maxHistoryItems: 1000,
@@ -72,6 +90,7 @@ export const DEFAULT_SETTINGS: Settings = {
   aiBaseUrl: null,
   aiSystemPrompt: '',
   aiApiKeys: {},
+  aiWebServices: DEFAULT_WEB_SERVICES,
   voiceEnabled: false,
   voiceActiveModel: null,
 };

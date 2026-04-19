@@ -8,3 +8,4 @@ pub mod recorder;
 pub mod search;
 pub mod terminal;
 pub mod translator;
+pub mod webchat;

@@ -10,7 +10,7 @@ import { Toggle } from '../shared/ui/Toggle';
 import { useToast } from '../shared/ui/Toast';
 
 import { SettingRow } from './SettingRow';
-import type { AiProvider, Settings } from './store';
+import type { AiProvider, Settings, WebChatService } from './store';
 
 interface AiTabProps {
   settings: Settings;
@@ -42,6 +42,44 @@ type TestResult =
   | { kind: 'pending' }
   | { kind: 'ok'; ms: number }
   | { kind: 'err'; message: string };
+
+// Derive a safe id from a human label: lowercase, keep alnum/underscore,
+// replace everything else with "-". Rust-side label_for() rejects anything
+// that doesn't match `[a-zA-Z0-9_-]+`, so this keeps us in sync.
+const slugify = (input: string): string =>
+  input
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'service';
+
+const freshServiceId = (existing: WebChatService[]): string => {
+  const base = 'service';
+  const used = new Set(existing.map((s) => s.id));
+  let i = 1;
+  while (used.has(`${base}-${i}`)) i += 1;
+  return `${base}-${i}`;
+};
+
+const updateService = (
+  settings: Settings,
+  onChange: <K extends keyof Settings>(key: K, value: Settings[K]) => void,
+  index: number,
+  patch: Partial<WebChatService>,
+) => {
+  const next = settings.aiWebServices.map((s, i) => {
+    if (i !== index) return s;
+    const merged = { ...s, ...patch };
+    // Auto-sync id from label so the Rust label stays stable-but-readable.
+    // Only re-slug when the label itself changed, to avoid overwriting a
+    // user-picked id on every URL edit.
+    if (patch.label !== undefined) {
+      merged.id = slugify(patch.label);
+    }
+    return merged;
+  });
+  onChange('aiWebServices', next);
+};
 
 export const AiTab = ({ settings, onChange }: AiTabProps) => {
   const { toast } = useToast();
@@ -212,6 +250,64 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
             />
           }
         />
+        <SettingRow
+          title="Embedded web services"
+          description="Services that appear in the AI tab's mode switcher. Each opens in a native child webview so your regular browser login carries over."
+          control={
+            <Button
+              size="sm"
+              variant="soft"
+              onClick={() => {
+                const nextId = freshServiceId(settings.aiWebServices);
+                onChange('aiWebServices', [
+                  ...settings.aiWebServices,
+                  { id: nextId, label: 'New service', url: 'https://' },
+                ]);
+              }}
+            >
+              + Add service
+            </Button>
+          }
+        />
+        <div className="py-1 space-y-1.5">
+          {settings.aiWebServices.map((s, i) => (
+            <div key={s.id + i} className="flex items-center gap-2">
+              <Input
+                aria-label="Service label"
+                placeholder="Label"
+                value={s.label}
+                onChange={(e) =>
+                  updateService(settings, onChange, i, { label: e.currentTarget.value })
+                }
+                className="w-[140px]"
+              />
+              <Input
+                aria-label="Service URL"
+                placeholder="https://"
+                value={s.url}
+                onChange={(e) =>
+                  updateService(settings, onChange, i, { url: e.currentTarget.value })
+                }
+                className="flex-1"
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                tone="danger"
+                onClick={() =>
+                  onChange(
+                    'aiWebServices',
+                    settings.aiWebServices.filter((_, j) => j !== i),
+                  )
+                }
+                aria-label="Remove service"
+                title="Remove"
+              >
+                ×
+              </Button>
+            </div>
+          ))}
+        </div>
         <SettingRow
           title="Test connection"
           description="Sends a 1-token request with your current settings to confirm everything is wired."
