@@ -69,8 +69,6 @@ export type WebChatService = {
 };
 
 export const DEFAULT_WEB_SERVICES: WebChatService[] = [
-  { id: 'claude', label: 'Claude', url: 'https://claude.ai/' },
-  { id: 'gpt', label: 'ChatGPT', url: 'https://chatgpt.com/' },
   { id: 'gemini', label: 'Gemini', url: 'https://gemini.google.com/app' },
 ];
 
