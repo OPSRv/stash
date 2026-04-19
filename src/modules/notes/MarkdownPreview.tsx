@@ -1,8 +1,7 @@
 import { useMemo } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeHighlight from 'rehype-highlight';
-import 'highlight.js/styles/github-dark.css';
+import type { Components } from 'react-markdown';
+
+import { Markdown } from '../../shared/ui/Markdown';
 
 type Props = {
   source: string;
@@ -10,11 +9,11 @@ type Props = {
 };
 
 // remark-gfm parses `- [ ] task` into <li class="task-list-item"> with a
-// disabled <input type="checkbox">. We want those checkboxes to be clickable
-// and to call `onToggleCheckbox(line)`. react-markdown strips position info
-// from element props by default, so we recover the source line of each task
-// item by scanning the raw source once and mapping checkbox occurrences to
-// their line numbers in order.
+// disabled <input type="checkbox">. We want those checkboxes clickable and
+// to call `onToggleCheckbox(line)`. react-markdown strips position info from
+// element props by default, so we recover the source line of each task item
+// by scanning the raw source once and mapping checkbox occurrences to their
+// line numbers in order.
 const collectTaskLines = (source: string): number[] => {
   const re = /^\s*([-*+]|\d+\.)\s+\[( |x|X)\]/;
   const out: number[] = [];
@@ -43,17 +42,6 @@ export const MarkdownPreview = ({ source, onToggleCheckbox }: Props) => {
           />
         );
       },
-      a: ({ href, children, ...rest }) => (
-        <a
-          {...rest}
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-[color:rgba(var(--stash-accent-rgb),1)] underline decoration-dotted"
-        >
-          {children}
-        </a>
-      ),
     };
   }, [onToggleCheckbox, taskLines]);
 
@@ -64,14 +52,8 @@ export const MarkdownPreview = ({ source, onToggleCheckbox }: Props) => {
   }
 
   return (
-    <div className="notes-md t-primary text-body">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
-        components={components}
-      >
-        {source}
-      </ReactMarkdown>
+    <div className="notes-md">
+      <Markdown source={source} components={components} />
     </div>
   );
 };

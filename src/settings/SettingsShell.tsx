@@ -9,6 +9,7 @@ import {
 } from '../modules/downloader/api';
 import { setTranslatorSettings } from '../modules/translator/api';
 import { AboutTab } from './AboutTab';
+import { AiTab } from './AiTab';
 import { AppearanceTab } from './AppearanceTab';
 import { ClipboardTab } from './ClipboardTab';
 import { DownloadsTab } from './DownloadsTab';
@@ -16,13 +17,14 @@ import { GeneralTab } from './GeneralTab';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
 import { applyTheme, broadcastTheme } from './theme';
 
-type Tab = 'general' | 'appearance' | 'clipboard' | 'downloads' | 'about';
+type Tab = 'general' | 'appearance' | 'clipboard' | 'downloads' | 'ai' | 'about';
 
 const tabs: { id: Tab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'clipboard', label: 'Clipboard' },
   { id: 'downloads', label: 'Downloads' },
+  { id: 'ai', label: 'AI' },
   { id: 'about', label: 'About' },
 ];
 
@@ -95,6 +97,11 @@ export const SettingsShell = () => {
         minChars: nextSettings.translateMinChars,
       }).catch(console.error);
     }
+    // Broadcast so modules subscribed via useAiSettings / similar hooks
+    // re-read without a popup reload. Keyed by setting name in `detail`.
+    window.dispatchEvent(
+      new CustomEvent('stash:settings-changed', { detail: key }),
+    );
   };
 
   const toggleAutostart = async (next: boolean) => {
@@ -135,6 +142,7 @@ export const SettingsShell = () => {
         {tab === 'appearance' && <AppearanceTab settings={settings} onChange={update} />}
         {tab === 'clipboard' && <ClipboardTab settings={settings} onChange={update} />}
         {tab === 'downloads' && <DownloadsTab settings={settings} onChange={update} />}
+        {tab === 'ai' && <AiTab settings={settings} onChange={update} />}
         {tab === 'about' && <AboutTab />}
       </main>
     </div>

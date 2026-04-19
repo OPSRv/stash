@@ -1,0 +1,201 @@
+import { useState } from 'react';
+
+import { Button } from '../../shared/ui/Button';
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+
+import type { Session } from './api';
+
+type Props = {
+  sessions: Session[];
+  activeId: string | null;
+  expanded: boolean;
+  onToggle: () => void;
+  onSelect: (id: string) => void;
+  onCreate: () => void;
+  onRename: (id: string, title: string) => Promise<void> | void;
+  onDelete: (id: string) => Promise<void> | void;
+};
+
+const relativeDay = (ms: number): string => {
+  const d = new Date(ms);
+  const today = new Date();
+  const sameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate();
+  if (sameDay) {
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+
+const initials = (title: string): string => {
+  const t = title.trim();
+  if (!t) return '·';
+  const words = t.split(/\s+/).slice(0, 2);
+  return words.map((w) => w[0]?.toUpperCase() ?? '').join('') || t[0]!.toUpperCase();
+};
+
+export const SessionSidebar = ({
+  sessions,
+  activeId,
+  expanded,
+  onToggle,
+  onSelect,
+  onCreate,
+  onRename,
+  onDelete,
+}: Props) => {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const startRename = (s: Session) => {
+    setRenamingId(s.id);
+    setRenameValue(s.title);
+  };
+
+  const commitRename = async () => {
+    if (!renamingId) return;
+    const next = renameValue.trim();
+    if (next) await onRename(renamingId, next);
+    setRenamingId(null);
+  };
+
+  const width = expanded ? 'w-[220px]' : 'w-[44px]';
+
+  return (
+    <>
+      <aside
+        className={`${width} h-full border-r hair flex flex-col transition-[width] duration-150`}
+        style={{ background: 'var(--color-surface)' }}
+      >
+        <div className="flex items-center gap-1 px-1 py-2 border-b hair">
+          <Button
+            variant="ghost"
+            size="sm"
+            shape="square"
+            aria-label={expanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            title={expanded ? 'Collapse' : 'Expand'}
+            onClick={onToggle}
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path
+                d={expanded ? 'M9 3 L5 7 L9 11' : 'M5 3 L9 7 L5 11'}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </Button>
+          <Button
+            variant="soft"
+            tone="accent"
+            size="sm"
+            shape={expanded ? 'default' : 'square'}
+            onClick={onCreate}
+            aria-label="New chat"
+            title="New chat (⌘N)"
+            fullWidth={expanded}
+          >
+            {expanded ? '+ New chat' : '+'}
+          </Button>
+        </div>
+        <ul className="flex-1 overflow-y-auto nice-scroll py-1">
+          {sessions.length === 0 && expanded && (
+            <li className="px-3 py-4 t-tertiary text-meta">No conversations yet.</li>
+          )}
+          {sessions.map((s) => {
+            const isActive = s.id === activeId;
+            const isRenaming = renamingId === s.id;
+            return (
+              <li key={s.id}>
+                <div
+                  className={`group flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md mx-1 ${
+                    isActive ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                  }`}
+                  onClick={() => !isRenaming && onSelect(s.id)}
+                >
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-meta shrink-0"
+                    style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
+                  >
+                    {initials(s.title)}
+                  </div>
+                  {expanded && (
+                    <div className="flex-1 min-w-0">
+                      {isRenaming ? (
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.currentTarget.value)}
+                          onBlur={commitRename}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename();
+                            else if (e.key === 'Escape') setRenamingId(null);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="input-field w-full px-2 py-0.5 rounded-md text-body"
+                          aria-label="Rename chat"
+                        />
+                      ) : (
+                        <>
+                          <div className="truncate t-primary text-body">{s.title}</div>
+                          <div className="truncate t-tertiary text-meta">
+                            {relativeDay(s.updated_at)}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {expanded && !isRenaming && (
+                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                      <button
+                        type="button"
+                        aria-label="Rename"
+                        title="Rename"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startRename(s);
+                        }}
+                        className="t-tertiary hover:t-primary px-1.5 py-0.5 rounded-md text-meta"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Delete"
+                        title="Delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeletingId(s.id);
+                        }}
+                        className="t-tertiary hover:text-red-400 px-1.5 py-0.5 rounded-md text-meta"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </aside>
+      <ConfirmDialog
+        open={deletingId !== null}
+        title="Delete chat?"
+        description="This removes the conversation and its messages. Cannot be undone."
+        confirmLabel="Delete"
+        tone="danger"
+        onCancel={() => setDeletingId(null)}
+        onConfirm={async () => {
+          if (deletingId) await onDelete(deletingId);
+          setDeletingId(null);
+        }}
+      />
+    </>
+  );
+};

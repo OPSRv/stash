@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
@@ -25,7 +25,15 @@ import { musicHide, type NowPlaying } from '../modules/music/api';
 import { applyTheme, subscribeTheme } from '../settings/theme';
 
 export const PopupShell = () => {
-  const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
+  // Some tabs (AI) are gated by an opt-in setting. We track the gate flags
+  // here so toggling them in Settings → AI updates the tab bar live, without
+  // reloading the popup.
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const visibleModules = useMemo(
+    () => modules.filter((m) => (m.id === 'ai' ? aiEnabled : true)),
+    [aiEnabled],
+  );
+  const [activeId, setActiveId] = useState(visibleModules[0]?.id ?? modules[0]?.id ?? '');
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -48,29 +56,51 @@ export const PopupShell = () => {
   };
 
   useEffect(() => {
-    loadSettings()
-      .then((s) => {
-        applyTheme({
-          mode: s.themeMode,
-          blur: s.themeBlur,
-          paneOpacity: s.themePaneOpacity,
-          accent: s.themeAccent,
-        });
-        return Promise.all([
-          setDownloadsDir(s.downloadsFolder),
-          setCookiesBrowser(s.cookiesFromBrowser),
-          setMaxParallel(s.maxParallelDownloads),
-          setRateLimit(s.downloadRateLimit),
-          pruneHistory(s.historyRetentionDays),
-          setTranslatorSettings({
-            enabled: s.translateEnabled,
-            target: s.translateTarget,
-            minChars: s.translateMinChars,
-          }),
-        ]);
-      })
-      .catch(() => {});
+    const read = () => {
+      loadSettings()
+        .then((s) => {
+          setAiEnabled(s.aiEnabled);
+          applyTheme({
+            mode: s.themeMode,
+            blur: s.themeBlur,
+            paneOpacity: s.themePaneOpacity,
+            accent: s.themeAccent,
+          });
+          return Promise.all([
+            setDownloadsDir(s.downloadsFolder),
+            setCookiesBrowser(s.cookiesFromBrowser),
+            setMaxParallel(s.maxParallelDownloads),
+            setRateLimit(s.downloadRateLimit),
+            pruneHistory(s.historyRetentionDays),
+            setTranslatorSettings({
+              enabled: s.translateEnabled,
+              target: s.translateTarget,
+              minChars: s.translateMinChars,
+            }),
+          ]);
+        })
+        .catch(() => {});
+    };
+    read();
+    // Live-update the tab bar when Settings → AI toggle changes.
+    const onChange = () => {
+      loadSettings()
+        .then((s) => setAiEnabled(s.aiEnabled))
+        .catch(() => {});
+    };
+    window.addEventListener('stash:settings-changed', onChange);
+    return () => window.removeEventListener('stash:settings-changed', onChange);
   }, []);
+
+  // If the active tab vanishes (e.g. user disables AI while on the AI tab),
+  // fall back to the first still-visible tab so the view area doesn't go
+  // blank.
+  useEffect(() => {
+    if (!visibleModules.some((m) => m.id === activeId)) {
+      const fallback = visibleModules[0]?.id;
+      if (fallback) setActiveId(fallback);
+    }
+  }, [visibleModules, activeId]);
 
   useEffect(() => {
     const unlisten = subscribeTheme(applyTheme);
@@ -104,8 +134,8 @@ export const PopupShell = () => {
       if (e.metaKey && e.altKey && /^[1-9]$/.test(e.key)) {
         const digit = Number(e.key);
         const target =
-          modules.find((m) => m.tabShortcutDigit === digit) ??
-          modules[digit - 1];
+          visibleModules.find((m) => m.tabShortcutDigit === digit) ??
+          visibleModules[digit - 1];
         if (target) {
           e.preventDefault();
           openTab(target.id);
@@ -125,7 +155,7 @@ export const PopupShell = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [cheatsheetOpen]);
+  }, [cheatsheetOpen, visibleModules]);
 
   // Rust can ask us to activate a specific tab (e.g. ⌘⇧N opens Notes).
   useEffect(() => {
@@ -248,7 +278,7 @@ export const PopupShell = () => {
   return (
     <div className="pane h-full w-full rounded-2xl overflow-hidden flex flex-col relative">
       <header className="flex items-center gap-1 px-2 py-1.5 border-b hair">
-        {modules.map((m, i) => (
+        {visibleModules.map((m, i) => (
           <TabButton
             key={m.id}
             label={m.title}
@@ -308,7 +338,7 @@ export const PopupShell = () => {
         </div>
       )}
       <main className="flex-1 overflow-hidden relative">
-        {modules
+        {visibleModules
           .filter((m) => visitedIds.has(m.id) && m.PopupView)
           .map((m) => {
             const View = m.PopupView!;
@@ -329,7 +359,7 @@ export const PopupShell = () => {
               </div>
             );
           })}
-        {!modules.some((m) => m.id === activeId && m.PopupView) && (
+        {!visibleModules.some((m) => m.id === activeId && m.PopupView) && (
           <div className="p-4 t-tertiary text-meta">No view.</div>
         )}
       </main>

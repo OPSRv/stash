@@ -1,4 +1,5 @@
 import type { ModuleDefinition } from './types';
+import { aiModule } from './ai';
 import { clipboardModule } from './clipboard';
 import { downloaderModule } from './downloader';
 import { metronomeModule } from './metronome';
@@ -15,6 +16,7 @@ export const modules: ModuleDefinition[] = [
   recorderModule,
   notesModule,
   translatorModule,
+  aiModule,
   musicModule,
   metronomeModule,
   terminalModule,
