@@ -347,7 +347,10 @@ export const PopupShell = () => {
 
   return (
     <div className="pane h-full w-full rounded-2xl overflow-hidden flex flex-col relative">
-      <header className="flex items-center gap-1 px-2 py-1.5 border-b hair">
+      <header
+        data-tauri-drag-region
+        className="flex items-center gap-1 px-2 py-1.5 border-b hair cursor-grab active:cursor-grabbing"
+      >
         {visibleModules.map((m, i) => (
           <TabButton
             key={m.id}
