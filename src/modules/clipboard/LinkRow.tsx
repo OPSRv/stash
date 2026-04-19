@@ -46,7 +46,7 @@ export const LinkRow = ({
   const hasThumbnail = preview?.image != null && !isImageBroken;
   const thumb = hasThumbnail ? (
     <img
-      src={preview.image}
+      src={preview.image ?? undefined}
       alt=""
       onError={() => setIsImageBroken(true)}
       className="w-7 h-7 rounded-md object-cover"

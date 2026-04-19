@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ChevronIcon, SelectCheckIcon } from './Select.icons';
 
 export type SelectOption<T extends string> = { value: T; label: string };
 
@@ -164,7 +165,7 @@ export const Select = <T extends string>({
                 }}
               >
                 <span className="truncate flex-1">{o.label}</span>
-                {isSelected && <CheckIcon />}
+                {isSelected && <SelectCheckIcon />}
               </li>
             );
           })}
@@ -173,22 +174,3 @@ export const Select = <T extends string>({
     </div>
   );
 };
-
-const ChevronIcon = ({ open }: { open: boolean }) => (
-  <svg
-    width="10"
-    height="10"
-    viewBox="0 0 10 10"
-    aria-hidden="true"
-    className="t-secondary shrink-0 transition-transform"
-    style={{ transform: `rotate(${open ? 180 : 0}deg)` }}
-  >
-    <path d="M2 4l3 3 3-3" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const CheckIcon = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" className="t-secondary">
-    <path d="M2.5 6.5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
