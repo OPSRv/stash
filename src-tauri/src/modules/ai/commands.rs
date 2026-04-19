@@ -1,0 +1,128 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use tauri::State;
+use uuid::Uuid;
+
+use super::repo::{Message, Session};
+use super::state::AiState;
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn map_err<E: std::fmt::Display>(e: E) -> String {
+    e.to_string()
+}
+
+#[tauri::command]
+pub fn ai_list_sessions(state: State<'_, AiState>) -> Result<Vec<Session>, String> {
+    state.repo.lock().unwrap().list_sessions().map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_create_session(
+    state: State<'_, AiState>,
+    title: Option<String>,
+) -> Result<Session, String> {
+    let id = Uuid::new_v4().to_string();
+    let title = title.unwrap_or_else(|| "New chat".to_string());
+    state
+        .repo
+        .lock()
+        .unwrap()
+        .create_session(&id, &title, now_ms())
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_rename_session(
+    state: State<'_, AiState>,
+    id: String,
+    title: String,
+) -> Result<(), String> {
+    state
+        .repo
+        .lock()
+        .unwrap()
+        .rename_session(&id, &title, now_ms())
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_delete_session(state: State<'_, AiState>, id: String) -> Result<(), String> {
+    state
+        .repo
+        .lock()
+        .unwrap()
+        .delete_session(&id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_list_messages(
+    state: State<'_, AiState>,
+    session_id: String,
+) -> Result<Vec<Message>, String> {
+    state
+        .repo
+        .lock()
+        .unwrap()
+        .list_messages(&session_id)
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_append_message(
+    state: State<'_, AiState>,
+    session_id: String,
+    role: String,
+    content: String,
+    stopped: Option<bool>,
+) -> Result<Message, String> {
+    let id = Uuid::new_v4().to_string();
+    state
+        .repo
+        .lock()
+        .unwrap()
+        .append_message(
+            &id,
+            &session_id,
+            &role,
+            &content,
+            now_ms(),
+            stopped.unwrap_or(false),
+        )
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn ai_get_api_key(
+    state: State<'_, AiState>,
+    provider: String,
+) -> Result<Option<String>, String> {
+    state.secrets.get(&provider)
+}
+
+#[tauri::command]
+pub fn ai_set_api_key(
+    state: State<'_, AiState>,
+    provider: String,
+    key: String,
+) -> Result<(), String> {
+    state.secrets.set(&provider, &key)
+}
+
+#[tauri::command]
+pub fn ai_delete_api_key(state: State<'_, AiState>, provider: String) -> Result<(), String> {
+    state.secrets.delete(&provider)
+}
+
+/// Does a keychain entry exist for this provider? Returns true without leaking
+/// the secret itself — used by Settings UI to render the "••••••••" placeholder.
+#[tauri::command]
+pub fn ai_has_api_key(state: State<'_, AiState>, provider: String) -> Result<bool, String> {
+    Ok(state.secrets.get(&provider)?.is_some())
+}

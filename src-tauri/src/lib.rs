@@ -15,6 +15,15 @@ fn set_popup_auto_hide(state: tauri::State<'_, Arc<PopupAutoHide>>, enabled: boo
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use modules::ai::{
+    commands::{
+        ai_append_message, ai_create_session, ai_delete_api_key, ai_delete_session, ai_get_api_key,
+        ai_has_api_key, ai_list_messages, ai_list_sessions, ai_rename_session, ai_set_api_key,
+    },
+    keyring::{KeyringStore, SecretStore},
+    repo::AiRepo,
+    state::{AiState, KEYRING_SERVICE},
+};
 use modules::clipboard::{
     commands::{
         clipboard_clear, clipboard_copy_only, clipboard_delete, clipboard_link_preview,
@@ -240,6 +249,16 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_close,
+            ai_list_sessions,
+            ai_create_session,
+            ai_rename_session,
+            ai_delete_session,
+            ai_list_messages,
+            ai_append_message,
+            ai_get_api_key,
+            ai_set_api_key,
+            ai_delete_api_key,
+            ai_has_api_key,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -345,6 +364,13 @@ pub fn run() {
             // call from the frontend (once the xterm fit addon knows the
             // actual cell grid).
             app.manage(Arc::new(TerminalState::new()));
+
+            // AI — sessions/messages in dedicated SQLite, API keys in OS keychain.
+            let ai_db = data_dir.join("ai.sqlite");
+            let ai_repo = AiRepo::new(Connection::open(&ai_db)?)?;
+            let ai_secrets: Arc<dyn SecretStore> =
+                Arc::new(KeyringStore::new(KEYRING_SERVICE));
+            app.manage(AiState::new(ai_repo, ai_secrets));
 
             let warmup_state = Arc::clone(&runner_state);
             std::thread::spawn(move || {

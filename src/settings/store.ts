@@ -29,7 +29,17 @@ export type Settings = {
   translateTarget: string;
   translateMinChars: number;
   translateShowNotification: boolean;
+  aiEnabled: boolean;
+  aiProvider: AiProvider;
+  aiModel: string;
+  aiBaseUrl: string | null;
+  aiSystemPrompt: string;
+  voiceEnabled: boolean;
+  voiceActiveModel: WhisperModelSize | null;
 };
+
+export type AiProvider = 'openai' | 'anthropic' | 'google' | 'custom';
+export type WhisperModelSize = 'tiny' | 'base' | 'small' | 'medium';
 
 export const DEFAULT_SETTINGS: Settings = {
   maxHistoryItems: 1000,
@@ -48,6 +58,13 @@ export const DEFAULT_SETTINGS: Settings = {
   translateTarget: 'uk',
   translateMinChars: 6,
   translateShowNotification: true,
+  aiEnabled: false,
+  aiProvider: 'google',
+  aiModel: '',
+  aiBaseUrl: null,
+  aiSystemPrompt: '',
+  voiceEnabled: false,
+  voiceActiveModel: null,
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });
