@@ -147,6 +147,7 @@ pub fn run() {
             open_data_folder,
             collect_logs,
             set_popup_vibrancy,
+            set_popup_appearance,
             set_popup_auto_hide,
             open_system_settings,
             rec_start,
@@ -439,6 +440,32 @@ fn set_popup_vibrancy(app: tauri::AppHandle, strength: u32) -> Result<(), String
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, strength);
+    }
+    Ok(())
+}
+
+/// Set the popup window's macOS appearance so the NSVisualEffectView (vibrancy)
+/// follows the in-app theme rather than the system theme. Without this, a user
+/// running macOS in Light mode but Stash in Dark mode would see a light frosted
+/// glass behind the popup — which reads as "translucency makes everything
+/// lighter" instead of "more see-through".
+#[tauri::command]
+fn set_popup_appearance(app: tauri::AppHandle, mode: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(win) = app.get_webview_window("popup") else {
+            return Err("popup window not found".into());
+        };
+        let theme = match mode.as_str() {
+            "light" => Some(tauri::Theme::Light),
+            "dark" => Some(tauri::Theme::Dark),
+            _ => None, // "auto" → follow system
+        };
+        win.set_theme(theme).map_err(|e| format!("set_theme: {e}"))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, mode);
     }
     Ok(())
 }

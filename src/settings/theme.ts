@@ -55,6 +55,9 @@ export const applyTheme = (t: ThemeSettings) => {
   root.style.setProperty('--stash-accent-rgb', accent.rgb);
   // macOS vibrancy strength — Rust side maps this into an NSVisualEffectMaterial.
   invoke('set_popup_vibrancy', { strength: blur }).catch(() => {});
+  // Force the popup's NSAppearance to match the in-app theme so the vibrancy
+  // view doesn't show light frost when the system is Light but Stash is Dark.
+  invoke('set_popup_appearance', { mode: t.mode }).catch(() => {});
 };
 
 /// Broadcast a theme change to every open Tauri window so floating shells
