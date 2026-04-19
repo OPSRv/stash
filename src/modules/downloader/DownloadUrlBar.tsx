@@ -1,5 +1,7 @@
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { LinkIcon } from '../../shared/ui/icons';
+import { Button } from '../../shared/ui/Button';
+import { Input } from '../../shared/ui/Input';
 import { Spinner } from '../../shared/ui/Spinner';
 
 interface DownloadUrlBarProps {
@@ -10,18 +12,6 @@ interface DownloadUrlBarProps {
   onDetect: () => void;
   onCancel: () => void;
 }
-
-const pasteButtonStyle = {
-  background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.06)',
-} as const;
-
-const primaryButtonStyle = { background: 'rgba(255,255,255,0.06)' } as const;
-
-const cancelButtonStyle = {
-  background: 'rgba(235,72,72,0.15)',
-  color: '#FF7878',
-} as const;
 
 export const DownloadUrlBar = ({
   url,
@@ -45,45 +35,37 @@ export const DownloadUrlBar = ({
 
   return (
     <div className="px-4 py-3 flex items-center gap-2 border-b hair">
-      <div className="input-field rounded-lg flex-1 flex items-center gap-2 px-3 py-2">
-        <LinkIcon className="t-tertiary" />
-        <input
-          type="text"
-          value={url}
-          onChange={(e) => onUrlChange(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') onDetect();
-          }}
-          placeholder="Paste a YouTube / TikTok / Instagram / X / Reddit URL"
-          className="flex-1 bg-transparent outline-none text-body t-primary"
-        />
-      </div>
-      <button
-        onClick={pasteFromClipboard}
-        className="px-3 py-2 rounded-lg t-secondary text-body flex items-center gap-1.5"
-        style={pasteButtonStyle}
-      >
-        Paste
-      </button>
+      <Input
+        leadingIcon={<LinkIcon />}
+        type="text"
+        value={url}
+        onChange={(e) => onUrlChange(e.currentTarget.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onDetect();
+        }}
+        placeholder="Paste a YouTube / TikTok / Instagram / X / Reddit URL"
+        className="flex-1"
+      />
+      <Button onClick={pasteFromClipboard}>Paste</Button>
       {detecting ? (
-        <button
+        <Button
+          variant="soft"
+          tone="danger"
           onClick={onCancel}
-          className="px-3 py-2 rounded-lg t-primary text-body flex items-center gap-1.5"
-          style={cancelButtonStyle}
+          leadingIcon={<Spinner size={12} />}
           title="Cancel"
         >
-          <Spinner />
-          <span>Cancel · {elapsedSec}s</span>
-        </button>
+          Cancel · {elapsedSec}s
+        </Button>
       ) : (
-        <button
+        <Button
+          variant="solid"
+          tone="accent"
           onClick={onDetect}
           disabled={!url.trim()}
-          className="px-3 py-2 rounded-lg t-primary text-body"
-          style={primaryButtonStyle}
         >
           Detect
-        </button>
+        </Button>
       )}
     </div>
   );

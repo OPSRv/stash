@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Kbd } from '../../shared/ui/Kbd';
 import { IconButton } from '../../shared/ui/IconButton';
+import { Button } from '../../shared/ui/Button';
 import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
@@ -432,26 +433,15 @@ export const ClipboardPopup = () => {
             {selectionCount} selected
           </span>
           <div className="flex items-center gap-2">
-            <button
-              onClick={bulkPin}
-              className="t-primary text-meta px-2 py-0.5 rounded"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
-            >
+            <Button size="xs" onClick={bulkPin}>
               Pin
-            </button>
-            <button
-              onClick={bulkDelete}
-              className="text-meta px-2 py-0.5 rounded"
-              style={{ background: 'rgba(235,72,72,0.18)', color: '#FF7878' }}
-            >
+            </Button>
+            <Button size="xs" variant="soft" tone="danger" onClick={bulkDelete}>
               Delete
-            </button>
-            <button
-              onClick={clearSelection}
-              className="t-tertiary hover:t-secondary text-meta px-2 py-0.5"
-            >
+            </Button>
+            <Button size="xs" variant="ghost" onClick={clearSelection}>
               Clear
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -479,26 +469,29 @@ export const ClipboardPopup = () => {
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {videoBanner.qualities.slice(0, 3).map((q) => (
-              <button
+              <Button
                 key={q.format_id}
+                size="sm"
+                variant="soft"
+                tone="accent"
                 onClick={() => downloadFromBanner(q.kind, q.format_id, q.height)}
-                className="px-2 py-1 rounded-md text-meta font-medium t-primary"
-                style={{ background: 'rgba(47,122,229,0.15)' }}
               >
                 {q.label}
-              </button>
+              </Button>
             ))}
           </div>
-          <button
+          <Button
+            size="sm"
+            variant="ghost"
+            shape="square"
+            aria-label="Dismiss"
             onClick={() => {
               setVideoBanner(null);
               setVideoBannerUrl(null);
             }}
-            className="t-tertiary hover:t-primary p-1"
-            aria-label="Dismiss"
           >
             ×
-          </button>
+          </Button>
         </div>
       )}
 
@@ -540,9 +533,8 @@ export const ClipboardPopup = () => {
               key={f.id}
               onClick={() => setFilter(f.id)}
               className={`px-2 py-1 rounded-md flex items-center gap-1.5 text-meta font-medium ${
-                filter === f.id ? 't-primary' : 't-secondary'
+                filter === f.id ? 't-primary bg-white/5' : 't-secondary hover:bg-white/[0.04]'
               }`}
-              style={filter === f.id ? { background: 'rgba(255,255,255,0.06)' } : undefined}
             >
               <Kbd>{f.hint}</Kbd>
               {f.label}
@@ -553,14 +545,9 @@ export const ClipboardPopup = () => {
           <span className="t-tertiary text-meta">
             {typed.length} items · {formatBytes(totalBytes)}
           </span>
-          <button
-            onClick={handleClearAll}
-            className="t-secondary hover:text-red-400 text-meta px-2 py-1 rounded"
-            style={{ background: 'rgba(255,255,255,0.04)' }}
-            title="Clear all unpinned items"
-          >
+          <Button size="xs" onClick={handleClearAll} title="Clear all unpinned items">
             Clear
-          </button>
+          </Button>
         </div>
       </footer>
       <ConfirmDialog
