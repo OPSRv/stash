@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { TranslationRow } from './TranslationRow';
+import { estimateTranslationRowHeight } from './estimateRowHeight';
 import type { TranslationRow as TranslationRowData } from './api';
 
 interface TranslationVirtualListProps {
@@ -25,7 +26,10 @@ export const TranslationVirtualList = ({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 96,
+    estimateSize: (i) => {
+      const r = rows[i];
+      return r ? estimateTranslationRowHeight(r) : 96;
+    },
     overscan: 6,
     getItemKey: (i) => rows[i]?.id ?? i,
   });

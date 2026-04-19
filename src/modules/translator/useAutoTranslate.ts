@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { AUTO_TRANSLATE_DEBOUNCE_MS } from './translator.constants';
 
 interface AutoTranslateArgs {
@@ -7,6 +7,13 @@ interface AutoTranslateArgs {
   sourceHint: string | null;
   onTranslate: (text: string, to: string, from?: string) => void;
   onEmpty: () => void;
+}
+
+interface AutoTranslateApi {
+  /// Drops the dedupe cache so the next run of the same (text, to) pair will
+  /// fire a fresh translate. Callers invoke this after swap / reuse flows
+  /// that mutate the draft to a value the hook has already translated.
+  reset: () => void;
 }
 
 /// Debounced auto-translate: runs `onTranslate` a short delay after the
@@ -20,7 +27,7 @@ export const useAutoTranslate = ({
   sourceHint,
   onTranslate,
   onEmpty,
-}: AutoTranslateArgs): void => {
+}: AutoTranslateArgs): AutoTranslateApi => {
   const lastTranslatedRef = useRef<{ text: string; to: string } | null>(null);
 
   useEffect(() => {
@@ -38,4 +45,10 @@ export const useAutoTranslate = ({
     }, AUTO_TRANSLATE_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [draft, target, sourceHint, onTranslate, onEmpty]);
+
+  const reset = useCallback(() => {
+    lastTranslatedRef.current = null;
+  }, []);
+
+  return { reset };
 };

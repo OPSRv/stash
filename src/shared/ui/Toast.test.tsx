@@ -72,6 +72,24 @@ describe('Toast', () => {
     expect(screen.queryByText('Failed')).not.toBeInTheDocument();
   });
 
+  it('cancels the auto-dismiss timer of toasts evicted by the MAX_VISIBLE cap', () => {
+    const clearSpy = vi.spyOn(window, 'clearTimeout');
+    render(
+      <ToastProvider>
+        <Trigger props={{ title: 'T' }} />
+      </ToastProvider>,
+    );
+    // Fire 4 toasts (MAX_VISIBLE = 3) — the oldest is evicted on the 4th.
+    fireEvent.click(screen.getByText('fire'));
+    fireEvent.click(screen.getByText('fire'));
+    fireEvent.click(screen.getByText('fire'));
+    const clearsBeforeEvict = clearSpy.mock.calls.length;
+    fireEvent.click(screen.getByText('fire'));
+    // Evicting the first toast must clear its scheduled dismiss timer.
+    expect(clearSpy.mock.calls.length).toBeGreaterThan(clearsBeforeEvict);
+    clearSpy.mockRestore();
+  });
+
   it('dismiss button removes the toast', () => {
     render(
       <ToastProvider>

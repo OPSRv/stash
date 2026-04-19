@@ -62,6 +62,39 @@ describe('TranslatorShell', () => {
     });
   });
 
+  it('refetches history after a delete', async () => {
+    const row = {
+      id: 42,
+      original: 'hello',
+      translated: 'привіт',
+      from_lang: 'en',
+      to_lang: 'uk',
+      created_at: Math.floor(Date.now() / 1000),
+    };
+    let listCalls = 0;
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'translator_list') {
+        listCalls += 1;
+        return listCalls === 1 ? [row] : [];
+      }
+      if (cmd === 'translator_search') return [];
+      if (cmd === 'translator_delete') return null;
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<TranslatorShell />);
+    const deleteBtn = await screen.findByRole('button', { name: /^delete$/i });
+    const before = listCalls;
+    await user.click(deleteBtn);
+    // Confirm the destructive-action dialog — second matching button.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /^delete$/i }).length).toBeGreaterThan(1);
+    });
+    const buttons = screen.getAllByRole('button', { name: /^delete$/i });
+    await user.click(buttons[buttons.length - 1]);
+    await waitFor(() => expect(listCalls).toBeGreaterThan(before));
+  });
+
   it('Escape clears a non-empty draft', async () => {
     wire();
     const user = userEvent.setup();

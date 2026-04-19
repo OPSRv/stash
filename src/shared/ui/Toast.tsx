@@ -44,7 +44,19 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
       const duration = input.durationMs ?? defaultDuration;
       setItems((prev) => {
         const next = [...prev, { ...input, id }];
-        // Cap visible stack — oldest toasts drop off first.
+        // Cap visible stack — oldest toasts drop off first. Cancel their
+        // scheduled dismiss timers so they don't fire against ids that are
+        // already gone from view.
+        const overflow = next.length - MAX_VISIBLE;
+        if (overflow > 0) {
+          for (const evicted of next.slice(0, overflow)) {
+            const t = timersRef.current.get(evicted.id);
+            if (t !== undefined) {
+              window.clearTimeout(t);
+              timersRef.current.delete(evicted.id);
+            }
+          }
+        }
         return next.slice(-MAX_VISIBLE);
       });
       if (duration > 0) {

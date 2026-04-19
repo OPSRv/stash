@@ -39,6 +39,8 @@ export const TranslatorShell = () => {
   const [isBusy, setIsBusy] = useState(false);
   const [liveResult, setLiveResult] = useState<LiveResult | null>(null);
   const [historyQuery, setHistoryQuery] = useState('');
+  const [historyReloadKey, setHistoryReloadKey] = useState(0);
+  const reloadHistory = useCallback(() => setHistoryReloadKey((k) => k + 1), []);
   const sourceRef = useRef<HTMLTextAreaElement | null>(null);
   const { toast } = useToast();
   const { announce } = useAnnounce();
@@ -83,7 +85,7 @@ export const TranslatorShell = () => {
     setLiveResult(null);
   }, []);
 
-  useAutoTranslate({
+  const { reset: resetAutoTranslate } = useAutoTranslate({
     draft,
     target,
     sourceHint,
@@ -91,7 +93,7 @@ export const TranslatorShell = () => {
     onEmpty: handleAutoEmpty,
   });
 
-  useHistorySearch({ query: historyQuery, onResults: setRows });
+  useHistorySearch({ query: historyQuery, reloadKey: historyReloadKey, onResults: setRows });
 
   // Refresh the list whenever a new auto-translation lands, unless the
   // user is actively filtering — we don't want the list to shift under
@@ -99,15 +101,12 @@ export const TranslatorShell = () => {
   useEffect(() => {
     const unlisten = listen('clipboard:translated', () => {
       if (historyQuery.trim()) return;
-      // Empty query → useHistorySearch already listens for the query-string;
-      // trigger its refresh by temporarily flipping state. Simplest path:
-      // re-fetch through the hook contract.
-      setHistoryQuery('');
+      reloadHistory();
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
-  }, [historyQuery]);
+  }, [historyQuery, reloadHistory]);
 
   const handleTargetChange = useCallback((next: string) => {
     setTarget(next);
@@ -130,10 +129,11 @@ export const TranslatorShell = () => {
     setDraft(nextDraft);
     setLiveResult(null);
     setSourceHint(null);
+    resetAutoTranslate();
     announce(
       `Swapped — translating ${languageLabel(liveResult.to)} to ${languageLabel(nextTarget)}`,
     );
-  }, [liveResult, canSwap, announce]);
+  }, [liveResult, canSwap, announce, resetAutoTranslate]);
 
   const handleSpeak = useCallback((text: string, lang: string) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
@@ -162,12 +162,12 @@ export const TranslatorShell = () => {
       try {
         await translatorDelete(id);
         announce('Translation deleted');
-        setHistoryQuery((q) => q); // trigger useHistorySearch refresh
+        reloadHistory();
       } catch (error) {
         console.error('delete failed', error);
       }
     },
-    [announce],
+    [announce, reloadHistory],
   );
 
   const handleDelete = useCallback(
@@ -202,12 +202,13 @@ export const TranslatorShell = () => {
       await translatorClear();
       announce('History cleared');
       toast({ title: 'Translations cleared', variant: 'success' });
-      setHistoryQuery(''); // trigger list refetch
+      setHistoryQuery('');
+      reloadHistory();
     } catch (error) {
       console.error('clear failed', error);
       toast({ title: 'Clear failed', description: String(error), variant: 'error' });
     }
-  }, [toast, announce]);
+  }, [toast, announce, reloadHistory]);
 
   const handleTranslateNow = useCallback(() => {
     void runTranslate(draft, target, sourceHint ?? undefined);
