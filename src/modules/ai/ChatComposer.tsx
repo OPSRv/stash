@@ -33,6 +33,15 @@ export const ChatComposer = ({
   }, [value]);
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Swallow plain typing keys so window-level listeners registered by
+    // other tabs (ClipboardPopup treats Space/Backspace/Enter as commands
+    // whenever the event target isn't an <input>) don't run on keystrokes
+    // meant for the chat textarea. Modifier combos (⌘K, ⌘/, ⌘⇧F, ⌘⌥<N>)
+    // still propagate so the popup's global shortcuts keep working.
+    if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.stopPropagation();
+      e.nativeEvent.stopImmediatePropagation();
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (isStreaming || disabled) return;

@@ -425,7 +425,14 @@ export const ClipboardPopup = () => {
       }
       const item = flat[index];
       if (!item) return;
-      const typingInInput = (e.target as HTMLElement | null)?.tagName === 'INPUT';
+      // Include TEXTAREA and contentEditable hosts so keystrokes meant for
+      // composers in other tabs (chat, notes) don't trigger clipboard
+      // list commands via this window-level listener.
+      const target = e.target as HTMLElement | null;
+      const typingInInput =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable === true;
       if (e.metaKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         handleTogglePin(item.id);
