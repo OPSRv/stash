@@ -54,6 +54,12 @@ export type Settings = {
   /** Persisted popup size in logical pixels. Never stored below the 920×520 floor. */
   popupWidth: number;
   popupHeight: number;
+  /**
+   * Exact command the Terminal's "Claude Code" shortcut writes to the PTY,
+   * including any flags the user runs habitually. Full line, shell-compatible
+   * (e.g. `claude --dangerously-skip-permissions --model opus`).
+   */
+  claudeCodeCommand: string;
 };
 
 export type AiProvider = 'openai' | 'anthropic' | 'google' | 'custom';
@@ -103,6 +109,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceActiveModel: null,
   popupWidth: 920,
   popupHeight: 520,
+  claudeCodeCommand: 'claude',
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

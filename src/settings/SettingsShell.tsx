@@ -137,7 +137,12 @@ export const SettingsShell = () => {
       </nav>
       <main className="flex-1 overflow-y-auto nice-scroll px-6 py-5">
         {tab === 'general' && (
-          <GeneralTab autostartOn={autostartOn} onToggleAutostart={toggleAutostart} />
+          <GeneralTab
+            autostartOn={autostartOn}
+            onToggleAutostart={toggleAutostart}
+            settings={settings}
+            onChange={update}
+          />
         )}
         {tab === 'appearance' && <AppearanceTab settings={settings} onChange={update} />}
         {tab === 'clipboard' && <ClipboardTab settings={settings} onChange={update} />}

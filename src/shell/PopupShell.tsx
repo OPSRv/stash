@@ -83,30 +83,36 @@ export const PopupShell = () => {
 
   // Save size on resize, debounced. Tauri emits a Resized event for every
   // frame of a drag, so we coalesce to one settings write ~250ms after the
-  // user stops moving the edge.
+  // user stops moving the edge. The whole block is wrapped defensively —
+  // test stubs of getCurrentWindow() don't implement onResized/scaleFactor.
   useEffect(() => {
     let timer: number | null = null;
     let unlisten: (() => void) | null = null;
-    const win = getCurrentWindow();
-    win
-      .onResized(({ payload }) => {
-        if (timer !== null) window.clearTimeout(timer);
-        timer = window.setTimeout(async () => {
-          try {
-            const scale = await win.scaleFactor();
-            const w = Math.max(MIN_WIDTH, Math.round(payload.width / scale));
-            const h = Math.max(MIN_HEIGHT, Math.round(payload.height / scale));
-            await saveSetting('popupWidth', w);
-            await saveSetting('popupHeight', h);
-          } catch {
-            // ignore — resize is a nice-to-have
-          }
-        }, 250);
-      })
-      .then((fn) => {
-        unlisten = fn;
-      })
-      .catch(() => {});
+    try {
+      const win = getCurrentWindow();
+      if (typeof win.onResized !== 'function') return;
+      win
+        .onResized(({ payload }) => {
+          if (timer !== null) window.clearTimeout(timer);
+          timer = window.setTimeout(async () => {
+            try {
+              const scale = await win.scaleFactor();
+              const w = Math.max(MIN_WIDTH, Math.round(payload.width / scale));
+              const h = Math.max(MIN_HEIGHT, Math.round(payload.height / scale));
+              await saveSetting('popupWidth', w);
+              await saveSetting('popupHeight', h);
+            } catch {
+              // ignore — resize is a nice-to-have
+            }
+          }, 250);
+        })
+        .then((fn) => {
+          unlisten = fn;
+        })
+        .catch(() => {});
+    } catch {
+      // window API unavailable in this environment
+    }
     return () => {
       if (timer !== null) window.clearTimeout(timer);
       unlisten?.();

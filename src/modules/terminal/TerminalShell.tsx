@@ -5,6 +5,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../shared/ui/Button';
+import { loadSettings } from '../../settings/store';
 import { ptyClose, ptyOpen, ptyResize, ptyWrite, type DataPayload, type ExitPayload } from './api';
 import './terminal-animations.css';
 
@@ -186,6 +187,22 @@ export const TerminalShell = () => {
     };
   }, []);
 
+  const launchClaudeCode = useCallback(async () => {
+    try {
+      const settings = await loadSettings();
+      const cmd = settings.claudeCodeCommand.trim();
+      if (!cmd) return;
+      // Trailing \r as if the user pressed Enter — same path ptyWrite takes
+      // for any keystroke, so the running shell sees it as a real command.
+      await ptyWrite(`${cmd}\r`);
+      termRef.current?.focus();
+    } catch (e) {
+      termRef.current?.write(
+        `\r\n\x1b[31mclaude code launch failed: ${String(e)}\x1b[0m\r\n`,
+      );
+    }
+  }, []);
+
   const restart = useCallback(async () => {
     await ptyClose().catch(() => {});
     termRef.current?.clear();
@@ -214,6 +231,16 @@ export const TerminalShell = () => {
             shell exited
           </span>
         )}
+        <Button
+          size="xs"
+          variant="soft"
+          tone="accent"
+          onClick={launchClaudeCode}
+          disabled={dead}
+          title="Run the configured Claude Code command in this terminal"
+        >
+          Claude Code
+        </Button>
         <Button size="xs" variant="ghost" onClick={restart}>
           Restart
         </Button>

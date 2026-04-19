@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { streamText } from 'ai';
 
-import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { useToast } from '../../shared/ui/Toast';
 
 import {
@@ -20,7 +19,7 @@ import { EmbeddedWebChat } from './EmbeddedWebChat';
 import { buildModel } from './provider';
 import { SessionSidebar } from './SessionSidebar';
 import { useAiSettings } from './useAiSettings';
-import { faviconUrlFor } from './webchatApi';
+import { faviconUrlFor, webchatClose } from './webchatApi';
 
 type Mode = 'api' | string; // 'api' or a web service id
 
@@ -47,37 +46,20 @@ export const AiShell = () => {
 
   const abortRef = useRef<AbortController | null>(null);
 
-  const modeOptions = useMemo(() => {
-    const opts: Array<{
-      value: string;
-      label: string;
-      icon?: React.ReactNode;
-    }> = [{ value: 'api', label: 'API' }];
-    for (const s of settings.aiWebServices) {
-      const favicon = faviconUrlFor(s.url, 16);
-      opts.push({
-        value: s.id,
-        label: s.label,
-        icon: favicon ? (
-          <img
-            src={favicon}
-            alt=""
-            width={14}
-            height={14}
-            className="rounded-sm"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-          />
-        ) : undefined,
-      });
-    }
-    return opts;
-  }, [settings.aiWebServices]);
-
   const activeWebService = useMemo(
     () => settings.aiWebServices.find((s) => s.id === mode),
     [mode, settings.aiWebServices],
+  );
+
+  // Close the webview for this service without touching the settings list.
+  // Frees the RAM / web process the session was holding. The tab stays in
+  // the switcher; clicking it later re-embeds a fresh instance.
+  const closeWebService = useCallback(
+    async (id: string) => {
+      if (mode === id) setMode('api');
+      await webchatClose(id).catch(() => {});
+    },
+    [mode],
   );
 
   useEffect(() => {
@@ -319,13 +301,69 @@ export const AiShell = () => {
   return (
     <div className="flex flex-col h-full w-full" style={{ background: 'var(--color-bg)' }}>
       <div className="px-3 py-2 border-b hair flex items-center gap-2">
-        <SegmentedControl<string>
-          value={mode}
-          onChange={setMode}
-          options={modeOptions}
-          size="sm"
-          ariaLabel="Chat mode"
-        />
+        <div role="tablist" aria-label="Chat mode" className="flex items-center gap-1 flex-wrap">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'api'}
+            onClick={() => setMode('api')}
+            className={`px-2.5 py-1 rounded-md text-meta transition-colors ${
+              mode === 'api'
+                ? 't-primary bg-white/[0.08]'
+                : 't-secondary hover:bg-white/[0.04]'
+            }`}
+          >
+            API
+          </button>
+          {settings.aiWebServices.map((s) => {
+            const active = mode === s.id;
+            const favicon = faviconUrlFor(s.url, 16);
+            return (
+              <div
+                key={s.id}
+                className={`group flex items-center rounded-md transition-colors ${
+                  active ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                }`}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setMode(s.id)}
+                  className={`flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-md text-meta ${
+                    active ? 't-primary' : 't-secondary'
+                  }`}
+                >
+                  {favicon && (
+                    <img
+                      src={favicon}
+                      alt=""
+                      width={14}
+                      height={14}
+                      className="rounded-sm"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  )}
+                  <span>{s.label}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Close ${s.label}`}
+                  title={`Close ${s.label} (free RAM; reopens on click)`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeWebService(s.id).catch(() => {});
+                  }}
+                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:text-red-400 px-1 py-0.5 rounded-md text-meta transition-opacity"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
         <div className="flex-1" />
         {isApi && (
           <span
