@@ -70,10 +70,12 @@ describe('PopupShell', () => {
   it('auto-switches to Downloader when clipboard lands a supported URL', async () => {
     const handlers: Record<string, (e: { payload: unknown }) => void> = {};
     vi.mocked(listen).mockImplementation(
-      (event: string, cb: (e: { payload: unknown }) => void) => {
+      // The real signature is generic over payload; the test only needs to
+      // capture the callback per event name, so we cast at the boundary.
+      ((event: string, cb: (e: { payload: unknown }) => void) => {
         handlers[event] = cb;
         return Promise.resolve(() => {});
-      },
+      }) as unknown as typeof listen,
     );
     vi.mocked(readText).mockResolvedValue('https://youtu.be/abc123');
     const prefill = vi.fn();
@@ -93,10 +95,12 @@ describe('PopupShell', () => {
   it('ignores non-supported URLs from clipboard', async () => {
     const handlers: Record<string, (e: { payload: unknown }) => void> = {};
     vi.mocked(listen).mockImplementation(
-      (event: string, cb: (e: { payload: unknown }) => void) => {
+      // The real signature is generic over payload; the test only needs to
+      // capture the callback per event name, so we cast at the boundary.
+      ((event: string, cb: (e: { payload: unknown }) => void) => {
         handlers[event] = cb;
         return Promise.resolve(() => {});
-      },
+      }) as unknown as typeof listen,
     );
     vi.mocked(readText).mockResolvedValue('https://example.com/page');
     const prefill = vi.fn();
