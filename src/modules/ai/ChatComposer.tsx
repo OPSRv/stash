@@ -1,6 +1,11 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 
 import { Button } from '../../shared/ui/Button';
+
+const LINE_HEIGHT = 20;
+const MIN_ROWS = 1;
+const MAX_ROWS = 6;
+const V_PADDING = 16; // py-2 → 8 + 8
 
 type Props = {
   value: string;
@@ -23,13 +28,18 @@ export const ChatComposer = ({
 }: Props) => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Auto-grow up to 8 lines. Reset to auto first so shrinking works.
-  useEffect(() => {
+  // Auto-grow up to MAX_ROWS, then internal scrolling kicks in. Reset to
+  // auto first so shrinking works on backspace.
+  useLayoutEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = 'auto';
-    const max = 8 * 20; // ~8 rows at 20px line-height
-    ta.style.height = `${Math.min(ta.scrollHeight, max)}px`;
+    const max = LINE_HEIGHT * MAX_ROWS + V_PADDING;
+    const scrollH = ta.scrollHeight;
+    ta.style.height = `${Math.min(scrollH, max)}px`;
+    // Only show the scrollbar once content actually needs one — otherwise a
+    // single empty line renders with a permanent scroll strip on the right.
+    ta.style.overflowY = scrollH > max ? 'auto' : 'hidden';
   }, [value]);
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -64,8 +74,13 @@ export const ChatComposer = ({
         placeholder={placeholder ?? 'Ask anything. Enter to send, Shift+Enter for newline.'}
         onChange={(e) => onChange(e.currentTarget.value)}
         onKeyDown={handleKey}
-        rows={1}
-        className="input-field flex-1 resize-none rounded-md px-3 py-2 text-body leading-[20px] max-h-[160px] overflow-y-auto nice-scroll"
+        rows={MIN_ROWS}
+        className="input-field flex-1 resize-none rounded-md px-3 py-2 text-body nice-scroll"
+        style={{
+          lineHeight: `${LINE_HEIGHT}px`,
+          minHeight: `${LINE_HEIGHT * MIN_ROWS + V_PADDING}px`,
+          maxHeight: `${LINE_HEIGHT * MAX_ROWS + V_PADDING}px`,
+        }}
         aria-label="Chat input"
       />
       {isStreaming ? (

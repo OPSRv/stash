@@ -30,6 +30,20 @@ export const ChatThread = ({ messages, streamingContent, emptyHero }: Props) => 
     }
   }, [messages, streamingContent]);
 
+  // When the composer auto-grows, the thread's own height changes while the
+  // scroll container's `scrollTop` stays put — so the bottom message slips
+  // behind the growing composer. Re-pin to the bottom whenever the container
+  // resizes (and the user hadn't scrolled up manually).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      if (atBottomRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const hasAny = messages.length > 0 || streamingContent !== null;
 
   return (
