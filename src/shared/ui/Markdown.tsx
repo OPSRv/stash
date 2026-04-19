@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -13,17 +13,30 @@ type MarkdownProps = {
   components?: Components;
 };
 
-const baseAnchor: Components['a'] = ({ href, children, ...rest }) => (
-  <a
-    {...rest}
-    href={href}
-    target="_blank"
-    rel="noreferrer noopener"
-    className="text-[color:rgba(var(--stash-accent-rgb),1)] underline decoration-dotted"
-  >
-    {children}
-  </a>
-);
+// Reject script-style schemes so pasted/AI/clipboard markdown can't execute
+// arbitrary code via [text](javascript:…). Allow relative links and the
+// usual http(s)/mailto/tel.
+const safeHref = (href: string | undefined): string | undefined => {
+  if (!href) return href;
+  const trimmed = href.trim();
+  if (/^(javascript|vbscript|data|file):/i.test(trimmed)) return undefined;
+  return href;
+};
+
+const baseAnchor: Components['a'] = ({ href, children, ...rest }) => {
+  const safe = safeHref(href);
+  return (
+    <a
+      {...rest}
+      href={safe}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="text-[color:rgba(var(--stash-accent-rgb),1)] underline decoration-dotted"
+    >
+      {children}
+    </a>
+  );
+};
 
 const CodeBlock = ({
   children,
@@ -38,12 +51,27 @@ const CodeBlock = ({
   // <span> tokens, so `String(children)` is meaningless. Read the rendered
   // text content from the DOM instead — always correct, always cheap.
   const codeRef = useRef<HTMLElement | null>(null);
+  const resetTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    },
+    [],
+  );
   const onCopy = async () => {
     try {
       const text = (codeRef.current?.textContent ?? '').replace(/\n$/, '');
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
+      if (resetTimerRef.current !== null) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = window.setTimeout(() => {
+        resetTimerRef.current = null;
+        setCopied(false);
+      }, 1400);
     } catch {
       // ignore — clipboard may be unavailable in some contexts
     }
@@ -55,7 +83,7 @@ const CodeBlock = ({
         onClick={onCopy}
         aria-label="Copy code"
         className="absolute top-2 right-2 text-meta px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-        style={{ background: 'rgba(255,255,255,0.08)' }}
+        style={{ background: 'rgba(var(--stash-accent-rgb), 0.14)' }}
       >
         {copied ? 'Copied' : 'Copy'}
       </button>

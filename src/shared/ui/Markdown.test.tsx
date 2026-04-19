@@ -50,5 +50,60 @@ describe('Markdown', () => {
     const { container } = render(<Markdown source={''} />);
     expect(container.firstChild).toBeNull();
   });
+
+  test('strips javascript: and data: hrefs to prevent XSS', () => {
+    const { container } = render(
+      <Markdown
+        source={'[js](javascript:alert(1)) [vb](vbscript:x) [ok](https://example.com)'}
+      />,
+    );
+    // Any rendered anchor for the unsafe schemes must not carry an
+    // executable href. react-markdown also strips some of these on its
+    // own — either way, no javascript:/vbscript: href should reach the DOM.
+    const anchors = Array.from(container.querySelectorAll('a'));
+    for (const a of anchors) {
+      const h = (a.getAttribute('href') ?? '').toLowerCase();
+      expect(h.startsWith('javascript:')).toBe(false);
+      expect(h.startsWith('vbscript:')).toBe(false);
+    }
+    const okLink = screen.getByRole('link', { name: 'ok' });
+    expect(okLink.getAttribute('href')).toBe('https://example.com');
+  });
+
+  test('does not warn when unmounted before copy-reset timeout fires', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const originalClipboard = Object.getOwnPropertyDescriptor(
+      navigator,
+      'clipboard',
+    );
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { unmount } = render(
+        <Markdown source={'```ts\nconst x = 1;\n```'} codeCopy />,
+      );
+      const btn = screen.getByRole('button', { name: 'Copy code' });
+      fireEvent.click(btn);
+      // Let the clipboard promise resolve so setCopied(true) runs and the
+      // reset timer is scheduled.
+      await vi.runAllTimersAsync();
+      unmount();
+      // Advance past 1400ms — if cleanup is broken, React logs a
+      // "setState on unmounted component" error here.
+      vi.advanceTimersByTime(2000);
+      const calls = errSpy.mock.calls.flat().join(' ');
+      expect(calls).not.toMatch(/unmounted/i);
+    } finally {
+      errSpy.mockRestore();
+      if (originalClipboard) {
+        Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      }
+      vi.useRealTimers();
+    }
+  });
 });
 
