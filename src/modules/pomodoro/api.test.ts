@@ -35,11 +35,12 @@ describe('pomodoro api', () => {
     expect(mockInvoke).toHaveBeenCalledWith('pomodoro_list_presets');
   });
 
-  it('save_preset forwards name + blocks', async () => {
+  it('save_preset forwards name + kind + blocks', async () => {
     mockInvoke.mockResolvedValue({});
-    await savePreset('Day', [sample]);
+    await savePreset('Day', 'daily', [sample]);
     expect(mockInvoke).toHaveBeenCalledWith('pomodoro_save_preset', {
       name: 'Day',
+      kind: 'daily',
       blocks: [sample],
     });
   });

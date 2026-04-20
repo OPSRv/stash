@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use super::driver::emit_events;
 use super::engine::{EngineEvent, SessionSnapshot};
-use super::model::{Block, Preset, SessionRow};
+use super::model::{Block, Preset, PresetKind, SessionRow};
 use super::state::PomodoroState;
 
 fn now_ms() -> i64 {
@@ -40,6 +40,7 @@ pub fn pomodoro_list_presets(
 pub fn pomodoro_save_preset(
     state: State<'_, Arc<PomodoroState>>,
     name: String,
+    kind: PresetKind,
     blocks: Vec<Block>,
 ) -> Result<Preset, String> {
     let trimmed = name.trim();
@@ -51,7 +52,7 @@ pub fn pomodoro_save_preset(
             .repo
             .lock()
             .unwrap()
-            .save_preset(trimmed, &blocks, now_sec()),
+            .save_preset(trimmed, kind, &blocks, now_sec()),
     )
 }
 

@@ -1,16 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
 import { Input } from '../../shared/ui/Input';
+import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { BlockRow } from './BlockRow';
-import type { Block, Preset } from './api';
+import type { Block, Preset, PresetKind } from './api';
 
 interface PresetEditorProps {
   /** Existing preset to edit. `null` means a brand-new draft. */
   initial: Preset | null;
-  onSave: (name: string, blocks: Block[]) => void;
+  /** Default kind when opening a fresh editor from the Session/Daily filter. */
+  defaultKind?: PresetKind;
+  onSave: (name: string, kind: PresetKind, blocks: Block[]) => void;
   onStartWithoutSaving: (blocks: Block[]) => void;
   onCancel: () => void;
 }
+
+const KIND_OPTIONS: { value: PresetKind; label: string }[] = [
+  { value: 'session', label: 'Session' },
+  { value: 'daily', label: 'Daily' },
+];
 
 let nextBlockSeq = 0;
 const makeId = () => `b_${Date.now().toString(36)}_${(nextBlockSeq++).toString(36)}`;
@@ -25,19 +33,22 @@ const DEFAULT_BLOCK = (): Block => ({
 
 export const PresetEditor = ({
   initial,
+  defaultKind = 'session',
   onSave,
   onStartWithoutSaving,
   onCancel,
 }: PresetEditorProps) => {
   const [name, setName] = useState(initial?.name ?? '');
+  const [kind, setKind] = useState<PresetKind>(initial?.kind ?? defaultKind);
   const [blocks, setBlocks] = useState<Block[]>(
     initial?.blocks ?? [DEFAULT_BLOCK()],
   );
 
   useEffect(() => {
     setName(initial?.name ?? '');
+    setKind(initial?.kind ?? defaultKind);
     setBlocks(initial?.blocks ?? [DEFAULT_BLOCK()]);
-  }, [initial]);
+  }, [initial, defaultKind]);
 
   const updateBlock = useCallback((idx: number, next: Block) => {
     setBlocks((prev) => prev.map((b, i) => (i === idx ? next : b)));
@@ -59,15 +70,26 @@ export const PresetEditor = ({
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex items-center gap-2 px-3 py-2 border-b hair">
+      <header className="flex items-center gap-3 px-4 py-3 border-b hair">
         <Input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Preset name (e.g. Standard day)"
+          placeholder={
+            kind === 'session'
+              ? 'Session name (e.g. Quick focus)'
+              : 'Daily plan name (e.g. Standard day)'
+          }
           aria-label="Preset name"
           className="flex-1"
         />
-        <span className="t-tertiary text-meta font-mono tabular-nums shrink-0">
+        <SegmentedControl<PresetKind>
+          size="sm"
+          value={kind}
+          onChange={setKind}
+          options={KIND_OPTIONS}
+          ariaLabel="Preset kind"
+        />
+        <span className="t-tertiary text-meta font-mono tabular-nums shrink-0 shrink-0">
           {totalMinutes}m · {blocks.length} blocks
         </span>
       </header>
@@ -96,7 +118,7 @@ export const PresetEditor = ({
           Start without saving
         </Button>
         <Button
-          onClick={() => onSave(name.trim(), blocks)}
+          onClick={() => onSave(name.trim(), kind, blocks)}
           disabled={!canSave}
         >
           Save preset

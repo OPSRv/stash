@@ -22,10 +22,20 @@ pub struct Block {
     pub mid_nudge_sec: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PresetKind {
+    /// One self-contained run (e.g. "Quick focus — 25m"). Typically 1-2 blocks.
+    Session,
+    /// A longer multi-block plan covering a working block of the day.
+    Daily,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preset {
     pub id: i64,
     pub name: String,
+    pub kind: PresetKind,
     pub blocks: Vec<Block>,
     pub updated_at: i64,
 }

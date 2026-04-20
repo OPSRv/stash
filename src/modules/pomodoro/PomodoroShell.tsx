@@ -7,6 +7,7 @@ import {
   type BlockChangedEvent,
   type Posture,
   type Preset,
+  type PresetKind,
 } from './api';
 import { PresetLibrary } from './PresetLibrary';
 import { PresetEditor } from './PresetEditor';
@@ -15,7 +16,7 @@ import { usePomodoroEngine } from './hooks/usePomodoroEngine';
 
 type Mode =
   | { kind: 'library' }
-  | { kind: 'editor'; draft: Preset | null }
+  | { kind: 'editor'; draft: Preset | null; defaultKind: PresetKind }
   | { kind: 'session' };
 
 type Banner = { from: Posture; to: Posture; block: string };
@@ -89,9 +90,9 @@ export const PomodoroShell = () => {
   );
 
   const handleSavePreset = useCallback(
-    async (name: string, blocks: Block[]) => {
+    async (name: string, kind: PresetKind, blocks: Block[]) => {
       try {
-        await savePreset(name, blocks);
+        await savePreset(name, kind, blocks);
         toast({ title: 'Preset saved', variant: 'success' });
         reloadTrigger.current += 1;
         setMode(libraryMode);
@@ -117,6 +118,7 @@ export const PomodoroShell = () => {
     return (
       <PresetEditor
         initial={mode.draft}
+        defaultKind={mode.defaultKind}
         onSave={handleSavePreset}
         onStartWithoutSaving={handleStartAdHoc}
         onCancel={() => setMode(libraryMode)}
@@ -128,8 +130,8 @@ export const PomodoroShell = () => {
     <PresetLibrary
       key={reloadTrigger.current}
       onStart={handleStartPreset}
-      onEdit={(p) => setMode({ kind: 'editor', draft: p })}
-      onNew={() => setMode({ kind: 'editor', draft: null })}
+      onEdit={(p) => setMode({ kind: 'editor', draft: p, defaultKind: p.kind })}
+      onNew={(kind) => setMode({ kind: 'editor', draft: null, defaultKind: kind })}
     />
   );
 };

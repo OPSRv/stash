@@ -1,6 +1,20 @@
 use rusqlite::{params, Connection, OptionalExtension, Result};
 
-use super::model::{Block, Preset, SessionRow};
+use super::model::{Block, Posture, Preset, PresetKind, SessionRow};
+
+fn kind_to_str(kind: PresetKind) -> &'static str {
+    match kind {
+        PresetKind::Session => "session",
+        PresetKind::Daily => "daily",
+    }
+}
+
+fn kind_from_str(s: &str) -> PresetKind {
+    match s {
+        "session" => PresetKind::Session,
+        _ => PresetKind::Daily,
+    }
+}
 
 pub struct PomodoroRepo {
     conn: Connection,
@@ -26,7 +40,110 @@ impl PomodoroRepo {
             CREATE INDEX IF NOT EXISTS idx_sessions_started
                 ON pomodoro_sessions(started_at DESC);",
         )?;
-        Ok(Self { conn })
+        // Additive migration — add `kind` column if missing. SQLite's
+        // ALTER TABLE ADD COLUMN is not idempotent so we probe first.
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(pomodoro_presets)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<_>>()?;
+        if !cols.iter().any(|c| c == "kind") {
+            conn.execute(
+                "ALTER TABLE pomodoro_presets ADD COLUMN kind TEXT NOT NULL DEFAULT 'daily'",
+                [],
+            )?;
+        }
+        let mut repo = Self { conn };
+        repo.seed_defaults_if_empty()?;
+        Ok(repo)
+    }
+
+    /// Populate the library with a few opinionated starters the first time
+    /// the app opens a fresh pomodoro DB. Users can delete or edit them;
+    /// we only seed when the table is empty so re-opens don't duplicate.
+    fn seed_defaults_if_empty(&mut self) -> Result<()> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM pomodoro_presets",
+            [],
+            |r| r.get(0),
+        )?;
+        if count > 0 {
+            return Ok(());
+        }
+        let now: i64 = 0;
+        // Session presets — quick, one-shot runs you trigger ad-hoc.
+        self.save_preset(
+            "Quick focus",
+            PresetKind::Session,
+            &[Block {
+                id: "seed_qf_a".into(),
+                name: "Deep work".into(),
+                duration_sec: 25 * 60,
+                posture: Posture::Sit,
+                mid_nudge_sec: Some(15 * 60),
+            }],
+            now,
+        )?;
+        self.save_preset(
+            "Walking block",
+            PresetKind::Session,
+            &[Block {
+                id: "seed_wb_a".into(),
+                name: "Walk + think".into(),
+                duration_sec: 20 * 60,
+                posture: Posture::Walk,
+                mid_nudge_sec: None,
+            }],
+            now,
+        )?;
+        self.save_preset(
+            "Standing block",
+            PresetKind::Session,
+            &[Block {
+                id: "seed_sb_a".into(),
+                name: "Stand + review".into(),
+                duration_sec: 30 * 60,
+                posture: Posture::Stand,
+                mid_nudge_sec: None,
+            }],
+            now,
+        )?;
+        // Daily presets — full multi-posture plans for a whole working block.
+        self.save_preset(
+            "Balanced day",
+            PresetKind::Daily,
+            &[
+                Block {
+                    id: "seed_bd_a".into(),
+                    name: "Deep focus".into(),
+                    duration_sec: 50 * 60,
+                    posture: Posture::Sit,
+                    mid_nudge_sec: Some(25 * 60),
+                },
+                Block {
+                    id: "seed_bd_b".into(),
+                    name: "Walk break".into(),
+                    duration_sec: 15 * 60,
+                    posture: Posture::Walk,
+                    mid_nudge_sec: None,
+                },
+                Block {
+                    id: "seed_bd_c".into(),
+                    name: "Standing tasks".into(),
+                    duration_sec: 30 * 60,
+                    posture: Posture::Stand,
+                    mid_nudge_sec: None,
+                },
+                Block {
+                    id: "seed_bd_d".into(),
+                    name: "Deep focus".into(),
+                    duration_sec: 50 * 60,
+                    posture: Posture::Sit,
+                    mid_nudge_sec: Some(25 * 60),
+                },
+            ],
+            now,
+        )?;
+        Ok(())
     }
 
     // --- Presets ---------------------------------------------------------
@@ -34,17 +151,24 @@ impl PomodoroRepo {
     /// Upsert by unique `name`. Returns the resulting row. Using name as the
     /// upsert key keeps the preset library small (no "Untitled 7" accidental
     /// duplicates) and matches how a casual user thinks about "save over".
-    pub fn save_preset(&mut self, name: &str, blocks: &[Block], now: i64) -> Result<Preset> {
+    pub fn save_preset(
+        &mut self,
+        name: &str,
+        kind: PresetKind,
+        blocks: &[Block],
+        now: i64,
+    ) -> Result<Preset> {
         let blocks_json = serde_json::to_string(blocks).map_err(|e| {
             rusqlite::Error::ToSqlConversionFailure(Box::new(e))
         })?;
         self.conn.execute(
-            "INSERT INTO pomodoro_presets (name, blocks_json, updated_at)
-             VALUES (?1, ?2, ?3)
+            "INSERT INTO pomodoro_presets (name, kind, blocks_json, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(name) DO UPDATE SET
+                kind = excluded.kind,
                 blocks_json = excluded.blocks_json,
                 updated_at = excluded.updated_at",
-            params![name, blocks_json, now],
+            params![name, kind_to_str(kind), blocks_json, now],
         )?;
         let id: i64 = self.conn.query_row(
             "SELECT id FROM pomodoro_presets WHERE name = ?1",
@@ -54,6 +178,7 @@ impl PomodoroRepo {
         Ok(Preset {
             id,
             name: name.to_string(),
+            kind,
             blocks: blocks.to_vec(),
             updated_at: now,
         })
@@ -61,7 +186,7 @@ impl PomodoroRepo {
 
     pub fn list_presets(&self) -> Result<Vec<Preset>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, blocks_json, updated_at
+            "SELECT id, name, kind, blocks_json, updated_at
              FROM pomodoro_presets ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], Self::map_preset)?;
@@ -71,7 +196,7 @@ impl PomodoroRepo {
     pub fn get_preset(&self, id: i64) -> Result<Option<Preset>> {
         self.conn
             .query_row(
-                "SELECT id, name, blocks_json, updated_at
+                "SELECT id, name, kind, blocks_json, updated_at
                  FROM pomodoro_presets WHERE id = ?1",
                 params![id],
                 Self::map_preset,
@@ -138,9 +263,11 @@ impl PomodoroRepo {
                 Box::new(e),
             )
         })?;
+        let kind_str: String = row.get("kind").unwrap_or_else(|_| "daily".to_string());
         Ok(Preset {
             id: row.get("id")?,
             name: row.get("name")?,
+            kind: kind_from_str(&kind_str),
             blocks,
             updated_at: row.get("updated_at")?,
         })
@@ -173,7 +300,28 @@ mod tests {
     use crate::modules::pomodoro::model::Posture;
 
     fn fresh() -> PomodoroRepo {
-        PomodoroRepo::new(Connection::open_in_memory().unwrap()).unwrap()
+        // Skip seed defaults in unit tests so assertions about row counts
+        // aren't polluted by the opinionated starter library.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE pomodoro_presets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL DEFAULT 'daily',
+                blocks_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE pomodoro_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                preset_id INTEGER,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                blocks_json TEXT NOT NULL,
+                completed_idx INTEGER NOT NULL DEFAULT 0
+            );",
+        )
+        .unwrap();
+        PomodoroRepo { conn }
     }
 
     fn block(id: &str, name: &str, dur: u32, posture: Posture) -> Block {
@@ -193,11 +341,14 @@ mod tests {
             block("a", "Focus", 1500, Posture::Sit),
             block("b", "Walk", 600, Posture::Walk),
         ];
-        let saved = repo.save_preset("Default", &blocks, 100).unwrap();
+        let saved = repo
+            .save_preset("Default", PresetKind::Daily, &blocks, 100)
+            .unwrap();
         assert!(saved.id > 0);
         let listed = repo.list_presets().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "Default");
+        assert_eq!(listed[0].kind, PresetKind::Daily);
         assert_eq!(listed[0].blocks, blocks);
         assert_eq!(listed[0].updated_at, 100);
     }
@@ -205,10 +356,16 @@ mod tests {
     #[test]
     fn save_preset_upserts_by_name() {
         let mut repo = fresh();
-        repo.save_preset("Day", &[block("a", "A", 60, Posture::Sit)], 10)
-            .unwrap();
         repo.save_preset(
             "Day",
+            PresetKind::Daily,
+            &[block("a", "A", 60, Posture::Sit)],
+            10,
+        )
+        .unwrap();
+        repo.save_preset(
+            "Day",
+            PresetKind::Daily,
             &[
                 block("a", "A", 60, Posture::Sit),
                 block("b", "B", 60, Posture::Stand),
@@ -223,10 +380,29 @@ mod tests {
     }
 
     #[test]
+    fn save_preset_persists_kind() {
+        let mut repo = fresh();
+        repo.save_preset(
+            "Quick",
+            PresetKind::Session,
+            &[block("a", "A", 60, Posture::Walk)],
+            10,
+        )
+        .unwrap();
+        let listed = repo.list_presets().unwrap();
+        assert_eq!(listed[0].kind, PresetKind::Session);
+    }
+
+    #[test]
     fn delete_preset_removes_row() {
         let mut repo = fresh();
         let saved = repo
-            .save_preset("Gone", &[block("a", "A", 60, Posture::Sit)], 10)
+            .save_preset(
+                "Gone",
+                PresetKind::Daily,
+                &[block("a", "A", 60, Posture::Sit)],
+                10,
+            )
             .unwrap();
         repo.delete_preset(saved.id).unwrap();
         assert!(repo.get_preset(saved.id).unwrap().is_none());
@@ -271,7 +447,9 @@ mod tests {
             block("b", "Stand", 60, Posture::Stand),
             block("c", "Walk", 60, Posture::Walk),
         ];
-        let saved = repo.save_preset("All", &blocks, 10).unwrap();
+        let saved = repo
+            .save_preset("All", PresetKind::Daily, &blocks, 10)
+            .unwrap();
         let got = repo.get_preset(saved.id).unwrap().unwrap();
         assert_eq!(got.blocks[0].posture, Posture::Sit);
         assert_eq!(got.blocks[1].posture, Posture::Stand);

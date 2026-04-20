@@ -31,7 +31,7 @@ describe('PresetEditor', () => {
     expect(screen.getByRole('button', { name: /save preset/i })).toBeDisabled();
   });
 
-  it('Save calls onSave with trimmed name and current blocks', async () => {
+  it('Save calls onSave with trimmed name, kind and current blocks', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     render(
@@ -46,8 +46,26 @@ describe('PresetEditor', () => {
     await user.click(screen.getByRole('button', { name: /save preset/i }));
     expect(onSave).toHaveBeenCalledWith(
       'Daily',
+      'session',
       expect.arrayContaining([expect.objectContaining({ name: 'Focus' })]),
     );
+  });
+
+  it('Kind segmented control switches preset flavor', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      <PresetEditor
+        initial={null}
+        onSave={onSave}
+        onStartWithoutSaving={() => {}}
+        onCancel={() => {}}
+      />,
+    );
+    await user.click(screen.getByRole('radio', { name: /daily/i }));
+    await user.type(screen.getByLabelText('Preset name'), 'Plan');
+    await user.click(screen.getByRole('button', { name: /save preset/i }));
+    expect(onSave).toHaveBeenCalledWith('Plan', 'daily', expect.anything());
   });
 
   it('Start without saving bypasses the preset-name requirement', async () => {

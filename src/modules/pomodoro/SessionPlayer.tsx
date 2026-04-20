@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { IconButton } from '../../shared/ui/IconButton';
+import { Kbd } from '../../shared/ui/Kbd';
 import { NextIcon, PauseIcon, PlayIcon, StopCircleIcon } from '../../shared/ui/icons';
 import {
   editBlocks,
@@ -10,6 +11,7 @@ import {
   skipTo,
   stopSession,
   type Block,
+  type Posture,
   type SessionSnapshot,
 } from './api';
 import { formatMmSs, transitionText } from './constants';
@@ -17,12 +19,21 @@ import { PostureBadge } from './PostureBadge';
 
 interface SessionPlayerProps {
   snapshot: SessionSnapshot;
-  banner: { from: Block['posture']; to: Block['posture']; block: string } | null;
+  banner: { from: Posture; to: Posture; block: string } | null;
   onDismissBanner: () => void;
 }
 
 const renameInTrack = (blocks: Block[], idx: number, name: string): Block[] =>
   blocks.map((b, i) => (i === idx ? { ...b, name } : b));
+
+/// Posture-tinted accent used for the pane tint + progress color so the
+/// active block gives the player a different energy (sit = calm, walk =
+/// warm). Values match the muted tones in PostureBadge.
+const POSTURE_TINT: Record<Posture, { bg: string; ring: string }> = {
+  sit:  { bg: 'rgba(120, 130, 160, 0.10)', ring: 'rgba(120, 130, 160, 0.30)' },
+  stand:{ bg: 'rgba(110, 170, 130, 0.12)', ring: 'rgba(110, 170, 130, 0.32)' },
+  walk: { bg: 'rgba(200, 150, 90, 0.12)',  ring: 'rgba(200, 150, 90, 0.32)' },
+};
 
 export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlayerProps) => {
   const [stopConfirm, setStopConfirm] = useState(false);
@@ -50,16 +61,41 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
 
   const upNext = useMemo(() => blocks.slice(current_idx + 1), [blocks, current_idx]);
 
+  // Global keyboard shortcuts while a session is active (Space to pause/resume,
+  // ⌘→ for skip, ⌘. to stop). Skips when user is typing in an input/textarea.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tgt = e.target as HTMLElement | null;
+      const typing =
+        tgt?.tagName === 'INPUT' ||
+        tgt?.tagName === 'TEXTAREA' ||
+        tgt?.isContentEditable === true;
+      if (typing) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (isRunning) pauseSession().catch(() => {});
+        else if (isPaused) resumeSession().catch(() => {});
+      } else if (e.metaKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        skipTo(current_idx + 1).catch(() => {});
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isRunning, isPaused, current_idx]);
+
   if (!current) {
     return <div className="p-6 t-tertiary">No active block.</div>;
   }
 
+  const tint = POSTURE_TINT[current.posture];
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {banner && (
         <div
           role="status"
-          className="px-3 py-2 flex items-center justify-between border-b hair"
+          className="px-4 py-2.5 flex items-center justify-between border-b hair"
           style={{ background: 'rgba(var(--stash-accent-rgb),0.14)' }}
         >
           <div className="flex items-center gap-2">
@@ -74,60 +110,100 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
           </Button>
         </div>
       )}
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 pt-4">
+
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pt-4 pb-6">
+        {/* Posture-tinted clock card */}
         <div
-          className="t-primary font-mono tabular-nums"
-          style={{ fontSize: 84, lineHeight: 1 }}
+          className="relative rounded-2xl px-10 py-8 flex flex-col items-center gap-4 w-full max-w-md"
+          style={{
+            background: tint.bg,
+            boxShadow: `inset 0 0 0 0.5px ${tint.ring}`,
+          }}
         >
-          {formatMmSs(remaining_ms)}
-        </div>
-        <div className="flex items-center gap-2">
-          <PostureBadge posture={current.posture} size="md" />
-          {editingName !== null ? (
-            <input
-              autoFocus
-              value={editingName}
-              onChange={(e) => setEditingName(e.target.value)}
-              onBlur={commitName}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitName();
-                else if (e.key === 'Escape') setEditingName(null);
-              }}
-              className="bg-transparent border-b border-[var(--color-border)] t-primary text-body outline-none"
-              aria-label="Rename current block"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setEditingName(current.name)}
-              className="t-primary text-body font-medium hover:underline"
-              title="Click to rename this block"
-            >
-              {current.name}
-            </button>
-          )}
-        </div>
-        <div
-          className="w-full max-w-sm h-1.5 rounded-full overflow-hidden"
-          style={{ background: 'rgba(255,255,255,0.08)' }}
-          role="progressbar"
-          aria-valuenow={Math.round(progress * 100)}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
+          <div className="flex items-center justify-between w-full">
+            <span className="section-label">
+              Block {current_idx + 1} / {blocks.length}
+            </span>
+            <PostureBadge posture={current.posture} size="md" />
+          </div>
+
           <div
-            className="h-full"
+            className="t-primary font-mono tabular-nums text-center w-full"
             style={{
-              width: `${progress * 100}%`,
-              background: 'var(--stash-accent)',
-              transition: 'width 180ms linear',
+              fontSize: 92,
+              lineHeight: 1,
+              letterSpacing: '-0.02em',
+              fontWeight: 500,
             }}
-          />
+            aria-live="polite"
+            aria-label={`${formatMmSs(remaining_ms)} remaining`}
+          >
+            {formatMmSs(remaining_ms)}
+          </div>
+
+          <div className="w-full flex items-center gap-2">
+            {editingName !== null ? (
+              <input
+                autoFocus
+                value={editingName}
+                onChange={(e) => setEditingName(e.target.value)}
+                onBlur={commitName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitName();
+                  else if (e.key === 'Escape') setEditingName(null);
+                }}
+                className="flex-1 bg-transparent border-b border-[var(--color-border)] t-primary text-title font-medium outline-none px-1"
+                aria-label="Rename current block"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingName(current.name)}
+                className="flex-1 text-left t-primary text-title font-medium hover:underline truncate"
+                title="Click to rename this block"
+              >
+                {current.name}
+              </button>
+            )}
+            {isPaused && (
+              <span className="t-tertiary text-meta uppercase tracking-wide">
+                paused
+              </span>
+            )}
+          </div>
+
+          {/* Progress */}
+          <div
+            className="relative w-full h-2 rounded-full overflow-hidden"
+            style={{ background: 'rgba(255,255,255,0.08)' }}
+            role="progressbar"
+            aria-valuenow={Math.round(progress * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className={`h-full rounded-full ${
+                isRunning ? 'prog-fill' : isPaused ? 'prog-fill-paused' : ''
+              }`}
+              style={{
+                width: `${progress * 100}%`,
+                transition: 'width 180ms linear',
+              }}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2 mt-2">
+
+        {/* Controls */}
+        <div className="flex items-center gap-2 mt-5">
           {isRunning && (
-            <Button leadingIcon={<PauseIcon size={13} />} onClick={() => pauseSession()}>
+            <Button
+              leadingIcon={<PauseIcon size={13} />}
+              onClick={() => pauseSession()}
+            >
               Pause
+              <span className="ml-2 opacity-60">
+                <Kbd>Space</Kbd>
+              </span>
             </Button>
           )}
           {isPaused && (
@@ -137,11 +213,14 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
               onClick={() => resumeSession()}
             >
               Resume
+              <span className="ml-2 opacity-60">
+                <Kbd>Space</Kbd>
+              </span>
             </Button>
           )}
           <IconButton
             onClick={() => skipTo(current_idx + 1)}
-            title="Skip to next block"
+            title="Skip to next block (⌘→)"
           >
             <NextIcon size={13} />
           </IconButton>
@@ -153,35 +232,37 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
             <StopCircleIcon size={13} />
           </IconButton>
         </div>
-        <div className="t-tertiary text-meta">
-          Block {current_idx + 1} of {blocks.length}
-        </div>
       </div>
+
       {upNext.length > 0 && (
-        <div className="border-t hair px-3 py-2 flex items-center gap-2 overflow-x-auto">
-          <span className="t-tertiary text-[11px] uppercase tracking-wide shrink-0">
-            Up next
-          </span>
-          {upNext.map((b, i) => (
-            <div
-              key={b.id}
-              className="flex items-center gap-1.5 px-2 py-1 rounded border hair shrink-0"
-            >
-              <PostureBadge posture={b.posture} />
-              <span className="t-primary text-meta truncate max-w-[10ch]">{b.name}</span>
-              <span className="t-tertiary text-[11px] font-mono tabular-nums">
-                {Math.round(b.duration_sec / 60)}m
-              </span>
-              <IconButton
-                onClick={() => skipTo(current_idx + 1 + i)}
-                title="Skip to this block"
+        <div className="border-t hair px-4 py-3">
+          <div className="section-label mb-2">Up next</div>
+          <div className="flex items-center gap-2 overflow-x-auto">
+            {upNext.map((b, i) => (
+              <div
+                key={b.id}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border hair shrink-0"
+                style={{ background: 'rgba(255,255,255,0.02)' }}
               >
-                <NextIcon size={11} />
-              </IconButton>
-            </div>
-          ))}
+                <PostureBadge posture={b.posture} />
+                <span className="t-primary text-meta truncate max-w-[14ch]">
+                  {b.name}
+                </span>
+                <span className="t-tertiary text-[11px] font-mono tabular-nums">
+                  {Math.round(b.duration_sec / 60)}m
+                </span>
+                <IconButton
+                  onClick={() => skipTo(current_idx + 1 + i)}
+                  title="Skip to this block"
+                >
+                  <NextIcon size={11} />
+                </IconButton>
+              </div>
+            ))}
+          </div>
         </div>
       )}
+
       <ConfirmDialog
         open={stopConfirm}
         title="Stop this session?"

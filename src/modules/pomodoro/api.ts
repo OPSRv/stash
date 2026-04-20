@@ -4,6 +4,9 @@ export type Posture = 'sit' | 'stand' | 'walk';
 
 export type SessionStatus = 'idle' | 'running' | 'paused';
 
+/** Library flavor: short one-shot runs vs full multi-posture day plans. */
+export type PresetKind = 'session' | 'daily';
+
 export interface Block {
   id: string;
   name: string;
@@ -15,6 +18,7 @@ export interface Block {
 export interface Preset {
   id: number;
   name: string;
+  kind: PresetKind;
   blocks: Block[];
   updated_at: number;
 }
@@ -62,8 +66,11 @@ export type SessionDoneEvent = {
 export const listPresets = (): Promise<Preset[]> =>
   invoke('pomodoro_list_presets');
 
-export const savePreset = (name: string, blocks: Block[]): Promise<Preset> =>
-  invoke('pomodoro_save_preset', { name, blocks });
+export const savePreset = (
+  name: string,
+  kind: PresetKind,
+  blocks: Block[],
+): Promise<Preset> => invoke('pomodoro_save_preset', { name, kind, blocks });
 
 export const deletePreset = (id: number): Promise<void> =>
   invoke('pomodoro_delete_preset', { id });
