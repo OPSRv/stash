@@ -12,6 +12,86 @@ pub struct PopupAutoHide(pub AtomicBool);
 fn set_popup_auto_hide(state: tauri::State<'_, Arc<PopupAutoHide>>, enabled: bool) {
     state.0.store(enabled, Ordering::SeqCst);
 }
+
+/// Persisted popup window position. While `user_moved == false`, the popup
+/// re-anchors under the tray icon on every show (legacy behaviour). Once the
+/// user drags it, we remember the spot and restore it on subsequent shows
+/// until they call `popup_position_reset`.
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+pub struct PopupPositionData {
+    pub user_moved: bool,
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+}
+
+pub struct PopupPositionState {
+    pub path: std::path::PathBuf,
+    pub data: Mutex<PopupPositionData>,
+    /// Set right before any programmatic `set_position`/`move_window` so the
+    /// resulting `WindowEvent::Moved` does not get attributed to the user.
+    pub suppress_next_moved: AtomicBool,
+}
+
+impl PopupPositionState {
+    fn load(path: std::path::PathBuf) -> Self {
+        let data = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        Self {
+            path,
+            data: Mutex::new(data),
+            suppress_next_moved: AtomicBool::new(false),
+        }
+    }
+
+    fn save(&self) {
+        let snapshot = self.data.lock().unwrap().clone();
+        if let Ok(s) = serde_json::to_string_pretty(&snapshot) {
+            let _ = std::fs::write(&self.path, s);
+        }
+    }
+}
+
+/// Anchor the popup. Restores the user-chosen spot when present, otherwise
+/// snaps under the tray icon. Always sets `suppress_next_moved` so the move
+/// we just performed isn't mistaken for a user drag.
+fn position_popup(win: &tauri::Window, state: &PopupPositionState) {
+    let snapshot = state.data.lock().unwrap().clone();
+    state.suppress_next_moved.store(true, Ordering::SeqCst);
+    if snapshot.user_moved {
+        if let (Some(x), Some(y)) = (snapshot.x, snapshot.y) {
+            let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+            return;
+        }
+    }
+    let _ = win.move_window(Position::TrayCenter);
+}
+
+#[tauri::command]
+fn popup_position_reset(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<PopupPositionState>>,
+) -> Result<(), String> {
+    {
+        let mut d = state.data.lock().unwrap();
+        d.user_moved = false;
+        d.x = None;
+        d.y = None;
+    }
+    state.save();
+    if let Some(win) = resolve_popup(&app) {
+        state.suppress_next_moved.store(true, Ordering::SeqCst);
+        let _ = win.move_window(Position::TrayCenter);
+    }
+    let _ = app.emit("popup:position_changed", false);
+    Ok(())
+}
+
+#[tauri::command]
+fn popup_position_status(state: tauri::State<'_, Arc<PopupPositionState>>) -> bool {
+    state.data.lock().unwrap().user_moved
+}
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -52,10 +132,6 @@ use modules::notes::{
         notes_write_file, NotesState,
     },
     repo::NotesRepo,
-};
-use modules::recorder::commands::{
-    cam_pip_hide, cam_pip_show, rec_delete, rec_list, rec_list_devices, rec_probe_permissions,
-    rec_set_output_dir, rec_start, rec_status, rec_stop, rec_trim, RecorderState,
 };
 use modules::music::commands::{
     music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
@@ -170,7 +246,8 @@ pub fn run() {
                         .matches(mods, tauri_plugin_global_shortcut::Code::KeyV)
                     {
                         if let Some(win) = resolve_popup(app) {
-                            toggle_popup(&win);
+                            let pos_state = app.state::<Arc<PopupPositionState>>();
+                            toggle_popup(&win, &pos_state);
                         }
                     } else if shortcut
                         .matches(mods, tauri_plugin_global_shortcut::Code::KeyN)
@@ -180,8 +257,8 @@ pub fn run() {
                             // `emit` stays on the AppHandle so child webviews
                             // also receive it. Pass the tab payload first.
                             let _ = app.emit("nav:activate", "notes");
-                            use tauri_plugin_positioner::{Position, WindowExt};
-                            let _ = win.move_window(Position::TrayCenter);
+                            let pos_state = app.state::<Arc<PopupPositionState>>();
+                            position_popup(&win, &pos_state);
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -224,18 +301,9 @@ pub fn run() {
             set_popup_vibrancy,
             set_popup_appearance,
             set_popup_auto_hide,
+            popup_position_reset,
+            popup_position_status,
             open_system_settings,
-            rec_start,
-            rec_stop,
-            rec_status,
-            rec_probe_permissions,
-            rec_set_output_dir,
-            rec_list,
-            rec_list_devices,
-            rec_delete,
-            rec_trim,
-            cam_pip_show,
-            cam_pip_hide,
             notes_list,
             notes_search,
             notes_create,
@@ -362,16 +430,6 @@ pub fn run() {
             let runner_state = Arc::new(RunnerState::new(dl_repo, downloads_dir));
             app.manage(Arc::clone(&runner_state));
 
-            // Warm-up yt-dlp in the background so the first Detect doesn't
-            // include an install round-trip.
-            // Recorder runtime — shares the Movies/Stash folder with downloads.
-            let recorder_dir = dirs_next::video_dir()
-                .unwrap_or_else(|| data_dir.join("Recordings"))
-                .join("Stash");
-            std::fs::create_dir_all(&recorder_dir).ok();
-            let recorder_state = Arc::new(RecorderState::new(recorder_dir));
-            app.manage(Arc::clone(&recorder_state));
-
             // Notes
             let notes_db = data_dir.join("notes.sqlite");
             let notes_repo = NotesRepo::new(Connection::open(&notes_db)?)?;
@@ -427,7 +485,8 @@ pub fn run() {
                     "quit" => app.exit(0),
                     "show" => {
                         if let Some(win) = resolve_popup(app) {
-                            let _ = win.move_window(Position::TrayCenter);
+                            let pos_state = app.state::<Arc<PopupPositionState>>();
+                            position_popup(&win, &pos_state);
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
@@ -444,14 +503,13 @@ pub fn run() {
                     } = event
                     {
                         if let Some(win) = resolve_popup(app) {
-                            toggle_popup(&win);
+                            let pos_state = app.state::<Arc<PopupPositionState>>();
+                            toggle_popup(&win, &pos_state);
                         }
                     }
                 })
                 .build(app)?;
-            // Hand the tray off to the monitor thread so it can refresh the
-            // menubar label whenever the clipboard changes.
-            app.manage(TrayHandle(Mutex::new(Some(tray))));
+            let _ = tray;
 
             #[cfg(desktop)]
             {
@@ -465,6 +523,11 @@ pub fn run() {
 
             let auto_hide = Arc::new(PopupAutoHide(AtomicBool::new(true)));
             app.manage(Arc::clone(&auto_hide));
+
+            let popup_pos_state = Arc::new(PopupPositionState::load(
+                data_dir.join("popup_position.json"),
+            ));
+            app.manage(Arc::clone(&popup_pos_state));
 
             if let Some(win) = app.get_webview_window("popup") {
                 #[cfg(target_os = "macos")]
@@ -482,12 +545,32 @@ pub fn run() {
 
                 let win_clone = win.clone();
                 let auto_hide_clone = Arc::clone(&auto_hide);
-                win.on_window_event(move |event| {
-                    if let WindowEvent::Focused(false) = event {
+                let pos_state_clone = Arc::clone(&popup_pos_state);
+                let app_handle = app.handle().clone();
+                win.on_window_event(move |event| match event {
+                    WindowEvent::Focused(false) => {
                         if auto_hide_clone.0.load(Ordering::SeqCst) {
                             let _ = win_clone.hide();
                         }
                     }
+                    WindowEvent::Moved(pos) => {
+                        // Skip the move that we just performed ourselves.
+                        if pos_state_clone
+                            .suppress_next_moved
+                            .swap(false, Ordering::SeqCst)
+                        {
+                            return;
+                        }
+                        {
+                            let mut d = pos_state_clone.data.lock().unwrap();
+                            d.user_moved = true;
+                            d.x = Some(pos.x);
+                            d.y = Some(pos.y);
+                        }
+                        pos_state_clone.save();
+                        let _ = app_handle.emit("popup:position_changed", true);
+                    }
+                    _ => {}
                 });
             }
 
@@ -714,25 +797,9 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
-pub struct TrayHandle(pub Mutex<Option<tauri::tray::TrayIcon>>);
 
 /// Keep the menubar label tight so it fits alongside the icon even when the
 /// user copies a long paragraph. Strip newlines and ellipsize past 30 chars.
-fn tray_label_from_clip(text: &str) -> String {
-    let cleaned: String = text
-        .chars()
-        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
-        .collect();
-    let trimmed = cleaned.trim();
-    const MAX: usize = 30;
-    if trimmed.chars().count() <= MAX {
-        format!(" {}", trimmed)
-    } else {
-        let short: String = trimmed.chars().take(MAX).collect();
-        format!(" {}…", short)
-    }
-}
-
 fn run_monitor(
     state: Arc<ClipboardState>,
     images_dir: std::path::PathBuf,
@@ -784,13 +851,6 @@ fn run_monitor(
                 .map(|it| it.content);
 
             if let Some(ref content) = text_content {
-                let label = tray_label_from_clip(content);
-                if let Some(handle) = app.try_state::<TrayHandle>() {
-                    if let Some(tray) = handle.0.lock().unwrap().as_ref() {
-                        let _ = tray.set_title(Some(label));
-                    }
-                }
-
                 // Auto-translate in a background thread so a slow network
                 // round-trip doesn't stall the 500ms clipboard poll.
                 let translator_bg = Arc::clone(&translator);
@@ -817,13 +877,13 @@ fn run_monitor(
     }
 }
 
-fn toggle_popup(win: &tauri::Window) {
+fn toggle_popup(win: &tauri::Window, pos_state: &PopupPositionState) {
     match win.is_visible() {
         Ok(true) => {
             let _ = win.hide();
         }
         _ => {
-            let _ = win.move_window(Position::TrayCenter);
+            position_popup(win, pos_state);
             let _ = win.show();
             let _ = win.set_focus();
         }

@@ -16,8 +16,8 @@ export type ThemeSettings = {
 
 export const DEFAULT_THEME: ThemeSettings = {
   mode: 'dark',
-  blur: 24,
-  paneOpacity: 0.35,
+  blur: 30,
+  paneOpacity: 0.5,
   accent: 'blue',
 };
 
@@ -61,7 +61,7 @@ export const applyTheme = (t: ThemeSettings) => {
 };
 
 /// Broadcast a theme change to every open Tauri window so floating shells
-/// (popup, recorder, notes, music, translator) re-apply CSS vars without
+/// (popup, notes, music, translator) re-apply CSS vars without
 /// needing a restart.
 export const broadcastTheme = (t: ThemeSettings) => {
   emit(THEME_EVENT, t).catch(() => {});

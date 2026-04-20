@@ -42,7 +42,7 @@ export const AboutTab = () => {
     <div className="t-secondary text-body space-y-4">
       <div>
         <div className="t-primary text-heading font-medium">Stash</div>
-        <div>macOS menubar multitool — clipboard, downloads, recorder.</div>
+        <div>macOS menubar multitool — clipboard, downloads, notes, music, translator.</div>
         <div className="t-tertiary text-meta">
           v0.1.0 {ytVersion && <>· yt-dlp {ytVersion}</>}
         </div>

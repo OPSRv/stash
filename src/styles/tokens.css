@@ -159,7 +159,7 @@
     background: rgba(28, 28, 32, var(--stash-pane-opacity-dark));
     backdrop-filter: blur(var(--stash-blur)) saturate(1.4);
     -webkit-backdrop-filter: blur(var(--stash-blur)) saturate(1.4);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.03);
     box-shadow:
       0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
       0 30px 60px -20px rgba(0, 0, 0, 0.55),
@@ -241,9 +241,11 @@
 
   .hair {
     background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.05);
   }
   .light .hair {
     background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.07);
   }
 
   .t-primary {
@@ -278,7 +280,7 @@
     line-height: 1;
     color: rgba(255, 255, 255, 0.78);
     background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.03);
     box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
   }
   .light .kbd {
@@ -305,7 +307,7 @@
 
   .seg {
     background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.03);
     border-radius: 7px;
     padding: 2px;
   }
@@ -332,7 +334,7 @@
 
   .select-popup {
     background: #1f1f24;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.04);
     box-shadow:
       0 12px 28px -8px rgba(0, 0, 0, 0.55),
       0 0 0 0.5px rgba(0, 0, 0, 0.6);
@@ -347,7 +349,7 @@
 
   .input-field {
     background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.03);
     color: rgba(255, 255, 255, 0.92);
   }
   .light .input-field {
@@ -375,7 +377,7 @@
 
   .btn-ghost {
     background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.02);
   }
   .btn-ghost:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.1);
@@ -426,7 +428,7 @@
      pull from semantic color tokens. Hover treatment only on interactive cards. */
   .stash-card--flat {
     background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.03);
   }
   .light .stash-card--flat {
     background: rgba(255, 255, 255, 0.65);
@@ -501,7 +503,7 @@
      the old inline styles to preserve the established visual weight. */
   .translator-row {
     background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.025);
   }
   .light .translator-row {
     background: rgba(0, 0, 0, 0.02);
@@ -606,43 +608,6 @@
     background: rgba(20, 22, 28, 0.35);
   }
 
-  /* Compact horizontal gain fader — used by the recorder audio mixer. */
-  .stash-fader {
-    -webkit-appearance: none;
-    appearance: none;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 999px;
-    outline: none;
-    transition: background 140ms;
-  }
-  .stash-fader:hover {
-    background: rgba(255, 255, 255, 0.16);
-  }
-  .stash-fader:disabled {
-    opacity: 0.4;
-  }
-  .stash-fader::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 12px;
-    height: 12px;
-    border-radius: 999px;
-    background: #ffffff;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(0, 0, 0, 0.4);
-    cursor: grab;
-    transition: transform 120ms;
-  }
-  .stash-fader::-webkit-slider-thumb:active {
-    cursor: grabbing;
-    transform: scale(1.1);
-  }
-  .light .stash-fader {
-    background: rgba(0, 0, 0, 0.08);
-  }
-  .light .stash-fader:hover {
-    background: rgba(0, 0, 0, 0.14);
-  }
 }
 
 /* Scrollbars — thin, theme-tinted, unlayered so they beat any lingering UA
@@ -715,7 +680,7 @@ html {
   color: rgba(255, 255, 255, 0.72);
   font-style: italic;
 }
-.md-body hr, .notes-md hr { margin: 12px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.md-body hr, .notes-md hr { margin: 12px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.05); }
 .md-body code, .notes-md code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
@@ -728,7 +693,7 @@ html {
   padding: 10px 12px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.03);
   overflow-x: auto;
   font-size: 12px;
   line-height: 1.5;
@@ -737,7 +702,7 @@ html {
 .notes-md pre code { padding: 0; background: transparent; font-size: inherit; }
 .notes-md table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
 .notes-md th, .notes-md td {
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   padding: 4px 8px;
   text-align: left;
 }

@@ -5,6 +5,7 @@
   "windows": ["popup"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
     "opener:default",
     "global-shortcut:default",
     "store:default",

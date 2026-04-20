@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
@@ -13,6 +13,68 @@ import { loadSettings, saveSetting } from '../settings/store';
 
 const MIN_WIDTH = 920;
 const MIN_HEIGHT = 520;
+
+const Stroke = ({ d }: { d: string }) => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d={d} />
+  </svg>
+);
+
+/// Per-tab visual identity. Kept inline so adding a tab is a one-line edit
+/// here rather than touching every module's index.tsx.
+const TAB_ICONS: Record<string, ReactNode> = {
+  clipboard: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="8" y="2" width="8" height="4" rx="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    </svg>
+  ),
+  downloads: <Stroke d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />,
+  notes: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+      <path d="M14 3v6h6M9 13h6M9 17h4" />
+    </svg>
+  ),
+  translator: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 5h7M7 4v2M5 11s1.5 4 5 4M11 11s-1.5 4-5 4" />
+      <path d="M13 19l4-9 4 9M14.5 16h5" />
+    </svg>
+  ),
+  ai: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </svg>
+  ),
+  music: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9 17V5l11-2v12" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="17" cy="15" r="3" />
+    </svg>
+  ),
+  metronome: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M8 2h8l3 20H5z" />
+      <path d="M9 18h6" />
+      <path d="M12 14 7 4" />
+    </svg>
+  ),
+  terminal: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <polyline points="4 7 9 12 4 17" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  ),
+  settings: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+    </svg>
+  ),
+};
 import {
   pruneHistory,
   setCookiesBrowser,
@@ -33,6 +95,11 @@ import { applyTheme, subscribeTheme } from '../settings/theme';
 export const PopupShell = () => {
   const visibleModules = modules;
   const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
+  const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [indicator, setIndicator] = useState<{ left: number; width: number }>({
+    left: 0,
+    width: 0,
+  });
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -57,6 +124,14 @@ export const PopupShell = () => {
     setActiveId(id);
     setVisitedIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   };
+
+  // Position the active-tab underline. Uses layout effect so the indicator
+  // moves on the same paint as the highlight changes — no flash on switch.
+  useLayoutEffect(() => {
+    const el = tabRefs.current.get(activeId);
+    if (!el) return;
+    setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+  }, [activeId]);
 
   // Restore persisted popup size on first mount. Tauri's window defaults to
   // the size declared in tauri.conf.json; if the user stretched it in a
@@ -116,6 +191,31 @@ export const PopupShell = () => {
       if (timer !== null) window.clearTimeout(timer);
       unlisten?.();
     };
+  }, []);
+
+  // Prefetch every tab's lazy chunk shortly after mount so that the very
+  // first switch into an unvisited tab doesn't pay the dynamic-import cost.
+  // Hover preload (TabButton) already covers warm clicks; this covers cold
+  // keyboard-driven switches and feels instant. Skipped in tests to keep
+  // them deterministic — the test runner asserts cold-load behaviour.
+  useEffect(() => {
+    if (import.meta.env.MODE === 'test') return;
+    const preloadAll = () => {
+      modules.forEach((m) => {
+        m.preloadPopup?.().catch(() => {});
+      });
+    };
+    type IdleWindow = Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const w = window as IdleWindow;
+    if (typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(preloadAll, { timeout: 1500 });
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const t = window.setTimeout(preloadAll, 600);
+    return () => window.clearTimeout(t);
   }, []);
 
   useEffect(() => {
@@ -347,18 +447,48 @@ export const PopupShell = () => {
     <div className="pane h-full w-full rounded-2xl overflow-hidden flex flex-col relative">
       <header
         data-tauri-drag-region
-        className="flex items-center gap-1 px-2 py-1.5 border-b hair cursor-grab active:cursor-grabbing"
+        onMouseDown={(e) => {
+          // Only suppress auto-hide for actual drag-region mousedowns, not
+          // clicks on the buttons inside (TabButton, IconButton, etc.).
+          if ((e.target as HTMLElement).closest('[data-tauri-drag-region]') !== e.currentTarget) return;
+          invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
+          const restore = () => {
+            invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
+            window.removeEventListener('mouseup', restore);
+            window.removeEventListener('blur', restore);
+          };
+          window.addEventListener('mouseup', restore);
+          window.addEventListener('blur', restore);
+        }}
+        className="relative flex items-center gap-1 px-2 py-1.5 border-b hair cursor-grab active:cursor-grabbing"
       >
         {visibleModules.map((m, i) => (
           <TabButton
             key={m.id}
+            ref={(el) => {
+              if (el) tabRefs.current.set(m.id, el);
+              else tabRefs.current.delete(m.id);
+            }}
             label={m.title}
+            icon={TAB_ICONS[m.id]}
             shortcutHint={`⌘⌥${i + 1}`}
             active={m.id === activeId}
             onClick={() => openTab(m.id)}
             onHover={() => m.preloadPopup?.().catch(() => {})}
           />
         ))}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute bottom-0 h-[2px] rounded-full"
+          style={{
+            background: 'var(--stash-accent)',
+            left: 0,
+            transform: `translateX(${indicator.left}px)`,
+            width: indicator.width,
+            transition: 'transform 200ms var(--easing-emphasized), width 200ms var(--easing-emphasized), opacity 150ms ease',
+            opacity: indicator.width > 0 ? 1 : 0,
+          }}
+        />
         <div className="ml-auto flex items-center gap-1">
           <Button
             size="sm"
