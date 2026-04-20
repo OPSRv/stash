@@ -15,14 +15,34 @@ const AUDIO_EXTS = new Set([
   'aif',
 ]);
 
-export const isAudioSrc = (src: string | undefined | null): boolean => {
-  if (!src) return false;
-  // Strip query/fragment so `foo.mp3?v=1` still classifies as audio. `?` and
-  // `#` are valid in URLs but never in the on-disk portion of our paths.
+const IMAGE_EXTS = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'bmp',
+  'svg',
+  'heic',
+  'heif',
+]);
+
+const extOf = (src: string): string => {
+  // Strip query/fragment so `foo.mp3?v=1` still classifies correctly. `?`
+  // and `#` are valid in URLs but never in the on-disk portion of our paths.
   const clean = src.split(/[?#]/, 1)[0];
   const dot = clean.lastIndexOf('.');
-  if (dot <= 0) return false;
-  return AUDIO_EXTS.has(clean.slice(dot + 1).toLowerCase());
+  return dot <= 0 ? '' : clean.slice(dot + 1).toLowerCase();
+};
+
+export const isAudioSrc = (src: string | undefined | null): boolean => {
+  if (!src) return false;
+  return AUDIO_EXTS.has(extOf(src));
+};
+
+export const isImageSrc = (src: string | undefined | null): boolean => {
+  if (!src) return false;
+  return IMAGE_EXTS.has(extOf(src));
 };
 
 /** Escape markdown link chars in the path so exotic filenames round-trip
@@ -41,17 +61,25 @@ const escapeAlt = (s: string): string => s.replace(/([\\[\]])/g, '\\$1');
 export const buildAudioEmbed = (path: string, caption = 'voice note'): string =>
   `![${escapeAlt(caption)}](${formatEmbedSrc(path)})`;
 
-/** Append an audio embed to `body`, ensuring blank-line separation before
- *  and after so the markdown parser treats it as a standalone block. The
- *  returned body preserves the user's trailing newline (if any). */
-export const appendAudioEmbed = (body: string, path: string, caption?: string): string => {
-  const embed = buildAudioEmbed(path, caption);
+/** Same as `buildAudioEmbed` but for images — the caption doubles as alt
+ *  text for screen-readers and becomes the fallback if the image fails. */
+export const buildImageEmbed = (path: string, caption = 'image'): string =>
+  `![${escapeAlt(caption)}](${formatEmbedSrc(path)})`;
+
+const appendEmbed = (body: string, embed: string): string => {
   if (!body.trim()) return `${embed}\n`;
-  // Trim trailing whitespace to keep the insertion deterministic, then add
-  // one blank line between existing content and the embed.
   const trimmed = body.replace(/\s+$/, '');
   return `${trimmed}\n\n${embed}\n`;
 };
+
+/** Append an audio embed to `body`, ensuring blank-line separation before
+ *  and after so the markdown parser treats it as a standalone block. The
+ *  returned body preserves the user's trailing newline (if any). */
+export const appendAudioEmbed = (body: string, path: string, caption?: string): string =>
+  appendEmbed(body, buildAudioEmbed(path, caption));
+
+export const appendImageEmbed = (body: string, path: string, caption?: string): string =>
+  appendEmbed(body, buildImageEmbed(path, caption));
 
 /** Insert an audio embed at `cursor` inside `body`, expanding to a standalone
  *  block by adding surrounding blank lines when needed. Returns the new body

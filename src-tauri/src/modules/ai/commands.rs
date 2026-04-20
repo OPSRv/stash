@@ -26,6 +26,8 @@ pub fn ai_list_sessions(state: State<'_, AiState>) -> Result<Vec<Session>, Strin
 pub fn ai_create_session(
     state: State<'_, AiState>,
     title: Option<String>,
+    kind: Option<String>,
+    context_ref: Option<String>,
 ) -> Result<Session, String> {
     let id = Uuid::new_v4().to_string();
     let title = title.unwrap_or_else(|| "New chat".to_string());
@@ -33,7 +35,30 @@ pub fn ai_create_session(
         .repo
         .lock()
         .unwrap()
-        .create_session(&id, &title, now_ms())
+        .create_session(
+            &id,
+            &title,
+            now_ms(),
+            kind.as_deref(),
+            context_ref.as_deref(),
+        )
+        .map_err(map_err)
+}
+
+/// Look up the existing session bound to a `(kind, context_ref)` pair, or
+/// `None` if none has been created yet. The notes module uses this to
+/// resolve the per-note chat lazily on first open.
+#[tauri::command]
+pub fn ai_find_session_by_context(
+    state: State<'_, AiState>,
+    kind: String,
+    context_ref: String,
+) -> Result<Option<Session>, String> {
+    state
+        .repo
+        .lock()
+        .unwrap()
+        .find_session_by_context(&kind, &context_ref)
         .map_err(map_err)
 }
 

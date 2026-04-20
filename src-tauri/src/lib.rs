@@ -97,8 +97,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use modules::ai::{
     commands::{
-        ai_append_message, ai_create_session, ai_delete_api_key, ai_delete_session, ai_get_api_key,
-        ai_has_api_key, ai_list_messages, ai_list_sessions, ai_rename_session, ai_set_api_key,
+        ai_append_message, ai_create_session, ai_delete_api_key, ai_delete_session,
+        ai_find_session_by_context, ai_get_api_key, ai_has_api_key, ai_list_messages,
+        ai_list_sessions, ai_rename_session, ai_set_api_key,
     },
     keyring::{KeyringStore, SecretStore},
     repo::AiRepo,
@@ -136,8 +137,9 @@ use modules::whisper::{
 use modules::notes::{
     commands::{
         notes_create, notes_delete, notes_get, notes_list, notes_read_audio_path,
-        notes_read_file, notes_save_audio_bytes, notes_save_audio_file, notes_search,
-        notes_set_pinned, notes_update, notes_write_file, NotesState,
+        notes_read_file, notes_read_image_path, notes_save_audio_bytes, notes_save_audio_file,
+        notes_save_image_bytes, notes_save_image_file, notes_search, notes_set_pinned,
+        notes_update, notes_write_file, NotesState,
     },
     repo::NotesRepo,
 };
@@ -343,6 +345,9 @@ pub fn run() {
             notes_save_audio_bytes,
             notes_save_audio_file,
             notes_read_audio_path,
+            notes_save_image_bytes,
+            notes_save_image_file,
+            notes_read_image_path,
             notes_set_pinned,
             pomodoro_list_presets,
             pomodoro_save_preset,
@@ -385,6 +390,7 @@ pub fn run() {
             pty_close,
             ai_list_sessions,
             ai_create_session,
+            ai_find_session_by_context,
             ai_rename_session,
             ai_delete_session,
             ai_list_messages,

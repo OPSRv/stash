@@ -5,10 +5,10 @@ import { SearchInput } from '../../shared/ui/SearchInput';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
-import { AskAiButton } from '../../shared/ui/AskAiButton';
 import {
   DownloadIcon,
   EyeIcon,
+  MagicWandIcon,
   MicIcon,
   PanelLeftIcon,
   PencilIcon,
@@ -27,9 +27,11 @@ import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { SaveStatusPill, type SaveStatus } from './SaveStatusPill';
 import { AudioRecorder, type RecordedAudio } from './AudioRecorder';
+import { NoteChatPanel } from './NoteChatPanel';
 import { useAudioFileDrop } from './useAudioFileDrop';
 import {
   appendAudioEmbed,
+  appendImageEmbed,
   insertAudioEmbedAt,
   insertTranscriptAfterEmbed,
 } from './audioEmbed';
@@ -45,6 +47,7 @@ import {
   notesReadFile,
   notesSaveAudioBytes,
   notesSaveAudioFile,
+  notesSaveImageFile,
   notesSearch,
   notesSetPinned,
   notesUpdate,
@@ -120,6 +123,25 @@ export const NotesShell = () => {
   /// in-flight promise so later saves wait for `activeId` to land.
   const pendingCreateRef = useRef<Promise<number> | null>(null);
   const [recorderOpen, setRecorderOpen] = useState(false);
+  const [chatOpen, setChatOpenState] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage?.getItem('stash:notes:chat-open') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setChatOpen = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setChatOpenState((prev) => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      try {
+        window.localStorage.setItem('stash:notes:chat-open', value ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return value;
+    });
+  }, []);
   /// Intent the recorder was opened with. `new` always creates a fresh note
   /// around the embed (sidebar mic button), `current` appends into whatever
   /// note is active (toolbar mic button). A ref — not state — because it
@@ -528,49 +550,78 @@ export const NotesShell = () => {
     deleteConfirm.request(activeId, performDelete);
   };
 
-  /** Drop handler: every dropped file becomes an inline `![caption](path)`
-   *  embed inside the active note, so multiple tracks share one note
-   *  alongside any text the user is writing. We resolve the target once and
-   *  reuse it across the whole batch so a four-file drop doesn't spawn four
-   *  new notes. Auto-transcription runs serially after all files land. */
+  /** Drop handler: every dropped media file becomes an inline
+   *  `![caption](path)` embed inside the active note, so audios and images
+   *  share one note alongside any text the user is writing. We resolve the
+   *  target once and reuse it across the whole batch so a four-file drop
+   *  doesn't spawn four new notes. Auto-transcription runs serially after
+   *  all audio files land; images skip that path entirely. */
   const onAudioFilesDropped = useCallback(
-    async (paths: string[]) => {
-      toast({
-        title: paths.length === 1 ? 'Importing audio…' : `Importing ${paths.length} files…`,
-        variant: 'default',
-        durationMs: 1400,
-      });
+    async (paths: { audio: string[]; image: string[] }) => {
+      const total = paths.audio.length + paths.image.length;
+      if (total === 0) return;
+      const kindLabel =
+        paths.audio.length > 0 && paths.image.length > 0
+          ? `${total} files`
+          : paths.audio.length > 0
+            ? paths.audio.length === 1
+              ? 'audio'
+              : `${paths.audio.length} audio files`
+            : paths.image.length === 1
+              ? 'image'
+              : `${paths.image.length} images`;
+      toast({ title: `Importing ${kindLabel}…`, variant: 'default', durationMs: 1400 });
+
       let target = await resolveEmbedTarget();
-      const savedPaths: string[] = [];
-      for (const p of paths) {
+      const savedAudio: string[] = [];
+      let savedImages = 0;
+
+      for (const p of paths.image) {
+        try {
+          const saved = await notesSaveImageFile(p);
+          const caption = (p.split(/[\\/]/).pop() ?? 'image').replace(/\.[^.]+$/, '');
+          const nextBody = appendImageEmbed(target.body, saved, caption);
+          await commitBodyUpdate(target, nextBody);
+          target = { ...target, body: nextBody, isNew: false };
+          savedImages += 1;
+        } catch (e) {
+          console.error('image import failed', p, e);
+          toast({
+            title: 'Image import failed',
+            description: `${p.split(/[\\/]/).pop() ?? p}: ${String(e)}`,
+            variant: 'error',
+          });
+        }
+      }
+
+      for (const p of paths.audio) {
         try {
           const saved = await notesSaveAudioFile(p);
           const caption = (p.split(/[\\/]/).pop() ?? 'audio').replace(/\.[^.]+$/, '');
           const nextBody = appendAudioEmbed(target.body, saved, caption);
           await commitBodyUpdate(target, nextBody);
           target = { ...target, body: nextBody, isNew: false };
-          savedPaths.push(saved);
+          savedAudio.push(saved);
         } catch (e) {
           console.error('audio import failed', p, e);
           toast({
-            title: 'Import failed',
+            title: 'Audio import failed',
             description: `${p.split(/[\\/]/).pop() ?? p}: ${String(e)}`,
             variant: 'error',
           });
         }
       }
-      if (savedPaths.length > 0) {
+
+      const embedded = savedAudio.length + savedImages;
+      if (embedded > 0) {
         setActiveId(target.id);
         setViewMode('preview');
         toast({
-          title:
-            savedPaths.length === 1
-              ? 'Audio embedded'
-              : `${savedPaths.length} audio files embedded`,
+          title: embedded === 1 ? 'Embedded' : `${embedded} files embedded`,
           variant: 'success',
           durationMs: 1800,
         });
-        for (const savedPath of savedPaths) {
+        for (const savedPath of savedAudio) {
           await runInlineTranscribe(target.id, savedPath);
         }
       }
@@ -578,7 +629,7 @@ export const NotesShell = () => {
     [resolveEmbedTarget, commitBodyUpdate, runInlineTranscribe, toast]
   );
 
-  const { isDragOver, audioCount } = useAudioFileDrop(onAudioFilesDropped);
+  const { isDragOver, audioCount, imageCount } = useAudioFileDrop(onAudioFilesDropped);
 
   const onImport = useCallback(async () => {
     // Suspend popup auto-hide so focus shifting to the native file picker
@@ -727,12 +778,23 @@ export const NotesShell = () => {
             <MicIcon size={18} />
             <div className="flex flex-col">
               <span className="t-primary text-body font-medium">
-                {audioCount === 1
-                  ? 'Drop audio file to import'
-                  : `Drop ${audioCount} audio files to import`}
+                {(() => {
+                  const total = audioCount + imageCount;
+                  const parts: string[] = [];
+                  if (audioCount > 0)
+                    parts.push(
+                      audioCount === 1 ? 'audio file' : `${audioCount} audio files`
+                    );
+                  if (imageCount > 0)
+                    parts.push(imageCount === 1 ? 'image' : `${imageCount} images`);
+                  if (total === 0) return 'Drop media to import';
+                  return `Drop ${parts.join(' + ')} to import`;
+                })()}
               </span>
               <span className="t-tertiary text-meta">
-                Transcription runs automatically after the drop
+                {audioCount > 0
+                  ? 'Audio is auto-transcribed after the drop'
+                  : 'Files embed into the active note'}
               </span>
             </div>
           </div>
@@ -901,18 +963,28 @@ export const NotesShell = () => {
                       />
                     </IconButton>
                   )}
-                  <AskAiButton
-                    text={() => (body.trim() ? body : title)}
-                    disabled={!body.trim() && !title.trim()}
-                    size={13}
-                    title="Ask AI about this note (opens a new chat)"
-                  />
                   <IconButton
                     onClick={openRecorderForCurrent}
                     title="Record voice note into this note"
                     stopPropagation={false}
                   >
                     <MicIcon size={13} />
+                  </IconButton>
+                  <IconButton
+                    onClick={() => {
+                      setChatOpen((v) => {
+                        const next = !v;
+                        // Free horizontal space when opening — at 920 px
+                        // popup width the 220 px notes list, the editor
+                        // and a 360 px chat don't all fit comfortably.
+                        if (next && !sidebarCollapsed) setSidebarCollapsed(true);
+                        return next;
+                      });
+                    }}
+                    title={chatOpen ? 'Hide note chat' : 'Chat with AI about this note'}
+                    stopPropagation={false}
+                  >
+                    <MagicWandIcon size={13} />
                   </IconButton>
                   <IconButton
                     onClick={onExport}
@@ -991,6 +1063,14 @@ export const NotesShell = () => {
           />
         )}
       </main>
+      {chatOpen && activeId != null && active && (
+        <NoteChatPanel
+          noteId={activeId}
+          noteTitle={title}
+          noteBody={body}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
       <AudioRecorder
         open={recorderOpen}
         onCancel={() => setRecorderOpen(false)}

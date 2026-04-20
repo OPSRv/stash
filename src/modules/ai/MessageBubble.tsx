@@ -27,13 +27,18 @@ export const MessageBubble = ({ message, showStoppedHint = true }: Props) => {
   return (
     <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`relative group max-w-[85%] rounded-2xl px-3 py-2 text-body ${
+        className={`relative group max-w-[85%] min-w-0 rounded-2xl px-3 py-2 text-body ${
           isUser ? 't-primary' : 't-primary'
         }`}
         style={{
           background: isUser
             ? 'rgba(var(--stash-accent-rgb), 0.14)'
             : 'var(--color-surface-muted)',
+          // Break long URLs and unbroken tokens so bubbles in narrow
+          // sidebars (notes chat @ 340-400 px) don't push content past
+          // their own rounded edge.
+          overflowWrap: 'anywhere',
+          wordBreak: 'break-word',
         }}
       >
         <LazyMarkdown source={message.content} codeCopy={!isUser} className="t-primary text-body" />

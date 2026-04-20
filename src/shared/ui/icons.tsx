@@ -135,6 +135,35 @@ export const Heading2Icon = ({ size = 14, className }: IconProps) => (
   </svg>
 );
 
+export const Heading3Icon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 5v14M11 5v14M4 12h7" />
+    <path d="M15 8a2.5 2.5 0 1 1 4 2c-.7.7-1.4.9-2 1 .6.1 1.3.3 2 1a2.5 2.5 0 1 1-4 2" />
+  </svg>
+);
+
+export const StrikethroughIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 12h16" />
+    <path d="M17 7c-.8-2-2.8-3-5-3-3 0-5 2-5 4 0 2 2 3 4 3.5" />
+    <path d="M7 17c.8 2 2.8 3 5 3 3 0 5-2 5-4" />
+  </svg>
+);
+
+export const HorizontalRuleIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 12h16" />
+    <path d="M4 6h6M14 6h6M4 18h6M14 18h6" opacity={0.5} />
+  </svg>
+);
+
+export const TableIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="M3 10h18M3 15h18M10 5v14" />
+  </svg>
+);
+
 export const BulletListIcon = ({ size = 14, className }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
     <path d="M9 6h12M9 12h12M9 18h12" />

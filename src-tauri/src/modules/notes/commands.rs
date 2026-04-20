@@ -123,6 +123,29 @@ pub fn notes_delete(
 }
 
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+const MAX_IMAGE_BYTES: usize = 15 * 1024 * 1024;
+const ALLOWED_IMAGE_EXT: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif",
+];
+
+fn image_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("notes")
+        .join("images");
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    Ok(base)
+}
+
+fn sanitize_image_ext(ext: &str) -> Result<String, String> {
+    let lower = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if !ALLOWED_IMAGE_EXT.contains(&lower.as_str()) {
+        return Err(format!("unsupported image extension: .{lower}"));
+    }
+    Ok(lower)
+}
 
 /// Write raw audio bytes into the managed audio dir and return the absolute
 /// path of the new file. Unlike `notes_create_audio`, this does NOT create
@@ -181,6 +204,79 @@ pub fn notes_save_audio_file(app: tauri::AppHandle, path: String) -> Result<Stri
     let dest = dir.join(format!("emb-{nanos}.{ext}"));
     std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Write raw image bytes into the managed images dir and return the
+/// absolute path. Mirrors `notes_save_audio_bytes` for the drag-from-
+/// screenshot / paste-from-clipboard path. No DB row — the frontend embeds
+/// the path into the active note via `![alt](…)` markdown syntax.
+#[tauri::command]
+pub fn notes_save_image_bytes(
+    app: tauri::AppHandle,
+    bytes: Vec<u8>,
+    ext: String,
+) -> Result<String, String> {
+    if bytes.is_empty() {
+        return Err("empty image payload".into());
+    }
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err("image payload exceeds 15 MiB limit".into());
+    }
+    let ext = sanitize_image_ext(&ext)?;
+    let dir = image_dir(&app)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("img-{nanos}.{ext}"));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Copy an on-disk image file into the managed images dir. Source is left
+/// untouched so Finder's original stays put.
+#[tauri::command]
+pub fn notes_save_image_file(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let src = Path::new(&path);
+    if !src.is_file() {
+        return Err(format!("not a file: {path}"));
+    }
+    let meta = std::fs::metadata(src).map_err(|e| e.to_string())?;
+    if (meta.len() as usize) > MAX_IMAGE_BYTES {
+        return Err("image file exceeds 15 MiB limit".into());
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .ok_or_else(|| "file has no extension".to_string())?;
+    let ext = sanitize_image_ext(ext)?;
+    let dir = image_dir(&app)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dest = dir.join(format!("img-{nanos}.{ext}"));
+    std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Read raw bytes of an image stored under the managed images dir. Used by
+/// the inline markdown image embed, which references files by absolute
+/// path from `![alt](…)`. Same scope guard as `notes_read_audio_path`.
+#[tauri::command]
+pub fn notes_read_image_path(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<Vec<u8>, String> {
+    let base = image_dir(&app)?;
+    let p = Path::new(&path);
+    if !p.starts_with(&base) {
+        return Err("image path is outside the managed images directory".into());
+    }
+    if !p.is_file() {
+        return Err("image file is missing on disk".into());
+    }
+    std::fs::read(p).map_err(|e| e.to_string())
 }
 
 /// Read raw bytes of an audio file stored under the managed audio dir. Used

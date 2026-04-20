@@ -92,15 +92,16 @@ describe('useAudioFileDrop', () => {
     act(() =>
       fire({
         type: 'enter',
-        paths: ['/x/photo.jpg', '/x/doc.pdf'],
+        paths: ['/x/doc.pdf', '/x/archive.zip'],
         position: { x: 0, y: 0 },
       })
     );
     expect(result.current.isDragOver).toBe(false);
     expect(result.current.audioCount).toBe(0);
+    expect(result.current.imageCount).toBe(0);
   });
 
-  it('passes only audio paths to onDrop and resets state', async () => {
+  it('classifies audio and image paths on drop', async () => {
     const onDrop = vi.fn();
     const { result } = renderHook(() => useAudioFileDrop(onDrop));
     await act(async () => {
@@ -111,16 +112,39 @@ describe('useAudioFileDrop', () => {
     act(() =>
       fire({
         type: 'drop',
-        paths: ['/x/a.mp3', '/x/cover.png', '/x/b.m4a'],
+        paths: ['/x/a.mp3', '/x/cover.png', '/x/b.m4a', '/x/photo.jpg', '/x/doc.pdf'],
         position: { x: 0, y: 0 },
       })
     );
 
-    expect(onDrop).toHaveBeenCalledWith(['/x/a.mp3', '/x/b.m4a']);
+    expect(onDrop).toHaveBeenCalledWith({
+      audio: ['/x/a.mp3', '/x/b.m4a'],
+      image: ['/x/cover.png', '/x/photo.jpg'],
+    });
     expect(result.current.isDragOver).toBe(false);
   });
 
-  it('does not fire onDrop when the drop contains no audio', async () => {
+  it('counts audio and image files separately while dragging', async () => {
+    const onDrop = vi.fn();
+    const { result } = renderHook(() => useAudioFileDrop(onDrop));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() =>
+      fire({
+        type: 'enter',
+        paths: ['/x/a.mp3', '/x/b.png', '/x/c.jpg', '/x/doc.pdf'],
+        position: { x: 0, y: 0 },
+      })
+    );
+    expect(result.current.isDragOver).toBe(true);
+    expect(result.current.audioCount).toBe(1);
+    expect(result.current.imageCount).toBe(2);
+  });
+
+  it('does not fire onDrop when the drop contains no media', async () => {
     const onDrop = vi.fn();
     renderHook(() => useAudioFileDrop(onDrop));
     await act(async () => {

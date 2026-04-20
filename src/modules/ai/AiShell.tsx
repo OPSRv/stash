@@ -87,6 +87,20 @@ export const AiShell = () => {
     return () => window.removeEventListener('stash:ai-open-service', onOpen);
   }, []);
 
+  // Cross-module request to open a specific chat session — e.g. the notes
+  // sidebar's "Open in AI tab" button sends `stash:ai-open-session` with a
+  // session id, and here we surface API mode + activate that session.
+  useEffect(() => {
+    const onOpenSession = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      if (typeof id !== 'string' || !id) return;
+      if (apiAvailable) setMode('api');
+      setActiveId(id);
+    };
+    window.addEventListener('stash:ai-open-session', onOpenSession);
+    return () => window.removeEventListener('stash:ai-open-session', onOpenSession);
+  }, [apiAvailable, setMode]);
+
   const abortRef = useRef<AbortController | null>(null);
 
   const activeWebService = useMemo(

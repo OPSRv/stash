@@ -113,7 +113,26 @@ export const SessionSidebar = ({
                       />
                     ) : (
                       <>
-                        <div className="truncate t-primary text-body">{s.title}</div>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="truncate t-primary text-body flex-1 min-w-0">
+                            {s.title}
+                          </span>
+                          {s.kind && (
+                            <span
+                              className="shrink-0 px-1.5 py-0 rounded text-meta tabular-nums"
+                              style={{
+                                background: 'rgba(var(--stash-accent-rgb), 0.16)',
+                                color: 'rgba(var(--stash-accent-rgb), 1)',
+                                fontSize: 9,
+                                letterSpacing: 0.3,
+                                textTransform: 'uppercase',
+                              }}
+                              title={`From the ${s.kind} tab`}
+                            >
+                              {s.kind}
+                            </span>
+                          )}
+                        </div>
                         <div className="truncate t-tertiary text-meta">
                           {relativeDay(s.updated_at)}
                         </div>

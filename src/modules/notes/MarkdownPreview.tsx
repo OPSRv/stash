@@ -4,28 +4,71 @@ import type { Components } from 'react-markdown';
 import { LazyMarkdown } from '../../shared/ui/LazyMarkdown';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { NoteIcon } from '../../shared/ui/icons';
-import { isAudioSrc } from './audioEmbed';
+import { isAudioSrc, isImageSrc } from './audioEmbed';
 import { LinkEmbed } from './LinkEmbed';
 import { MarkdownAudioPlayer } from './MarkdownAudioPlayer';
+import { MarkdownImageEmbed } from './MarkdownImageEmbed';
 
-/// Detect a paragraph whose only meaningful child is a single autolinked URL
-/// (`<a href="X">X</a>`). Those should render as rich embeds instead of plain
-/// text — inline links inside prose stay untouched. We strip empty text nodes
-/// so trailing whitespace from the markdown source doesn't disqualify it.
-const baremUrlHref = (children: ReactNode): string | null => {
-  const meaningful = Children.toArray(children).filter(
-    (c) => !(typeof c === 'string' && c.trim() === ''),
-  );
-  if (meaningful.length !== 1) return null;
-  const only = meaningful[0];
-  if (!isValidElement(only)) return null;
-  const props = (only as ReactElement<{ href?: unknown; children?: ReactNode }>).props;
+/** Local image embeds point at files we've copied into the managed images
+ *  dir, which sits under the app-data root. Everything else (http(s), data,
+ *  assets) passes through to the native `<img>` renderer. */
+const isLocalImagePath = (src: string): boolean => {
+  if (!src) return false;
+  if (/^(https?:|data:|blob:|asset:)/i.test(src)) return false;
+  return isImageSrc(src);
+};
+
+/// Walk a paragraph's children looking for the first remark-gfm autolink
+/// (`<a href="http…">http…</a>`) and, if present, return the href plus the
+/// children with that anchor stripped. This makes the rich-embed preview
+/// work not only for a URL alone on its line but also for URLs pasted next
+/// to prose ("check this out https://youtu.be/… 🔥"), which users hit far
+/// more often than the sterile bare-URL case.
+///
+/// Anchor-text matching is lenient on purpose — remark-gfm autolink may
+/// normalise the visible text (trailing slash, decoded escapes) so
+/// `inner === href` misses obvious autolinks. We accept any visible text
+/// that *is* a URL, which distinguishes an autolink from a hand-written
+/// `[label](url)`.
+const extractAutolink = (
+  children: ReactNode,
+): { href: string; rest: ReactNode[] } | null => {
+  const arr = Children.toArray(children);
+  // Walk past leading whitespace-only text nodes — but stop at the first
+  // meaningful child and require IT to be the autolink. A URL sitting mid-
+  // sentence ("see https://… for details") stays a plain anchor, because
+  // tearing it out of its prose would butcher the surrounding meaning.
+  let i = 0;
+  while (i < arr.length) {
+    const c = arr[i];
+    if (typeof c === 'string' && c.trim() === '') {
+      i += 1;
+      continue;
+    }
+    break;
+  }
+  if (i >= arr.length) return null;
+  const first = arr[i];
+  if (!isValidElement(first)) return null;
+  const props = (first as ReactElement<{ href?: unknown; children?: ReactNode }>).props;
   const href = typeof props.href === 'string' ? props.href : null;
   if (!href || !/^https?:\/\//i.test(href)) return null;
-  // Anchor's visible text equals the href → autolinked bare URL.
-  const inner = Children.toArray(props.children).join('').toString().trim();
-  return inner === href ? href : null;
+  const innerParts = Children.toArray(props.children).map((cc) =>
+    typeof cc === 'string' ? cc : '',
+  );
+  const inner = innerParts.join('').trim();
+  if (!inner) return null;
+  const looksAutolinked = inner === href || /^https?:\/\/\S+$/i.test(inner);
+  if (!looksAutolinked) return null;
+  const rest = arr.filter((_, idx) => idx !== i);
+  return { href, rest };
 };
+
+/// True when `children` collapse to nothing visible after the autolink is
+/// stripped — that is, they are all empty strings or bare whitespace. Used
+/// to decide whether to render a trailing `<p>` at all.
+const isEmptyChildren = (children: ReactNode[]): boolean =>
+  children.every((c) => typeof c === 'string' && c.trim() === '');
 
 /// Detect a paragraph whose only meaningful child is an `<img>` with an
 /// audio `src`. React-markdown always wraps standalone `![](…)` in a `<p>`,
@@ -93,6 +136,9 @@ export const MarkdownPreview = ({ source, onToggleCheckbox }: Props) => {
         if (typeof src === 'string' && isAudioSrc(src)) {
           return <MarkdownAudioPlayer src={src} caption={alt || undefined} />;
         }
+        if (typeof src === 'string' && isLocalImagePath(src)) {
+          return <MarkdownImageEmbed src={src} alt={alt || undefined} />;
+        }
         // eslint-disable-next-line @next/next/no-img-element
         return <img src={src} alt={alt ?? ''} {...rest} />;
       },
@@ -103,8 +149,19 @@ export const MarkdownPreview = ({ source, onToggleCheckbox }: Props) => {
       // skips the `<p>` wrapper so the block-level player doesn't violate
       // HTML nesting.
       p: ({ children, ...rest }) => {
-        const href = baremUrlHref(children);
-        if (href) return <LinkEmbed href={href} />;
+        const link = extractAutolink(children);
+        if (link) {
+          // Render the embed above any surrounding prose. If everything
+          // except the URL was whitespace, drop the trailing `<p>` so
+          // the preview doesn't leave an empty gap beneath the embed.
+          const trimmed = isEmptyChildren(link.rest);
+          return (
+            <>
+              <LinkEmbed href={link.href} />
+              {!trimmed && <p {...rest}>{link.rest}</p>}
+            </>
+          );
+        }
         const audio = soleAudioImg(children);
         if (audio) return <MarkdownAudioPlayer src={audio.src} caption={audio.alt || undefined} />;
         return <p {...rest}>{children}</p>;

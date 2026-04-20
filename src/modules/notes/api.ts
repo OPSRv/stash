@@ -64,3 +64,19 @@ export const notesSaveAudioFile = (path: string): Promise<string> =>
  *  markdown audio player, which references files by path from `![](…)`. */
 export const notesReadAudioByPath = (path: string): Promise<Uint8Array> =>
   invoke<number[]>('notes_read_audio_path', { path }).then((arr) => new Uint8Array(arr));
+
+/** Persist image bytes (e.g. a screenshot pasted from the clipboard) into
+ *  the managed images dir. Returns the absolute path for embedding via
+ *  markdown's `![alt](path)` syntax. */
+export const notesSaveImageBytes = (bytes: Uint8Array, ext: string): Promise<string> =>
+  invoke('notes_save_image_bytes', { bytes: Array.from(bytes), ext });
+
+/** Copy an on-disk image file into the managed images dir. Source is left
+ *  untouched so Finder's original stays where it is. */
+export const notesSaveImageFile = (path: string): Promise<string> =>
+  invoke('notes_save_image_file', { path });
+
+/** Read raw image bytes by absolute path. Only paths under the managed
+ *  images dir are accepted. */
+export const notesReadImageByPath = (path: string): Promise<Uint8Array> =>
+  invoke<number[]>('notes_read_image_path', { path }).then((arr) => new Uint8Array(arr));
