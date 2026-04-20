@@ -3,8 +3,8 @@ import type { DownloadJob } from './api';
 
 interface CompletedGridProps {
   jobs: DownloadJob[];
-  onPlay: (path: string | null) => () => void;
-  onDelete: (id: number) => () => void;
+  onPlay: (path: string | null) => void;
+  onDelete: (id: number, purgeFile: boolean) => void;
 }
 
 export const CompletedGrid = ({ jobs, onPlay, onDelete }: CompletedGridProps) => (
@@ -13,8 +13,8 @@ export const CompletedGrid = ({ jobs, onPlay, onDelete }: CompletedGridProps) =>
       <CompletedDownloadTile
         key={job.id}
         job={job}
-        onPlay={onPlay(job.target_path)}
-        onDelete={onDelete(job.id)}
+        onPlay={onPlay}
+        onDelete={onDelete}
       />
     ))}
   </div>

@@ -2,7 +2,58 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
+import bash from 'highlight.js/lib/languages/bash';
+import css from 'highlight.js/lib/languages/css';
+import diff from 'highlight.js/lib/languages/diff';
+import go from 'highlight.js/lib/languages/go';
+import java from 'highlight.js/lib/languages/java';
+import javascript from 'highlight.js/lib/languages/javascript';
+import json from 'highlight.js/lib/languages/json';
+import markdownLang from 'highlight.js/lib/languages/markdown';
+import plaintext from 'highlight.js/lib/languages/plaintext';
+import python from 'highlight.js/lib/languages/python';
+import rust from 'highlight.js/lib/languages/rust';
+import sql from 'highlight.js/lib/languages/sql';
+import typescript from 'highlight.js/lib/languages/typescript';
+import xml from 'highlight.js/lib/languages/xml';
+import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
+
+// rehype-highlight ships with all ~190 highlight.js languages by default,
+// dragging ~250 KB of grammar into every chunk that touches the markdown
+// renderer (Notes preview, AI chat). Almost no real note or chat fence
+// uses anything outside this set, so curating cuts the markdown chunk by
+// more than half with no user-visible impact.
+const HLJS_LANGUAGES = {
+  bash,
+  shell: bash,
+  sh: bash,
+  zsh: bash,
+  css,
+  diff,
+  go,
+  java,
+  javascript,
+  js: javascript,
+  jsx: javascript,
+  json,
+  markdown: markdownLang,
+  md: markdownLang,
+  plaintext,
+  text: plaintext,
+  python,
+  py: python,
+  rust,
+  rs: rust,
+  sql,
+  typescript,
+  ts: typescript,
+  tsx: typescript,
+  xml,
+  html: xml,
+  yaml,
+  yml: yaml,
+};
 
 type MarkdownProps = {
   source: string;
@@ -133,7 +184,11 @@ export const Markdown = ({ source, className, codeCopy, components }: MarkdownPr
 
   return (
     <div className={rootClass}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={merged}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[[rehypeHighlight, { languages: HLJS_LANGUAGES }]]}
+        components={merged}
+      >
         {source}
       </ReactMarkdown>
     </div>

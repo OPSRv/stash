@@ -2,6 +2,14 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { MarkdownPreview } from './MarkdownPreview';
 
+// Force Markdown to load eagerly in tests so Suspense doesn't show its
+// placeholder when assertions run synchronously. Production keeps the
+// `React.lazy` boundary so the chunk only loads when a render touches it.
+vi.mock('../../shared/ui/LazyMarkdown', async () => {
+  const { Markdown } = await import('../../shared/ui/Markdown');
+  return { LazyMarkdown: Markdown, preloadMarkdown: () => Promise.resolve() };
+});
+
 describe('MarkdownPreview', () => {
   it('renders headings, lists, links and inline code', () => {
     render(
@@ -50,8 +58,8 @@ describe('MarkdownPreview', () => {
     expect(onToggle).toHaveBeenCalledWith(1);
   });
 
-  it('shows placeholder on empty source', () => {
+  it('shows an empty-state when the source is blank', () => {
     render(<MarkdownPreview source="   " />);
-    expect(screen.getByText(/Empty/)).toBeInTheDocument();
+    expect(screen.getByText(/Nothing to preview yet/i)).toBeInTheDocument();
   });
 });

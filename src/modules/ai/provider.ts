@@ -1,6 +1,3 @@
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
 import type { LanguageModel } from 'ai';
 
 import type { AiProvider } from '../../settings/store';
@@ -12,21 +9,35 @@ export type AiConfig = {
 };
 
 /// Build a Vercel AI SDK model handle from the user's config and secret.
-/// `custom` reuses the OpenAI-compatible client with a custom baseURL — works
-/// for Ollama, LM Studio, OpenRouter, Groq, DeepSeek, and anything else that
-/// exposes an OpenAI-compatible chat endpoint.
-export const buildModel = (cfg: AiConfig, apiKey: string): LanguageModel => {
+/// Each `@ai-sdk/*` package is ~150 KB; importing all three eagerly bloats
+/// every chunk that touches the AI module (Notes pulls polish, Settings
+/// pulls AiTab) by ~480 KB. Loading per-provider on demand keeps cold
+/// chunks small and means the user pays the AI bytes only when an actual
+/// generation is requested. `custom` reuses the OpenAI-compatible client
+/// with a custom baseURL — works for Ollama, LM Studio, OpenRouter, Groq,
+/// DeepSeek, and anything else exposing an OpenAI-compatible endpoint.
+export const buildModel = async (
+  cfg: AiConfig,
+  apiKey: string,
+): Promise<LanguageModel> => {
   switch (cfg.provider) {
-    case 'openai':
+    case 'openai': {
+      const { createOpenAI } = await import('@ai-sdk/openai');
       return createOpenAI({ apiKey })(cfg.model);
-    case 'anthropic':
+    }
+    case 'anthropic': {
+      const { createAnthropic } = await import('@ai-sdk/anthropic');
       return createAnthropic({ apiKey })(cfg.model);
-    case 'google':
+    }
+    case 'google': {
+      const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
       return createGoogleGenerativeAI({ apiKey })(cfg.model);
+    }
     case 'custom': {
       if (!cfg.baseUrl) {
         throw new Error('Custom provider requires a base URL');
       }
+      const { createOpenAI } = await import('@ai-sdk/openai');
       return createOpenAI({ apiKey, baseURL: cfg.baseUrl })(cfg.model);
     }
   }

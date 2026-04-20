@@ -38,7 +38,13 @@ impl ClipboardRepo {
                 created_at INTEGER NOT NULL,
                 pinned     INTEGER NOT NULL DEFAULT 0
             );
-            CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_items(created_at DESC);",
+            CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_items(created_at DESC);
+            -- Every listing does `ORDER BY pinned DESC, created_at DESC`. A
+            -- standalone `created_at` index forces SQLite to do a filesort
+            -- by pinned; a composite lets the planner stream the table in
+            -- the final order and stop at LIMIT.
+            CREATE INDEX IF NOT EXISTS idx_clipboard_pinned_created
+                ON clipboard_items(pinned DESC, created_at DESC);",
         )?;
         // Migration: add kind + meta columns for clients that predate image support.
         Self::ensure_column(&conn, "kind", "TEXT NOT NULL DEFAULT 'text'")?;

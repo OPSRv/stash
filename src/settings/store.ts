@@ -34,6 +34,18 @@ export type Settings = {
   aiBaseUrl: string | null;
   aiSystemPrompt: string;
   /**
+   * If set, a voice recording is sent to whisper the moment recording stops
+   * — the transcript lands in the note's body without an extra click. Skipped
+   * quietly when no whisper model is active.
+   */
+  notesAutoTranscribe: boolean;
+  /**
+   * If set, `polishTranscript` runs right after a successful transcribe to
+   * correct typos/punctuation via the active AI provider (temperature 0,
+   * no rephrasing). Skipped when no AI provider is configured.
+   */
+  notesAutoPolish: boolean;
+  /**
    * Per-provider API keys, stored alongside other settings in `settings.json`
    * under the app data dir. Not as locked-down as a proper keychain entry,
    * but reliable across `tauri dev` rebuilds (unsigned binaries lose macOS
@@ -116,6 +128,8 @@ export const DEFAULT_SETTINGS: Settings = {
   aiWebServices: DEFAULT_WEB_SERVICES,
   voiceEnabled: false,
   voiceActiveModel: null,
+  notesAutoTranscribe: true,
+  notesAutoPolish: true,
   popupWidth: 920,
   popupHeight: 520,
   terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
@@ -123,7 +137,15 @@ export const DEFAULT_SETTINGS: Settings = {
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });
 
-export const loadSettings = async (): Promise<Settings> => {
+// In-memory cache for settings. LazyStore already batches disk I/O but every
+// `loadSettings()` call still does N `store.get()` awaits — a full tour of
+// the settings file per mount. Popup startup triggers at least two loads
+// (PopupShell + theme boot), so caching cuts ~40ms off cold open and trims
+// later re-reads to a promise resolution.
+let cache: Settings | null = null;
+let inflight: Promise<Settings> | null = null;
+
+const readAll = async (): Promise<Settings> => {
   const keys = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];
   const entries = await Promise.all(
     keys.map(async (k) => {
@@ -134,9 +156,33 @@ export const loadSettings = async (): Promise<Settings> => {
   return Object.fromEntries(entries) as Settings;
 };
 
+export const loadSettings = async (): Promise<Settings> => {
+  if (cache) return cache;
+  if (!inflight) {
+    inflight = readAll()
+      .then((s) => {
+        cache = s;
+        return s;
+      })
+      .finally(() => {
+        inflight = null;
+      });
+  }
+  return inflight;
+};
+
 export const saveSetting = async <K extends keyof Settings>(
   key: K,
   value: Settings[K]
 ): Promise<void> => {
   await store.set(key, value);
+  if (cache) cache = { ...cache, [key]: value };
+};
+
+/// Drop the in-memory cache. Useful for tests or external edits to the
+/// underlying file; UI code should prefer `saveSetting` which keeps the
+/// cache in sync.
+export const invalidateSettingsCache = (): void => {
+  cache = null;
+  inflight = null;
 };

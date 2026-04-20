@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import { Markdown } from '../../shared/ui/Markdown';
+import { LazyMarkdown } from '../../shared/ui/LazyMarkdown';
 
 import type { Message } from './api';
 
@@ -36,7 +36,7 @@ export const MessageBubble = ({ message, showStoppedHint = true }: Props) => {
             : 'var(--color-surface-muted)',
         }}
       >
-        <Markdown source={message.content} codeCopy={!isUser} className="t-primary text-body" />
+        <LazyMarkdown source={message.content} codeCopy={!isUser} className="t-primary text-body" />
         {message.stopped && showStoppedHint && (
           <div className="t-tertiary text-meta italic mt-1">(stopped)</div>
         )}

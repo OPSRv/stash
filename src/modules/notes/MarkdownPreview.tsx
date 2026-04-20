@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import type { Components } from 'react-markdown';
 
-import { Markdown } from '../../shared/ui/Markdown';
+import { LazyMarkdown } from '../../shared/ui/LazyMarkdown';
+import { EmptyState } from '../../shared/ui/EmptyState';
+import { NoteIcon } from '../../shared/ui/icons';
 
 type Props = {
   source: string;
@@ -47,13 +49,18 @@ export const MarkdownPreview = ({ source, onToggleCheckbox }: Props) => {
 
   if (!source.trim()) {
     return (
-      <div className="t-tertiary text-meta italic">Empty — start typing on the left.</div>
+      <EmptyState
+        variant="compact"
+        icon={<NoteIcon size={24} />}
+        title="Nothing to preview yet"
+        description="Switch to Edit to start writing, or drop markdown into the editor on the left."
+      />
     );
   }
 
   return (
     <div className="notes-md">
-      <Markdown source={source} components={components} />
+      <LazyMarkdown source={source} components={components} />
     </div>
   );
 };
