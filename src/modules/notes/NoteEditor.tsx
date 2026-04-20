@@ -1,5 +1,6 @@
-import { useCallback, useRef, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { IconButton } from '../../shared/ui/IconButton';
+import { Spinner } from '../../shared/ui/Spinner';
 import {
   BoldIcon,
   BulletListIcon,
@@ -11,7 +12,9 @@ import {
   ItalicIcon,
   OrderedListIcon,
   QuoteIcon,
+  TranslateIcon,
 } from '../../shared/ui/icons';
+import { translateForNote } from './noteTranslate';
 
 export type NotesViewMode = 'edit' | 'split' | 'preview';
 
@@ -20,6 +23,10 @@ type Props = {
   onChange: (next: string) => void;
   placeholder?: string;
   textareaRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Called after a translation lands so the parent can surface a toast. */
+  onTranslateResult?: (result: { ok: boolean; message?: string }) => void;
+  /** ISO target language for the Translate button. Defaults to Ukrainian. */
+  translateTarget?: string;
 };
 
 type Action =
@@ -76,9 +83,43 @@ export const NoteEditor = ({
   onChange,
   placeholder,
   textareaRef,
+  onTranslateResult,
+  translateTarget = 'uk',
 }: Props) => {
   const localRef = useRef<HTMLTextAreaElement | null>(null);
   const ref = textareaRef ?? localRef;
+  const [translating, setTranslating] = useState(false);
+
+  const translate = useCallback(async () => {
+    const el = ref.current;
+    if (!el || translating) return;
+    const { selectionStart, selectionEnd } = el;
+    setTranslating(true);
+    try {
+      const out = await translateForNote(
+        value,
+        selectionStart,
+        selectionEnd,
+        translateTarget,
+      );
+      if (out.kind === 'ok') {
+        onChange(out.edit.insertion.next);
+        const { selStart, selEnd } = out.edit.insertion;
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(selStart, selEnd);
+        });
+        onTranslateResult?.({ ok: true });
+      } else {
+        onTranslateResult?.({
+          ok: false,
+          message: out.kind === 'error' ? out.message : out.reason,
+        });
+      }
+    } finally {
+      setTranslating(false);
+    }
+  }, [ref, translating, value, onChange, translateTarget, onTranslateResult]);
 
   const run = useCallback(
     (action: Action) => {
@@ -196,6 +237,15 @@ export const NoteEditor = ({
           </IconButton>
           <IconButton onClick={() => run(linePrefix('> '))} title="Quote" stopPropagation={false}>
             <QuoteIcon />
+          </IconButton>
+          <div className="w-px h-4 bg-white/10 mx-1" />
+          <IconButton
+            onClick={translate}
+            title={`Translate to ${translateTarget.toUpperCase()} — selection if any, else whole note`}
+            stopPropagation={false}
+            disabled={translating || value.trim().length === 0}
+          >
+            {translating ? <Spinner size={12} /> : <TranslateIcon size={13} />}
           </IconButton>
         </div>
       </div>

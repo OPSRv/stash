@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import {
   notesCreate,
+  notesCreateAudio,
   notesDelete,
   notesList,
+  notesReadAudio,
   notesSearch,
   notesUpdate,
 } from './api';
@@ -39,5 +41,34 @@ describe('notes/api', () => {
   it('notesDelete forwards id', async () => {
     await notesDelete(5);
     expect(invoke).toHaveBeenCalledWith('notes_delete', { id: 5 });
+  });
+
+  it('notesCreateAudio forwards a byte array, extension and duration', async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      id: 9,
+      title: 'Voice',
+      body: '',
+      created_at: 0,
+      updated_at: 0,
+      audio_path: '/tmp/9.webm',
+      audio_duration_ms: 1500,
+    } as never);
+    const bytes = new Uint8Array([1, 2, 3]);
+    const note = await notesCreateAudio({ title: 'Voice', bytes, ext: 'webm', durationMs: 1500 });
+    expect(note.id).toBe(9);
+    expect(invoke).toHaveBeenCalledWith('notes_create_audio', {
+      title: 'Voice',
+      bytes: [1, 2, 3],
+      ext: 'webm',
+      durationMs: 1500,
+    });
+  });
+
+  it('notesReadAudio unwraps the number[] payload into a Uint8Array', async () => {
+    vi.mocked(invoke).mockResolvedValue([10, 20, 30] as never);
+    const bytes = await notesReadAudio(4);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(bytes)).toEqual([10, 20, 30]);
+    expect(invoke).toHaveBeenCalledWith('notes_read_audio', { id: 4 });
   });
 });

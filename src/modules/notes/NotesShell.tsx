@@ -1,11 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
-import { DownloadIcon, TrashIcon, UploadIcon } from '../../shared/ui/icons';
+import { AskAiButton } from '../../shared/ui/AskAiButton';
+import {
+  DownloadIcon,
+  EyeIcon,
+  MicIcon,
+  PanelLeftIcon,
+  PencilIcon,
+  SearchIcon,
+  SplitViewIcon,
+  TrashIcon,
+  UploadIcon,
+} from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
@@ -13,16 +24,24 @@ import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfir
 import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { SaveStatusPill } from './SaveStatusPill';
+import { AudioRecorder, type RecordedAudio } from './AudioRecorder';
+import { AudioNoteView } from './AudioNoteView';
 import { toggleCheckboxAtLine } from './markdown';
+import { polishTranscript } from './polish';
+import { loadSettings } from '../../settings/store';
+import { whisperGetActive, whisperTranscribe } from '../whisper/api';
 import {
   notesCreate,
+  notesCreateAudio,
   notesDelete,
+  notesGet,
   notesList,
   notesReadFile,
   notesSearch,
   notesUpdate,
   notesWriteFile,
   type Note,
+  type NoteSummary,
 } from './api';
 
 const iso = (ts: number) => {
@@ -33,16 +52,50 @@ const iso = (ts: number) => {
   return `${Math.floor(diff / 86400)}d`;
 };
 
+const countWords = (text: string): number => {
+  // Match any run of word characters, Ukrainian/Latin/digits alike. Cheaper
+  // and Unicode-aware than splitting on whitespace and trimming markdown.
+  const matches = text.match(/[\p{L}\p{N}]+/gu);
+  return matches ? matches.length : 0;
+};
+
+const formatDuration = (ms: number | null): string => {
+  if (!ms || ms <= 0) return '—';
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
 const AUTOSAVE_DEBOUNCE_MS = 400;
+const SIDEBAR_COLLAPSED_KEY = 'stash:notes:sidebar-collapsed';
 
 const VIEW_MODE_OPTIONS = [
-  { value: 'preview' as const, label: 'Preview', title: 'Preview only' },
-  { value: 'edit' as const, label: 'Edit', title: 'Editor only' },
-  { value: 'split' as const, label: 'Split', title: 'Editor + preview' },
+  {
+    value: 'preview' as const,
+    label: <span className="sr-only">Preview</span>,
+    icon: <EyeIcon size={13} />,
+    title: 'Preview only',
+  },
+  {
+    value: 'edit' as const,
+    label: <span className="sr-only">Edit</span>,
+    icon: <PencilIcon size={13} />,
+    title: 'Editor only',
+  },
+  {
+    value: 'split' as const,
+    label: <span className="sr-only">Split</span>,
+    icon: <SplitViewIcon size={13} />,
+    title: 'Editor + preview',
+  },
 ];
 
 export const NotesShell = () => {
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
+  // Full note for the currently active row — loaded on demand from Rust so
+  // the list itself can stay on summaries. AudioNoteView reads from here too.
+  const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [title, setTitle] = useState('');
@@ -57,7 +110,33 @@ export const NotesShell = () => {
   /// is slower than the debounce window — a pending create sets this to the
   /// in-flight promise so later saves wait for `activeId` to land.
   const pendingCreateRef = useRef<Promise<number> | null>(null);
+  const [recorderOpen, setRecorderOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return window.localStorage?.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
   const { toast } = useToast();
+
+  const setSidebarCollapsed = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setSidebarCollapsedState((prev) => {
+      const value = typeof next === 'function' ? next(prev) : next;
+      try {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, value ? '1' : '0');
+      } catch {
+        // ignore storage failures (private mode, quota, etc.)
+      }
+      return value;
+    });
+  }, []);
+
+  const expandSidebarAndFocusSearch = useCallback(() => {
+    setSidebarCollapsed(false);
+    window.setTimeout(() => searchRef.current?.focus(), 0);
+  }, [setSidebarCollapsed]);
 
   useEffect(
     () => () => {
@@ -82,22 +161,30 @@ export const NotesShell = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  const active = useMemo(
-    () => notes.find((n) => n.id === activeId) ?? null,
-    [notes, activeId]
-  );
+  const active = activeNote;
 
+  // Load the full body on activation — the side-list only carries summaries,
+  // so opening Notes ships at most ~150 KB across IPC even with 500 entries.
   useEffect(() => {
-    if (active) {
-      setTitle(active.title);
-      setBody(active.body);
-    } else {
+    if (activeId == null) {
+      setActiveNote(null);
       setTitle('');
       setBody('');
+      return;
     }
+    let cancelled = false;
+    void notesGet(activeId).then((note) => {
+      if (cancelled || !note) return;
+      setActiveNote(note);
+      setTitle(note.title);
+      setBody(note.body);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [activeId]);
-  // intentionally not depending on `active` to avoid overwriting the editor
-  // after a debounced autosave refresh reuses the same id.
+  // intentionally not depending on `notes` / edits — the user's in-progress
+  // edits live in `title` / `body`; we only refetch when switching rows.
 
   const scheduleSave = useCallback(
     (nextTitle: string, nextBody: string) => {
@@ -170,8 +257,81 @@ export const NotesShell = () => {
   const newNote = async () => {
     const id = await notesCreate('', '');
     setActiveId(id);
+    // Brand-new blank note — drop the user straight into the editor instead of
+    // the empty preview pane. Existing notes open in preview (see row onClick).
+    setViewMode('edit');
     await reload();
   };
+
+  const onRecorderComplete = useCallback(
+    async (audio: RecordedAudio) => {
+      setRecorderOpen(false);
+      let createdId: number | null = null;
+      try {
+        const created = await notesCreateAudio({
+          title: `Voice note · ${new Date().toLocaleString()}`,
+          bytes: audio.bytes,
+          ext: audio.ext,
+          durationMs: audio.durationMs,
+        });
+        createdId = created.id;
+        setActiveId(created.id);
+        await reload();
+        toast({
+          title: 'Voice note saved',
+          description: formatDuration(audio.durationMs),
+          variant: 'success',
+        });
+      } catch (e) {
+        console.error('voice note save failed', e);
+        toast({ title: 'Couldn\u2019t save recording', description: String(e), variant: 'error' });
+        return;
+      }
+
+      // Auto-transcribe / auto-polish, both gated on user settings. Both
+      // steps are best-effort — failures show a toast but don't roll back
+      // the recording itself.
+      const settings = await loadSettings().catch(() => null);
+      if (!settings?.notesAutoTranscribe) return;
+      const activeModel = await whisperGetActive().catch(() => null);
+      if (!activeModel || createdId == null) return;
+      let transcript: string | null = null;
+      try {
+        transcript = await whisperTranscribe(createdId, 'uk');
+        setBody(transcript);
+        await reload();
+      } catch (e) {
+        toast({
+          title: 'Auto-transcribe failed',
+          description: String(e),
+          variant: 'error',
+        });
+        return;
+      }
+      if (!settings.notesAutoPolish || !transcript?.trim()) return;
+      try {
+        const polish = await polishTranscript(transcript, {
+          aiProvider: settings.aiProvider,
+          aiModel: settings.aiModel,
+          aiBaseUrl: settings.aiBaseUrl,
+          aiSystemPrompt: settings.aiSystemPrompt,
+          aiApiKeys: settings.aiApiKeys,
+          aiWebServices: settings.aiWebServices,
+        });
+        if (polish.kind !== 'ok') return;
+        await notesUpdate(createdId, `Voice note · ${new Date().toLocaleString()}`, polish.text);
+        setBody(polish.text);
+        await reload();
+      } catch (e) {
+        toast({
+          title: 'Auto-polish failed',
+          description: String(e),
+          variant: 'error',
+        });
+      }
+    },
+    [reload, toast],
+  );
 
   const deleteConfirm = useSuppressibleConfirm<number>('notes.delete');
 
@@ -235,55 +395,150 @@ export const NotesShell = () => {
     }
   }, [title, body, toast]);
 
+  const isAudio = Boolean(active?.audio_path);
   const isEditing = active || (activeId === null && (title || body));
   const exportDisabled = !body && !title;
-  const showEditor = viewMode !== 'preview';
-  const showPreview = viewMode !== 'edit';
+  const showEditor = !isAudio && viewMode !== 'preview';
+  const showPreview = !isAudio && viewMode !== 'edit';
 
   return (
     <div className="h-full flex">
-      <aside className="w-[220px] flex flex-col border-r hair">
+      <aside
+        className="relative shrink-0 border-r hair overflow-hidden transition-[width] duration-200 ease-out"
+        style={{ width: sidebarCollapsed ? 40 : 220 }}
+      >
+        <div
+          className={`absolute inset-y-0 left-0 w-10 flex flex-col items-center py-2 gap-1 transition-opacity duration-150 ${
+            sidebarCollapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!sidebarCollapsed}
+        >
+          <IconButton
+            onClick={() => setSidebarCollapsed(false)}
+            title="Expand notes list"
+            stopPropagation={false}
+          >
+            <PanelLeftIcon size={14} />
+          </IconButton>
+          <IconButton
+            onClick={newNote}
+            title="New note (⌘N)"
+            stopPropagation={false}
+          >
+            <PencilIcon size={13} />
+          </IconButton>
+          <IconButton
+            onClick={() => setRecorderOpen(true)}
+            title="Record voice note"
+            stopPropagation={false}
+          >
+            <MicIcon size={13} />
+          </IconButton>
+          <IconButton
+            onClick={expandSidebarAndFocusSearch}
+            title="Search notes"
+            stopPropagation={false}
+          >
+            <SearchIcon size={13} />
+          </IconButton>
+          <div className="flex-1" />
+          <IconButton
+            onClick={onImport}
+            title="Import .md"
+            stopPropagation={false}
+          >
+            <UploadIcon size={13} />
+          </IconButton>
+        </div>
+        <div
+          className={`absolute inset-y-0 left-0 w-[220px] flex flex-col transition-opacity duration-150 ${
+            sidebarCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+          aria-hidden={sidebarCollapsed}
+        >
         <SearchInput
           value={query}
           onChange={setQuery}
           placeholder="Search notes"
-          shortcutHint="⌘K"
           inputRef={searchRef}
+          compact
+          trailing={
+            <IconButton
+              onClick={() => setSidebarCollapsed(true)}
+              title="Collapse notes list"
+              stopPropagation={false}
+            >
+              <PanelLeftIcon size={13} />
+            </IconButton>
+          }
         />
-        <div className="px-3 pt-1 pb-2">
+        <div className="px-2.5 pt-1 pb-1.5 flex items-stretch gap-1.5">
           <Button
             size="sm"
             variant="soft"
             tone="accent"
             onClick={newNote}
             title="New note (⌘N)"
-            className="w-full justify-center"
+            className="flex-1 justify-center"
+            leadingIcon={<PencilIcon size={12} />}
           >
-            + New note
+            New note
+          </Button>
+          <Button
+            size="sm"
+            variant="soft"
+            tone="accent"
+            shape="square"
+            onClick={() => setRecorderOpen(true)}
+            title="Record voice note"
+            aria-label="Record voice note"
+          >
+            <MicIcon size={13} />
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto nice-scroll">
-          {notes.map((n) => (
-            <button
-              key={n.id}
-              onClick={() => setActiveId(n.id)}
-              className={`w-full text-left px-3 py-2 cursor-pointer ${
-                n.id === activeId ? 'row-active' : ''
-              }`}
-            >
-              <div className="flex items-baseline gap-2">
-                <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
-                  {n.title || <span className="t-tertiary">Untitled</span>}
-                </span>
-                <span className="t-tertiary text-[10px] font-mono shrink-0">
-                  {iso(n.updated_at)}
-                </span>
-              </div>
-              <div className="t-tertiary text-meta truncate mt-0.5">
-                {n.body.split('\n').find((l) => l.trim()) || 'No content'}
-              </div>
-            </button>
-          ))}
+          {notes.map((n) => {
+            const isAudio = Boolean(n.audio_path);
+            const preview = isAudio
+              ? `Voice memo · ${formatDuration(n.audio_duration_ms)}`
+              : n.preview.split('\n').find((l) => l.trim()) || 'No content';
+            return (
+              <button
+                key={n.id}
+                onClick={() => {
+                  setActiveId(n.id);
+                  // Existing notes default to preview — the editor is one click
+                  // away via the view-mode segmented control.
+                  setViewMode('preview');
+                }}
+                className={`w-full text-left px-3 py-2 cursor-pointer transition-colors ${
+                  n.id === activeId ? 'row-active' : 'hover:bg-white/[0.03]'
+                }`}
+              >
+                <div className="flex items-baseline gap-2">
+                  {isAudio && (
+                    <span
+                      className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full"
+                      style={{
+                        background: 'rgba(var(--stash-accent-rgb), 0.18)',
+                        color: 'rgba(var(--stash-accent-rgb), 1)',
+                      }}
+                      aria-hidden
+                    >
+                      <MicIcon size={9} />
+                    </span>
+                  )}
+                  <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
+                    {n.title || <span className="t-tertiary">Untitled</span>}
+                  </span>
+                  <span className="t-tertiary text-[10px] font-mono shrink-0">
+                    {iso(n.updated_at)}
+                  </span>
+                </div>
+                <div className="t-tertiary text-meta truncate mt-0.5">{preview}</div>
+              </button>
+            );
+          })}
           {notes.length === 0 && (
             <EmptyState
               variant="compact"
@@ -293,57 +548,91 @@ export const NotesShell = () => {
           )}
         </div>
         <div className="px-3 py-2 border-t hair">
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="ghost"
             onClick={onImport}
-            className="w-full inline-flex items-center justify-center gap-1.5 t-tertiary hover:t-secondary text-meta"
-            title="Import .md file"
+            title="Open a markdown or text file as a new note"
+            fullWidth
+            leadingIcon={<UploadIcon size={12} />}
           >
-            <UploadIcon size={12} />
-            Import .md file
-          </button>
+            Import .md
+          </Button>
+        </div>
         </div>
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0">
         {isEditing ? (
           <>
-            <div className="px-4 pt-3 pb-2 flex items-center gap-3 border-b hair">
-              <input
-                value={title}
-                onChange={(e) => onTitleChange(e.currentTarget.value)}
-                placeholder="Untitled"
-                className="flex-1 bg-transparent outline-none t-primary text-heading font-medium min-w-0"
-              />
-              <SaveStatusPill status={saveStatus} />
-              <SegmentedControl
-                size="sm"
-                options={VIEW_MODE_OPTIONS}
-                value={viewMode}
-                onChange={setViewMode}
-                ariaLabel="View mode"
-              />
-              <div className="flex items-center gap-1 shrink-0">
-                <IconButton
-                  onClick={onExport}
-                  title={exportDisabled ? 'Nothing to export' : 'Export as .md'}
-                  stopPropagation={false}
-                >
-                  <DownloadIcon size={13} />
-                </IconButton>
-                {activeId !== null && (
+            <div className="px-4 pt-3 pb-2 border-b hair">
+              <div className="flex items-center gap-3">
+                <input
+                  value={title}
+                  onChange={(e) => onTitleChange(e.currentTarget.value)}
+                  placeholder="Untitled"
+                  className="flex-1 bg-transparent outline-none t-primary text-heading font-medium min-w-0"
+                />
+                <SaveStatusPill status={saveStatus} />
+                {!isAudio && (
+                  <SegmentedControl
+                    size="sm"
+                    options={VIEW_MODE_OPTIONS}
+                    value={viewMode}
+                    onChange={setViewMode}
+                    ariaLabel="View mode"
+                  />
+                )}
+                <div className="w-px h-5 bg-white/[0.08]" aria-hidden />
+                <div className="flex items-center gap-1 shrink-0">
+                  <AskAiButton
+                    text={() => (body.trim() ? body : title)}
+                    disabled={!body.trim() && !title.trim()}
+                    size={13}
+                    title="Ask AI about this note (opens a new chat)"
+                  />
                   <IconButton
-                    onClick={removeActive}
-                    title="Delete note"
-                    tone="danger"
+                    onClick={onExport}
+                    title={exportDisabled ? 'Nothing to export' : 'Export as .md'}
                     stopPropagation={false}
                   >
-                    <TrashIcon size={13} />
+                    <DownloadIcon size={13} />
                   </IconButton>
+                  {activeId !== null && (
+                    <IconButton
+                      onClick={removeActive}
+                      title="Delete note"
+                      tone="danger"
+                      stopPropagation={false}
+                    >
+                      <TrashIcon size={13} />
+                    </IconButton>
+                  )}
+                </div>
+              </div>
+              <div className="mt-1 flex items-center gap-3 t-tertiary text-meta tabular-nums">
+                {active && <span>Updated {iso(active.updated_at)} ago</span>}
+                {!isAudio && body.trim() && (
+                  <>
+                    {active && <span aria-hidden>·</span>}
+                    <span>{countWords(body)} words</span>
+                  </>
                 )}
               </div>
             </div>
             <div className="flex-1 flex min-h-0">
+              {isAudio && active && (
+                <AudioNoteView
+                  note={active}
+                  onTranscriptUpdated={(_id, merged) => {
+                    // Reflect the server-side body bump locally so the
+                    // editor/preview updates without waiting for a reload,
+                    // then reload in the background to sync timestamps.
+                    setBody(merged);
+                    reload();
+                  }}
+                />
+              )}
               {showEditor && (
                 <div
                   className={`flex flex-col min-h-0 ${showPreview ? 'w-1/2 border-r hair' : 'flex-1'}`}
@@ -353,6 +642,15 @@ export const NotesShell = () => {
                     onChange={onBodyChange}
                     placeholder="Write markdown — headings, lists, - [ ] checklists…"
                     textareaRef={editorRef}
+                    onTranslateResult={(r) =>
+                      r.ok
+                        ? toast({ title: 'Translated', variant: 'success', durationMs: 1600 })
+                        : toast({
+                            title: 'Translate failed',
+                            description: r.message,
+                            variant: 'error',
+                          })
+                    }
                   />
                 </div>
               )}
@@ -382,6 +680,11 @@ export const NotesShell = () => {
           />
         )}
       </main>
+      <AudioRecorder
+        open={recorderOpen}
+        onCancel={() => setRecorderOpen(false)}
+        onComplete={onRecorderComplete}
+      />
       <ConfirmDialog
         open={deleteConfirm.open}
         title="Delete this note?"
