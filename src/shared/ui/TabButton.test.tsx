@@ -4,14 +4,19 @@ import { describe, it, expect, vi } from 'vitest';
 import { TabButton } from './TabButton';
 
 describe('TabButton', () => {
-  it('shows shortcut hint only on the active tab', () => {
+  it('keeps shortcut out of the visible label and only in the title', () => {
+    // Tabs no longer render the shortcut hint inline — it lives on `title`
+    // so the chip stays compact while still being discoverable on hover.
     const { rerender } = render(
       <TabButton label="Clipboard" shortcutHint="⌘1" active={false} onClick={() => {}} />
     );
-    expect(screen.getByRole('button', { name: /Clipboard/ })).toBeInTheDocument();
     expect(screen.queryByText('⌘1')).not.toBeInTheDocument();
     rerender(<TabButton label="Clipboard" shortcutHint="⌘1" active onClick={() => {}} />);
-    expect(screen.getByText('⌘1')).toBeInTheDocument();
+    expect(screen.queryByText('⌘1')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Clipboard/ })).toHaveAttribute(
+      'title',
+      'Clipboard (⌘1)',
+    );
   });
 
   it('exposes the shortcut via the title attribute on hover', () => {

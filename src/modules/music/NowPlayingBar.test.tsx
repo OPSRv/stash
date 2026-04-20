@@ -46,15 +46,18 @@ describe('NowPlayingBar', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
+  // IconButton exposes its label via `aria-label` (the HTML `title`
+  // attribute moved to a Tooltip wrapper), so reach the buttons by
+  // accessible name rather than the raw title.
   it('transport buttons invoke the Rust bridge without opening Music tab', async () => {
     const onOpen = vi.fn();
     const user = userEvent.setup();
     render(<NowPlayingBar state={basePlaying} onOpen={onOpen} onClose={() => {}} onOptimistic={() => {}} />);
-    await user.click(screen.getByTitle('Pause'));
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
     expect(invoke).toHaveBeenCalledWith('music_play_pause');
-    await user.click(screen.getByTitle('Next'));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(invoke).toHaveBeenCalledWith('music_next');
-    await user.click(screen.getByTitle('Previous'));
+    await user.click(screen.getByRole('button', { name: 'Previous' }));
     expect(invoke).toHaveBeenCalledWith('music_prev');
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -71,7 +74,7 @@ describe('NowPlayingBar', () => {
         onOptimistic={() => {}}
       />,
     );
-    await user.click(screen.getByTitle('Dismiss'));
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -87,9 +90,9 @@ describe('NowPlayingBar', () => {
         onOptimistic={onOptimistic}
       />,
     );
-    await user.click(screen.getByTitle('Pause'));
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
     expect(onOptimistic).toHaveBeenCalledWith({ playing: false });
-    await user.click(screen.getByTitle('Next'));
+    await user.click(screen.getByRole('button', { name: 'Next' }));
     expect(onOptimistic).toHaveBeenLastCalledWith({ playing: true });
   });
 
@@ -97,13 +100,13 @@ describe('NowPlayingBar', () => {
     const { rerender } = render(
       <NowPlayingBar state={basePlaying} onOpen={() => {}} onClose={() => {}} onOptimistic={() => {}} />,
     );
-    expect(screen.getByTitle('Pause')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
     rerender(
       <NowPlayingBar
         state={{ ...basePlaying, playing: false }}
         onOpen={() => {}} onClose={() => {}} onOptimistic={() => {}}
       />,
     );
-    expect(screen.getByTitle('Play')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
   });
 });
