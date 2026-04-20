@@ -135,8 +135,9 @@ use modules::whisper::{
 };
 use modules::notes::{
     commands::{
-        notes_create, notes_create_audio, notes_delete, notes_get, notes_list, notes_read_audio,
-        notes_read_file, notes_search, notes_set_pinned, notes_update, notes_write_file, NotesState,
+        notes_copy_audio_to_clipboard, notes_create, notes_create_audio, notes_delete, notes_get,
+        notes_list, notes_read_audio, notes_read_file, notes_search, notes_set_pinned, notes_update,
+        notes_write_file, NotesState,
     },
     repo::NotesRepo,
 };
@@ -342,6 +343,7 @@ pub fn run() {
             notes_create_audio,
             notes_read_audio,
             notes_set_pinned,
+            notes_copy_audio_to_clipboard,
             pomodoro_list_presets,
             pomodoro_save_preset,
             pomodoro_delete_preset,
@@ -529,8 +531,11 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
-            // Custom monochrome template tray icon. Falls back to the window
-            // icon if the file cannot be found (dev before first `tauri build`).
+            // Custom colour tray icon (graphite + accent blue — mirrors the
+            // app logo). We opt out of template mode so macOS renders the
+            // original colours instead of flattening to a mono silhouette.
+            // Falls back to the window icon if the file cannot be found
+            // (dev before first `tauri build`).
             let tray_icon = {
                 let bytes = include_bytes!("../icons/tray.png");
                 tauri::image::Image::from_bytes(bytes)
@@ -539,7 +544,7 @@ pub fn run() {
             };
             let tray = TrayIconBuilder::with_id("main")
                 .icon(tray_icon)
-                .icon_as_template(true)
+                .icon_as_template(false)
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {

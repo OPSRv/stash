@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Stash tray icon — template (macOS): pure black on transparent.
-  macOS re-tints the alpha mask per menubar appearance (light/dark) so do
-  NOT add colour. Mirrors the two-overlapping-rounded-rectangles silhouette
-  from logo.svg: a faded back layer and a fully opaque front layer offset
-  up and left. 22x22 base; rsvg-convert regenerates 22/44 PNGs from this.
+  Stash tray icon — COLOUR variant (opt-out of macOS template behaviour).
+  A shrunk copy of logo.svg: graphite back card, saturated blue front
+  card with subtle top highlight. Transparent background so the menubar
+  vibrancy still reads through. 22x22 base; rsvg-convert regenerates
+  22/44 PNGs from this.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="22" height="22">
-  <g fill="#000000">
-    <rect x="4.5" y="7"   width="13.5" height="9" rx="1.9" ry="1.9" opacity="0.45"/>
-    <rect x="3"   y="5.5" width="13.5" height="9" rx="1.9" ry="1.9"/>
-    <rect x="3.4" y="6.1" width="12.7" height="0.35" rx="0.17" fill="#FFFFFF" opacity="0.35"/>
-  </g>
+  <!-- back card (graphite) -->
+  <rect x="4.5" y="7.5" width="13" height="9" rx="1.9" ry="1.9" fill="#565E6B"/>
+  <!-- ambient shadow beneath the front card -->
+  <rect x="3.2" y="6.2" width="13" height="9" rx="1.9" ry="1.9" fill="#000000" fill-opacity="0.22"/>
+  <!-- front card (accent blue) -->
+  <rect x="3" y="6"   width="13" height="9" rx="1.9" ry="1.9" fill="#2F7AE5"/>
+  <!-- subtle top highlight line -->
+  <rect x="3.4" y="6.5" width="12.2" height="0.45" rx="0.22" fill="#FFFFFF" opacity="0.32"/>
 </svg>
