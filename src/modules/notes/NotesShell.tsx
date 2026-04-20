@@ -25,7 +25,7 @@ import { EmptyState } from '../../shared/ui/EmptyState';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
 import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
-import { SaveStatusPill } from './SaveStatusPill';
+import { SaveStatusPill, type SaveStatus } from './SaveStatusPill';
 import { AudioRecorder, type RecordedAudio } from './AudioRecorder';
 import { AudioNoteView } from './AudioNoteView';
 import { toggleCheckboxAtLine } from './markdown';
