@@ -149,6 +149,56 @@ describe('TranslatorShell', () => {
     expect(document.activeElement).toBe(reuseBtn);
   });
 
+  it('swap button is disabled until a translation has resolved', async () => {
+    wire();
+    render(<TranslatorShell />);
+    const swap = await screen.findByRole('button', { name: /swap/i });
+    expect(swap).toBeDisabled();
+  });
+
+  it('swap moves the translation into the source and retranslates reversed', async () => {
+    let lastRunArgs: { text?: string; to?: string; from?: string } | null = null;
+    mockInvoke.mockImplementation(async (cmd: string, args) => {
+      if (cmd === 'translator_list' || cmd === 'translator_search') return [];
+      if (cmd === 'translator_run') {
+        lastRunArgs = args as { text: string; to: string; from?: string };
+        const { text, to } = lastRunArgs;
+        if (to === 'uk') {
+          return { original: text, translated: 'привіт', from: 'en', to: 'uk' };
+        }
+        return { original: text, translated: 'hello', from: 'uk', to: 'en' };
+      }
+      return null;
+    });
+    const user = userEvent.setup();
+    render(<TranslatorShell />);
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>('Text to translate');
+    await user.click(ta);
+    await user.keyboard('hello');
+    // Wait for auto-translate to land and swap to become enabled.
+    await waitFor(
+      () => {
+        const btn = screen.getByRole('button', { name: /swap/i });
+        expect(btn).not.toBeDisabled();
+      },
+      { timeout: 1500 },
+    );
+
+    await user.click(screen.getByRole('button', { name: /swap/i }));
+
+    // Draft becomes the previous translation, and a reversed run fires.
+    expect(ta.value).toBe('привіт');
+    await waitFor(
+      () => {
+        expect(lastRunArgs).toEqual(
+          expect.objectContaining({ text: 'привіт', to: 'en' }),
+        );
+      },
+      { timeout: 1500 },
+    );
+  });
+
   it('Escape clears a non-empty draft', async () => {
     wire();
     const user = userEvent.setup();

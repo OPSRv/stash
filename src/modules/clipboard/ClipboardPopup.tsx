@@ -10,7 +10,9 @@ import { Card } from '../../shared/ui/Card';
 import { Row } from '../../shared/ui/Row';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
-import { EyeIcon, PinIcon, TrashIcon } from '../../shared/ui/icons';
+import { AskAiButton } from '../../shared/ui/AskAiButton';
+import { SendToTranslatorButton } from '../../shared/ui/SendToTranslatorButton';
+import { ExternalIcon, EyeIcon, NoteIcon, PinIcon, TrashIcon } from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
@@ -69,6 +71,9 @@ export const ClipboardPopup = () => {
   const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
   const [copyFlash, setCopyFlash] = useState(false);
   const copyFlashTimer = useRef<number | null>(null);
+  const [newItemId, setNewItemId] = useState<number | null>(null);
+  const newItemTimer = useRef<number | null>(null);
+  const seenIdsRef = useRef<Set<number> | null>(null);
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const deleteConfirm = useSuppressibleConfirm<number>('clipboard.delete');
   const [previewId, setPreviewId] = useState<number | null>(null);
@@ -95,18 +100,20 @@ export const ClipboardPopup = () => {
     };
   }, [query, reloadNonce]);
 
+  // Coalesce bursts of clipboard changes (e.g. user copy-spamming) into a
+  // single list refresh so we don't hammer SQLite + React with an IPC round
+  // trip per event. 120ms is below the perception threshold for "instant".
   useEffect(() => {
+    let pending: number | null = null;
     const unlisten = listen('clipboard:changed', () => {
-      reload();
-      // A new clipboard capture happened — flash the popup border briefly.
-      setCopyFlash(true);
-      if (copyFlashTimer.current !== null) window.clearTimeout(copyFlashTimer.current);
-      copyFlashTimer.current = window.setTimeout(() => {
-        setCopyFlash(false);
-        copyFlashTimer.current = null;
-      }, 450);
+      if (pending !== null) return;
+      pending = window.setTimeout(() => {
+        pending = null;
+        reload();
+      }, 120);
     });
     return () => {
+      if (pending !== null) window.clearTimeout(pending);
       unlisten.then((fn) => fn()).catch(() => {});
     };
   }, [reload]);
@@ -114,9 +121,38 @@ export const ClipboardPopup = () => {
   useEffect(
     () => () => {
       if (copyFlashTimer.current !== null) window.clearTimeout(copyFlashTimer.current);
+      if (newItemTimer.current !== null) window.clearTimeout(newItemTimer.current);
     },
     [],
   );
+
+  // Track the freshest id that wasn't in the prior list so the matching row
+  // can play an entrance animation. Skip the *first non-empty* load — the
+  // initial `rawItems` is `[]` before IPC resolves, so seeding on mount
+  // would mark every real item as "fresh" and flash the whole pane.
+  useEffect(() => {
+    if (seenIdsRef.current === null) {
+      if (rawItems.length === 0) return;
+      seenIdsRef.current = new Set(rawItems.map((i) => i.id));
+      return;
+    }
+    const seen = seenIdsRef.current;
+    const fresh = rawItems.find((i) => !seen.has(i.id));
+    rawItems.forEach((i) => seen.add(i.id));
+    if (!fresh) return;
+    setNewItemId(fresh.id);
+    if (newItemTimer.current !== null) window.clearTimeout(newItemTimer.current);
+    newItemTimer.current = window.setTimeout(() => {
+      setNewItemId(null);
+      newItemTimer.current = null;
+    }, 600);
+    setCopyFlash(true);
+    if (copyFlashTimer.current !== null) window.clearTimeout(copyFlashTimer.current);
+    copyFlashTimer.current = window.setTimeout(() => {
+      setCopyFlash(false);
+      copyFlashTimer.current = null;
+    }, 450);
+  }, [rawItems]);
 
 
   // Auto-detect video downloads when the newest text item is a video URL.
@@ -232,6 +268,39 @@ export const ClipboardPopup = () => {
     [pasteAt]
   );
 
+  const bumpItemToTop = useCallback((id: number) => {
+    setRawItems((prev) => {
+      const target = prev.find((p) => p.id === id);
+      if (!target) return prev;
+      const rest = prev.filter((p) => p.id !== id);
+      const nowSec = Math.floor(Date.now() / 1000);
+      const bumped = { ...target, created_at: nowSec };
+      if (bumped.pinned) return [bumped, ...rest];
+      const firstUnpinned = rest.findIndex((p) => !p.pinned);
+      return firstUnpinned === -1
+        ? [...rest, bumped]
+        : [...rest.slice(0, firstUnpinned), bumped, ...rest.slice(firstUnpinned)];
+    });
+  }, []);
+
+  // Clicking a row copies to the system clipboard and shows a visible toast,
+  // leaving the popup open — paste (and auto-hide) stays on Enter / ⇧Enter.
+  const copyInPlace = useCallback(
+    (i: number) => {
+      const item = flat[i];
+      if (!item) return;
+      bumpItemToTop(item.id);
+      announce('Copied to clipboard');
+      toast({ title: 'Copied', variant: 'success', durationMs: 1600 });
+      copyOnly(item.id).catch((e) => {
+        console.error('copy failed:', e);
+        toast({ title: 'Copy failed', description: String(e), variant: 'error' });
+        reload();
+      });
+    },
+    [flat, toast, announce, bumpItemToTop, reload],
+  );
+
   const { index, setIndex } = useKeyboardNav({
     itemCount: flat.length,
     onSelect,
@@ -294,28 +363,56 @@ export const ClipboardPopup = () => {
     }
   }, [previewItem, toast]);
 
+  const saveTextToNote = useCallback(
+    async (body: string) => {
+      const firstLine = body.split('\n').find((l) => l.trim().length > 0) ?? '';
+      const title = firstLine.length > 60 ? `${firstLine.slice(0, 57).trimEnd()}…` : firstLine;
+      try {
+        await notesCreate(title, body);
+        toast({
+          title: 'Saved to notes',
+          variant: 'success',
+          action: {
+            label: 'Open Notes',
+            onClick: () =>
+              window.dispatchEvent(new CustomEvent('stash:navigate', { detail: 'notes' })),
+          },
+        });
+      } catch (e) {
+        console.error('save to note failed:', e);
+        toast({ title: 'Save failed', description: String(e), variant: 'error' });
+      }
+    },
+    [toast],
+  );
+
   const handleSaveToNote = useCallback(async () => {
     if (!previewItem) return;
-    const body = previewItem.content;
-    const firstLine = body.split('\n').find((l) => l.trim().length > 0) ?? '';
-    const title = firstLine.length > 60 ? `${firstLine.slice(0, 57).trimEnd()}…` : firstLine;
-    try {
-      await notesCreate(title, body);
-      toast({
-        title: 'Saved to notes',
-        variant: 'success',
-        action: {
-          label: 'Open Notes',
-          onClick: () =>
-            window.dispatchEvent(new CustomEvent('stash:navigate', { detail: 'notes' })),
-        },
-      });
-      setPreviewId(null);
-    } catch (e) {
-      console.error('save to note failed:', e);
-      toast({ title: 'Save failed', description: String(e), variant: 'error' });
-    }
-  }, [previewItem, toast]);
+    await saveTextToNote(previewItem.content);
+    setPreviewId(null);
+  }, [previewItem, saveTextToNote]);
+
+  const openImageInViewer = useCallback(
+    async (path: string) => {
+      try {
+        const { openPath } = await import('@tauri-apps/plugin-opener');
+        await openPath(path);
+      } catch (e) {
+        console.error('open image failed:', e);
+        toast({ title: 'Could not open image', description: String(e), variant: 'error' });
+      }
+    },
+    [toast],
+  );
+
+  const handleRowSaveToNote = useCallback(
+    (id: number) => {
+      const item = rawItems.find((i) => i.id === id);
+      if (!item || item.kind !== 'text') return;
+      void saveTextToNote(item.content);
+    },
+    [rawItems, saveTextToNote],
+  );
 
   const confirmClearAll = useCallback(() => {
     setClearConfirmOpen(false);
@@ -364,12 +461,16 @@ export const ClipboardPopup = () => {
         setSelectionAnchor(flatIndex);
         return;
       }
-      // Plain click: clear multi-selection and paste as before.
+      // Plain click: clear multi-selection, copy to clipboard, and leave the
+      // popup open so the user actually sees the confirmation toast. Paste
+      // remains bound to Enter / ⇧Enter.
       clearSelection();
-      setIndex(flatIndex);
-      pasteAt(flatIndex);
+      copyInPlace(flatIndex);
+      // Item has moved to the top of its section — follow it with the
+      // keyboard cursor so the ↵ hint stays on the clicked row.
+      setIndex(item.pinned ? 0 : pinned.length);
     },
-    [flat, selectionAnchor, clearSelection, setIndex, pasteAt]
+    [flat, selectionAnchor, clearSelection, setIndex, copyInPlace, pinned.length]
   );
 
   const bulkDelete = useCallback(async () => {
@@ -456,6 +557,7 @@ export const ClipboardPopup = () => {
     n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
   const renderRow = (item: (typeof typed)[number], flatIndex: number) => {
+    const enterClass = item.id === newItemId ? 'clip-row-enter' : undefined;
     if (item.type === 'link') {
       return (
         <LinkRow
@@ -467,6 +569,8 @@ export const ClipboardPopup = () => {
           onTogglePin={handleTogglePin}
           onDelete={handleDelete}
           onClick={handleRowClick}
+          onSaveToNote={handleRowSaveToNote}
+          className={enterClass}
         />
       );
     }
@@ -499,6 +603,23 @@ export const ClipboardPopup = () => {
                 <EyeIcon size={12} />
               </IconButton>
             )}
+            {imageMeta && (
+              <IconButton
+                onClick={() => openImageInViewer(imageMeta.path)}
+                title="Open in image viewer"
+              >
+                <ExternalIcon size={12} />
+              </IconButton>
+            )}
+            {item.kind === 'text' && (
+              <>
+                <SendToTranslatorButton text={item.content} />
+                <AskAiButton text={item.content} />
+                <IconButton onClick={() => handleRowSaveToNote(item.id)} title="Save to notes">
+                  <NoteIcon size={12} />
+                </IconButton>
+              </>
+            )}
             <IconButton onClick={() => handleTogglePin(item.id)} title={item.pinned ? 'Unpin' : 'Pin'}>
               <PinIcon size={12} filled={item.pinned} />
             </IconButton>
@@ -517,6 +638,7 @@ export const ClipboardPopup = () => {
         active={index === flatIndex}
         selected={selectedIds.has(item.id)}
         onSelect={(e) => handleRowClick(flatIndex, e)}
+        className={enterClass}
       />
     );
   };

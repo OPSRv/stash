@@ -74,32 +74,28 @@ export const ConfirmDialog = ({
         ) : (
           <div className="mb-2" />
         )}
-        <div className="flex items-center justify-between gap-2 mt-2">
-          {suppressibleLabel ? (
-            <label className="flex items-center gap-1.5 t-secondary text-meta select-none cursor-pointer">
-              <input
-                type="checkbox"
-                checked={suppress}
-                onChange={(e) => setSuppress(e.target.checked)}
-                className="ring-focus"
-              />
-              {suppressibleLabel}
-            </label>
-          ) : (
-            <span />
-          )}
-          <div className="flex items-center gap-2">
-            <Button onClick={onCancel} variant="ghost" data-role="confirm-cancel">
-              {cancelLabel}
-            </Button>
-            <Button
-              onClick={() => onConfirm(suppressibleLabel ? suppress : undefined)}
-              variant={tone === 'danger' ? 'soft' : 'solid'}
-              tone={tone === 'danger' ? 'danger' : 'accent'}
-            >
-              {confirmLabel}
-            </Button>
-          </div>
+        {suppressibleLabel && (
+          <label className="flex items-center gap-1.5 t-secondary text-meta select-none cursor-pointer mt-2">
+            <input
+              type="checkbox"
+              checked={suppress}
+              onChange={(e) => setSuppress(e.target.checked)}
+              className="ring-focus shrink-0"
+            />
+            <span>{suppressibleLabel}</span>
+          </label>
+        )}
+        <div className="flex items-center justify-end gap-2 mt-3">
+          <Button onClick={onCancel} variant="ghost" data-role="confirm-cancel">
+            {cancelLabel}
+          </Button>
+          <Button
+            onClick={() => onConfirm(suppressibleLabel ? suppress : undefined)}
+            variant={tone === 'danger' ? 'soft' : 'solid'}
+            tone={tone === 'danger' ? 'danger' : 'accent'}
+          >
+            {confirmLabel}
+          </Button>
         </div>
       </div>
     </div>

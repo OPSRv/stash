@@ -6,6 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { modules } from '../modules/registry';
 import { SUPPORTED_VIDEO_URL } from '../modules/downloader/downloads.constants';
+import { setPendingDownloaderUrl } from '../modules/downloader/pendingUrl';
 import { TabButton } from '../shared/ui/TabButton';
 import { Button } from '../shared/ui/Button';
 import { PinIcon } from '../shared/ui/icons';
@@ -193,17 +194,22 @@ export const PopupShell = () => {
     };
   }, []);
 
-  // Prefetch every tab's lazy chunk shortly after mount so that the very
-  // first switch into an unvisited tab doesn't pay the dynamic-import cost.
-  // Hover preload (TabButton) already covers warm clicks; this covers cold
-  // keyboard-driven switches and feels instant. Skipped in tests to keep
-  // them deterministic — the test runner asserts cold-load behaviour.
+  // Prefetch the *neighbouring* tabs' chunks (active ± 1) in idle time so a
+  // keyboard-driven ⌘⌥← / ⌘⌥→ switch feels instant, while less-likely tabs
+  // remain lazy. Previously we preloaded all 12 modules on mount which
+  // defeated code-splitting — users who never open the Metronome still paid
+  // for its JS on every cold start. Hover on TabButton continues to warm
+  // any other tab on demand. Skipped in tests for deterministic behaviour.
   useEffect(() => {
     if (import.meta.env.MODE === 'test') return;
-    const preloadAll = () => {
-      modules.forEach((m) => {
-        m.preloadPopup?.().catch(() => {});
-      });
+    const idx = visibleModules.findIndex((m) => m.id === activeId);
+    if (idx < 0) return;
+    const neighbours = [
+      visibleModules[idx - 1],
+      visibleModules[idx + 1],
+    ].filter(Boolean) as typeof visibleModules;
+    const preloadNeighbours = () => {
+      neighbours.forEach((m) => m.preloadPopup?.().catch(() => {}));
     };
     type IdleWindow = Window & {
       requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
@@ -211,12 +217,12 @@ export const PopupShell = () => {
     };
     const w = window as IdleWindow;
     if (typeof w.requestIdleCallback === 'function') {
-      const id = w.requestIdleCallback(preloadAll, { timeout: 1500 });
+      const id = w.requestIdleCallback(preloadNeighbours, { timeout: 2000 });
       return () => w.cancelIdleCallback?.(id);
     }
-    const t = window.setTimeout(preloadAll, 600);
+    const t = window.setTimeout(preloadNeighbours, 800);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [activeId, visibleModules]);
 
   useEffect(() => {
     const read = () => {
@@ -342,20 +348,35 @@ export const PopupShell = () => {
   // user into the Downloader tab and prefill the URL bar. We re-read the
   // clipboard ourselves because `clipboard:changed` only carries the new row
   // id — reading raw text keeps the handshake simple.
+  //
+  // The prefill is handed off two ways so the Downloader catches it whether
+  // it was already mounted or only lazy-loads *after* we flip the tab:
+  //   1. `setPendingDownloaderUrl` — module-level slot the Downloader reads
+  //      on mount, so a late mount still sees the URL.
+  //   2. `stash:downloader-prefill` event — wins when the Downloader is
+  //      already mounted and just needs to re-run detect.
   useEffect(() => {
-    const unlisten = listen<number>('clipboard:changed', async () => {
-      try {
-        const text = (await readText())?.trim();
-        if (!text || !SUPPORTED_VIDEO_URL.test(text)) return;
-        openTab('downloader');
-        window.dispatchEvent(
-          new CustomEvent('stash:downloader-prefill', { detail: text }),
-        );
-      } catch {
-        // ignore clipboard read failures — this is a nice-to-have.
-      }
+    let pending: number | null = null;
+    const unlisten = listen<number>('clipboard:changed', () => {
+      // Collapse rapid copy bursts into one readText() + one regex check.
+      if (pending !== null) window.clearTimeout(pending);
+      pending = window.setTimeout(async () => {
+        pending = null;
+        try {
+          const text = (await readText())?.trim();
+          if (!text || !SUPPORTED_VIDEO_URL.test(text)) return;
+          setPendingDownloaderUrl(text);
+          openTab('downloader');
+          window.dispatchEvent(
+            new CustomEvent('stash:downloader-prefill', { detail: text }),
+          );
+        } catch {
+          // ignore clipboard read failures — this is a nice-to-have.
+        }
+      }, 150);
     });
     return () => {
+      if (pending !== null) window.clearTimeout(pending);
       unlisten.then((fn) => fn()).catch(() => {});
     };
   }, []);

@@ -31,6 +31,7 @@ const existing = {
   updated_at: 100,
   audio_path: null,
   audio_duration_ms: null,
+  pinned: false,
 };
 
 const fullExisting = {
@@ -41,6 +42,7 @@ const fullExisting = {
   updated_at: 100,
   audio_path: null,
   audio_duration_ms: null,
+  pinned: false,
 };
 
 // The segmented control labels each option with a title attr ("Preview only",

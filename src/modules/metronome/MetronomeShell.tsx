@@ -6,8 +6,10 @@ import { BpmDial } from './components/BpmDial';
 import { BeatStrip } from './components/BeatStrip';
 import { Controls } from './components/Controls';
 import { BackingTrack } from './components/BackingTrack';
+import { ExtrasRow } from './components/ExtrasRow';
 import { useMetronomeEngine } from './hooks/useMetronomeEngine';
 import { useTapTempo } from './hooks/useTapTempo';
+import { useTrainer } from './hooks/useTrainer';
 
 const clampBpm = (v: number) => Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(v)));
 
@@ -81,6 +83,8 @@ export const MetronomeShell = () => {
 
   const setBpm = useCallback((bpm: number) => patch({ bpm: clampBpm(bpm) }), [patch]);
   const tap = useTapTempo(setBpm);
+
+  useTrainer({ engine, bpm: state.bpm, config: state.trainer, onBpmChange: setBpm });
 
   const toggleAccent = useCallback((idx: number) => {
     setState((prev) => {
@@ -194,6 +198,7 @@ export const MetronomeShell = () => {
         <div style={{ width: 52 }} aria-hidden className="shrink-0" />
       </div>
       <Controls state={state} onPatch={patch} />
+      <ExtrasRow state={state} onPatch={patch} />
       <BackingTrack
         volume={state.track_volume}
         onVolume={(v) => patch({ track_volume: v })}

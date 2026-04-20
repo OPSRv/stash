@@ -136,7 +136,7 @@ use modules::whisper::{
 use modules::notes::{
     commands::{
         notes_create, notes_create_audio, notes_delete, notes_get, notes_list, notes_read_audio,
-        notes_read_file, notes_search, notes_update, notes_write_file, NotesState,
+        notes_read_file, notes_search, notes_set_pinned, notes_update, notes_write_file, NotesState,
     },
     repo::NotesRepo,
 };
@@ -341,6 +341,7 @@ pub fn run() {
             notes_write_file,
             notes_create_audio,
             notes_read_audio,
+            notes_set_pinned,
             pomodoro_list_presets,
             pomodoro_save_preset,
             pomodoro_delete_preset,

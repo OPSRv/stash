@@ -26,6 +26,9 @@ pub struct Note {
     pub audio_path: Option<String>,
     /// Recording length in milliseconds, when known. Used for list previews.
     pub audio_duration_ms: Option<i64>,
+    /// User-pinned notes float to the top of the side-list regardless of
+    /// their `updated_at`.
+    pub pinned: bool,
 }
 
 /// Projection used for the side-list. Carries only what the list row needs so
@@ -42,6 +45,7 @@ pub struct NoteSummary {
     pub updated_at: i64,
     pub audio_path: Option<String>,
     pub audio_duration_ms: Option<i64>,
+    pub pinned: bool,
 }
 
 /// How many leading body chars the list projection returns. Large enough for
@@ -81,7 +85,21 @@ impl NotesRepo {
                 [],
             )?;
         }
+        if !cols.iter().any(|c| c == "pinned") {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
         Ok(Self { conn })
+    }
+
+    pub fn set_pinned(&mut self, id: i64, pinned: bool) -> Result<()> {
+        self.conn.execute(
+            "UPDATE notes SET pinned = ?1 WHERE id = ?2",
+            params![pinned as i64, id],
+        )?;
+        Ok(())
     }
 
     pub fn create(&mut self, title: &str, body: &str, now: i64) -> Result<i64> {
@@ -138,7 +156,7 @@ impl NotesRepo {
     pub fn get(&self, id: i64) -> Result<Option<Note>> {
         self.conn
             .query_row(
-                "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms
+                "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms, pinned
                  FROM notes WHERE id = ?1",
                 params![id],
                 Self::map_row,
@@ -148,11 +166,12 @@ impl NotesRepo {
 
     /// Lightweight projection used by the side-list. `substr(body, 1, ?)` is
     /// evaluated inside SQLite, so the full body never leaves the DB page.
+    /// Pinned notes float to the top.
     pub fn list_summaries(&self) -> Result<Vec<NoteSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, title, substr(body, 1, ?1) AS preview,
-                    created_at, updated_at, audio_path, audio_duration_ms
-             FROM notes ORDER BY updated_at DESC LIMIT 500",
+                    created_at, updated_at, audio_path, audio_duration_ms, pinned
+             FROM notes ORDER BY pinned DESC, updated_at DESC LIMIT 500",
         )?;
         let rows = stmt.query_map(params![LIST_PREVIEW_CHARS as i64], Self::map_summary)?;
         rows.collect()
@@ -162,11 +181,11 @@ impl NotesRepo {
     pub fn search(&self, query: &str) -> Result<Vec<Note>> {
         let like = format!("%{}%", escape_like(query.trim()));
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms
+            "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms, pinned
              FROM notes
              WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                 OR body  LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-             ORDER BY updated_at DESC",
+             ORDER BY pinned DESC, updated_at DESC",
         )?;
         let rows = stmt.query_map(params![like], Self::map_row)?;
         rows.collect()
@@ -176,11 +195,11 @@ impl NotesRepo {
         let like = format!("%{}%", escape_like(query.trim()));
         let mut stmt = self.conn.prepare(
             "SELECT id, title, substr(body, 1, ?2) AS preview,
-                    created_at, updated_at, audio_path, audio_duration_ms
+                    created_at, updated_at, audio_path, audio_duration_ms, pinned
              FROM notes
              WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
                 OR body  LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-             ORDER BY updated_at DESC",
+             ORDER BY pinned DESC, updated_at DESC",
         )?;
         let rows = stmt.query_map(params![like, LIST_PREVIEW_CHARS as i64], Self::map_summary)?;
         rows.collect()
@@ -195,6 +214,7 @@ impl NotesRepo {
             updated_at: row.get("updated_at")?,
             audio_path: row.get("audio_path").ok(),
             audio_duration_ms: row.get("audio_duration_ms").ok(),
+            pinned: row.get::<_, i64>("pinned").unwrap_or(0) != 0,
         })
     }
 
@@ -207,6 +227,7 @@ impl NotesRepo {
             updated_at: row.get("updated_at")?,
             audio_path: row.get("audio_path").ok(),
             audio_duration_ms: row.get("audio_duration_ms").ok(),
+            pinned: row.get::<_, i64>("pinned").unwrap_or(0) != 0,
         })
     }
 }
@@ -306,6 +327,30 @@ mod tests {
         let note = repo.get(id).unwrap().unwrap();
         assert_eq!(note.audio_path.as_deref(), Some("/tmp/a.webm"));
         assert_eq!(note.audio_duration_ms, Some(12_500));
+    }
+
+    #[test]
+    fn pinned_notes_float_to_top() {
+        let mut repo = fresh();
+        let _a = repo.create("a", "", 10).unwrap();
+        let b = repo.create("b", "", 20).unwrap();
+        let _c = repo.create("c", "", 30).unwrap();
+        repo.set_pinned(b, true).unwrap();
+        let summaries = repo.list_summaries().unwrap();
+        assert_eq!(summaries[0].id, b);
+        assert!(summaries[0].pinned);
+        assert!(!summaries[1].pinned);
+    }
+
+    #[test]
+    fn search_keeps_pinned_first() {
+        let mut repo = fresh();
+        let new = repo.create("new pin", "x", 30).unwrap();
+        let old = repo.create("old pin", "x", 10).unwrap();
+        repo.set_pinned(old, true).unwrap();
+        let hits = repo.search_summaries("pin").unwrap();
+        assert_eq!(hits[0].id, old);
+        assert_eq!(hits[1].id, new);
     }
 
     #[test]

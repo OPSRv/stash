@@ -11,7 +11,15 @@
     "store:default",
     "autostart:default",
     "clipboard-manager:allow-read-text",
-    "opener:allow-reveal-item-in-dir",
+    "clipboard-manager:allow-write-text",
+    {
+      "identifier": "opener:allow-reveal-item-in-dir",
+      "allow": [{ "path": "$HOME/**" }]
+    },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [{ "path": "$HOME/**" }]
+    },
     "notification:default",
     "dialog:allow-open",
     "dialog:allow-save"

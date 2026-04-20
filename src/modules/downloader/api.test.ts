@@ -142,13 +142,37 @@ describe('downloader/api invoke wrappers', () => {
 
   it.each([
     ['cancel', cancel, 'dl_cancel'],
-    ['deleteJob', deleteJob, 'dl_delete'],
     ['pause', pause, 'dl_pause'],
     ['resume', resume, 'dl_resume'],
     ['retry', retry, 'dl_retry'],
   ])('%s sends { id }', async (_, fn, expected) => {
     await fn(7);
     expect(invoke).toHaveBeenCalledWith(expected, { id: 7 });
+  });
+
+  it('deleteJob defaults to keeping the file on disk', async () => {
+    await deleteJob(7);
+    expect(invoke).toHaveBeenCalledWith('dl_delete', { id: 7, purgeFile: false });
+  });
+
+  it('deleteJob forwards purgeFile=true to Rust', async () => {
+    await deleteJob(7, true);
+    expect(invoke).toHaveBeenCalledWith('dl_delete', { id: 7, purgeFile: true });
+  });
+
+  it('extractSubtitles passes id and defaults langs=null so Rust picks en/uk', async () => {
+    const { extractSubtitles } = await import('./api');
+    await extractSubtitles(9);
+    expect(invoke).toHaveBeenCalledWith('dl_extract_subtitles', { id: 9, langs: null });
+  });
+
+  it('extractSubtitles forwards an explicit lang list', async () => {
+    const { extractSubtitles } = await import('./api');
+    await extractSubtitles(9, ['uk', 'en']);
+    expect(invoke).toHaveBeenCalledWith('dl_extract_subtitles', {
+      id: 9,
+      langs: ['uk', 'en'],
+    });
   });
 
   it('list invokes without args', async () => {

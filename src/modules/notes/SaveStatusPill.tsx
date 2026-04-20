@@ -1,9 +1,17 @@
-export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+export type SaveStatus =
+  | 'idle'
+  | 'saving'
+  | 'saved'
+  | 'error'
+  | 'transcribing'
+  | 'polishing';
 
 const statusLabel: Record<Exclude<SaveStatus, 'idle'>, string> = {
   saving: 'Saving…',
   saved: 'Saved',
   error: 'Save failed',
+  transcribing: 'Transcribing…',
+  polishing: 'Polishing…',
 };
 
 export const SaveStatusPill = ({ status }: { status: SaveStatus }) => {

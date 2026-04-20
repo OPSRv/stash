@@ -1,8 +1,10 @@
 import { SegmentedControl } from '../../../shared/ui/SegmentedControl';
 import {
+  DENOMINATORS,
+  NUMERATOR_MAX,
+  NUMERATOR_MIN,
   SOUND_PRESETS,
   SUBDIVISIONS,
-  TIME_SIGNATURES,
   type MetronomeState,
   type SoundId,
 } from '../metronome.constants';
@@ -13,24 +15,50 @@ interface ControlsProps {
   onPatch: (patch: Partial<MetronomeState>) => void;
 }
 
-const sigKey = (n: number, d: number): string => `${n}/${d}`;
+const clampNum = (v: number) => Math.max(NUMERATOR_MIN, Math.min(NUMERATOR_MAX, Math.round(v)));
 
 export const Controls = ({ state, onPatch }: ControlsProps) => {
+  const setNumerator = (v: number) => onPatch({ numerator: clampNum(v) });
+
   return (
     <div className="flex items-center gap-4 px-4 py-2 border-t hair">
-      <SegmentedControl
-        ariaLabel="Time signature"
-        size="sm"
-        value={sigKey(state.numerator, state.denominator)}
-        options={TIME_SIGNATURES.map((s) => ({
-          value: sigKey(s.numerator, s.denominator),
-          label: sigKey(s.numerator, s.denominator),
-        }))}
-        onChange={(v) => {
-          const [n, d] = v.split('/').map(Number);
-          onPatch({ numerator: n, denominator: d });
-        }}
-      />
+      <div className="flex items-center gap-1" aria-label="Time signature">
+        <button
+          type="button"
+          onClick={() => setNumerator(state.numerator - 1)}
+          disabled={state.numerator <= NUMERATOR_MIN}
+          aria-label="Decrease numerator"
+          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.04] disabled:opacity-30"
+        >
+          −
+        </button>
+        <div
+          className="t-primary font-medium text-body tabular-nums text-center"
+          style={{ minWidth: 44 }}
+          aria-live="polite"
+          data-testid="time-signature-label"
+        >
+          {state.numerator}/{state.denominator}
+        </div>
+        <button
+          type="button"
+          onClick={() => setNumerator(state.numerator + 1)}
+          disabled={state.numerator >= NUMERATOR_MAX}
+          aria-label="Increase numerator"
+          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.04] disabled:opacity-30"
+        >
+          +
+        </button>
+        <div className="ml-2">
+          <SegmentedControl<string>
+            ariaLabel="Denominator"
+            size="sm"
+            value={String(state.denominator)}
+            onChange={(v) => onPatch({ denominator: Number(v) })}
+            options={DENOMINATORS.map((d) => ({ value: String(d), label: String(d) }))}
+          />
+        </div>
+      </div>
       <div className="hair w-px h-6" />
       <div className="flex items-center gap-1" role="radiogroup" aria-label="Subdivision">
         {SUBDIVISIONS.map((s) => {

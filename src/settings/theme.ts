@@ -5,7 +5,19 @@ const THEME_EVENT = 'stash:theme-changed';
 
 export type ThemeMode = 'dark' | 'light' | 'auto';
 
-export type AccentKey = 'blue' | 'purple' | 'green' | 'orange' | 'pink' | 'graphite';
+export type AccentKey =
+  | 'blue'
+  | 'indigo'
+  | 'purple'
+  | 'pink'
+  | 'rose'
+  | 'red'
+  | 'orange'
+  | 'amber'
+  | 'green'
+  | 'teal'
+  | 'cyan'
+  | 'graphite';
 
 export type ThemeSettings = {
   mode: ThemeMode;
@@ -23,10 +35,16 @@ export const DEFAULT_THEME: ThemeSettings = {
 
 export const ACCENTS: Record<AccentKey, { label: string; hex: string; rgb: string }> = {
   blue: { label: 'Blue', hex: '#2F7AE5', rgb: '47, 122, 229' },
+  indigo: { label: 'Indigo', hex: '#6366F1', rgb: '99, 102, 241' },
   purple: { label: 'Purple', hex: '#8B5CF6', rgb: '139, 92, 246' },
-  green: { label: 'Green', hex: '#22C55E', rgb: '34, 197, 94' },
-  orange: { label: 'Orange', hex: '#F97316', rgb: '249, 115, 22' },
   pink: { label: 'Pink', hex: '#EC4899', rgb: '236, 72, 153' },
+  rose: { label: 'Rose', hex: '#F43F5E', rgb: '244, 63, 94' },
+  red: { label: 'Red', hex: '#EF4444', rgb: '239, 68, 68' },
+  orange: { label: 'Orange', hex: '#F97316', rgb: '249, 115, 22' },
+  amber: { label: 'Amber', hex: '#F59E0B', rgb: '245, 158, 11' },
+  green: { label: 'Green', hex: '#22C55E', rgb: '34, 197, 94' },
+  teal: { label: 'Teal', hex: '#14B8A6', rgb: '20, 184, 166' },
+  cyan: { label: 'Cyan', hex: '#06B6D4', rgb: '6, 182, 212' },
   graphite: { label: 'Graphite', hex: '#6B7280', rgb: '107, 114, 128' },
 };
 

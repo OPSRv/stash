@@ -1,11 +1,17 @@
+import { memo, useState } from 'react';
 import { CloseIcon, PlayIcon } from '../../shared/ui/icons';
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { PlatformBadge } from './PlatformBadge';
 import type { DownloadJob } from './api';
 
 interface CompletedDownloadTileProps {
   job: DownloadJob;
-  onPlay: () => void;
-  onDelete: () => void;
+  onPlay: (path: string | null) => void;
+  /// `purgeFile=true` means the user also asked to delete the file from disk.
+  /// The tile shows a confirm dialog with an opt-in checkbox, mirroring the
+  /// list row so both views can fully remove a download. Callbacks receive
+  /// the job's id/path so parents can pass stable references.
+  onDelete: (id: number, purgeFile: boolean) => void;
 }
 
 const tileStyle = {
@@ -19,23 +25,25 @@ const deleteButtonStyle = { background: 'rgba(0,0,0,0.55)' } as const;
 const isFailure = (status: DownloadJob['status']) =>
   status === 'failed' || status === 'cancelled';
 
-export const CompletedDownloadTile = ({
+const CompletedDownloadTileImpl = ({
   job,
   onPlay,
   onDelete,
 }: CompletedDownloadTileProps) => {
   const failed = isFailure(job.status);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const canPurge = Boolean(job.target_path) && !failed;
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const openDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    onDelete();
+    setDeleteOpen(true);
   };
 
   return (
     <div
       className="group relative rounded-lg overflow-hidden cursor-pointer"
       style={tileStyle}
-      onClick={failed ? undefined : onPlay}
+      onClick={failed ? undefined : () => onPlay(job.target_path)}
     >
       <div className="aspect-video relative" style={thumbStyle}>
         {job.thumbnail_url ? (
@@ -54,7 +62,7 @@ export const CompletedDownloadTile = ({
           </div>
         )}
         <button
-          onClick={handleDelete}
+          onClick={openDelete}
           className="absolute top-1 right-1 w-6 h-6 rounded-md items-center justify-center hidden group-hover:flex"
           style={deleteButtonStyle}
           aria-label="Delete"
@@ -70,6 +78,30 @@ export const CompletedDownloadTile = ({
           {job.title ?? (job.target_path?.split('/').pop() ?? job.url)}
         </div>
       </div>
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete this download?"
+        description={
+          canPurge
+            ? 'Removes the entry from history. Tick the box to also delete the file from disk.'
+            : 'Removes the entry from history.'
+        }
+        confirmLabel="Delete"
+        tone="danger"
+        suppressibleLabel={canPurge ? 'Also delete the downloaded file' : undefined}
+        onConfirm={(alsoPurge) => {
+          setDeleteOpen(false);
+          onDelete(job.id, Boolean(canPurge && alsoPurge));
+        }}
+        onCancel={() => setDeleteOpen(false)}
+      />
     </div>
   );
 };
+
+/// Tiles scroll in a grid that re-renders whenever any job in the list
+/// ticks (download progress, transient hover state). Memoising skips tiles
+/// whose own job snapshot hasn't changed.
+export const CompletedDownloadTile = memo(CompletedDownloadTileImpl, (a, b) =>
+  a.job === b.job && a.onPlay === b.onPlay && a.onDelete === b.onDelete,
+);

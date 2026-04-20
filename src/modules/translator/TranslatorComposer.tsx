@@ -1,4 +1,5 @@
 import { type RefObject } from 'react';
+import { AskAiButton } from '../../shared/ui/AskAiButton';
 import { Button } from '../../shared/ui/Button';
 import { Card } from '../../shared/ui/Card';
 import { IconButton } from '../../shared/ui/IconButton';
@@ -78,10 +79,11 @@ export const TranslatorComposer = ({
         </div>
         <IconButton
           onClick={onSwap}
-          title={canSwap ? 'Swap languages (⌘⇧S)' : 'Swap unavailable for auto-detect'}
+          title={canSwap ? 'Swap languages (⌘⇧S)' : 'Translate something first to enable swap'}
           stopPropagation={false}
+          disabled={!canSwap}
         >
-          <SwapIcon size={13} className={canSwap ? '' : 'opacity-40'} />
+          <SwapIcon size={13} />
         </IconButton>
         <div className="flex items-center gap-1.5">
           <span className="t-tertiary text-meta">To</span>
@@ -188,7 +190,7 @@ export const TranslatorComposer = ({
             {isBusy && <Spinner size={11} />}
           </div>
           <div
-            className="flex-1 t-primary text-body leading-snug break-words overflow-y-auto nice-scroll"
+            className="stash-selectable flex-1 t-primary text-body leading-snug break-words overflow-y-auto nice-scroll"
             dir={isRtl(target) ? 'rtl' : 'auto'}
             aria-live="polite"
           >
@@ -207,6 +209,10 @@ export const TranslatorComposer = ({
               >
                 <SpeakerIcon size={12} />
               </IconButton>
+              <AskAiButton
+                text={() => liveTranslation ?? ''}
+                title="Ask AI about this translation (opens a new chat)"
+              />
               <Button
                 size="xs"
                 variant="soft"

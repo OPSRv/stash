@@ -1,7 +1,6 @@
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { LinkIcon } from '../../shared/ui/icons';
 import { Button } from '../../shared/ui/Button';
-import { Input } from '../../shared/ui/Input';
 import { Spinner } from '../../shared/ui/Spinner';
 
 interface DownloadUrlBarProps {
@@ -34,9 +33,11 @@ export const DownloadUrlBar = ({
   };
 
   return (
-    <div className="px-4 py-3 flex items-center gap-2 border-b hair">
-      <Input
-        leadingIcon={<LinkIcon />}
+    <div className="flex items-center gap-2.5 px-3 py-2.5 border-b hair">
+      <span className="t-tertiary shrink-0 inline-flex">
+        <LinkIcon />
+      </span>
+      <input
         type="text"
         value={url}
         onChange={(e) => onUrlChange(e.currentTarget.value)}
@@ -44,12 +45,15 @@ export const DownloadUrlBar = ({
           if (e.key === 'Enter') onDetect();
         }}
         placeholder="Paste a YouTube / TikTok / Instagram / X / Reddit URL"
-        className="flex-1"
+        className="flex-1 bg-transparent outline-none text-body t-primary"
       />
-      <Button onClick={pasteFromClipboard}>Paste</Button>
+      <Button size="xs" onClick={pasteFromClipboard}>
+        Paste
+      </Button>
       {detecting ? (
         <Button
-          variant="soft"
+          size="xs"
+          variant="ghost"
           tone="danger"
           onClick={onCancel}
           leadingIcon={<Spinner size={12} />}
@@ -59,7 +63,8 @@ export const DownloadUrlBar = ({
         </Button>
       ) : (
         <Button
-          variant="solid"
+          size="xs"
+          variant="ghost"
           tone="accent"
           onClick={onDetect}
           disabled={!url.trim()}

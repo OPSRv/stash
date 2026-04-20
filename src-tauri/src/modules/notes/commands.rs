@@ -87,6 +87,15 @@ pub fn notes_update(
 }
 
 #[tauri::command]
+pub fn notes_set_pinned(
+    state: State<'_, NotesState>,
+    id: i64,
+    pinned: bool,
+) -> Result<(), String> {
+    to_string_err(state.repo.lock().unwrap().set_pinned(id, pinned))
+}
+
+#[tauri::command]
 pub fn notes_delete(
     app: tauri::AppHandle,
     state: State<'_, NotesState>,

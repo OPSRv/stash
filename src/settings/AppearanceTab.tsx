@@ -1,3 +1,6 @@
+import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Button } from '../shared/ui/Button';
 import { SegmentedControl } from '../shared/ui/SegmentedControl';
 import { AppearancePreview } from './AppearancePreview';
@@ -19,11 +22,19 @@ const themeModeOptions = [
   { value: 'dark' as ThemeMode, label: 'Dark', icon: <MoonIcon /> },
 ];
 
-const blurLabel = (v: number): string => (v === 0 ? 'Off' : `${v} px`);
-
 export const AppearanceTab = ({ settings, onChange }: AppearanceTabProps) => {
   const accentKeys = Object.keys(ACCENTS) as AccentKey[];
   const accent = ACCENTS[settings.themeAccent];
+  const [posMoved, setPosMoved] = useState(false);
+  useEffect(() => {
+    invoke<boolean>('popup_position_status').then(setPosMoved).catch(() => {});
+    const unlistenPromise = listen<boolean>('popup:position_changed', (e) =>
+      setPosMoved(e.payload),
+    );
+    return () => {
+      unlistenPromise.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
   return (
     <div className="max-w-[560px] mx-auto space-y-6">
       <section>
@@ -44,6 +55,25 @@ export const AppearanceTab = ({ settings, onChange }: AppearanceTabProps) => {
                 value={settings.themeMode}
                 onChange={(v) => onChange('themeMode', v)}
               />
+            }
+          />
+          <SettingRow
+            title="Position"
+            description={
+              posMoved
+                ? 'Custom position — pinned where you dropped it. Reset to snap back under the tray icon.'
+                : 'Follows the menubar icon. Drag the popup by its tab header to pin it anywhere.'
+            }
+            control={
+              <Button
+                size="sm"
+                disabled={!posMoved}
+                onClick={() => {
+                  invoke('popup_position_reset').catch(() => {});
+                }}
+              >
+                Reset position
+              </Button>
             }
           />
           <SettingRow
@@ -105,16 +135,6 @@ export const AppearanceTab = ({ settings, onChange }: AppearanceTabProps) => {
       <section>
         <SettingsSectionHeader label="SURFACE" />
         <div className="divide-y divide-white/5 [.light_&]:divide-black/5">
-          <SliderField
-            label="Background blur"
-            description="Frosts whatever is behind the popup."
-            value={settings.themeBlur}
-            min={0}
-            max={60}
-            step={2}
-            onChange={(v) => onChange('themeBlur', v)}
-            display={blurLabel(settings.themeBlur)}
-          />
           <SliderField
             label="Translucency"
             description="How much of the desktop shows through."

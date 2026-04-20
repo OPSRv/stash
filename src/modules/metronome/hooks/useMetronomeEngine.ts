@@ -18,6 +18,24 @@ type EngineConfig = Pick<
 const LOOKAHEAD_MS = 25;
 const SCHEDULE_AHEAD_S = 0.1;
 
+/// Web Worker timer source. Browsers throttle `setInterval` on hidden tabs
+/// (down to ~1Hz), which starves the lookahead scheduler and makes the
+/// metronome stutter when the popup is closed. Workers aren't throttled, so
+/// we run the tick clock there and post a message back to drive the
+/// scheduler at full rate even when the popup is hidden.
+const SCHEDULER_WORKER_SRC = `
+let id = null;
+self.onmessage = (e) => {
+  if (e.data && e.data.type === 'start') {
+    if (id !== null) clearInterval(id);
+    const ms = e.data.ms || 25;
+    id = setInterval(() => self.postMessage('tick'), ms);
+  } else if (e.data && e.data.type === 'stop') {
+    if (id !== null) { clearInterval(id); id = null; }
+  }
+};
+`;
+
 type EngineHandle = {
   isPlaying: boolean;
   start: () => void;
@@ -39,7 +57,8 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   const masterRef = useRef<GainNode | null>(null);
   const nextNoteTimeRef = useRef<number>(0);
   const beatIdxRef = useRef<number>(0);
-  const intervalRef = useRef<number | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const workerUrlRef = useRef<string | null>(null);
   const cfgRef = useRef(cfg);
   const listenersRef = useRef<Set<(beatDot: number, accent: boolean) => void>>(new Set());
   const currentBeatRef = useRef<number>(0);
@@ -55,7 +74,7 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
       const Ctor = (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ?? AudioContext;
       ctxRef.current = new Ctor();
       const master = ctxRef.current.createGain();
-      master.gain.value = 1;
+      master.gain.value = 5;
       master.connect(ctxRef.current.destination);
       masterRef.current = master;
     }
@@ -109,20 +128,37 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
     }
   }, [scheduleNote]);
 
+  const ensureWorker = useCallback((): Worker | null => {
+    if (workerRef.current) return workerRef.current;
+    if (typeof Worker === 'undefined') return null;
+    try {
+      const blob = new Blob([SCHEDULER_WORKER_SRC], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      const w = new Worker(url);
+      w.onmessage = () => scheduler();
+      workerRef.current = w;
+      workerUrlRef.current = url;
+      return w;
+    } catch {
+      return null;
+    }
+  }, [scheduler]);
+
   const start = useCallback(() => {
     const ctx = ensureCtx();
     ctx.resume().catch(() => {});
     nextNoteTimeRef.current = ctx.currentTime + 0.05;
     beatIdxRef.current = 0;
     setIsPlaying(true);
-    if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
-    intervalRef.current = window.setInterval(scheduler, LOOKAHEAD_MS);
-  }, [scheduler]);
+    const w = ensureWorker();
+    if (w) {
+      w.postMessage({ type: 'start', ms: LOOKAHEAD_MS });
+    }
+  }, [ensureWorker]);
 
   const stop = useCallback(() => {
-    if (intervalRef.current !== null) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (workerRef.current) {
+      workerRef.current.postMessage({ type: 'stop' });
     }
     for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
     pendingBeatTimersRef.current.clear();
@@ -134,20 +170,30 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
     else start();
   }, [isPlaying, start, stop]);
 
-  // Restart the scheduling loop when tempo changes mid-play, so the new
-  // interval takes effect on the next beat instead of after the queued
-  // 100 ms of look-ahead drains.
+  // Restart the scheduling loop when the *bar structure* changes mid-play
+  // (numerator/subdivision) — the scheduler reads `bpm` from `cfgRef.current`
+  // on each tick, so BPM changes take effect naturally after the look-ahead
+  // drains without nuking already-scheduled notes or forcing a phantom
+  // accented downbeat. This keeps trainer mode's auto-increase smooth.
   useEffect(() => {
     if (!isPlaying) return;
     const ctx = ctxRef.current;
     if (!ctx) return;
     nextNoteTimeRef.current = ctx.currentTime + 0.05;
     beatIdxRef.current = 0;
-  }, [cfg.bpm, cfg.subdivision, cfg.numerator, isPlaying]);
+  }, [cfg.subdivision, cfg.numerator, isPlaying]);
 
   useEffect(() => {
     return () => {
-      if (intervalRef.current !== null) window.clearInterval(intervalRef.current);
+      if (workerRef.current) {
+        workerRef.current.postMessage({ type: 'stop' });
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+      if (workerUrlRef.current) {
+        URL.revokeObjectURL(workerUrlRef.current);
+        workerUrlRef.current = null;
+      }
       for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
       pendingBeatTimersRef.current.clear();
       ctxRef.current?.close().catch(() => {});

@@ -226,7 +226,7 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
               if (videoRef.current) videoRef.current.playbackRate = r;
             }}
             className="t-primary text-meta bg-transparent rounded px-1 py-0.5"
-            style={{ border: '1px solid rgba(255,255,255,0.1)' }}
+            style={{ border: '1px solid rgba(255,255,255,0.05)' }}
             title="Playback speed (+/-)"
           >
             {SPEED_PRESETS.map((r) => (

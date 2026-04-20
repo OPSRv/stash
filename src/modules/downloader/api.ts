@@ -81,7 +81,13 @@ export const start = (args: {
 
 export const cancel = (id: number): Promise<void> => invoke('dl_cancel', { id });
 export const list = (): Promise<DownloadJob[]> => invoke('dl_list');
-export const deleteJob = (id: number): Promise<void> => invoke('dl_delete', { id });
+export const deleteJob = (id: number, purgeFile = false): Promise<void> =>
+  invoke('dl_delete', { id, purgeFile });
+/** Fetch subtitle text for a completed job. Runs yt-dlp with `--skip-download`
+ *  and parses the resulting VTT into plain text; the caller decides what to do
+ *  with it (usually hand it off to notesCreate). */
+export const extractSubtitles = (id: number, langs?: string[]): Promise<string> =>
+  invoke('dl_extract_subtitles', { id, langs: langs ?? null });
 export const clearCompleted = (): Promise<number> => invoke('dl_clear_completed');
 export const pause = (id: number): Promise<void> => invoke('dl_pause', { id });
 export const resume = (id: number): Promise<void> => invoke('dl_resume', { id });

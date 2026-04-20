@@ -10,6 +10,8 @@ type SelectProps<T extends string> = {
   label?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Where the popup opens. `auto` flips up when there isn't enough room below. */
+  placement?: 'bottom' | 'top' | 'auto';
 };
 
 export const Select = <T extends string>({
@@ -19,12 +21,16 @@ export const Select = <T extends string>({
   label,
   placeholder,
   disabled,
+  placement = 'bottom',
 }: SelectProps<T>) => {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popupRef = useRef<HTMLUListElement | null>(null);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
+  const [resolvedPlacement, setResolvedPlacement] = useState<'bottom' | 'top'>(
+    placement === 'top' ? 'top' : 'bottom',
+  );
 
   const selectedIndex = useMemo(
     () => Math.max(0, options.findIndex((o) => o.value === value)),
@@ -65,6 +71,25 @@ export const Select = <T extends string>({
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [open]);
+
+  // Resolve placement whenever the popup opens (auto = flip up if the popup
+  // would otherwise overflow the viewport below the trigger).
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (placement !== 'auto') {
+      setResolvedPlacement(placement);
+      return;
+    }
+    const trigger = triggerRef.current;
+    const popup = popupRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const popupHeight = popup?.offsetHeight ?? 0;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const fitsBelow = spaceBelow >= popupHeight + 8;
+    setResolvedPlacement(fitsBelow || spaceBelow >= spaceAbove ? 'bottom' : 'top');
+  }, [open, placement, options.length]);
 
   // Move focus to listbox when it opens (without scrolling ancestors), and
   // keep the highlighted option in view inside the popup only.
@@ -142,7 +167,9 @@ export const Select = <T extends string>({
           role="listbox"
           tabIndex={-1}
           onKeyDown={onListKey}
-          className="select-popup absolute z-50 mt-1 left-0 min-w-full max-h-60 overflow-y-auto nice-scroll rounded-md py-1 text-body outline-none"
+          className={`select-popup absolute z-50 left-0 min-w-full max-h-60 overflow-y-auto nice-scroll rounded-md py-1 text-body outline-none ${
+            resolvedPlacement === 'top' ? 'bottom-full mb-1' : 'mt-1'
+          }`}
           style={{ minWidth: triggerRef.current?.offsetWidth }}
         >
           {options.map((o, idx) => {

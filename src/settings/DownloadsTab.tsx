@@ -8,6 +8,7 @@ import { Toggle } from '../shared/ui/Toggle';
 import { useToast } from '../shared/ui/Toast';
 import { purgeCookies } from '../modules/downloader/api';
 import { SettingRow } from './SettingRow';
+import { SettingsSectionHeader } from './SettingsSectionHeader';
 import { YtDlpUpdateRow } from './YtDlpUpdateRow';
 import type { Settings } from './store';
 
@@ -47,8 +48,17 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
   };
 
   return (
-    <div className="divide-y divide-white/5">
-      <YtDlpUpdateRow />
+    <div className="max-w-[560px] mx-auto space-y-6">
+      <section>
+        <SettingsSectionHeader label="BINARY" />
+        <div className="divide-y divide-white/5">
+          <YtDlpUpdateRow />
+        </div>
+      </section>
+
+      <section>
+        <SettingsSectionHeader label="STORAGE" />
+        <div className="divide-y divide-white/5">
       <SettingRow
         title="Download folder"
         description={settings.downloadsFolder ?? 'Default: ~/Movies/Stash'}
@@ -131,6 +141,12 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
           />
         }
       />
+        </div>
+      </section>
+
+      <section>
+        <SettingsSectionHeader label="NOTIFICATIONS" />
+        <div className="divide-y divide-white/5">
       <SettingRow
         title="Notify when a download finishes"
         description="Shows a system notification on completion and failure."
@@ -142,6 +158,12 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
           />
         }
       />
+        </div>
+      </section>
+
+      <section>
+        <SettingsSectionHeader label="COOKIES" />
+        <div className="divide-y divide-white/5">
       <SettingRow
         title="Default browser"
         description="Used across the app: as the cookie source for yt-dlp on login-walled content, and as the identity for embedded web views (Music). Safari is the safest choice on macOS."
@@ -175,6 +197,9 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
           </Button>
         }
       />
+        </div>
+      </section>
+
       <ConfirmDialog
         open={isForgetOpen}
         title="Forget browser cookies?"

@@ -104,7 +104,7 @@ export const GlobalSearch = ({
         className="rounded-xl w-full max-w-[560px] overflow-hidden"
         style={{
           background: 'rgba(30,30,30,0.96)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          border: '1px solid rgba(255,255,255,0.04)',
         }}
         onClick={(e) => e.stopPropagation()}
       >

@@ -26,17 +26,21 @@ import {
 import { useDownloadJobs } from './useDownloadJobs';
 import { useUrlDropTarget } from './useUrlDropTarget';
 import { useVideoDetect } from './useVideoDetect';
+import { takePendingDownloaderUrl } from './pendingUrl';
 import {
   cancel,
   clearCompleted,
   deleteJob,
+  extractSubtitles,
   formatDuration,
   pause,
   resume,
   retry,
   start,
+  type DownloadJob,
   type QualityOption,
 } from './api';
+import { notesCreate } from '../notes/api';
 
 type CompletedView = 'list' | 'grid';
 
@@ -100,10 +104,19 @@ export const DownloadsShell = () => {
     [run]
   );
 
-  // On mount: if clipboard holds a supported URL, auto-fill and detect.
+  // On mount: if the shell stashed a URL for us while we were still lazy-
+  // loading (the usual path when a download link lands in the clipboard and
+  // PopupShell flips the tab), consume it first. Otherwise fall back to
+  // peeking at the clipboard directly so a fresh popup still auto-fills.
   useEffect(() => {
     (async () => {
       try {
+        const pending = takePendingDownloaderUrl();
+        if (pending && SUPPORTED_VIDEO_URL.test(pending)) {
+          setUrl(pending);
+          runDetect(pending);
+          return;
+        }
         const text = await readText();
         const candidate = text?.trim() ?? '';
         if (candidate && SUPPORTED_VIDEO_URL.test(candidate)) {
@@ -189,36 +202,76 @@ export const DownloadsShell = () => {
     },
     [reload, toast, announce],
   );
-  const handleCancelJob = useCallback(
-    (id: number) => () => cancelConfirm.request(id, performCancel),
-    [cancelConfirm, performCancel]
-  );
-  const handlePauseJob = useCallback(
-    (id: number) => () =>
-      pause(id).then(() => {
-        reload();
-        announce('Download paused');
-      }),
-    [reload, announce]
-  );
-  const handleResumeJob = useCallback(
-    (id: number) => () =>
-      resume(id).then(() => {
-        reload();
-        announce('Download resumed');
-      }),
-    [reload, announce]
-  );
+  const handleCancelJob = (id: number) =>
+    cancelConfirm.request(id, performCancel);
+  const handlePauseJob = (id: number) =>
+    pause(id).then(() => {
+      reload();
+      announce('Download paused');
+    });
+  const handleResumeJob = (id: number) =>
+    resume(id).then(() => {
+      reload();
+      announce('Download resumed');
+    });
+  // Stable callback — the completed list/grid rows are React.memo, so
+  // identity churn here would force every row to re-render on any shell
+  // update (toast, resize, tab banner).
   const handleDeleteJob = useCallback(
-    (id: number) => () =>
-      deleteJob(id).then(() => {
-        reload();
-        announce('Download removed');
-      }),
-    [reload, announce]
+    (id: number, purgeFile: boolean) =>
+      deleteJob(id, purgeFile)
+        .then(() => {
+          reload();
+          announce(purgeFile ? 'Download and file deleted' : 'Download removed');
+        })
+        .catch((e) => {
+          console.error('delete failed', e);
+          toast({
+            title: purgeFile ? 'Delete failed' : 'Remove failed',
+            description: String(e),
+            variant: 'error',
+          });
+        }),
+    [reload, announce, toast],
+  );
+  const [extractingId, setExtractingId] = useState<number | null>(null);
+  const handleExtractSubtitles = useCallback(
+    async (job: DownloadJob) => {
+      if (extractingId != null) return;
+      setExtractingId(job.id);
+      try {
+        const text = await extractSubtitles(job.id);
+        const firstLine = text.split('\n').find((l) => l.trim()) ?? '';
+        const title = job.title
+          ? `Subtitles · ${job.title}`
+          : firstLine.length > 60
+            ? `Subtitles · ${firstLine.slice(0, 57).trimEnd()}…`
+            : `Subtitles · ${firstLine || 'Untitled'}`;
+        await notesCreate(title, text);
+        toast({
+          title: 'Subtitles saved to Notes',
+          variant: 'success',
+          action: {
+            label: 'Open Notes',
+            onClick: () =>
+              window.dispatchEvent(new CustomEvent('stash:navigate', { detail: 'notes' })),
+          },
+        });
+      } catch (e) {
+        console.error('subtitle extraction failed', e);
+        toast({
+          title: 'Could not extract subtitles',
+          description: String(e),
+          variant: 'error',
+        });
+      } finally {
+        setExtractingId(null);
+      }
+    },
+    [extractingId, toast],
   );
   const handleRetryJob = useCallback(
-    (id: number) => () =>
+    (id: number) =>
       retry(id)
         .then(() => {
           reload();
@@ -228,14 +281,11 @@ export const DownloadsShell = () => {
           console.error('retry failed', e);
           toast({ title: 'Retry failed', description: String(e), variant: 'error' });
         }),
-    [reload, toast]
+    [reload, toast],
   );
-  const handlePlay = useCallback(
-    (targetPath: string | null) => () => {
-      if (targetPath) setPlaying(targetPath);
-    },
-    []
-  );
+  const handlePlay = useCallback((targetPath: string | null) => {
+    if (targetPath) setPlaying(targetPath);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -339,9 +389,9 @@ export const DownloadsShell = () => {
               <ActiveDownloadRow
                 key={job.id}
                 job={job}
-                onCancel={handleCancelJob(job.id)}
-                onPause={handlePauseJob(job.id)}
-                onResume={handleResumeJob(job.id)}
+                onCancel={() => handleCancelJob(job.id)}
+                onPause={() => handlePauseJob(job.id)}
+                onResume={() => handleResumeJob(job.id)}
               />
             ))}
           </>
@@ -373,6 +423,8 @@ export const DownloadsShell = () => {
                 onPlay={handlePlay}
                 onDelete={handleDeleteJob}
                 onRetry={handleRetryJob}
+                onExtractSubtitles={handleExtractSubtitles}
+                extractingId={extractingId}
               />
             ) : (
               <CompletedGrid
@@ -384,12 +436,17 @@ export const DownloadsShell = () => {
           </>
         )}
 
-        {active.length === 0 && completed.length === 0 && !detected && (
-          <EmptyState
-            title="No downloads yet"
-            description="Paste a video URL above or drop one in — YouTube, TikTok, Instagram, X, Reddit, Vimeo, Twitch and more."
-          />
-        )}
+        {active.length === 0 &&
+          completed.length === 0 &&
+          !detected &&
+          !quick &&
+          !detecting &&
+          !url.trim() && (
+            <EmptyState
+              title="No downloads yet"
+              description="Paste a video URL above or drop one in — YouTube, TikTok, Instagram, X, Reddit, Vimeo, Twitch and more."
+            />
+          )}
         <div className="h-6" />
       </div>
 

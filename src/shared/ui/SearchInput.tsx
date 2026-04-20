@@ -8,6 +8,8 @@ type SearchInputProps = {
   shortcutHint?: string;
   autoFocus?: boolean;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  compact?: boolean;
+  trailing?: React.ReactNode;
 };
 
 export const SearchInput = ({
@@ -17,11 +19,18 @@ export const SearchInput = ({
   shortcutHint,
   autoFocus,
   inputRef,
-}: SearchInputProps) => (
-  <div className="flex items-center gap-2.5 px-3 py-2.5 border-b hair">
+  compact,
+  trailing,
+}: SearchInputProps) => {
+  const iconSize = compact ? 13 : 16;
+  const rowCls = compact
+    ? 'flex items-center gap-2 pl-2.5 pr-1.5 py-1.5 border-b hair'
+    : 'flex items-center gap-2.5 px-3 py-2.5 border-b hair';
+  return (
+  <div className={rowCls}>
     <svg
-      width="16"
-      height="16"
+      width={iconSize}
+      height={iconSize}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -45,5 +54,7 @@ export const SearchInput = ({
       className="flex-1 bg-transparent outline-none text-body t-primary"
     />
     {shortcutHint && <Kbd>{shortcutHint}</Kbd>}
+    {trailing}
   </div>
-);
+  );
+};

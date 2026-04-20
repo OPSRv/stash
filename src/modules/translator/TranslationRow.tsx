@@ -1,4 +1,5 @@
 import { memo, type ReactNode } from 'react';
+import { AskAiButton } from '../../shared/ui/AskAiButton';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
 import { ReuseIcon, SpeakerIcon, TrashIcon } from '../../shared/ui/icons';
@@ -72,6 +73,7 @@ export const TranslationRow = memo(
         <IconButton onClick={() => onSpeak(row.translated, row.to_lang)} title="Listen">
           <SpeakerIcon size={12} />
         </IconButton>
+        <AskAiButton text={row.translated} title="Ask AI about this translation (opens a new chat)" />
         <Button
           size="xs"
           variant="soft"

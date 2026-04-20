@@ -45,6 +45,23 @@ export const TranslatorShell = () => {
       .catch(() => {});
   }, []);
 
+  // External nudge from other modules (e.g. Clipboard's "Send to translator"
+  // button) — drop the text into the source pane; auto-translate kicks in
+  // from the existing draft watcher.
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (typeof detail !== 'string') return;
+      const trimmed = detail.trim();
+      if (!trimmed) return;
+      setSourceHint(null);
+      setDraft(trimmed);
+      sourceRef.current?.focus();
+    };
+    window.addEventListener('stash:translator-prefill', onPrefill);
+    return () => window.removeEventListener('stash:translator-prefill', onPrefill);
+  }, []);
+
   const { liveResult, setLiveResult, isBusy, run: runTranslate, reset: resetRun } =
     useRunTranslate({ onToast: toast, onAnnounce: announce });
 
@@ -91,16 +108,20 @@ export const TranslatorShell = () => {
     if (!liveResult || !canSwap) return;
     const nextTarget = liveResult.from;
     const nextDraft = liveResult.translated;
+    const nextFrom = liveResult.to;
     setTarget(nextTarget);
     saveSetting('translateTarget', nextTarget).catch(() => {});
     setDraft(nextDraft);
     setLiveResult(null);
-    setSourceHint(null);
+    // Keep the header's "From" label accurate immediately — the live result
+    // was cleared, so without a hint it would flash back to "Auto-detect"
+    // before the auto-translate re-resolves and make the click look dead.
+    setSourceHint(nextFrom);
     resetAutoTranslate();
     announce(
       `Swapped — translating ${languageLabel(liveResult.to)} to ${languageLabel(nextTarget)}`,
     );
-  }, [liveResult, canSwap, announce, resetAutoTranslate]);
+  }, [liveResult, canSwap, announce, resetAutoTranslate, setLiveResult]);
 
   const handleSpeak = useCallback((text: string, lang: string) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;

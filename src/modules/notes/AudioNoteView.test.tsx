@@ -29,6 +29,7 @@ const audioNote = (overrides: Partial<Note> = {}): Note => ({
   updated_at: 0,
   audio_path: '/tmp/1.webm',
   audio_duration_ms: 32_000,
+  pinned: false,
   ...overrides,
 });
 

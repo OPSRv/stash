@@ -52,30 +52,29 @@ export const AiShell = () => {
   // user was using, not the picker. Stored in localStorage keyed simply so
   // we don't need Rust round-trips for what's essentially UI state.
   const LAST_MODE_KEY = 'stash.ai.lastMode';
-  const [mode, setMode] = useState<Mode>(() => {
+  const [storedMode, setStoredMode] = useState<Mode>(() => {
     try {
       const stashed = localStorage.getItem(LAST_MODE_KEY);
-      if (stashed === 'api' && apiAvailable) return 'api';
-      if (stashed && stashed !== 'api' && stashed !== '') return stashed;
+      if (stashed === 'api') return 'api';
+      if (stashed && stashed !== '') return stashed;
     } catch {
       // localStorage may be unavailable in some contexts
     }
-    return apiAvailable ? 'api' : '';
+    return '';
   });
 
-  useEffect(() => {
+  // Derived: if the API pill vanishes while the user was on it, fall back to
+  // the tile picker without an extra render pass through an effect.
+  const mode: Mode = !apiAvailable && storedMode === 'api' ? '' : storedMode;
+
+  const setMode = useCallback((next: Mode) => {
+    setStoredMode(next);
     try {
-      localStorage.setItem(LAST_MODE_KEY, mode);
+      localStorage.setItem(LAST_MODE_KEY, next);
     } catch {
       // ignore
     }
-  }, [mode]);
-
-  // If the API pill vanishes while the user is on it (they cleared the
-  // model), fall back to the tile picker.
-  useEffect(() => {
-    if (!apiAvailable && mode === 'api') setMode('');
-  }, [apiAvailable, mode]);
+  }, []);
 
   // External nudge (e.g. clicking the webchat Now Playing bar in the popup
   // shell) that wants us to surface a specific service.
@@ -107,14 +106,19 @@ export const AiShell = () => {
   );
 
   useEffect(() => {
+    let cancelled = false;
     aiListSessions()
       .then((list) => {
+        if (cancelled) return;
         setSessions(list);
         if (list.length > 0) setActiveId(list[0].id);
       })
       .catch((e) => {
-        console.error('load sessions failed', e);
+        if (!cancelled) console.error('load sessions failed', e);
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -122,9 +126,19 @@ export const AiShell = () => {
       setMessages([]);
       return;
     }
+    // Guard against rapid session switching: a slow IPC for an old session
+    // mustn't overwrite messages we already loaded for the new one.
+    let cancelled = false;
     aiListMessages(activeId)
-      .then(setMessages)
-      .catch((e) => console.error('load messages failed', e));
+      .then((msgs) => {
+        if (!cancelled) setMessages(msgs);
+      })
+      .catch((e) => {
+        if (!cancelled) console.error('load messages failed', e);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [activeId]);
 
   const createNewSession = useCallback(async (): Promise<Session> => {
@@ -134,6 +148,32 @@ export const AiShell = () => {
     setMessages([]);
     return s;
   }, []);
+
+  // Pre-fill the composer from cross-module triggers (e.g. clipboard's
+  // magic wand, the notes transcript "Ask AI" button). Switches to API mode
+  // when available so the user lands on the input and can hit Send.
+  //
+  // Payload is either a plain string (legacy — reuse current session) or
+  // `{ text, newSession }`. When `newSession` is set, a fresh chat is
+  // created first, so a previous conversation doesn't contaminate this one.
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const raw = (e as CustomEvent<string | { text: string; newSession?: boolean }>).detail;
+      const text = typeof raw === 'string' ? raw : raw?.text;
+      const newSession = typeof raw === 'object' && raw !== null ? !!raw.newSession : false;
+      if (typeof text !== 'string' || !text) return;
+      if (apiAvailable) setMode('api');
+      if (newSession) {
+        createNewSession()
+          .then(() => setInput(text))
+          .catch(() => setInput(text));
+      } else {
+        setInput(text);
+      }
+    };
+    window.addEventListener('stash:ai-prefill', onPrefill);
+    return () => window.removeEventListener('stash:ai-prefill', onPrefill);
+  }, [apiAvailable, createNewSession]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -188,7 +228,7 @@ export const AiShell = () => {
 
     let model;
     try {
-      model = buildModel(
+      model = await buildModel(
         {
           provider: settings.aiProvider,
           model: settings.aiModel,

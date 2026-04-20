@@ -69,7 +69,7 @@ const toneGhost: Record<ButtonTone, string> = {
 
 const toneOutline: Record<ButtonTone, string> = {
   neutral:
-    'border border-white/15 hover:bg-white/5 text-[rgba(255,255,255,0.92)]',
+    'border border-white/[0.06] hover:bg-white/5 text-[rgba(255,255,255,0.92)]',
   accent:
     'text-[#4A8BEA] border [border-color:rgba(var(--stash-accent-rgb),0.45)] hover:[background:rgba(var(--stash-accent-rgb),0.10)]',
   success:
@@ -113,7 +113,7 @@ export const Button = ({
 }: ButtonProps) => {
   const isDisabled = disabled || loading;
   const classes = [
-    'inline-flex items-center transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed ring-focus',
+    'inline-flex items-center whitespace-nowrap transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed ring-focus',
     sizeClass[size],
     shapeClass[shape],
     variantTone(variant, tone),

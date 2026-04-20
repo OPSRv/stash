@@ -14,6 +14,7 @@ import { AppearanceTab } from './AppearanceTab';
 import { ClipboardTab } from './ClipboardTab';
 import { DownloadsTab } from './DownloadsTab';
 import { GeneralTab } from './GeneralTab';
+import { NotesTab } from './NotesTab';
 import { TerminalTab } from './TerminalTab';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
 import { applyTheme, broadcastTheme } from './theme';
@@ -24,17 +25,106 @@ type Tab =
   | 'clipboard'
   | 'downloads'
   | 'terminal'
+  | 'notes'
   | 'ai'
   | 'about';
 
-const tabs: { id: Tab; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'clipboard', label: 'Clipboard' },
-  { id: 'downloads', label: 'Downloads' },
-  { id: 'terminal', label: 'Terminal' },
-  { id: 'ai', label: 'Web' },
-  { id: 'about', label: 'About' },
+const Stroke = ({ d }: { d: string }) => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d={d} />
+  </svg>
+);
+
+const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  {
+    id: 'general',
+    label: 'General',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+        <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+        <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+        <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+        <path d="M12 22a10 10 0 1 1 0-20c5.523 0 10 4.03 10 9 0 1.657-1.343 3-3 3h-1.667A1.333 1.333 0 0 0 16 15.333c0 .369.146.71.402.954.256.244.402.585.402.953 0 .885-.717 1.76-1.604 1.76H12z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'clipboard',
+    label: 'Clipboard',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="8" y="2" width="8" height="4" rx="1" />
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+      </svg>
+    ),
+  },
+  {
+    id: 'downloads',
+    label: 'Downloads',
+    icon: <Stroke d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14" />,
+  },
+  {
+    id: 'terminal',
+    label: 'Terminal',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <polyline points="4 7 9 12 4 17" />
+        <line x1="12" y1="19" x2="20" y2="19" />
+      </svg>
+    ),
+  },
+  {
+    id: 'notes',
+    label: 'Notes',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4z" />
+        <path d="M16 4v4h4" />
+        <path d="M8 12h8M8 16h6" />
+      </svg>
+    ),
+  },
+  {
+    id: 'ai',
+    label: 'Web',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+      </svg>
+    ),
+  },
+  {
+    id: 'about',
+    label: 'About',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 16v-4M12 8h.01" />
+      </svg>
+    ),
+  },
 ];
 
 /// Settings root: owns the active-tab state + the settings-update effect
@@ -125,8 +215,12 @@ export const SettingsShell = () => {
   };
 
   return (
-    <div className="h-full flex flex-col">
-      <nav className="px-4 py-2 flex items-center gap-1 border-b hair" role="tablist">
+    <div className="h-full flex">
+      <nav
+        className="w-[140px] shrink-0 px-2 py-3 flex flex-col gap-0.5 border-r hair"
+        role="tablist"
+        aria-orientation="vertical"
+      >
         {tabs.map((t) => {
           const isActive = tab === t.id;
           return (
@@ -135,16 +229,20 @@ export const SettingsShell = () => {
               role="tab"
               aria-selected={isActive}
               onClick={() => setTab(t.id)}
-              className={`px-3 py-1.5 rounded-md text-body font-medium transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-2 px-2 py-1.5 rounded-md text-meta font-medium transition-colors cursor-pointer text-left ${
                 isActive ? 't-primary bg-white/[0.06]' : 't-secondary hover:bg-white/[0.04]'
               }`}
             >
+              <span className="inline-flex shrink-0">{t.icon}</span>
               {t.label}
             </button>
           );
         })}
       </nav>
-      <main className="flex-1 overflow-y-auto nice-scroll px-6 py-5">
+      <main
+        className="flex-1 min-w-0 overflow-y-auto nice-scroll px-6 py-5"
+        style={{ scrollbarGutter: 'stable' }}
+      >
         {tab === 'general' && (
           <GeneralTab autostartOn={autostartOn} onToggleAutostart={toggleAutostart} />
         )}
@@ -152,6 +250,14 @@ export const SettingsShell = () => {
         {tab === 'clipboard' && <ClipboardTab settings={settings} onChange={update} />}
         {tab === 'downloads' && <DownloadsTab settings={settings} onChange={update} />}
         {tab === 'terminal' && <TerminalTab settings={settings} onChange={update} />}
+        {tab === 'notes' && (
+          <NotesTab
+            autoTranscribe={settings.notesAutoTranscribe}
+            autoPolish={settings.notesAutoPolish}
+            onToggleAutoTranscribe={(v) => update('notesAutoTranscribe', v)}
+            onToggleAutoPolish={(v) => update('notesAutoPolish', v)}
+          />
+        )}
         {tab === 'ai' && <AiTab settings={settings} onChange={update} />}
         {tab === 'about' && <AboutTab />}
       </main>

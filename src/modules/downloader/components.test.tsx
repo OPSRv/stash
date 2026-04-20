@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ActiveDownloadRow } from './ActiveDownloadRow';
@@ -298,7 +298,7 @@ describe('CompletedDownloadTile', () => {
     expect(onPlay).not.toHaveBeenCalled();
   });
 
-  it('delete button stops propagation and does not trigger play', async () => {
+  it('delete button opens a confirm dialog without triggering play', async () => {
     const user = userEvent.setup();
     const onPlay = vi.fn();
     const onDelete = vi.fn();
@@ -310,7 +310,34 @@ describe('CompletedDownloadTile', () => {
       />
     );
     await user.click(screen.getByRole('button', { name: 'Delete' }));
-    expect(onDelete).toHaveBeenCalled();
     expect(onPlay).not.toHaveBeenCalled();
+    // Dialog confirm button sits inside role="dialog" — disambiguate from the
+    // tile's own × button (also labelled "Delete").
+    const dialog = await screen.findByRole('dialog');
+    const { getByRole } = within(dialog);
+    await user.click(getByRole('button', { name: 'Delete' }));
+    // Row/Tile now forward the row's id so memoised parents can pass
+    // stable callbacks without per-item arrow closures.
+    expect(onDelete).toHaveBeenCalledWith(expect.any(Number), false);
+  });
+
+  it('delete confirm passes purgeFile=true when the "also delete file" box is ticked', async () => {
+    const user = userEvent.setup();
+    const onDelete = vi.fn();
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
+        onPlay={vi.fn()}
+        onDelete={onDelete}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog');
+    const { getByRole } = within(dialog);
+    await user.click(
+      getByRole('checkbox', { name: /also delete the downloaded file/i }),
+    );
+    await user.click(getByRole('button', { name: 'Delete' }));
+    expect(onDelete).toHaveBeenCalledWith(expect.any(Number), true);
   });
 });

@@ -6,7 +6,7 @@ interface ToastCardProps {
 }
 
 const variantClasses: Record<ToastVariant, string> = {
-  default: 'bg-white/10 border-white/10 t-primary',
+  default: 'bg-white/10 border-white/[0.05] t-primary',
   success: 'border-emerald-400/30 t-primary',
   error: 'border-red-400/40 t-primary',
 };

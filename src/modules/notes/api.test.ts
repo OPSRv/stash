@@ -52,6 +52,7 @@ describe('notes/api', () => {
       updated_at: 0,
       audio_path: '/tmp/9.webm',
       audio_duration_ms: 1500,
+      pinned: false,
     } as never);
     const bytes = new Uint8Array([1, 2, 3]);
     const note = await notesCreateAudio({ title: 'Voice', bytes, ext: 'webm', durationMs: 1500 });

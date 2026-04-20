@@ -1,6 +1,7 @@
 import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
 import { SettingRow } from './SettingRow';
+import { SettingsSectionHeader } from './SettingsSectionHeader';
 import type { Settings, TerminalSnippet } from './store';
 
 interface TerminalTabProps {
@@ -28,26 +29,33 @@ const updateSnippet = (
 };
 
 export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
-  <div className="divide-y divide-white/5">
-    <SettingRow
-      title="Command snippets"
-      description="Each snippet becomes a button in the Terminal tab. Clicking it writes the command followed by a newline into the active shell."
-      control={
-        <Button
-          size="sm"
-          variant="soft"
-          onClick={() =>
-            onChange('terminalSnippets', [
-              ...settings.terminalSnippets,
-              { id: freshId(settings.terminalSnippets), label: 'New', command: '' },
-            ])
+  <div className="max-w-[560px] mx-auto space-y-6">
+    <section>
+      <SettingsSectionHeader label="SNIPPETS" />
+      <div className="divide-y divide-white/5">
+        <SettingRow
+          title="Command snippets"
+          description="Each snippet becomes a button in the Terminal tab. Clicking it writes the command followed by a newline into the active shell."
+          control={
+            <Button
+              size="sm"
+              variant="soft"
+              shape="square"
+              aria-label="Add snippet"
+              title="Add snippet"
+              onClick={() =>
+                onChange('terminalSnippets', [
+                  ...settings.terminalSnippets,
+                  { id: freshId(settings.terminalSnippets), label: 'New', command: '' },
+                ])
+              }
+            >
+              +
+            </Button>
           }
-        >
-          + Add snippet
-        </Button>
-      }
-    />
-    <div className="py-2 space-y-1.5">
+        />
+      </div>
+      <div className="py-2 space-y-1.5">
       {settings.terminalSnippets.length === 0 && (
         <div className="t-tertiary text-meta italic">
           No snippets yet — add one above to get a dedicated button in the Terminal tab.
@@ -90,6 +98,7 @@ export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
           </Button>
         </div>
       ))}
-    </div>
+      </div>
+    </section>
   </div>
 );

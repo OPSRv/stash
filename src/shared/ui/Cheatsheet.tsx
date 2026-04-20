@@ -97,7 +97,7 @@ export const Cheatsheet = ({
         aria-modal="true"
         aria-label="Keyboard shortcuts"
         className="rounded-xl p-5 max-w-[560px] w-full max-h-full overflow-y-auto nice-scroll"
-        style={{ background: 'rgba(30,30,30,0.95)', border: '1px solid rgba(255,255,255,0.08)' }}
+        style={{ background: 'rgba(30,30,30,0.95)', border: '1px solid rgba(255,255,255,0.04)' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">

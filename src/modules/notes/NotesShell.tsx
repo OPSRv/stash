@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { SearchInput } from '../../shared/ui/SearchInput';
@@ -12,11 +12,13 @@ import {
   MicIcon,
   PanelLeftIcon,
   PencilIcon,
+  PinIcon,
   SearchIcon,
   SplitViewIcon,
   TrashIcon,
   UploadIcon,
 } from '../../shared/ui/icons';
+import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { useToast } from '../../shared/ui/Toast';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
@@ -38,6 +40,7 @@ import {
   notesList,
   notesReadFile,
   notesSearch,
+  notesSetPinned,
   notesUpdate,
   notesWriteFile,
   type Note,
@@ -101,7 +104,7 @@ export const NotesShell = () => {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [viewMode, setViewMode] = useState<NotesViewMode>('preview');
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const saveTimer = useRef<number | null>(null);
   const savedClearTimer = useRef<number | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -151,6 +154,29 @@ export const NotesShell = () => {
     setNotes(data);
     return data;
   }, [query]);
+
+  const togglePinned = useCallback(
+    async (id: number, pinned: boolean) => {
+      try {
+        await notesSetPinned(id, pinned);
+        await reload();
+        // Optimistically reflect on the loaded full note too, so the header
+        // pin state flips without waiting for the next notesGet round-trip.
+        setActiveNote((prev) => (prev && prev.id === id ? { ...prev, pinned } : prev));
+      } catch (e) {
+        toast({ title: 'Pin failed', description: String(e), variant: 'error' });
+      }
+    },
+    [reload, toast],
+  );
+
+  const { pinned: pinnedNotes, recent: recentNotes } = useMemo(
+    () => ({
+      pinned: notes.filter((n) => n.pinned),
+      recent: notes.filter((n) => !n.pinned),
+    }),
+    [notes],
+  );
 
   useEffect(() => {
     reload().then((data) => {
@@ -296,11 +322,18 @@ export const NotesShell = () => {
       const activeModel = await whisperGetActive().catch(() => null);
       if (!activeModel || createdId == null) return;
       let transcript: string | null = null;
+      setSaveStatus('transcribing');
+      toast({ title: 'Transcribing voice note…', variant: 'default', durationMs: 2200 });
       try {
         transcript = await whisperTranscribe(createdId, 'uk');
         setBody(transcript);
         await reload();
+        setSaveStatus('saved');
+        if (savedClearTimer.current !== null) window.clearTimeout(savedClearTimer.current);
+        savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);
+        toast({ title: 'Transcribed', variant: 'success', durationMs: 2000 });
       } catch (e) {
+        setSaveStatus('error');
         toast({
           title: 'Auto-transcribe failed',
           description: String(e),
@@ -309,6 +342,8 @@ export const NotesShell = () => {
         return;
       }
       if (!settings.notesAutoPolish || !transcript?.trim()) return;
+      setSaveStatus('polishing');
+      toast({ title: 'Polishing transcript…', variant: 'default', durationMs: 2200 });
       try {
         const polish = await polishTranscript(transcript, {
           aiProvider: settings.aiProvider,
@@ -318,11 +353,19 @@ export const NotesShell = () => {
           aiApiKeys: settings.aiApiKeys,
           aiWebServices: settings.aiWebServices,
         });
-        if (polish.kind !== 'ok') return;
+        if (polish.kind !== 'ok') {
+          setSaveStatus('idle');
+          return;
+        }
         await notesUpdate(createdId, `Voice note · ${new Date().toLocaleString()}`, polish.text);
         setBody(polish.text);
         await reload();
+        setSaveStatus('saved');
+        if (savedClearTimer.current !== null) window.clearTimeout(savedClearTimer.current);
+        savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);
+        toast({ title: 'Polished', variant: 'success', durationMs: 2000 });
       } catch (e) {
+        setSaveStatus('error');
         toast({
           title: 'Auto-polish failed',
           description: String(e),
@@ -400,6 +443,91 @@ export const NotesShell = () => {
   const exportDisabled = !body && !title;
   const showEditor = !isAudio && viewMode !== 'preview';
   const showPreview = !isAudio && viewMode !== 'edit';
+
+  const renderNoteRow = (n: NoteSummary) => {
+    const rowAudio = Boolean(n.audio_path);
+    const preview = rowAudio
+      ? `Voice memo · ${formatDuration(n.audio_duration_ms)}`
+      : n.preview.split('\n').find((l) => l.trim()) || 'No content';
+    const open = () => {
+      setActiveId(n.id);
+      setViewMode('preview');
+    };
+    return (
+      <div
+        key={n.id}
+        role="button"
+        tabIndex={0}
+        onClick={open}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            open();
+          }
+        }}
+        className={`group w-full text-left px-3 py-2 cursor-pointer transition-colors ring-focus ${
+          n.id === activeId ? 'row-active' : 'hover:bg-white/[0.03]'
+        }`}
+      >
+        <div className="flex items-baseline gap-2">
+          {rowAudio && (
+            <span
+              className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full"
+              style={{
+                background: 'rgba(var(--stash-accent-rgb), 0.18)',
+                color: 'rgba(var(--stash-accent-rgb), 1)',
+              }}
+              aria-hidden
+            >
+              <MicIcon size={9} />
+            </span>
+          )}
+          <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
+            {n.title || <span className="t-tertiary">Untitled</span>}
+          </span>
+          {/* Trailing slot: timestamp by default, pin toggle on row hover/focus
+              and always when the note is pinned. Same width avoids layout
+              jumps when the trailing element swaps. */}
+          <span className="shrink-0 relative inline-flex items-center justify-end w-7 h-4">
+            <span
+              className={`t-tertiary text-[10px] font-mono ${
+                n.pinned ? 'hidden' : 'group-hover:hidden group-focus-within:hidden'
+              }`}
+            >
+              {iso(n.updated_at)}
+            </span>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                void togglePinned(n.id, !n.pinned);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void togglePinned(n.id, !n.pinned);
+                }
+              }}
+              title={n.pinned ? 'Unpin note' : 'Pin note'}
+              aria-label={n.pinned ? 'Unpin note' : 'Pin note'}
+              aria-pressed={n.pinned}
+              className={`ring-focus rounded p-0.5 t-tertiary hover:t-primary cursor-pointer ${
+                n.pinned
+                  ? 'inline-flex items-center'
+                  : 'hidden group-hover:inline-flex group-focus-within:inline-flex items-center'
+              }`}
+              style={n.pinned ? { color: 'var(--stash-accent)' } : undefined}
+            >
+              <PinIcon size={11} filled={n.pinned} />
+            </span>
+          </span>
+        </div>
+        <div className="t-tertiary text-meta truncate mt-0.5">{preview}</div>
+      </div>
+    );
+  };
 
   return (
     <div className="h-full flex">
@@ -497,48 +625,18 @@ export const NotesShell = () => {
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto nice-scroll">
-          {notes.map((n) => {
-            const isAudio = Boolean(n.audio_path);
-            const preview = isAudio
-              ? `Voice memo · ${formatDuration(n.audio_duration_ms)}`
-              : n.preview.split('\n').find((l) => l.trim()) || 'No content';
-            return (
-              <button
-                key={n.id}
-                onClick={() => {
-                  setActiveId(n.id);
-                  // Existing notes default to preview — the editor is one click
-                  // away via the view-mode segmented control.
-                  setViewMode('preview');
-                }}
-                className={`w-full text-left px-3 py-2 cursor-pointer transition-colors ${
-                  n.id === activeId ? 'row-active' : 'hover:bg-white/[0.03]'
-                }`}
-              >
-                <div className="flex items-baseline gap-2">
-                  {isAudio && (
-                    <span
-                      className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full"
-                      style={{
-                        background: 'rgba(var(--stash-accent-rgb), 0.18)',
-                        color: 'rgba(var(--stash-accent-rgb), 1)',
-                      }}
-                      aria-hidden
-                    >
-                      <MicIcon size={9} />
-                    </span>
-                  )}
-                  <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
-                    {n.title || <span className="t-tertiary">Untitled</span>}
-                  </span>
-                  <span className="t-tertiary text-[10px] font-mono shrink-0">
-                    {iso(n.updated_at)}
-                  </span>
-                </div>
-                <div className="t-tertiary text-meta truncate mt-0.5">{preview}</div>
-              </button>
-            );
-          })}
+          {pinnedNotes.length > 0 && (
+            <div className="px-3 pt-3 pb-1">
+              <SectionLabel>Pinned</SectionLabel>
+            </div>
+          )}
+          {pinnedNotes.map((n) => renderNoteRow(n))}
+          {pinnedNotes.length > 0 && recentNotes.length > 0 && (
+            <div className="px-3 pt-3 pb-1">
+              <SectionLabel>Recent</SectionLabel>
+            </div>
+          )}
+          {recentNotes.map((n) => renderNoteRow(n))}
           {notes.length === 0 && (
             <EmptyState
               variant="compact"
@@ -585,6 +683,19 @@ export const NotesShell = () => {
                 )}
                 <div className="w-px h-5 bg-white/[0.08]" aria-hidden />
                 <div className="flex items-center gap-1 shrink-0">
+                  {active && (
+                    <IconButton
+                      onClick={() => void togglePinned(active.id, !active.pinned)}
+                      title={active.pinned ? 'Unpin note' : 'Pin note'}
+                      stopPropagation={false}
+                    >
+                      <PinIcon
+                        size={13}
+                        filled={active.pinned}
+                        className={active.pinned ? '' : undefined}
+                      />
+                    </IconButton>
+                  )}
                   <AskAiButton
                     text={() => (body.trim() ? body : title)}
                     disabled={!body.trim() && !title.trim()}

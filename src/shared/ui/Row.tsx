@@ -12,6 +12,7 @@ type RowProps = {
   pinned?: boolean;
   onSelect?: (e?: React.MouseEvent) => void;
   selected?: boolean;
+  className?: string;
 };
 
 export const Row = ({
@@ -26,11 +27,13 @@ export const Row = ({
   pinned = false,
   onSelect,
   selected = false,
+  className = '',
 }: RowProps) => {
   const classes = [
-    'group mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2 cursor-pointer select-none',
+    'group row-base mx-2 my-0.5 rounded-lg flex items-center gap-3 px-2.5 py-2 cursor-pointer select-none',
     selected ? 'row-selected' : '',
     active ? 'row-active' : pinned ? 'row-pinned' : '',
+    className,
   ]
     .filter(Boolean)
     .join(' ');

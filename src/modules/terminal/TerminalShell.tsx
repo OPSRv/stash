@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../shared/ui/Button';
+import { AskAiButton } from '../../shared/ui/AskAiButton';
+import { SearchIcon, CloseIcon } from '../../shared/ui/icons';
 import { loadSettings } from '../../settings/store';
 import { ptyClose, ptyOpen, ptyResize, ptyWrite, type DataPayload, type ExitPayload } from './api';
 import './terminal-animations.css';
@@ -66,7 +71,12 @@ export const TerminalShell = () => {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
   const [dead, setDead] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selection, setSelection] = useState('');
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const boot = useCallback(async () => {
     const host = hostRef.current;
@@ -83,17 +93,36 @@ export const TerminalShell = () => {
       theme: themeFor(isLight),
     });
     const fit = new FitAddon();
+    const search = new SearchAddon();
+    // Open URLs in the user's default browser via Tauri's opener plugin —
+    // a bare `window.open` is a no-op inside the WKWebView popup.
+    const webLinks = new WebLinksAddon((_evt, uri) => {
+      openUrl(uri).catch(() => {});
+    });
     term.loadAddon(fit);
+    term.loadAddon(search);
+    term.loadAddon(webLinks);
     term.open(host);
     fit.fit();
     termRef.current = term;
     fitRef.current = fit;
+    searchRef.current = search;
 
     term.onData((data) => {
       ptyWrite(encodeBase64(data)).catch(() => {});
     });
     term.onResize(({ cols, rows }) => {
       ptyResize(cols, rows).catch(() => {});
+    });
+    term.onSelectionChange(() => {
+      setSelection(term.getSelection());
+    });
+    // BEL (\x07) is the shell's "I'm done" signal. Users can append
+    // `; printf '\a'` to long commands — or rely on programs that ring the
+    // bell on failure — to get a native desktop notification when the popup
+    // isn't visible.
+    term.onBell(() => {
+      void notifyCommandDone();
     });
 
     try {
@@ -112,13 +141,14 @@ export const TerminalShell = () => {
       termRef.current?.dispose();
       termRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
     };
   }, [boot]);
 
   // Keys pressed inside xterm must not reach the global PopupShell keydown
   // handler — otherwise Escape closes the popup mid-session and ⌘⌥-digit
-  // switches tabs instead of being sent to the shell. ⌘K is a Stash-level
-  // convenience that clears the visible scrollback.
+  // switches tabs instead of being sent to the shell. ⌘K clears scrollback,
+  // ⌘F opens the in-terminal search overlay.
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -126,6 +156,11 @@ export const TerminalShell = () => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         termRef.current?.clear();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        setSearchOpen(true);
+        requestAnimationFrame(() => searchInputRef.current?.focus());
       }
       e.stopPropagation();
     };
@@ -222,27 +257,47 @@ export const TerminalShell = () => {
       try {
         await ptyOpen(termRef.current.cols, termRef.current.rows);
         setDead(false);
+        termRef.current.focus();
       } catch (e) {
         termRef.current.write(`\r\n\x1b[31mrestart failed: ${String(e)}\x1b[0m\r\n`);
       }
     }
   }, []);
 
+  const runSearch = useCallback((direction: 'next' | 'prev', query?: string) => {
+    const q = query ?? searchQuery;
+    if (!q) return;
+    const opts = { caseSensitive: false, wholeWord: false, regex: false };
+    if (direction === 'next') searchRef.current?.findNext(q, opts);
+    else searchRef.current?.findPrevious(q, opts);
+  }, [searchQuery]);
+
+  const closeSearch = useCallback(() => {
+    searchRef.current?.clearDecorations();
+    setSearchOpen(false);
+    setSearchQuery('');
+    termRef.current?.focus();
+  }, []);
+
+  const statusLabel = useMemo(() => {
+    if (dead) return 'shell exited';
+    return '$SHELL';
+  }, [dead]);
+
   return (
     <div className="h-full flex flex-col">
       <div className="px-3 pt-2 pb-1 flex items-center gap-2 shrink-0 border-b hair">
         <span className="t-tertiary text-meta">Terminal</span>
         <span className="t-tertiary text-meta">·</span>
-        <span className="t-tertiary text-meta font-mono">PTY · $SHELL</span>
+        <span
+          className="text-meta font-mono"
+          style={{
+            color: dead ? 'var(--color-warning-fg)' : undefined,
+          }}
+        >
+          {statusLabel}
+        </span>
         <div className="flex-1" />
-        {dead && (
-          <span
-            className="terminal-dead-banner text-meta"
-            style={{ color: 'var(--color-warning-fg)' }}
-          >
-            shell exited
-          </span>
-        )}
         {snippets.map((sn) => (
           <Button
             key={sn.id}
@@ -258,11 +313,121 @@ export const TerminalShell = () => {
             {sn.label}
           </Button>
         ))}
-        <Button size="xs" variant="ghost" onClick={restart}>
-          Restart
+        <div className="w-px h-4 bg-white/[0.08]" aria-hidden />
+        <AskAiButton
+          text={() => selection}
+          disabled={!selection.trim()}
+          title="Ask AI about the selected text (opens a new chat)"
+        />
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() => setSearchOpen((v) => !v)}
+          title="Search scrollback (⌘F)"
+          leadingIcon={<SearchIcon size={12} />}
+        >
+          Find
+        </Button>
+        <Button
+          size="xs"
+          variant={dead ? 'soft' : 'ghost'}
+          tone={dead ? 'accent' : 'neutral'}
+          onClick={restart}
+          title={dead ? 'Start a fresh shell session' : 'Kill the current shell and spawn a new one'}
+        >
+          {dead ? 'Restart shell' : 'Restart'}
         </Button>
       </div>
+      {searchOpen && (
+        <div
+          className="px-3 py-1.5 flex items-center gap-2 border-b hair"
+          style={{ background: 'rgba(255,255,255,0.02)' }}
+        >
+          <SearchIcon size={12} className="t-tertiary" />
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={searchQuery}
+            placeholder="Search terminal output"
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              runSearch('next', e.target.value);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                runSearch(e.shiftKey ? 'prev' : 'next');
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeSearch();
+              }
+            }}
+            className="flex-1 bg-transparent outline-none text-body t-primary"
+            data-testid="terminal-search-input"
+          />
+          <Button size="xs" variant="ghost" onClick={() => runSearch('prev')}>
+            Prev
+          </Button>
+          <Button size="xs" variant="ghost" onClick={() => runSearch('next')}>
+            Next
+          </Button>
+          <button
+            type="button"
+            onClick={closeSearch}
+            aria-label="Close search"
+            className="w-6 h-6 rounded-md flex items-center justify-center t-tertiary hover:t-primary hover:bg-white/[0.06]"
+          >
+            <CloseIcon size={10} />
+          </button>
+        </div>
+      )}
+      {dead && (
+        <div
+          className="px-3 py-2 flex items-center gap-3 text-meta border-b hair"
+          style={{
+            background: 'rgba(var(--stash-accent-rgb), 0.08)',
+            color: 'var(--color-warning-fg)',
+          }}
+        >
+          <span className="terminal-dead-banner font-medium">Shell has exited.</span>
+          <span className="t-tertiary">
+            Press <kbd className="kbd">Restart</kbd> above, or ⌘-click the banner to relaunch.
+          </span>
+          <div className="flex-1" />
+          <Button size="xs" variant="soft" tone="accent" onClick={restart}>
+            Restart shell
+          </Button>
+        </div>
+      )}
       <div ref={hostRef} className="terminal-host flex-1" />
     </div>
   );
+};
+
+/** Fire a native desktop notification when a BEL byte arrives from the PTY.
+ *  We request permission lazily on first use and cache the result — no toast
+ *  inside the app since the whole point is being informed while the popup
+ *  is hidden. */
+let notifyPermission: 'granted' | 'denied' | 'unknown' = 'unknown';
+const notifyCommandDone = async () => {
+  try {
+    const { isPermissionGranted, requestPermission, sendNotification } = await import(
+      '@tauri-apps/plugin-notification'
+    );
+    if (notifyPermission === 'unknown') {
+      const granted = await isPermissionGranted();
+      notifyPermission = granted
+        ? 'granted'
+        : (await requestPermission()) === 'granted'
+          ? 'granted'
+          : 'denied';
+    }
+    if (notifyPermission !== 'granted') return;
+    sendNotification({
+      title: 'Terminal',
+      body: 'Command finished.',
+    });
+  } catch {
+    /* swallow — notifications are best-effort */
+  }
 };

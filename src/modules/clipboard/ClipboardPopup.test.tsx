@@ -79,6 +79,19 @@ describe('ClipboardPopup', () => {
     });
   });
 
+  it('clicking a row copies instead of pasting and keeps the popup open', async () => {
+    const user = userEvent.setup();
+    render(<ClipboardPopup />);
+    await waitFor(() => expect(screen.getByText('recent note')).toBeInTheDocument());
+
+    await user.click(screen.getByText('recent note'));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_copy_only', { id: 2 });
+    });
+    expect(mockInvoke).not.toHaveBeenCalledWith('clipboard_paste', { id: 2 });
+  });
+
   it('Meta+P toggles pin on active item', async () => {
     const user = userEvent.setup();
     render(<ClipboardPopup />);
