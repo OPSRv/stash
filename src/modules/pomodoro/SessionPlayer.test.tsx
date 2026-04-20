@@ -61,11 +61,11 @@ describe('SessionPlayer', () => {
     await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('pomodoro_resume'));
   });
 
-  it('Skip to next invokes pomodoro_skip_to with current_idx + 1', async () => {
+  it('Next block button invokes pomodoro_skip_to with current_idx + 1', async () => {
     mockInvoke.mockResolvedValue(base);
     const user = userEvent.setup();
     render(<SessionPlayer snapshot={base} banner={null} onDismissBanner={() => {}} />);
-    await user.click(screen.getByRole('button', { name: /skip to next/i }));
+    await user.click(screen.getByRole('button', { name: /^next block/i }));
     await waitFor(() =>
       expect(mockInvoke).toHaveBeenCalledWith('pomodoro_skip_to', { idx: 1 }),
     );
@@ -88,7 +88,9 @@ describe('SessionPlayer', () => {
     mockInvoke.mockResolvedValue(base);
     const user = userEvent.setup();
     render(<SessionPlayer snapshot={base} banner={null} onDismissBanner={() => {}} />);
-    await user.click(screen.getByRole('button', { name: /Focus/ }));
+    // The clock-area name button exposes a "Click to rename this block"
+    // title; timeline chips carry their own aria-label so we disambiguate.
+    await user.click(screen.getByTitle(/click to rename this block/i));
     const input = screen.getByLabelText(/Rename current block/i);
     await user.clear(input);
     await user.type(input, 'Deep work');
@@ -105,9 +107,41 @@ describe('SessionPlayer', () => {
     });
   });
 
-  it('renders up-next strip with remaining blocks', () => {
+  it('renders the timeline listing every block', () => {
     render(<SessionPlayer snapshot={base} banner={null} onDismissBanner={() => {}} />);
-    expect(screen.getByText(/Up next/i)).toBeInTheDocument();
+    expect(screen.getByText(/Timeline/i)).toBeInTheDocument();
+    // 25m (current) + 10m (upcoming) — both visible in the timeline chips.
+    expect(screen.getByText('25m')).toBeInTheDocument();
     expect(screen.getByText('10m')).toBeInTheDocument();
+  });
+
+  it('clicking a past block in the timeline skips back to it', async () => {
+    mockInvoke.mockResolvedValue({});
+    const user = userEvent.setup();
+    const atBlockTwo: SessionSnapshot = { ...base, current_idx: 1, remaining_ms: 600_000 };
+    render(<SessionPlayer snapshot={atBlockTwo} banner={null} onDismissBanner={() => {}} />);
+    // "Focus" chip represents the completed block 0 — clicking restarts it.
+    await user.click(screen.getByRole('button', { name: /restart block: focus/i }));
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('pomodoro_skip_to', { idx: 0 }),
+    );
+  });
+
+  it('Previous button skips to previous block when available', async () => {
+    mockInvoke.mockResolvedValue({});
+    const user = userEvent.setup();
+    const atBlockTwo: SessionSnapshot = { ...base, current_idx: 1, remaining_ms: 600_000 };
+    render(<SessionPlayer snapshot={atBlockTwo} banner={null} onDismissBanner={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /previous block/i }));
+    await waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith('pomodoro_skip_to', { idx: 0 }),
+    );
+  });
+
+  it('Previous button is disabled on the first block', () => {
+    render(<SessionPlayer snapshot={base} banner={null} onDismissBanner={() => {}} />);
+    expect(
+      screen.getByRole('button', { name: /previous block/i }),
+    ).toBeDisabled();
   });
 });

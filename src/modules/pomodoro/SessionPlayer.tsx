@@ -3,7 +3,14 @@ import { Button } from '../../shared/ui/Button';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { IconButton } from '../../shared/ui/IconButton';
 import { Kbd } from '../../shared/ui/Kbd';
-import { NextIcon, PauseIcon, PlayIcon, StopCircleIcon } from '../../shared/ui/icons';
+import {
+  CheckIcon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  PrevIcon,
+  StopCircleIcon,
+} from '../../shared/ui/icons';
 import {
   editBlocks,
   pauseSession,
@@ -26,13 +33,10 @@ interface SessionPlayerProps {
 const renameInTrack = (blocks: Block[], idx: number, name: string): Block[] =>
   blocks.map((b, i) => (i === idx ? { ...b, name } : b));
 
-/// Posture-tinted accent used for the pane tint + progress color so the
-/// active block gives the player a different energy (sit = calm, walk =
-/// warm). Values match the muted tones in PostureBadge.
-const POSTURE_TINT: Record<Posture, { bg: string; ring: string }> = {
-  sit:  { bg: 'rgba(120, 130, 160, 0.10)', ring: 'rgba(120, 130, 160, 0.30)' },
-  stand:{ bg: 'rgba(110, 170, 130, 0.12)', ring: 'rgba(110, 170, 130, 0.32)' },
-  walk: { bg: 'rgba(200, 150, 90, 0.12)',  ring: 'rgba(200, 150, 90, 0.32)' },
+const POSTURE_EMOJI: Record<Posture, string> = {
+  sit: '💺',
+  stand: '🧍',
+  walk: '🚶',
 };
 
 export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlayerProps) => {
@@ -43,6 +47,8 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
   const current = blocks[current_idx];
   const isRunning = status === 'running';
   const isPaused = status === 'paused';
+  const canGoBack = current_idx > 0;
+  const canGoForward = current_idx < blocks.length - 1;
 
   const totalMs = current ? current.duration_sec * 1000 : 0;
   const progress = totalMs > 0 ? Math.max(0, Math.min(1, 1 - remaining_ms / totalMs)) : 0;
@@ -59,10 +65,9 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
     }
   }, [editingName, current, blocks, current_idx]);
 
-  const upNext = useMemo(() => blocks.slice(current_idx + 1), [blocks, current_idx]);
-
-  // Global keyboard shortcuts while a session is active (Space to pause/resume,
-  // ⌘→ for skip, ⌘. to stop). Skips when user is typing in an input/textarea.
+  // Keyboard shortcuts while active. Space = pause/resume, ⌘← / ⌘→ move
+  // between blocks (both directions — backward restarts that block from
+  // full duration, which is what the engine.skip_to already does).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tgt = e.target as HTMLElement | null;
@@ -75,20 +80,36 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
         e.preventDefault();
         if (isRunning) pauseSession().catch(() => {});
         else if (isPaused) resumeSession().catch(() => {});
-      } else if (e.metaKey && e.key === 'ArrowRight') {
+      } else if (e.metaKey && e.key === 'ArrowRight' && canGoForward) {
         e.preventDefault();
         skipTo(current_idx + 1).catch(() => {});
+      } else if (e.metaKey && e.key === 'ArrowLeft' && canGoBack) {
+        e.preventDefault();
+        skipTo(current_idx - 1).catch(() => {});
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [isRunning, isPaused, current_idx]);
+  }, [isRunning, isPaused, current_idx, canGoBack, canGoForward]);
+
+  const totalSec = useMemo(
+    () => blocks.reduce((s, b) => s + b.duration_sec, 0),
+    [blocks],
+  );
+  const elapsedSec = useMemo(() => {
+    const past = blocks
+      .slice(0, current_idx)
+      .reduce((s, b) => s + b.duration_sec, 0);
+    const currentElapsed = current
+      ? current.duration_sec - Math.floor(remaining_ms / 1000)
+      : 0;
+    return past + Math.max(0, currentElapsed);
+  }, [blocks, current_idx, current, remaining_ms]);
+  const sessionProgress = totalSec > 0 ? elapsedSec / totalSec : 0;
 
   if (!current) {
     return <div className="p-6 t-tertiary">No active block.</div>;
   }
-
-  const tint = POSTURE_TINT[current.posture];
 
   return (
     <div className="flex flex-col h-full relative">
@@ -111,28 +132,52 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
         </div>
       )}
 
-      <div className="flex-1 flex flex-col items-center justify-center px-8 pt-4 pb-6">
-        {/* Posture-tinted clock card */}
+      {/* Session-wide progress (thin bar across the whole header) */}
+      <div
+        className="h-[3px] relative overflow-hidden"
+        style={{ background: 'rgba(255,255,255,0.05)' }}
+        role="progressbar"
+        aria-valuenow={Math.round(sessionProgress * 100)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Session progress"
+      >
         <div
-          className="relative rounded-2xl px-10 py-8 flex flex-col items-center gap-4 w-full max-w-md"
+          className={isRunning ? 'prog-fill' : 'prog-fill-paused'}
           style={{
-            background: tint.bg,
-            boxShadow: `inset 0 0 0 0.5px ${tint.ring}`,
+            width: `${sessionProgress * 100}%`,
+            height: '100%',
+            transition: 'width 220ms linear',
+          }}
+        />
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pt-6 pb-6">
+        <div className="flex items-center justify-between w-full max-w-md mb-3">
+          <span className="section-label">
+            Block {current_idx + 1} / {blocks.length}
+          </span>
+          <PostureBadge posture={current.posture} size="md" />
+        </div>
+
+        {/* Clock with aura glow */}
+        <div
+          className={`relative rounded-[20px] px-10 py-8 w-full max-w-md flex flex-col items-center gap-5 ${
+            isRunning ? 'pomo-aura-running' : 'pomo-aura-paused'
+          }`}
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%)',
           }}
         >
-          <div className="flex items-center justify-between w-full">
-            <span className="section-label">
-              Block {current_idx + 1} / {blocks.length}
-            </span>
-            <PostureBadge posture={current.posture} size="md" />
-          </div>
-
           <div
-            className="t-primary font-mono tabular-nums text-center w-full"
+            className={`pomo-clock-digits font-mono tabular-nums text-center ${
+              isPaused ? 'pomo-clock-paused' : ''
+            }`}
             style={{
-              fontSize: 92,
+              fontSize: 96,
               lineHeight: 1,
-              letterSpacing: '-0.02em',
+              letterSpacing: '-0.03em',
               fontWeight: 500,
             }}
             aria-live="polite"
@@ -159,31 +204,32 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
               <button
                 type="button"
                 onClick={() => setEditingName(current.name)}
-                className="flex-1 text-left t-primary text-title font-medium hover:underline truncate"
+                className="flex-1 text-center t-primary text-title font-medium hover:underline truncate"
                 title="Click to rename this block"
               >
                 {current.name}
               </button>
             )}
             {isPaused && (
-              <span className="t-tertiary text-meta uppercase tracking-wide">
+              <span className="t-tertiary text-meta uppercase tracking-wide shrink-0">
                 paused
               </span>
             )}
           </div>
 
-          {/* Progress */}
+          {/* Block-local progress */}
           <div
-            className="relative w-full h-2 rounded-full overflow-hidden"
-            style={{ background: 'rgba(255,255,255,0.08)' }}
+            className="relative w-full h-1.5 rounded-full overflow-hidden"
+            style={{ background: 'rgba(255,255,255,0.07)' }}
             role="progressbar"
             aria-valuenow={Math.round(progress * 100)}
             aria-valuemin={0}
             aria-valuemax={100}
+            aria-label={`${current.name} progress`}
           >
             <div
               className={`h-full rounded-full ${
-                isRunning ? 'prog-fill' : isPaused ? 'prog-fill-paused' : ''
+                isRunning ? 'prog-fill' : 'prog-fill-paused'
               }`}
               style={{
                 width: `${progress * 100}%`,
@@ -193,8 +239,15 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
           </div>
         </div>
 
-        {/* Controls */}
+        {/* Transport controls */}
         <div className="flex items-center gap-2 mt-5">
+          <IconButton
+            onClick={() => skipTo(current_idx - 1)}
+            title="Previous block (⌘←)"
+            disabled={!canGoBack}
+          >
+            <PrevIcon size={13} />
+          </IconButton>
           {isRunning && (
             <Button
               leadingIcon={<PauseIcon size={13} />}
@@ -220,7 +273,8 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
           )}
           <IconButton
             onClick={() => skipTo(current_idx + 1)}
-            title="Skip to next block (⌘→)"
+            title="Next block (⌘→)"
+            disabled={!canGoForward}
           >
             <NextIcon size={13} />
           </IconButton>
@@ -234,34 +288,57 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
         </div>
       </div>
 
-      {upNext.length > 0 && (
-        <div className="border-t hair px-4 py-3">
-          <div className="section-label mb-2">Up next</div>
-          <div className="flex items-center gap-2 overflow-x-auto">
-            {upNext.map((b, i) => (
-              <div
+      {/* Timeline — every block, jump to any. Past blocks are greyed with a
+          check so the user can scroll history and restart an earlier one. */}
+      <div className="border-t hair px-4 py-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="section-label">Timeline</span>
+          <span className="t-tertiary text-meta font-mono tabular-nums">
+            {Math.round(elapsedSec / 60)}m / {Math.round(totalSec / 60)}m
+          </span>
+        </div>
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          {blocks.map((b, i) => {
+            const isCurrent = i === current_idx;
+            const isDone = i < current_idx;
+            const cls = `pomo-chip shrink-0 ${
+              isCurrent
+                ? 'pomo-chip-current'
+                : isDone
+                  ? 'pomo-chip-done'
+                  : ''
+            }`;
+            return (
+              <button
                 key={b.id}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border hair shrink-0"
-                style={{ background: 'rgba(255,255,255,0.02)' }}
+                type="button"
+                onClick={() => skipTo(i)}
+                className={cls}
+                title={isDone ? 'Restart this block' : isCurrent ? 'Current' : 'Jump to this block'}
+                aria-label={`${
+                  isDone ? 'Restart' : isCurrent ? 'Current' : 'Jump to'
+                } block: ${b.name}`}
+                aria-current={isCurrent ? 'true' : undefined}
               >
-                <PostureBadge posture={b.posture} />
-                <span className="t-primary text-meta truncate max-w-[14ch]">
+                <span aria-hidden className="text-[13px]">
+                  {POSTURE_EMOJI[b.posture]}
+                </span>
+                <span className="t-primary text-meta font-medium truncate max-w-[12ch]">
                   {b.name}
                 </span>
                 <span className="t-tertiary text-[11px] font-mono tabular-nums">
                   {Math.round(b.duration_sec / 60)}m
                 </span>
-                <IconButton
-                  onClick={() => skipTo(current_idx + 1 + i)}
-                  title="Skip to this block"
-                >
-                  <NextIcon size={11} />
-                </IconButton>
-              </div>
-            ))}
-          </div>
+                {isDone && (
+                  <span className="pomo-chip-check inline-flex" aria-hidden>
+                    <CheckIcon size={11} />
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
-      )}
+      </div>
 
       <ConfirmDialog
         open={stopConfirm}

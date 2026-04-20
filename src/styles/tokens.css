@@ -271,23 +271,87 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: 5px;
-    font-size: 11px;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 6px;
+    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+    font-size: 10.5px;
     font-weight: 500;
     line-height: 1;
-    color: rgba(255, 255, 255, 0.78);
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.68);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2);
   }
   .light .kbd {
-    color: rgba(20, 22, 28, 0.78);
+    color: rgba(20, 22, 28, 0.7);
     background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.6),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.04);
+  }
+
+  .tip {
+    position: relative;
+    display: inline-flex;
+  }
+  .tip > .tip-label {
+    position: absolute;
+    left: 50%;
+    padding: 3px 6px;
+    background: rgba(20, 22, 28, 0.96);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 11px;
+    line-height: 1.2;
+    border-radius: 6px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 50;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+    transition: opacity 120ms ease 200ms, transform 120ms ease 200ms;
+  }
+  .tip-top > .tip-label {
+    bottom: 100%;
+    transform: translate(-50%, 0);
+  }
+  .tip-bottom > .tip-label {
+    top: 100%;
+    transform: translate(-50%, 0);
+  }
+  .tip:hover > .tip-label,
+  .tip:focus-within > .tip-label {
+    opacity: 1;
+  }
+  .tip-top:hover > .tip-label,
+  .tip-top:focus-within > .tip-label {
+    transform: translate(-50%, -6px);
+  }
+  .tip-bottom:hover > .tip-label,
+  .tip-bottom:focus-within > .tip-label {
+    transform: translate(-50%, 6px);
+  }
+  .light .tip > .tip-label {
+    background: rgba(250, 250, 252, 0.98);
+    color: rgba(20, 22, 28, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  }
+
+  .row-base {
+    transition: background-color 120ms ease, transform 80ms ease;
+  }
+  .row-base:hover:not(.row-active):not(.row-selected) {
+    background: rgba(var(--stash-accent-rgb), 0.06);
+  }
+  .row-base:active {
+    transform: scale(0.985);
   }
 
   .row-active {
@@ -422,6 +486,14 @@
   }
   .stash-pop-in {
     animation: stash-pop-in var(--duration-base) var(--easing-emphasized);
+  }
+  @keyframes clip-row-enter {
+    0%   { opacity: 0; transform: translateY(-6px); background: rgba(var(--stash-accent-rgb), 0.18); }
+    60%  { opacity: 1; transform: translateY(0);    background: rgba(var(--stash-accent-rgb), 0.12); }
+    100% { opacity: 1; transform: translateY(0);    background: transparent; }
+  }
+  .clip-row-enter {
+    animation: clip-row-enter 520ms var(--easing-emphasized);
   }
 
   /* Card primitive. Flat variant uses subtle elevated surface; tone variants
@@ -604,6 +676,115 @@
   .prog-fill-paused {
     background: rgba(255, 255, 255, 0.35);
   }
+
+  /* Pomodoro: breathing aura ring around the active clock. Subtle accent
+     glow that pulses 3× per minute so the surface feels alive without
+     demanding attention. */
+  @keyframes pomo-breathe {
+    0%, 100% {
+      box-shadow:
+        0 0 0 1px rgba(var(--stash-accent-rgb), 0.28),
+        0 0 44px -6px rgba(var(--stash-accent-rgb), 0.38),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    50% {
+      box-shadow:
+        0 0 0 1px rgba(var(--stash-accent-rgb), 0.45),
+        0 0 72px -4px rgba(var(--stash-accent-rgb), 0.58),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+  }
+  .pomo-aura-running { animation: pomo-breathe 4.5s ease-in-out infinite; }
+  .pomo-aura-paused {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+  .light .pomo-aura-paused {
+    box-shadow:
+      0 0 0 1px rgba(20, 22, 28, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+
+  /* Timeline block chips. Completed = muted; current = accent ring with a
+     subtle glow; upcoming = neutral border. */
+  .pomo-chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: transform 120ms ease, background-color 120ms ease, box-shadow 160ms ease;
+    cursor: pointer;
+  }
+  .light .pomo-chip {
+    background: rgba(0, 0, 0, 0.015);
+    border-color: rgba(0, 0, 0, 0.08);
+  }
+  .pomo-chip:hover {
+    background: rgba(255, 255, 255, 0.06);
+    transform: translateY(-1px);
+  }
+  .light .pomo-chip:hover { background: rgba(0, 0, 0, 0.04); }
+  .pomo-chip-done {
+    opacity: 0.5;
+  }
+  .pomo-chip-done .pomo-chip-check {
+    color: rgb(110, 170, 130);
+  }
+  .pomo-chip-current {
+    background: rgba(var(--stash-accent-rgb), 0.12);
+    border-color: rgba(var(--stash-accent-rgb), 0.45);
+    box-shadow:
+      0 0 0 1px rgba(var(--stash-accent-rgb), 0.35),
+      0 4px 24px -6px rgba(var(--stash-accent-rgb), 0.55);
+  }
+  .pomo-chip-current:hover {
+    background: rgba(var(--stash-accent-rgb), 0.18);
+  }
+
+  /* Clock digit sheen — radial highlight so the mono numerals don't look
+     flat at 92px. Rotates slowly for the faintest amount of motion. */
+  @keyframes pomo-sheen {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+  }
+  .pomo-clock-digits {
+    background: linear-gradient(
+      92deg,
+      rgba(255, 255, 255, 0.95) 0%,
+      rgba(255, 255, 255, 0.78) 28%,
+      rgba(255, 255, 255, 0.96) 50%,
+      rgba(255, 255, 255, 0.78) 72%,
+      rgba(255, 255, 255, 0.95) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: pomo-sheen 8s linear infinite;
+  }
+  .light .pomo-clock-digits {
+    background: linear-gradient(
+      92deg,
+      rgba(20, 22, 28, 0.92) 0%,
+      rgba(20, 22, 28, 0.72) 28%,
+      rgba(20, 22, 28, 0.92) 50%,
+      rgba(20, 22, 28, 0.72) 72%,
+      rgba(20, 22, 28, 0.92) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .pomo-clock-paused {
+    animation-play-state: paused;
+    opacity: 0.7;
+  }
   .light .prog-fill-paused {
     background: rgba(20, 22, 28, 0.35);
   }
@@ -641,6 +822,28 @@ html::-webkit-scrollbar-corner {
 html {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+/* Native-like UX: за замовчуванням UI-хром не виділяється — як у macOS-застосунках.
+ * Виділення лишаємо в полях вводу та текстовому контенті (markdown, code, терміналу),
+ * а також на будь-якому елементі з класом `.stash-selectable` як escape hatch. */
+html, body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable=""],
+pre,
+code,
+.md-body,
+.notes-md,
+.stash-selectable,
+.stash-selectable * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 @media (prefers-reduced-motion: reduce) {
