@@ -20,7 +20,9 @@ fn to_string_err<T, E: std::fmt::Display>(r: Result<T, E>) -> Result<T, String> 
 
 /// Allowed audio container extensions. Anything else is rejected so a
 /// compromised frontend can't coax the app into writing arbitrary files.
-const ALLOWED_AUDIO_EXT: &[&str] = &["webm", "ogg", "mp4", "m4a", "mp3", "wav"];
+const ALLOWED_AUDIO_EXT: &[&str] = &[
+    "webm", "ogg", "mp4", "m4a", "mp3", "wav", "aac", "flac", "opus", "aiff", "aif",
+];
 
 fn audio_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app
@@ -120,95 +122,84 @@ pub fn notes_delete(
     to_string_err(state.repo.lock().unwrap().delete(id))
 }
 
-/// Create a new note backed by a freshly-recorded audio blob. The blob is
-/// written to `appData/notes/audio/<id>.<ext>` and the row stores its path.
+const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
+
+/// Write raw audio bytes into the managed audio dir and return the absolute
+/// path of the new file. Unlike `notes_create_audio`, this does NOT create
+/// a DB row — the frontend embeds the returned path into the active note's
+/// markdown body via `![](…)` syntax, keeping a single note type that can
+/// hold text and N audio embeds together.
 #[tauri::command]
-pub fn notes_create_audio(
+pub fn notes_save_audio_bytes(
     app: tauri::AppHandle,
-    state: State<'_, NotesState>,
-    title: String,
     bytes: Vec<u8>,
     ext: String,
-    duration_ms: Option<i64>,
-) -> Result<Note, String> {
-    // Reject empty payloads — the recorder produced nothing to save.
+) -> Result<String, String> {
     if bytes.is_empty() {
         return Err("empty audio payload".into());
     }
-    // Guard against runaway blobs. ~25 MiB is plenty for a voice memo.
-    if bytes.len() > 25 * 1024 * 1024 {
+    if bytes.len() > MAX_AUDIO_BYTES {
         return Err("audio payload exceeds 25 MiB limit".into());
     }
     let ext = sanitize_ext(&ext)?;
     let dir = audio_dir(&app)?;
-    // Provisional write to a temp path so we have a stable target for the
-    // DB insert. After insert we rename to `<id>.<ext>` so the filename is
-    // discoverable from the row alone.
+    // Nanos-based filename keeps collision odds vanishingly small across
+    // rapid-fire recordings and drops, without needing a DB round-trip to
+    // reserve an id.
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let tmp = dir.join(format!(".pending-{nanos}.{ext}"));
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-
-    let mut repo = state.repo.lock().unwrap();
-    let id = match repo.create_audio(
-        &title,
-        "",
-        tmp.to_string_lossy().as_ref(),
-        duration_ms,
-        now(),
-    ) {
-        Ok(id) => id,
-        Err(e) => {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e.to_string());
-        }
-    };
-    let final_path = dir.join(format!("{id}.{ext}"));
-    if let Err(e) = std::fs::rename(&tmp, &final_path) {
-        // Roll back the row so we don't leave a stale pointer.
-        let _ = repo.delete(id);
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.to_string());
-    }
-    // Update the row with its final absolute path.
-    let final_str = final_path.to_string_lossy().into_owned();
-    if let Err(e) = repo.set_audio_path_inline(id, &final_str) {
-        let _ = std::fs::remove_file(&final_path);
-        let _ = repo.delete(id);
-        return Err(e.to_string());
-    }
-    let note = repo
-        .get(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "note vanished after insert".to_string())?;
-    Ok(note)
+    let path = dir.join(format!("emb-{nanos}.{ext}"));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
-/// Read a note's audio bytes. Returns raw bytes which the frontend wraps in
-/// a Blob — avoids needing filesystem capabilities in the webview.
+/// Copy an on-disk audio file into the managed audio dir (leaving the
+/// original where the user had it) and return the new absolute path. Same
+/// embed-into-body flow as `notes_save_audio_bytes`.
 #[tauri::command]
-pub fn notes_read_audio(
+pub fn notes_save_audio_file(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let src = Path::new(&path);
+    if !src.is_file() {
+        return Err(format!("not a file: {path}"));
+    }
+    let meta = std::fs::metadata(src).map_err(|e| e.to_string())?;
+    if (meta.len() as usize) > MAX_AUDIO_BYTES {
+        return Err("audio file exceeds 25 MiB limit".into());
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .ok_or_else(|| "file has no extension".to_string())?;
+    let ext = sanitize_ext(ext)?;
+    let dir = audio_dir(&app)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dest = dir.join(format!("emb-{nanos}.{ext}"));
+    std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Read raw bytes of an audio file stored under the managed audio dir. Used
+/// by the inline markdown audio player, which references files by absolute
+/// path rather than by note id. Path must live under the audio dir — a hard
+/// guard against a tampered note body coaxing the app into reading other
+/// locations on disk.
+#[tauri::command]
+pub fn notes_read_audio_path(
     app: tauri::AppHandle,
-    state: State<'_, NotesState>,
-    id: i64,
+    path: String,
 ) -> Result<Vec<u8>, String> {
-    let note = state
-        .repo
-        .lock()
-        .unwrap()
-        .get(id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "note not found".to_string())?;
-    let path = note
-        .audio_path
-        .ok_or_else(|| "note has no audio attachment".to_string())?;
-    // Hard-limit reads to files inside our audio dir.
     let base = audio_dir(&app)?;
     let p = Path::new(&path);
     if !p.starts_with(&base) {
         return Err("audio path is outside the managed audio directory".into());
+    }
+    if !p.is_file() {
+        return Err("audio file is missing on disk".into());
     }
     std::fs::read(p).map_err(|e| e.to_string())
 }

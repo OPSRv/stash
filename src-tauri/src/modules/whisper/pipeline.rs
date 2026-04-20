@@ -13,7 +13,25 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use std::sync::Once;
+use whisper_rs::{whisper_rs_sys, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// Suppress whisper.cpp's per-token `whisper_full_with_state: id = …` spam
+/// from stderr. The crate's `print_*` params control sampling traces, but
+/// ggml itself logs through a separate C-side hook that bypasses them. We
+/// install a no-op log callback once per process so the console stays usable.
+static SILENCE_LOG: Once = Once::new();
+unsafe extern "C" fn silent_log(
+    _level: whisper_rs_sys::ggml_log_level,
+    _text: *const std::os::raw::c_char,
+    _user_data: *mut std::ffi::c_void,
+) {
+}
+fn silence_whisper_logs() {
+    SILENCE_LOG.call_once(|| unsafe {
+        whisper_rs_sys::whisper_log_set(Some(silent_log), std::ptr::null_mut());
+    });
+}
 
 pub const WHISPER_SAMPLE_RATE: u32 = 16_000;
 
@@ -263,6 +281,7 @@ pub fn transcribe(
     language: &str,
     n_threads: i32,
 ) -> Result<String, PipelineError> {
+    silence_whisper_logs();
     let pcm = decode(audio_path)?;
     let samples = resample_to_16k(pcm)?;
 

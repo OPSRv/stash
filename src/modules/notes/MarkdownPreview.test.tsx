@@ -62,4 +62,53 @@ describe('MarkdownPreview', () => {
     render(<MarkdownPreview source="   " />);
     expect(screen.getByText(/Nothing to preview yet/i)).toBeInTheDocument();
   });
+
+  it('renders audio-extension image embeds as an inline audio player', () => {
+    render(
+      <MarkdownPreview
+        source={'intro\n\n![voice note](/tmp/rec.mp3)\n\ntail'}
+      />
+    );
+    const embed = screen.getByTestId('md-audio-embed');
+    expect(embed).toBeInTheDocument();
+    // The caption flows through from the alt text.
+    expect(embed).toHaveTextContent(/voice note/i);
+    // The play control is the nearest IconButton inside the embed.
+    expect(screen.getByTestId('md-audio-toggle')).toBeInTheDocument();
+    // Non-audio paragraphs still render as text around the embed.
+    expect(screen.getByText('intro')).toBeInTheDocument();
+    expect(screen.getByText('tail')).toBeInTheDocument();
+  });
+
+  it('falls through to a regular image for non-audio srcs', () => {
+    const { container } = render(
+      <MarkdownPreview source={'![logo](/tmp/logo.png)'} />
+    );
+    expect(container.querySelector('img')).not.toBeNull();
+    expect(screen.queryByTestId('md-audio-embed')).not.toBeInTheDocument();
+  });
+
+  it('embeds a YouTube player for a bare youtu.be URL on its own line', () => {
+    const { container } = render(
+      <MarkdownPreview source={'before\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nafter'} />
+    );
+    const iframe = container.querySelector('iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe?.getAttribute('src')).toContain('/embed/dQw4w9WgXcQ');
+    expect(screen.getByText('before')).toBeInTheDocument();
+    expect(screen.getByText('after')).toBeInTheDocument();
+    // The bare URL becomes the embed — there should be no plain link with
+    // that text floating in the document.
+    expect(screen.queryByRole('link', { name: 'https://youtu.be/dQw4w9WgXcQ' })).toBeNull();
+  });
+
+  it('keeps inline links alongside text as plain anchors (no embed)', () => {
+    const { container } = render(
+      <MarkdownPreview source={'see https://example.org for details'} />
+    );
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'https://example.org' }),
+    ).toHaveAttribute('href', 'https://example.org');
+  });
 });

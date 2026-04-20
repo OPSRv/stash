@@ -27,18 +27,24 @@ import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { SaveStatusPill, type SaveStatus } from './SaveStatusPill';
 import { AudioRecorder, type RecordedAudio } from './AudioRecorder';
-import { AudioNoteView } from './AudioNoteView';
+import { useAudioFileDrop } from './useAudioFileDrop';
+import {
+  appendAudioEmbed,
+  insertAudioEmbedAt,
+  insertTranscriptAfterEmbed,
+} from './audioEmbed';
 import { toggleCheckboxAtLine } from './markdown';
 import { polishTranscript } from './polish';
 import { loadSettings } from '../../settings/store';
-import { whisperGetActive, whisperTranscribe } from '../whisper/api';
+import { whisperGetActive, whisperTranscribePath } from '../whisper/api';
 import {
   notesCreate,
-  notesCreateAudio,
   notesDelete,
   notesGet,
   notesList,
   notesReadFile,
+  notesSaveAudioBytes,
+  notesSaveAudioFile,
   notesSearch,
   notesSetPinned,
   notesUpdate,
@@ -114,6 +120,18 @@ export const NotesShell = () => {
   /// in-flight promise so later saves wait for `activeId` to land.
   const pendingCreateRef = useRef<Promise<number> | null>(null);
   const [recorderOpen, setRecorderOpen] = useState(false);
+  /// Intent the recorder was opened with. `new` always creates a fresh note
+  /// around the embed (sidebar mic button), `current` appends into whatever
+  /// note is active (toolbar mic button). A ref — not state — because it
+  /// only needs to round-trip from the button click to `onRecorderComplete`,
+  /// and a re-render on mere intent change is pointless.
+  const recorderIntentRef = useRef<'current' | 'new'>('current');
+  /// Monotonic session id for in-flight transcription. Each new run bumps
+  /// this; the in-flight promise bails out if its session is no longer
+  /// current. Also drives the SaveStatusPill cancel affordance — Whisper
+  /// itself still runs to completion in Rust, but the UI forgets about
+  /// the result so the user isn't blocked.
+  const transcribeSessionRef = useRef(0);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -289,59 +307,105 @@ export const NotesShell = () => {
     await reload();
   };
 
-  const onRecorderComplete = useCallback(
-    async (audio: RecordedAudio) => {
-      setRecorderOpen(false);
-      let createdId: number | null = null;
-      try {
-        const created = await notesCreateAudio({
-          title: `Voice note · ${new Date().toLocaleString()}`,
-          bytes: audio.bytes,
-          ext: audio.ext,
-          durationMs: audio.durationMs,
-        });
-        createdId = created.id;
-        setActiveId(created.id);
-        await reload();
-        toast({
-          title: 'Voice note saved',
-          description: formatDuration(audio.durationMs),
-          variant: 'success',
-        });
-      } catch (e) {
-        console.error('voice note save failed', e);
-        toast({ title: 'Couldn\u2019t save recording', description: String(e), variant: 'error' });
-        return;
-      }
+  const openRecorderForNew = useCallback(() => {
+    recorderIntentRef.current = 'new';
+    setRecorderOpen(true);
+  }, []);
+  const openRecorderForCurrent = useCallback(() => {
+    recorderIntentRef.current = 'current';
+    setRecorderOpen(true);
+  }, []);
 
-      // Auto-transcribe / auto-polish, both gated on user settings. Both
-      // steps are best-effort — failures show a toast but don't roll back
-      // the recording itself.
+  /** Resolve the target note for a new inline audio embed.
+   *
+   *  `intent: 'current'` reuses the active note so recordings/drops
+   *  accumulate in one place alongside whatever text the user is writing.
+   *  Falls back to creating a blank note when nothing is active.
+   *
+   *  `intent: 'new'` always creates a fresh note — the sidebar mic button
+   *  wants every click to produce a new voice note, even when another note
+   *  happens to be open. */
+  const resolveEmbedTarget = useCallback(
+    async (intent: 'current' | 'new' = 'current'): Promise<{
+      id: number;
+      title: string;
+      body: string;
+      isNew: boolean;
+    }> => {
+      if (intent === 'current' && activeNote && activeId != null) {
+        return { id: activeId, title, body, isNew: false };
+      }
+      const id = await notesCreate('', '');
+      return { id, title: '', body: '', isNew: true };
+    },
+    [activeId, activeNote, body, title]
+  );
+
+  /** Write `nextBody` into the target note, keeping local state in sync so
+   *  the editor / preview reflect the new embed immediately without
+   *  waiting for the notesGet round-trip. */
+  const commitBodyUpdate = useCallback(
+    async (target: { id: number; title: string }, nextBody: string) => {
+      await notesUpdate(target.id, target.title, nextBody);
+      setActiveId(target.id);
+      setTitle(target.title);
+      setBody(nextBody);
+      setActiveNote((prev) =>
+        prev && prev.id === target.id ? { ...prev, body: nextBody } : prev
+      );
+      await reload();
+    },
+    [reload]
+  );
+
+  /** Transcribe a just-embedded audio file and splice the transcript into
+   *  the note's body right after the `![caption](path)` reference. Reads
+   *  the latest body via `setBody(prev => …)` so a user editing during
+   *  transcription doesn't get their changes clobbered. */
+  const runInlineTranscribe = useCallback(
+    async (noteId: number, path: string) => {
       const settings = await loadSettings().catch(() => null);
       if (!settings?.notesAutoTranscribe) return;
-      const activeModel = await whisperGetActive().catch(() => null);
-      if (!activeModel || createdId == null) return;
-      let transcript: string | null = null;
+      const model = await whisperGetActive().catch(() => null);
+      if (!model) return;
+      const session = ++transcribeSessionRef.current;
+      const cancelled = () => transcribeSessionRef.current !== session;
       setSaveStatus('transcribing');
       toast({ title: 'Transcribing voice note…', variant: 'default', durationMs: 2200 });
+      let transcript: string;
       try {
-        transcript = await whisperTranscribe(createdId, 'uk');
-        setBody(transcript);
-        await reload();
-        setSaveStatus('saved');
-        if (savedClearTimer.current !== null) window.clearTimeout(savedClearTimer.current);
-        savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);
-        toast({ title: 'Transcribed', variant: 'success', durationMs: 2000 });
+        transcript = await whisperTranscribePath(path, 'uk');
       } catch (e) {
+        if (cancelled()) return;
         setSaveStatus('error');
         toast({
           title: 'Auto-transcribe failed',
           description: String(e),
           variant: 'error',
+          action: { label: 'Retry', onClick: () => void runInlineTranscribe(noteId, path) },
         });
         return;
       }
-      if (!settings.notesAutoPolish || !transcript?.trim()) return;
+      if (cancelled()) return;
+      // Functional setState reads the freshest body, so concurrent typing
+      // between the embed-insert and transcription return is preserved.
+      let persisted: string | null = null;
+      setBody((prev) => {
+        const next = insertTranscriptAfterEmbed(prev, path, transcript);
+        persisted = next;
+        return next;
+      });
+      if (persisted !== null) {
+        await notesUpdate(noteId, title, persisted);
+        setActiveNote((p) => (p && p.id === noteId ? { ...p, body: persisted! } : p));
+        await reload();
+      }
+      setSaveStatus('saved');
+      if (savedClearTimer.current !== null) window.clearTimeout(savedClearTimer.current);
+      savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);
+      toast({ title: 'Transcribed', variant: 'success', durationMs: 2000 });
+
+      if (!settings.notesAutoPolish || !transcript.trim()) return;
       setSaveStatus('polishing');
       toast({ title: 'Polishing transcript…', variant: 'default', durationMs: 2200 });
       try {
@@ -353,27 +417,97 @@ export const NotesShell = () => {
           aiApiKeys: settings.aiApiKeys,
           aiWebServices: settings.aiWebServices,
         });
+        if (cancelled()) return;
         if (polish.kind !== 'ok') {
           setSaveStatus('idle');
           return;
         }
-        await notesUpdate(createdId, `Voice note · ${new Date().toLocaleString()}`, polish.text);
-        setBody(polish.text);
-        await reload();
+        let polished: string | null = null;
+        setBody((prev) => {
+          // Replace the raw transcript block with the polished version by
+          // first removing the raw (via transcript match) and re-inserting.
+          const withoutRaw = prev.replace(transcript.trim(), '').replace(/\n{3,}/g, '\n\n');
+          const next = insertTranscriptAfterEmbed(withoutRaw, path, polish.text);
+          polished = next;
+          return next;
+        });
+        if (polished !== null) {
+          await notesUpdate(noteId, title, polished);
+          setActiveNote((p) => (p && p.id === noteId ? { ...p, body: polished! } : p));
+          await reload();
+        }
         setSaveStatus('saved');
         if (savedClearTimer.current !== null) window.clearTimeout(savedClearTimer.current);
         savedClearTimer.current = window.setTimeout(() => setSaveStatus('idle'), 1800);
         toast({ title: 'Polished', variant: 'success', durationMs: 2000 });
       } catch (e) {
+        if (cancelled()) return;
         setSaveStatus('error');
-        toast({
-          title: 'Auto-polish failed',
-          description: String(e),
-          variant: 'error',
-        });
+        toast({ title: 'Auto-polish failed', description: String(e), variant: 'error' });
       }
     },
-    [reload, toast],
+    [reload, title, toast]
+  );
+
+  /** Cancel whatever transcription/polish is currently in flight. Whisper
+   *  itself keeps churning on the Rust side — there's no cheap abort path
+   *  through `whisper.cpp` — so we just bump the session id and let the
+   *  arriving result drop on the floor, freeing the UI immediately. */
+  const cancelTranscribe = useCallback(() => {
+    transcribeSessionRef.current += 1;
+    setSaveStatus('idle');
+    toast({ title: 'Transcription cancelled', variant: 'default', durationMs: 1400 });
+  }, [toast]);
+
+  const onRecorderComplete = useCallback(
+    async (audio: RecordedAudio) => {
+      setRecorderOpen(false);
+      let savedPath: string;
+      try {
+        savedPath = await notesSaveAudioBytes(audio.bytes, audio.ext);
+      } catch (e) {
+        console.error('voice note save failed', e);
+        toast({ title: 'Couldn\u2019t save recording', description: String(e), variant: 'error' });
+        return;
+      }
+      const target = await resolveEmbedTarget(recorderIntentRef.current);
+      // Insert at cursor when the editor is focused on the current note, so
+      // a quick ⌘⇧R in the middle of typing lands the embed where the user
+      // was writing. Otherwise append as a new block at the end.
+      const editor = editorRef.current;
+      const atCursor =
+        !target.isNew && editor && document.activeElement === editor;
+      const caption = `voice note · ${new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`;
+      let nextBody: string;
+      let nextCursor: number | null = null;
+      if (atCursor && editor) {
+        const pos = editor.selectionStart ?? target.body.length;
+        const r = insertAudioEmbedAt(target.body, pos, savedPath, caption);
+        nextBody = r.body;
+        nextCursor = r.cursor;
+      } else {
+        nextBody = appendAudioEmbed(target.body, savedPath, caption);
+      }
+      await commitBodyUpdate(target, nextBody);
+      if (nextCursor != null && editor) {
+        window.requestAnimationFrame(() => {
+          editor.focus();
+          editor.setSelectionRange(nextCursor!, nextCursor!);
+        });
+      }
+      toast({
+        title: 'Voice note embedded',
+        description: formatDuration(audio.durationMs),
+        variant: 'success',
+        durationMs: 1600,
+      });
+      await runInlineTranscribe(target.id, savedPath);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [resolveEmbedTarget, commitBodyUpdate, toast]
   );
 
   const deleteConfirm = useSuppressibleConfirm<number>('notes.delete');
@@ -393,6 +527,58 @@ export const NotesShell = () => {
     if (activeId == null) return;
     deleteConfirm.request(activeId, performDelete);
   };
+
+  /** Drop handler: every dropped file becomes an inline `![caption](path)`
+   *  embed inside the active note, so multiple tracks share one note
+   *  alongside any text the user is writing. We resolve the target once and
+   *  reuse it across the whole batch so a four-file drop doesn't spawn four
+   *  new notes. Auto-transcription runs serially after all files land. */
+  const onAudioFilesDropped = useCallback(
+    async (paths: string[]) => {
+      toast({
+        title: paths.length === 1 ? 'Importing audio…' : `Importing ${paths.length} files…`,
+        variant: 'default',
+        durationMs: 1400,
+      });
+      let target = await resolveEmbedTarget();
+      const savedPaths: string[] = [];
+      for (const p of paths) {
+        try {
+          const saved = await notesSaveAudioFile(p);
+          const caption = (p.split(/[\\/]/).pop() ?? 'audio').replace(/\.[^.]+$/, '');
+          const nextBody = appendAudioEmbed(target.body, saved, caption);
+          await commitBodyUpdate(target, nextBody);
+          target = { ...target, body: nextBody, isNew: false };
+          savedPaths.push(saved);
+        } catch (e) {
+          console.error('audio import failed', p, e);
+          toast({
+            title: 'Import failed',
+            description: `${p.split(/[\\/]/).pop() ?? p}: ${String(e)}`,
+            variant: 'error',
+          });
+        }
+      }
+      if (savedPaths.length > 0) {
+        setActiveId(target.id);
+        setViewMode('preview');
+        toast({
+          title:
+            savedPaths.length === 1
+              ? 'Audio embedded'
+              : `${savedPaths.length} audio files embedded`,
+          variant: 'success',
+          durationMs: 1800,
+        });
+        for (const savedPath of savedPaths) {
+          await runInlineTranscribe(target.id, savedPath);
+        }
+      }
+    },
+    [resolveEmbedTarget, commitBodyUpdate, runInlineTranscribe, toast]
+  );
+
+  const { isDragOver, audioCount } = useAudioFileDrop(onAudioFilesDropped);
 
   const onImport = useCallback(async () => {
     // Suspend popup auto-hide so focus shifting to the native file picker
@@ -438,17 +624,13 @@ export const NotesShell = () => {
     }
   }, [title, body, toast]);
 
-  const isAudio = Boolean(active?.audio_path);
   const isEditing = active || (activeId === null && (title || body));
   const exportDisabled = !body && !title;
-  const showEditor = !isAudio && viewMode !== 'preview';
-  const showPreview = !isAudio && viewMode !== 'edit';
+  const showEditor = viewMode !== 'preview';
+  const showPreview = viewMode !== 'edit';
 
   const renderNoteRow = (n: NoteSummary) => {
-    const rowAudio = Boolean(n.audio_path);
-    const preview = rowAudio
-      ? `Voice memo · ${formatDuration(n.audio_duration_ms)}`
-      : n.preview.split('\n').find((l) => l.trim()) || 'No content';
+    const preview = n.preview.split('\n').find((l) => l.trim()) || 'No content';
     const open = () => {
       setActiveId(n.id);
       setViewMode('preview');
@@ -470,18 +652,6 @@ export const NotesShell = () => {
         }`}
       >
         <div className="flex items-baseline gap-2">
-          {rowAudio && (
-            <span
-              className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full"
-              style={{
-                background: 'rgba(var(--stash-accent-rgb), 0.18)',
-                color: 'rgba(var(--stash-accent-rgb), 1)',
-              }}
-              aria-hidden
-            >
-              <MicIcon size={9} />
-            </span>
-          )}
           <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
             {n.title || <span className="t-tertiary">Untitled</span>}
           </span>
@@ -530,7 +700,44 @@ export const NotesShell = () => {
   };
 
   return (
-    <div className="h-full flex">
+    <div className="h-full flex relative">
+      {isDragOver && (
+        <div
+          className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center"
+          role="presentation"
+          data-testid="notes-audio-drop-overlay"
+          style={{
+            // Accent-tinted fog so the drop zone reads as "ready to accept"
+            // without obscuring the underlying list layout beneath it.
+            background: 'rgba(var(--stash-accent-rgb), 0.12)',
+            backdropFilter: 'blur(2px)',
+            border: '2px dashed rgba(var(--stash-accent-rgb), 0.6)',
+            borderRadius: 10,
+            margin: 6,
+          }}
+        >
+          <div
+            className="flex items-center gap-3 px-5 py-3 rounded-lg"
+            style={{
+              background: 'var(--color-surface)',
+              boxShadow: '0 12px 40px -12px rgba(0,0,0,0.5)',
+              border: '1px solid rgba(var(--stash-accent-rgb), 0.4)',
+            }}
+          >
+            <MicIcon size={18} />
+            <div className="flex flex-col">
+              <span className="t-primary text-body font-medium">
+                {audioCount === 1
+                  ? 'Drop audio file to import'
+                  : `Drop ${audioCount} audio files to import`}
+              </span>
+              <span className="t-tertiary text-meta">
+                Transcription runs automatically after the drop
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
       <aside
         className="relative shrink-0 border-r hair overflow-hidden transition-[width] duration-200 ease-out"
         style={{ width: sidebarCollapsed ? 40 : 220 }}
@@ -556,8 +763,8 @@ export const NotesShell = () => {
             <PencilIcon size={13} />
           </IconButton>
           <IconButton
-            onClick={() => setRecorderOpen(true)}
-            title="Record voice note"
+            onClick={openRecorderForNew}
+            title="New voice note"
             stopPropagation={false}
           >
             <MicIcon size={13} />
@@ -617,9 +824,9 @@ export const NotesShell = () => {
             variant="soft"
             tone="accent"
             shape="square"
-            onClick={() => setRecorderOpen(true)}
-            title="Record voice note"
-            aria-label="Record voice note"
+            onClick={openRecorderForNew}
+            title="New voice note"
+            aria-label="New voice note"
           >
             <MicIcon size={13} />
           </Button>
@@ -671,16 +878,14 @@ export const NotesShell = () => {
                   placeholder="Untitled"
                   className="flex-1 bg-transparent outline-none t-primary text-heading font-medium min-w-0"
                 />
-                <SaveStatusPill status={saveStatus} />
-                {!isAudio && (
-                  <SegmentedControl
-                    size="sm"
-                    options={VIEW_MODE_OPTIONS}
-                    value={viewMode}
-                    onChange={setViewMode}
-                    ariaLabel="View mode"
-                  />
-                )}
+                <SaveStatusPill status={saveStatus} onCancel={cancelTranscribe} />
+                <SegmentedControl
+                  size="sm"
+                  options={VIEW_MODE_OPTIONS}
+                  value={viewMode}
+                  onChange={setViewMode}
+                  ariaLabel="View mode"
+                />
                 <div className="w-px h-5 bg-white/[0.08]" aria-hidden />
                 <div className="flex items-center gap-1 shrink-0">
                   {active && (
@@ -703,6 +908,13 @@ export const NotesShell = () => {
                     title="Ask AI about this note (opens a new chat)"
                   />
                   <IconButton
+                    onClick={openRecorderForCurrent}
+                    title="Record voice note into this note"
+                    stopPropagation={false}
+                  >
+                    <MicIcon size={13} />
+                  </IconButton>
+                  <IconButton
                     onClick={onExport}
                     title={exportDisabled ? 'Nothing to export' : 'Export as .md'}
                     stopPropagation={false}
@@ -723,7 +935,7 @@ export const NotesShell = () => {
               </div>
               <div className="mt-1 flex items-center gap-3 t-tertiary text-meta tabular-nums">
                 {active && <span>Updated {iso(active.updated_at)} ago</span>}
-                {!isAudio && body.trim() && (
+                {body.trim() && (
                   <>
                     {active && <span aria-hidden>·</span>}
                     <span>{countWords(body)} words</span>
@@ -732,18 +944,6 @@ export const NotesShell = () => {
               </div>
             </div>
             <div className="flex-1 flex min-h-0">
-              {isAudio && active && (
-                <AudioNoteView
-                  note={active}
-                  onTranscriptUpdated={(_id, merged) => {
-                    // Reflect the server-side body bump locally so the
-                    // editor/preview updates without waiting for a reload,
-                    // then reload in the background to sync timestamps.
-                    setBody(merged);
-                    reload();
-                  }}
-                />
-              )}
               {showEditor && (
                 <div
                   className={`flex flex-col min-h-0 ${showPreview ? 'w-1/2 border-r hair' : 'flex-1'}`}

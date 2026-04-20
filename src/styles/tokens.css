@@ -180,6 +180,16 @@
     background: rgba(255, 255, 255, calc(var(--stash-pane-opacity-light) + 0.04));
   }
 
+  /* Modal surface — fully opaque so the chaotic content underneath doesn't
+   * bleed through. The popup itself can be translucent (user setting), but a
+   * modal that overlays it must obscure for legibility. Theme-aware. */
+  .modal-surface {
+    background: rgb(28, 28, 32);
+  }
+  .light .modal-surface {
+    background: rgb(246, 247, 249);
+  }
+
   .canvas-grid {
     background-color: #0b0b0e;
     background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);

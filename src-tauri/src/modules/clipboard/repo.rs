@@ -157,6 +157,18 @@ impl ClipboardRepo {
         Ok(removed)
     }
 
+    /// Return the raw `meta` JSON strings for every unpinned image row, so a
+    /// caller can parse out file paths and delete the backing files before
+    /// `clear_all` drops the rows that point at them.
+    pub fn unpinned_image_metas(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT meta FROM clipboard_items
+             WHERE pinned = 0 AND kind = 'image' AND meta IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect()
+    }
+
     /// Keep at most `cap` unpinned items (newest first). Pinned items are
     /// always retained. Returns how many rows were removed.
     pub fn trim_to_cap(&mut self, cap: usize) -> Result<usize> {
@@ -203,6 +215,21 @@ mod tests {
         assert_eq!(items[0].id, id);
         assert_eq!(items[0].content, "hello world");
         assert_eq!(items[0].kind, "text");
+    }
+
+    #[test]
+    fn unpinned_image_metas_returns_only_image_rows_and_skips_pinned() {
+        let mut repo = ClipboardRepo::new(Connection::open_in_memory().unwrap()).unwrap();
+        repo.insert_text("plain", 1).unwrap();
+        let img1 = repo
+            .insert_image("h1", r#"{"path":"/tmp/a.png"}"#, 2)
+            .unwrap();
+        repo.insert_image("h2", r#"{"path":"/tmp/b.png"}"#, 3)
+            .unwrap();
+        repo.toggle_pin(img1).unwrap();
+        let metas = repo.unpinned_image_metas().unwrap();
+        assert_eq!(metas.len(), 1);
+        assert!(metas[0].contains("/tmp/b.png"));
     }
 
     #[test]

@@ -1,6 +1,31 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
+import { Select } from '../../shared/ui/Select';
 import { MicIcon, StopCircleIcon } from '../../shared/ui/icons';
+
+const MIC_PREF_KEY = 'stash:notes:micDeviceId';
+
+const readSavedMic = (): string | null => {
+  try {
+    return localStorage.getItem(MIC_PREF_KEY);
+  } catch {
+    return null;
+  }
+};
+
+const saveMic = (id: string | null): void => {
+  try {
+    if (id) localStorage.setItem(MIC_PREF_KEY, id);
+    else localStorage.removeItem(MIC_PREF_KEY);
+  } catch {
+    /* storage may be unavailable (private mode, disabled) — silently skip. */
+  }
+};
+
+/** Continuity mics expose the iPhone's device name (e.g. "Sasha's iPhone
+ *  Microphone"). Detecting by substring is fragile in theory but in practice
+ *  macOS always includes the word — and the user can override via the picker. */
+const isIphoneLabel = (label: string): boolean => /iphone/i.test(label);
 
 export type RecordedAudio = {
   bytes: Uint8Array;
@@ -65,6 +90,8 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [levels, setLevels] = useState<number[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -74,6 +101,10 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const formatRef = useRef<{ mime: string; ext: string }>({ mime: '', ext: 'webm' });
+  /** Whether we've already auto-switched to an iPhone on this open. Prevents
+   *  the picker from yanking the stream back every time enumerateDevices
+   *  re-runs (e.g. device hotplug while recording). */
+  const autoSwitchedRef = useRef(false);
 
   const cleanup = useCallback(() => {
     if (rafRef.current !== null) {
@@ -99,16 +130,55 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
       setElapsedMs(0);
       setLevels([]);
       setErrorMsg(null);
+      autoSwitchedRef.current = false;
     }
   }, [open, cleanup]);
 
   useEffect(() => () => cleanup(), [cleanup]);
 
-  const start = useCallback(async () => {
-    setErrorMsg(null);
+  const refreshDevices = useCallback(async (): Promise<MediaDeviceInfo[]> => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const mics = all.filter((d) => d.kind === 'audioinput');
+      setDevices(mics);
+      return mics;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const start = useCallback(async (deviceId?: string | null) => {
+    setErrorMsg(null);
+    /** If a saved or requested device is no longer available, `exact` throws
+     *  `OverconstrainedError`. Fall through to the default mic in that case. */
+    const openStream = async (wanted: string | null): Promise<MediaStream> => {
+      if (wanted) {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: { deviceId: { exact: wanted } },
+          });
+        } catch (e) {
+          const err = e as DOMException;
+          if (err?.name !== 'OverconstrainedError' && err?.name !== 'NotFoundError') throw e;
+          saveMic(null);
+        }
+      }
+      return navigator.mediaDevices.getUserMedia({ audio: true });
+    };
+    try {
+      const wanted = deviceId ?? readSavedMic();
+      const stream = await openStream(wanted);
       streamRef.current = stream;
+      const activeId = stream.getAudioTracks()[0]?.getSettings?.().deviceId ?? null;
+      setActiveDeviceId(activeId);
+
+      // Cache the resolved device as the user's preference so the next open
+      // skips the full "enumerate → possibly re-open for iPhone" dance and
+      // goes straight to `exact` the moment `getUserMedia` is available.
+      // Without this, every recorder open paid a ~1s startup cost to redo
+      // the same discovery. Only fill it in if nothing was saved before, to
+      // respect an explicit manual pick from the device picker.
+      if (activeId && !readSavedMic()) saveMic(activeId);
 
       const ctx = new (window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
@@ -126,8 +196,33 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
       rec.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
-      rec.start(250);
+      // 100 ms timeslice — small enough that the first audio bytes land in
+      // `chunksRef` almost immediately after `rec.start()`, so if the user
+      // stops the recording within the first half-second there's still
+      // something to save. 250 ms (the old value) made very short
+      // clips occasionally come back empty.
+      rec.start(100);
       recorderRef.current = rec;
+
+      // Enumerate devices and auto-prefer an iPhone mic off the critical
+      // path — after the user has a live stream and the UI has already
+      // swapped to the "Recording" panel. This adds a device picker
+      // eventually (on a laptop without Continuity) or, on the very first
+      // open with an iPhone nearby, preps the saved preference so
+      // subsequent opens go straight to the phone.
+      if (!deviceId && !autoSwitchedRef.current) {
+        autoSwitchedRef.current = true;
+        void refreshDevices().then((mics) => {
+          const iphone = mics.find((d) => isIphoneLabel(d.label));
+          if (iphone?.deviceId && iphone.deviceId !== activeId) {
+            // Remember for next open; the current recording keeps running
+            // on whatever mic we already captured — no mid-clip swap.
+            saveMic(iphone.deviceId);
+          }
+        });
+      } else {
+        void refreshDevices();
+      }
 
       startedAtRef.current = performance.now();
       setState('recording');
@@ -158,7 +253,7 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
       }
       cleanup();
     }
-  }, [cleanup]);
+  }, [cleanup, refreshDevices]);
 
   // Auto-start the recording when the modal opens.
   useEffect(() => {
@@ -166,6 +261,39 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
       start();
     }
   }, [open, state, start]);
+
+  const changeDevice = useCallback(
+    async (nextId: string) => {
+      if (!nextId || nextId === activeDeviceId) return;
+      saveMic(nextId);
+      // Tear down the current recording and restart cleanly on the new input.
+      // Elapsed resets — this is consistent with how macOS apps handle mid-
+      // recording input switches, and clearer than trying to splice two streams.
+      const rec = recorderRef.current;
+      if (rec && rec.state !== 'inactive') {
+        try {
+          rec.stop();
+        } catch {
+          /* already stopped */
+        }
+      }
+      cleanup();
+      setElapsedMs(0);
+      setLevels([]);
+      setState('idle');
+      await start(nextId);
+    },
+    [activeDeviceId, cleanup, start]
+  );
+
+  const deviceOptions = useMemo(
+    () =>
+      devices.map((d, i) => ({
+        value: d.deviceId || `__dev_${i}`,
+        label: d.label || `Microphone ${i + 1}`,
+      })),
+    [devices]
+  );
 
   const finish = useCallback(async () => {
     const rec = recorderRef.current;
@@ -201,13 +329,16 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
       role="dialog"
       aria-modal="true"
       aria-label="Record a voice note"
-      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)' }}
+      style={{
+        background: 'rgba(0,0,0,0.65)',
+        backdropFilter: 'blur(14px)',
+        WebkitBackdropFilter: 'blur(14px)',
+      }}
     >
       <div
-        className="rounded-xl p-6 w-[380px] flex flex-col items-center gap-4"
+        className="modal-surface rounded-xl p-6 w-[380px] flex flex-col items-center gap-4"
         style={{
-          background: 'var(--color-surface)',
-          boxShadow: '0 20px 60px -10px rgba(0,0,0,0.45)',
+          boxShadow: '0 20px 60px -10px rgba(0,0,0,0.55)',
           border: '1px solid rgba(255,255,255,0.08)',
         }}
       >
@@ -247,6 +378,21 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
                 />
               ))}
             </div>
+            {deviceOptions.length > 1 && activeDeviceId && (
+              <div
+                className="flex items-center gap-2 w-full"
+                data-testid="recorder-device-row"
+              >
+                <span className="t-secondary text-meta shrink-0">Mic</span>
+                <Select
+                  label="Microphone"
+                  value={activeDeviceId}
+                  onChange={changeDevice}
+                  options={deviceOptions}
+                  placement="auto"
+                />
+              </div>
+            )}
             <div className="flex items-center gap-2 w-full justify-center mt-1">
               <Button variant="ghost" onClick={onCancel}>
                 Cancel

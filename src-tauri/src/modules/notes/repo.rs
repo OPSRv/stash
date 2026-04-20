@@ -111,34 +111,6 @@ impl NotesRepo {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn create_audio(
-        &mut self,
-        title: &str,
-        body: &str,
-        audio_path: &str,
-        duration_ms: Option<i64>,
-        now: i64,
-    ) -> Result<i64> {
-        self.conn.execute(
-            "INSERT INTO notes
-                (title, body, created_at, updated_at, audio_path, audio_duration_ms)
-             VALUES (?1, ?2, ?3, ?3, ?4, ?5)",
-            params![title, body, now, audio_path, duration_ms],
-        )?;
-        Ok(self.conn.last_insert_rowid())
-    }
-
-    /// Rewrite the `audio_path` column for an existing row without touching
-    /// any other field. Used by `notes_create_audio` to finalize the path
-    /// after renaming the temp file to its id-based name.
-    pub fn set_audio_path_inline(&mut self, id: i64, audio_path: &str) -> Result<()> {
-        self.conn.execute(
-            "UPDATE notes SET audio_path = ?1 WHERE id = ?2",
-            params![audio_path, id],
-        )?;
-        Ok(())
-    }
-
     pub fn update(&mut self, id: i64, title: &str, body: &str, now: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE notes SET title = ?1, body = ?2, updated_at = ?3 WHERE id = ?4",
@@ -316,17 +288,6 @@ mod tests {
         let id = repo.create("gone", "", 1).unwrap();
         repo.delete(id).unwrap();
         assert!(repo.get(id).unwrap().is_none());
-    }
-
-    #[test]
-    fn create_audio_persists_path_and_duration() {
-        let mut repo = fresh();
-        let id = repo
-            .create_audio("Idea", "", "/tmp/a.webm", Some(12_500), 10)
-            .unwrap();
-        let note = repo.get(id).unwrap().unwrap();
-        assert_eq!(note.audio_path.as_deref(), Some("/tmp/a.webm"));
-        assert_eq!(note.audio_duration_ms, Some(12_500));
     }
 
     #[test]

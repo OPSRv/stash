@@ -129,15 +129,15 @@ use modules::metronome::commands::{
 use modules::whisper::{
     commands::{
         whisper_delete_model, whisper_download_model, whisper_get_active, whisper_list_models,
-        whisper_set_active, whisper_transcribe,
+        whisper_set_active, whisper_transcribe_path,
     },
     state::WhisperStateHandle,
 };
 use modules::notes::{
     commands::{
-        notes_copy_audio_to_clipboard, notes_create, notes_create_audio, notes_delete, notes_get,
-        notes_list, notes_read_audio, notes_read_file, notes_search, notes_set_pinned, notes_update,
-        notes_write_file, NotesState,
+        notes_create, notes_delete, notes_get, notes_list, notes_read_audio_path,
+        notes_read_file, notes_save_audio_bytes, notes_save_audio_file, notes_search,
+        notes_set_pinned, notes_update, notes_write_file, NotesState,
     },
     repo::NotesRepo,
 };
@@ -340,10 +340,10 @@ pub fn run() {
             notes_delete,
             notes_read_file,
             notes_write_file,
-            notes_create_audio,
-            notes_read_audio,
+            notes_save_audio_bytes,
+            notes_save_audio_file,
+            notes_read_audio_path,
             notes_set_pinned,
-            notes_copy_audio_to_clipboard,
             pomodoro_list_presets,
             pomodoro_save_preset,
             pomodoro_delete_preset,
@@ -360,7 +360,7 @@ pub fn run() {
             whisper_delete_model,
             whisper_set_active,
             whisper_get_active,
-            whisper_transcribe,
+            whisper_transcribe_path,
             global_search,
             music_status,
             music_embed,

@@ -6,10 +6,6 @@ export type Note = {
   body: string;
   created_at: number;
   updated_at: number;
-  /** Absolute path to the recorded audio file, if this note is a voice memo. */
-  audio_path: string | null;
-  /** Recording length in ms, when known. */
-  audio_duration_ms: number | null;
   /** User-pinned notes float to the top of the side-list. */
   pinned: boolean;
 };
@@ -24,8 +20,6 @@ export type NoteSummary = {
   preview: string;
   created_at: number;
   updated_at: number;
-  audio_path: string | null;
-  audio_duration_ms: number | null;
   pinned: boolean;
 };
 
@@ -54,21 +48,19 @@ export const notesReadFile = (path: string): Promise<ReadFileResult> =>
 export const notesWriteFile = (path: string, content: string): Promise<void> =>
   invoke('notes_write_file', { path, content });
 
-/** Create a new note backed by a recorded audio blob. Returns the full note. */
-export const notesCreateAudio = (args: {
-  title: string;
-  bytes: Uint8Array;
-  ext: string;
-  durationMs: number | null;
-}): Promise<Note> =>
-  invoke('notes_create_audio', {
-    title: args.title,
-    bytes: Array.from(args.bytes),
-    ext: args.ext,
-    durationMs: args.durationMs,
-  });
+/** Persist audio bytes (from the recorder) into the managed audio directory.
+ *  Returns the absolute path so the caller can embed it into a note's body
+ *  via markdown: `![voice note](/abs/path)`. */
+export const notesSaveAudioBytes = (bytes: Uint8Array, ext: string): Promise<string> =>
+  invoke('notes_save_audio_bytes', { bytes: Array.from(bytes), ext });
 
-/** Fetch the raw audio bytes for a voice-note so the frontend can wrap them
- *  in a Blob URL for `<audio>` playback. */
-export const notesReadAudio = (id: number): Promise<Uint8Array> =>
-  invoke<number[]>('notes_read_audio', { id }).then((arr) => new Uint8Array(arr));
+/** Copy an audio file at `path` (e.g. dropped from Finder) into the managed
+ *  audio directory. Returns the new absolute path for markdown-embed use. */
+export const notesSaveAudioFile = (path: string): Promise<string> =>
+  invoke('notes_save_audio_file', { path });
+
+/** Read raw audio bytes by absolute path. Only paths under the managed audio
+ *  dir are accepted (the Rust side enforces this). Used by the inline
+ *  markdown audio player, which references files by path from `![](…)`. */
+export const notesReadAudioByPath = (path: string): Promise<Uint8Array> =>
+  invoke<number[]>('notes_read_audio_path', { path }).then((arr) => new Uint8Array(arr));

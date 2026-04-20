@@ -1,4 +1,3 @@
-use crate::modules::notes::commands::NotesState;
 use crate::modules::whisper::catalog::{self, ModelSpec};
 use crate::modules::whisper::pipeline;
 use crate::modules::whisper::state::WhisperStateHandle;
@@ -228,18 +227,18 @@ struct TranscribeEvent<'a> {
     stage: &'a str,
 }
 
-/// Transcribe a voice-note using the currently active whisper model. Writes
-/// the result into the note's `body`, bumping `updated_at`. Returns the
-/// transcript so the frontend can show it without a reload race.
+/// Transcribe an arbitrary audio file at `path` and return the transcript
+/// text. Does not touch any DB row — the caller decides where the text
+/// goes (usually splicing it into a note's body next to the `![](…)` embed
+/// it was drawn from).
 ///
 /// `language` defaults to `"uk"` (Ukrainian — the product's base language).
 /// Pass `"auto"` to let whisper detect.
 #[tauri::command]
-pub async fn whisper_transcribe(
+pub async fn whisper_transcribe_path(
     app: AppHandle,
     state: State<'_, WhisperStateHandle>,
-    notes: State<'_, NotesState>,
-    note_id: i64,
+    path: String,
     language: Option<String>,
 ) -> Result<String, String> {
     let active = state
@@ -254,30 +253,17 @@ pub async fn whisper_transcribe(
     if !is_downloaded(&model_path, spec.size_bytes) {
         return Err("active model is not downloaded".into());
     }
-
-    // Locate the audio file for this note.
-    let note = notes
-        .repo
-        .lock()
-        .unwrap()
-        .get(note_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("note {note_id} not found"))?;
-    let audio_path = note
-        .audio_path
-        .ok_or_else(|| "note has no audio attachment".to_string())?;
-
+    let audio = PathBuf::from(&path);
+    if !audio.is_file() {
+        return Err(format!("audio file not found: {path}"));
+    }
     let lang = language.unwrap_or_else(|| "uk".into());
-    // Half the available logical cores is a reasonable default — whisper.cpp
-    // saturates ~4 threads on Intel CPUs before diminishing returns.
-    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) / 2).max(2) as i32;
-
+    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) / 2).max(2)
+        as i32;
     let _ = app.emit(
         "whisper:transcribe",
-        TranscribeEvent { note_id, stage: "running" },
+        TranscribeEvent { note_id: 0, stage: "running" },
     );
-
-    let audio = PathBuf::from(audio_path);
     let model = model_path.clone();
     let lang_owned = lang.clone();
     let text = tauri::async_runtime::spawn_blocking(move || {
@@ -285,23 +271,9 @@ pub async fn whisper_transcribe(
     })
     .await
     .map_err(|e| e.to_string())??;
-
-    // Always replace the body — this is a voice note, re-transcribing should
-    // not accumulate duplicates.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    notes
-        .repo
-        .lock()
-        .unwrap()
-        .update(note_id, &note.title, &text, now)
-        .map_err(|e| e.to_string())?;
-
     let _ = app.emit(
         "whisper:transcribe",
-        TranscribeEvent { note_id, stage: "done" },
+        TranscribeEvent { note_id: 0, stage: "done" },
     );
     Ok(text)
 }

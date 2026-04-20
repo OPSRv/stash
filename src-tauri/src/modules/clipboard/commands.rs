@@ -3,7 +3,7 @@ use crate::modules::clipboard::repo::{ClipboardItem, ClipboardRepo};
 use lru::LruCache;
 use rusqlite::Result;
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
@@ -37,8 +37,25 @@ impl LinkPreviewState {
 
 pub struct ClipboardState {
     pub repo: Mutex<ClipboardRepo>,
-    #[allow(dead_code)]
     pub images_dir: PathBuf,
+}
+
+/// Best-effort delete of a captured-image file pointed at by a row's meta
+/// JSON. Only files inside the configured `images_dir` are touched — defence
+/// against a stale or tampered row pointing at something unrelated. Failures
+/// are swallowed because the row removal must succeed regardless.
+fn purge_image_file(meta: &str, images_dir: &Path) {
+    let parsed: serde_json::Value = match serde_json::from_str(meta) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let path = match parsed.get("path").and_then(|v| v.as_str()) {
+        Some(p) => Path::new(p),
+        None => return,
+    };
+    if path.starts_with(images_dir) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 const DEFAULT_LIMIT: usize = 200;
@@ -116,6 +133,12 @@ pub fn clipboard_toggle_pin(
 pub fn clipboard_clear(
     state: State<'_, Arc<ClipboardState>>,
 ) -> std::result::Result<usize, String> {
+    // Gather the unpinned image rows' meta first so we can purge the backing
+    // PNGs from `images_dir` before the rows that point at them disappear.
+    let metas = to_string_err(state.repo.lock().unwrap().unpinned_image_metas())?;
+    for meta in &metas {
+        purge_image_file(meta, &state.images_dir);
+    }
     to_string_err(clear_all(&state))
 }
 
@@ -180,6 +203,17 @@ pub fn clipboard_delete(
     state: State<'_, Arc<ClipboardState>>,
     id: i64,
 ) -> std::result::Result<(), String> {
+    // For image rows, remove the captured PNG from disk before dropping the
+    // row — otherwise repeated screenshot copies leak into `images_dir`
+    // forever. Lookup is best-effort: a missing row falls through to the
+    // delete (no-op), and a non-image row skips the file step.
+    if let Ok(Some(item)) = state.repo.lock().unwrap().get(id) {
+        if item.kind == "image" {
+            if let Some(meta) = item.meta.as_deref() {
+                purge_image_file(meta, &state.images_dir);
+            }
+        }
+    }
     to_string_err(delete_item(&state, id))
 }
 

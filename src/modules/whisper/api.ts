@@ -37,5 +37,9 @@ export const whisperSetActive = (id: string | null): Promise<void> =>
 export const whisperGetActive = (): Promise<string | null> =>
   invoke('whisper_get_active');
 
-export const whisperTranscribe = (noteId: number, language: string = 'uk'): Promise<string> =>
-  invoke('whisper_transcribe', { noteId, language });
+/** Transcribe an arbitrary audio file by path; returns the transcript text
+ *  without touching any DB row. Inline `![](…mp3)` embeds point at files
+ *  inside the managed audio dir, and the caller splices the transcript
+ *  into the note's body near the embed. */
+export const whisperTranscribePath = (path: string, language: string = 'uk'): Promise<string> =>
+  invoke('whisper_transcribe_path', { path, language });

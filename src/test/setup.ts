@@ -19,6 +19,13 @@ vi.mock('@tauri-apps/api/window', () => {
   return { getCurrentWindow: () => win };
 });
 
+vi.mock('@tauri-apps/api/webview', () => {
+  const webview = {
+    onDragDropEvent: vi.fn().mockResolvedValue(() => {}),
+  };
+  return { getCurrentWebview: () => webview };
+});
+
 vi.mock('@tauri-apps/plugin-store', () => ({
   LazyStore: class {
     get = vi.fn().mockResolvedValue(undefined);
