@@ -21,7 +21,33 @@ pub struct Note {
     pub body: String,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Absolute path to the recorded audio file, if this note originated from
+    /// a voice recording. `None` for plain markdown notes.
+    pub audio_path: Option<String>,
+    /// Recording length in milliseconds, when known. Used for list previews.
+    pub audio_duration_ms: Option<i64>,
 }
+
+/// Projection used for the side-list. Carries only what the list row needs so
+/// large bodies aren't shipped across IPC on every open — the full note is
+/// fetched with `notes_get` when the user actually picks one.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct NoteSummary {
+    pub id: i64,
+    pub title: String,
+    /// Leading slice of the body (capped in SQL), enough to render one line of
+    /// preview text without shipping the full note.
+    pub preview: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub audio_path: Option<String>,
+    pub audio_duration_ms: Option<i64>,
+}
+
+/// How many leading body chars the list projection returns. Large enough for
+/// any reasonable single-line preview, small enough that 500 notes stay under
+/// ~150 KB across IPC even when bodies are long.
+const LIST_PREVIEW_CHARS: usize = 280;
 
 pub struct NotesRepo {
     conn: Connection,
@@ -40,6 +66,21 @@ impl NotesRepo {
             CREATE INDEX IF NOT EXISTS idx_notes_updated
                 ON notes(updated_at DESC);",
         )?;
+        // Additive migrations. `ALTER TABLE ADD COLUMN` is not idempotent in
+        // SQLite, so we check the existing columns first.
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(notes)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<_>>()?;
+        if !cols.iter().any(|c| c == "audio_path") {
+            conn.execute("ALTER TABLE notes ADD COLUMN audio_path TEXT", [])?;
+        }
+        if !cols.iter().any(|c| c == "audio_duration_ms") {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN audio_duration_ms INTEGER",
+                [],
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -50,6 +91,34 @@ impl NotesRepo {
             params![title, body, now],
         )?;
         Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn create_audio(
+        &mut self,
+        title: &str,
+        body: &str,
+        audio_path: &str,
+        duration_ms: Option<i64>,
+        now: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO notes
+                (title, body, created_at, updated_at, audio_path, audio_duration_ms)
+             VALUES (?1, ?2, ?3, ?3, ?4, ?5)",
+            params![title, body, now, audio_path, duration_ms],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Rewrite the `audio_path` column for an existing row without touching
+    /// any other field. Used by `notes_create_audio` to finalize the path
+    /// after renaming the temp file to its id-based name.
+    pub fn set_audio_path_inline(&mut self, id: i64, audio_path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE notes SET audio_path = ?1 WHERE id = ?2",
+            params![audio_path, id],
+        )?;
+        Ok(())
     }
 
     pub fn update(&mut self, id: i64, title: &str, body: &str, now: i64) -> Result<()> {
@@ -66,24 +135,26 @@ impl NotesRepo {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn get(&self, id: i64) -> Result<Option<Note>> {
         self.conn
             .query_row(
-                "SELECT * FROM notes WHERE id = ?1",
+                "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms
+                 FROM notes WHERE id = ?1",
                 params![id],
                 Self::map_row,
             )
             .optional()
     }
 
-    pub fn list(&self) -> Result<Vec<Note>> {
-        // Cap unconditionally so a user with thousands of notes doesn't stall
-        // the UI thread on every reload. UI flows that need more could page.
-        let mut stmt = self
-            .conn
-            .prepare("SELECT * FROM notes ORDER BY updated_at DESC LIMIT 500")?;
-        let rows = stmt.query_map([], Self::map_row)?;
+    /// Lightweight projection used by the side-list. `substr(body, 1, ?)` is
+    /// evaluated inside SQLite, so the full body never leaves the DB page.
+    pub fn list_summaries(&self) -> Result<Vec<NoteSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, substr(body, 1, ?1) AS preview,
+                    created_at, updated_at, audio_path, audio_duration_ms
+             FROM notes ORDER BY updated_at DESC LIMIT 500",
+        )?;
+        let rows = stmt.query_map(params![LIST_PREVIEW_CHARS as i64], Self::map_summary)?;
         rows.collect()
     }
 
@@ -91,11 +162,27 @@ impl NotesRepo {
     pub fn search(&self, query: &str) -> Result<Vec<Note>> {
         let like = format!("%{}%", escape_like(query.trim()));
         let mut stmt = self.conn.prepare(
-            "SELECT * FROM notes
-             WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE OR body LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+            "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms
+             FROM notes
+             WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                OR body  LIKE ?1 ESCAPE '\\' COLLATE NOCASE
              ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map(params![like], Self::map_row)?;
+        rows.collect()
+    }
+
+    pub fn search_summaries(&self, query: &str) -> Result<Vec<NoteSummary>> {
+        let like = format!("%{}%", escape_like(query.trim()));
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, substr(body, 1, ?2) AS preview,
+                    created_at, updated_at, audio_path, audio_duration_ms
+             FROM notes
+             WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                OR body  LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![like, LIST_PREVIEW_CHARS as i64], Self::map_summary)?;
         rows.collect()
     }
 
@@ -106,6 +193,20 @@ impl NotesRepo {
             body: row.get("body")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
+            audio_path: row.get("audio_path").ok(),
+            audio_duration_ms: row.get("audio_duration_ms").ok(),
+        })
+    }
+
+    fn map_summary(row: &rusqlite::Row<'_>) -> Result<NoteSummary> {
+        Ok(NoteSummary {
+            id: row.get("id")?,
+            title: row.get("title")?,
+            preview: row.get("preview")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+            audio_path: row.get("audio_path").ok(),
+            audio_duration_ms: row.get("audio_duration_ms").ok(),
         })
     }
 }
@@ -127,6 +228,8 @@ mod tests {
         assert_eq!(note.body, "World");
         assert_eq!(note.created_at, 100);
         assert_eq!(note.updated_at, 100);
+        assert_eq!(note.audio_path, None);
+        assert_eq!(note.audio_duration_ms, None);
     }
 
     #[test]
@@ -141,12 +244,23 @@ mod tests {
     }
 
     #[test]
+    fn list_summaries_caps_preview_length() {
+        let mut repo = fresh();
+        let long = "x".repeat(5_000);
+        repo.create("big", &long, 1).unwrap();
+        let summaries = repo.list_summaries().unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].preview.len(), LIST_PREVIEW_CHARS);
+        assert!(summaries[0].preview.chars().all(|c| c == 'x'));
+    }
+
+    #[test]
     fn list_returns_newest_first_by_update_time() {
         let mut repo = fresh();
         let older = repo.create("older", "", 10).unwrap();
         let newer = repo.create("newer", "", 20).unwrap();
         repo.update(older, "older", "touched", 30).unwrap();
-        let notes = repo.list().unwrap();
+        let notes = repo.list_summaries().unwrap();
         assert_eq!(notes[0].id, older);
         assert_eq!(notes[1].id, newer);
     }
@@ -181,5 +295,39 @@ mod tests {
         let id = repo.create("gone", "", 1).unwrap();
         repo.delete(id).unwrap();
         assert!(repo.get(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn create_audio_persists_path_and_duration() {
+        let mut repo = fresh();
+        let id = repo
+            .create_audio("Idea", "", "/tmp/a.webm", Some(12_500), 10)
+            .unwrap();
+        let note = repo.get(id).unwrap().unwrap();
+        assert_eq!(note.audio_path.as_deref(), Some("/tmp/a.webm"));
+        assert_eq!(note.audio_duration_ms, Some(12_500));
+    }
+
+    #[test]
+    fn migration_adds_columns_to_legacy_schema() {
+        // Simulate a pre-existing DB that has the old 5-column schema.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL DEFAULT '',
+                body TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            INSERT INTO notes (title, body, created_at, updated_at)
+            VALUES ('old', 'x', 1, 1);",
+        )
+        .unwrap();
+        let repo = NotesRepo::new(conn).unwrap();
+        let notes = repo.list_summaries().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].title, "old");
+        assert_eq!(notes[0].audio_path, None);
     }
 }

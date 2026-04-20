@@ -115,10 +115,10 @@ use modules::clipboard::{
 };
 use modules::downloader::{
     commands::{
-        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_list, dl_pause, dl_purge_cookies,
-        dl_detect_quick, dl_prune_history, dl_resume, dl_retry, dl_set_cookies_browser,
-        dl_set_downloads_dir, dl_set_max_parallel, dl_set_rate_limit, dl_start,
-        dl_update_binary, dl_ytdlp_version,
+        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_extract_subtitles, dl_list,
+        dl_pause, dl_purge_cookies, dl_detect_quick, dl_prune_history, dl_resume, dl_retry,
+        dl_set_cookies_browser, dl_set_downloads_dir, dl_set_max_parallel, dl_set_rate_limit,
+        dl_start, dl_update_binary, dl_ytdlp_version,
     },
     jobs::JobRepo,
     runner::RunnerState,
@@ -126,12 +126,29 @@ use modules::downloader::{
 use modules::metronome::commands::{
     metronome_get_state, metronome_save_state, MetronomeStateHandle,
 };
+use modules::whisper::{
+    commands::{
+        whisper_delete_model, whisper_download_model, whisper_get_active, whisper_list_models,
+        whisper_set_active, whisper_transcribe,
+    },
+    state::WhisperStateHandle,
+};
 use modules::notes::{
     commands::{
-        notes_create, notes_delete, notes_list, notes_read_file, notes_search, notes_update,
-        notes_write_file, NotesState,
+        notes_create, notes_create_audio, notes_delete, notes_get, notes_list, notes_read_audio,
+        notes_read_file, notes_search, notes_update, notes_write_file, NotesState,
     },
     repo::NotesRepo,
+};
+use modules::pomodoro::{
+    commands::{
+        pomodoro_delete_preset, pomodoro_edit_blocks, pomodoro_get_state, pomodoro_list_history,
+        pomodoro_list_presets, pomodoro_pause, pomodoro_resume, pomodoro_save_preset,
+        pomodoro_skip_to, pomodoro_start, pomodoro_stop,
+    },
+    driver::spawn as spawn_pomodoro_driver,
+    repo::PomodoroRepo,
+    state::PomodoroState,
 };
 use modules::music::commands::{
     music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
@@ -284,6 +301,7 @@ pub fn run() {
             dl_cancel,
             dl_list,
             dl_delete,
+            dl_extract_subtitles,
             dl_clear_completed,
             dl_set_downloads_dir,
             dl_set_cookies_browser,
@@ -306,11 +324,31 @@ pub fn run() {
             open_system_settings,
             notes_list,
             notes_search,
+            notes_get,
             notes_create,
             notes_update,
             notes_delete,
             notes_read_file,
             notes_write_file,
+            notes_create_audio,
+            notes_read_audio,
+            pomodoro_list_presets,
+            pomodoro_save_preset,
+            pomodoro_delete_preset,
+            pomodoro_list_history,
+            pomodoro_get_state,
+            pomodoro_start,
+            pomodoro_pause,
+            pomodoro_resume,
+            pomodoro_stop,
+            pomodoro_skip_to,
+            pomodoro_edit_blocks,
+            whisper_list_models,
+            whisper_download_model,
+            whisper_delete_model,
+            whisper_set_active,
+            whisper_get_active,
+            whisper_transcribe,
             global_search,
             music_status,
             music_embed,
@@ -437,9 +475,22 @@ pub fn run() {
                 repo: Mutex::new(notes_repo),
             });
 
+            // Pomodoro — timer engine runs in a std::thread so it survives
+            // popup hide / webview unload. Frontend is only a projection.
+            let pomodoro_db = data_dir.join("pomodoro.sqlite");
+            let pomodoro_repo = PomodoroRepo::new(Connection::open(&pomodoro_db)?)?;
+            let pomodoro_state = Arc::new(PomodoroState::new(pomodoro_repo));
+            app.manage(Arc::clone(&pomodoro_state));
+            spawn_pomodoro_driver(Arc::clone(&pomodoro_state), app.handle().clone());
+
             // Metronome — single JSON blob in app data dir.
             let metronome_path = data_dir.join("metronome.json");
             app.manage(MetronomeStateHandle::new(metronome_path));
+
+            // Whisper — model files live in appData/whisper, config blob
+            // tracks the active model id.
+            let whisper_cfg = data_dir.join("whisper").join("state.json");
+            app.manage(WhisperStateHandle::new(whisper_cfg));
 
             // Terminal — PTY session lazily opened by the first `pty_open`
             // call from the frontend (once the xterm fit addon knows the

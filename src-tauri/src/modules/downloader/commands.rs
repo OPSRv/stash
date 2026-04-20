@@ -151,14 +151,130 @@ pub fn dl_cancel(state: State<'_, Arc<RunnerState>>, id: i64) -> Result<(), Stri
     cancel_download(&state, id)
 }
 
-#[tauri::command]
-pub fn dl_list(state: State<'_, Arc<RunnerState>>) -> Result<Vec<DownloadJob>, String> {
-    to_string_err(state.jobs.lock().unwrap().list(500))
+/// Split a job list into "rows to keep" and "ids whose file vanished". Pure
+/// helper so the hot path and tests can share the same predicate without a
+/// live runner state.
+pub(crate) fn partition_missing_files<F: Fn(&str) -> bool>(
+    jobs: Vec<DownloadJob>,
+    exists: F,
+) -> (Vec<DownloadJob>, Vec<i64>) {
+    let mut kept = Vec::with_capacity(jobs.len());
+    let mut pruned = Vec::new();
+    for job in jobs {
+        let missing = job.status == "completed"
+            && matches!(job.target_path.as_deref(), Some(p) if !exists(p));
+        if missing {
+            pruned.push(job.id);
+        } else {
+            kept.push(job);
+        }
+    }
+    (kept, pruned)
 }
 
 #[tauri::command]
-pub fn dl_delete(state: State<'_, Arc<RunnerState>>, id: i64) -> Result<(), String> {
+pub fn dl_list(state: State<'_, Arc<RunnerState>>) -> Result<Vec<DownloadJob>, String> {
+    let jobs = to_string_err(state.jobs.lock().unwrap().list(500))?;
+    // Drop completed rows whose target file was removed behind our back
+    // (Finder, external cleanup, moved drive). The UI should never show a
+    // row that can't be played or revealed anyway, so we purge the stale
+    // record here and return the survivors.
+    let (kept, pruned) = partition_missing_files(jobs, |p| std::path::Path::new(p).exists());
+    if !pruned.is_empty() {
+        if let Ok(mut repo) = state.jobs.lock() {
+            for id in &pruned {
+                let _ = repo.delete(*id);
+            }
+        }
+    }
+    Ok(kept)
+}
+
+#[tauri::command]
+pub fn dl_delete(
+    state: State<'_, Arc<RunnerState>>,
+    id: i64,
+    purge_file: Option<bool>,
+) -> Result<(), String> {
+    if purge_file.unwrap_or(false) {
+        // Fetch first so we can reach for target_path before dropping the row.
+        // Failure to remove the file is non-fatal — the DB row is still the
+        // source of truth for the UI, and the user asked to forget this job.
+        let target = to_string_err(state.jobs.lock().unwrap().get(id))?
+            .and_then(|job| job.target_path.clone());
+        if let Some(path) = target {
+            let p = std::path::Path::new(&path);
+            if p.is_file() {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+    }
     to_string_err(state.jobs.lock().unwrap().delete(id))
+}
+
+/// Extract subtitles for a completed job. Re-queries yt-dlp for subtitle files
+/// only (skips the video download), converts the first usable track to plain
+/// text, and returns it so the frontend can feed it into Notes.
+#[tauri::command]
+pub async fn dl_extract_subtitles(
+    state: State<'_, Arc<RunnerState>>,
+    id: i64,
+    langs: Option<Vec<String>>,
+) -> Result<String, String> {
+    use crate::modules::downloader::subtitles;
+
+    let yt_dlp = resolve_yt_dlp(&state)?;
+    let job = to_string_err(state.jobs.lock().unwrap().get(id))?
+        .ok_or_else(|| "download not found".to_string())?;
+    let url = job.url.clone();
+    let cookies = state.cookies_browser.lock().unwrap().clone();
+    let scratch_root = state.default_downloads_dir.join("bin").join("subs");
+    let scratch = subtitles::new_scratch(&scratch_root);
+
+    let langs = langs.unwrap_or_default();
+    let cookies_for_worker = cookies.clone();
+    let scratch_for_worker = scratch.clone();
+    let yt_dlp_for_worker = yt_dlp.clone();
+    let files = tauri::async_runtime::spawn_blocking(move || {
+        subtitles::fetch_vtt_files(
+            &yt_dlp_for_worker,
+            &url,
+            &scratch_for_worker,
+            &langs,
+            cookies_for_worker.as_deref(),
+        )
+    })
+    .await
+    .map_err(|e| format!("subtitle task join: {e}"))??;
+
+    let cleanup = scratch.clone();
+    let result: Result<String, String> = (|| {
+        if files.is_empty() {
+            return Err("No subtitles available for this video".into());
+        }
+        // Prefer manual subs (no `.auto`) over auto-generated when both exist.
+        let mut manual: Option<&std::path::PathBuf> = None;
+        let mut auto: Option<&std::path::PathBuf> = None;
+        for f in &files {
+            let stem = f.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            if stem.contains(".auto") || stem.contains("-auto") {
+                auto.get_or_insert(f);
+            } else {
+                manual.get_or_insert(f);
+            }
+        }
+        let chosen = manual.or(auto).unwrap();
+        let raw = std::fs::read_to_string(chosen)
+            .map_err(|e| format!("read subtitle file: {e}"))?;
+        let text = subtitles::vtt_to_plain_text(&raw);
+        if text.trim().is_empty() {
+            Err("Subtitle file was empty after parsing".into())
+        } else {
+            Ok(text)
+        }
+    })();
+    let _ = std::fs::remove_dir_all(&cleanup);
+    result
 }
 
 #[tauri::command]
@@ -346,10 +462,56 @@ pub fn dl_set_cookies_browser(
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_max_parallel, normalize_cookies_browser, normalize_rate_limit,
-        resolve_downloads_dir,
+        clamp_max_parallel, normalize_cookies_browser, normalize_rate_limit, partition_missing_files,
+        resolve_downloads_dir, DownloadJob,
     };
     use std::path::PathBuf;
+
+    fn stub_job(id: i64, status: &str, path: Option<&str>) -> DownloadJob {
+        DownloadJob {
+            id,
+            url: "https://example.com/v".into(),
+            platform: "generic".into(),
+            title: None,
+            thumbnail_url: None,
+            format_id: None,
+            target_path: path.map(|p| p.to_string()),
+            status: status.into(),
+            progress: 1.0,
+            bytes_total: None,
+            bytes_done: None,
+            error: None,
+            created_at: 0,
+            completed_at: Some(0),
+        }
+    }
+
+    #[test]
+    fn partition_missing_drops_completed_rows_with_vanished_files() {
+        let jobs = vec![
+            stub_job(1, "completed", Some("/tmp/present.mp4")),
+            stub_job(2, "completed", Some("/tmp/missing.mp4")),
+            stub_job(3, "active", Some("/tmp/active.mp4")),
+            stub_job(4, "completed", None),
+        ];
+        let (kept, pruned) =
+            partition_missing_files(jobs, |p| p == "/tmp/present.mp4" || p == "/tmp/active.mp4");
+        assert_eq!(pruned, vec![2]);
+        assert_eq!(kept.iter().map(|j| j.id).collect::<Vec<_>>(), vec![1, 3, 4]);
+    }
+
+    #[test]
+    fn partition_missing_preserves_non_completed_statuses_even_if_file_absent() {
+        // Active / pending / failed rows may legitimately have no file yet.
+        let jobs = vec![
+            stub_job(1, "active", Some("/tmp/none")),
+            stub_job(2, "failed", Some("/tmp/none")),
+            stub_job(3, "pending", None),
+        ];
+        let (kept, pruned) = partition_missing_files(jobs, |_| false);
+        assert!(pruned.is_empty());
+        assert_eq!(kept.len(), 3);
+    }
 
     #[test]
     fn resolve_downloads_dir_falls_back_to_default_for_none() {

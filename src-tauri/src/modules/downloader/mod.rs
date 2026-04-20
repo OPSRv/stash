@@ -7,3 +7,4 @@ pub mod platform;
 pub mod progress;
 pub mod resolver;
 pub mod runner;
+pub mod subtitles;

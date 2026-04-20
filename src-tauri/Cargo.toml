@@ -44,7 +44,23 @@ portable-pty = "0.8"
 base64 = "0.22"
 keyring = "3"
 uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
+futures-util = "0.3"
+symphonia = { version = "0.5", features = ["all"] }
+rubato = "0.15"
+whisper-rs = "0.14"
+lru = "0.12"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
 window-vibrancy = "0.6"
+
+# Release profile tuned for a snappy menubar tool: LTO + a single codegen unit
+# give a measurable runtime speedup (loops / iterator chains inline better) in
+# exchange for slower release builds, and `panic = "abort"` shrinks the binary
+# and skips unwind-table work at call sites.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

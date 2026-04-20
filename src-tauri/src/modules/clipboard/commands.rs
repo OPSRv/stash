@@ -1,24 +1,28 @@
 use crate::modules::clipboard::og::{self, LinkPreview};
 use crate::modules::clipboard::repo::{ClipboardItem, ClipboardRepo};
+use lru::LruCache;
 use rusqlite::Result;
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
 /// In-memory cache for LinkPreview lookups. Keyed by URL. Stores both hits
 /// (Some) and misses (None) so the UI never re-hammers a URL that doesn't
-/// expose og metadata.
+/// expose og metadata. Backed by an LRU so the hot set survives eviction
+/// while stale entries at the tail are the ones that get dropped.
 pub struct LinkPreviewState {
-    cache: Mutex<HashMap<String, Option<LinkPreview>>>,
+    cache: Mutex<LruCache<String, Option<LinkPreview>>>,
 }
 
 const LINK_PREVIEW_CACHE_CAP: usize = 500;
 
 impl LinkPreviewState {
     pub fn new() -> Self {
+        // SAFETY: cap is a compile-time non-zero constant.
+        let cap = NonZeroUsize::new(LINK_PREVIEW_CACHE_CAP).unwrap();
         Self {
-            cache: Mutex::new(HashMap::new()),
+            cache: Mutex::new(LruCache::new(cap)),
         }
     }
 
@@ -27,16 +31,7 @@ impl LinkPreviewState {
     }
 
     fn put(&self, url: String, value: Option<LinkPreview>) {
-        let mut cache = self.cache.lock().unwrap();
-        if cache.len() >= LINK_PREVIEW_CACHE_CAP {
-            // Very coarse eviction — drop a random chunk. This cache is
-            // per-process and short-lived, so precise LRU is overkill.
-            let to_drop: Vec<String> = cache.keys().take(LINK_PREVIEW_CACHE_CAP / 4).cloned().collect();
-            for k in to_drop {
-                cache.remove(&k);
-            }
-        }
-        cache.insert(url, value);
+        self.cache.lock().unwrap().put(url, value);
     }
 }
 
@@ -317,6 +312,27 @@ mod tests {
         assert_eq!(item.kind, "text");
         let reloaded = state.repo.lock().unwrap().get(id).unwrap().unwrap();
         assert_eq!(reloaded.created_at, 999);
+    }
+
+    #[test]
+    fn link_preview_cache_evicts_least_recently_used_first() {
+        let state = LinkPreviewState::new();
+        // Fill beyond capacity and verify the oldest untouched entry is the
+        // one that gets evicted, while a recently touched entry survives.
+        let cap = LINK_PREVIEW_CACHE_CAP;
+        for i in 0..cap {
+            state.put(format!("https://example.com/{i}"), None);
+        }
+        // Touch entry 0 — it becomes most-recently-used.
+        let _ = state.get("https://example.com/0");
+        // One more insert forces a single eviction.
+        state.put("https://example.com/new".into(), None);
+
+        assert!(state.get("https://example.com/0").is_some(),
+            "touched entry must survive eviction");
+        assert!(state.get("https://example.com/1").is_none(),
+            "oldest untouched entry must be evicted");
+        assert!(state.get("https://example.com/new").is_some());
     }
 
     #[test]
