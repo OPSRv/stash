@@ -11,9 +11,9 @@ use super::keyring::{SecretStore, ACCOUNT_CHAT_ID};
 use super::pairing::{self, PairOutcome, PairingState};
 use super::state::TelegramState;
 
-/// Outcome of running one update through the Phase-0 dispatcher. Kept
-/// separate from teloxide types so the dispatcher stays pure and tests do
-/// not need network or a mocked bot.
+/// Outcome of running one update through the dispatcher. Kept separate
+/// from teloxide types so the dispatcher stays pure and tests do not need
+/// network or a mocked bot.
 #[derive(Debug, PartialEq, Eq)]
 pub enum DispatchAction {
     /// Silently drop — no reply, no log.
@@ -23,6 +23,20 @@ pub enum DispatchAction {
     ReplyExpired { chat_id: i64 },
     ReplyAlreadyPaired { chat_id: i64 },
     ReplyAborted { chat_id: i64 },
+    /// Paired user sent a slash-command. Dispatcher couldn't call the
+    /// async handler itself (it is sync + pure), so it surfaces the name
+    /// and args for `handle_update` to resolve against the registry.
+    RunCommand {
+        chat_id: i64,
+        name: String,
+        args: String,
+    },
+    /// Paired user sent plain text. Phase 1.5 pipes this into the inbox;
+    /// for now the caller drops it.
+    IngestText { chat_id: i64, text: String },
+    /// Paired user hit an unknown slash-command. Static reply from here
+    /// so tests can assert the exact wording.
+    UnknownCommand { chat_id: i64, name: String },
 }
 
 /// Parse an inbound text message + chat_id into a dispatcher action while
@@ -35,18 +49,57 @@ pub fn dispatch_text(
     chat_id: i64,
     now: i64,
 ) -> DispatchAction {
-    let Some(code) = text.strip_prefix("/pair").map(str::trim) else {
-        return DispatchAction::Drop;
-    };
-    if code.is_empty() {
-        return DispatchAction::Drop;
+    // /pair always takes precedence while not Paired, regardless of other
+    // input shapes.
+    if let Some(code) = text.strip_prefix("/pair").map(str::trim) {
+        if !code.is_empty() {
+            return dispatch_pair(pairing_state, secrets, code, chat_id, now);
+        }
+        // Bare `/pair` — fall through to command dispatch (which will drop
+        // it if unpaired, or reject it as unknown-command when paired).
     }
 
-    // verify_pair consumes the state — clone and replace after.
+    match pairing_state {
+        PairingState::Unconfigured => DispatchAction::Drop,
+        PairingState::Pairing { .. } => DispatchAction::Drop,
+        PairingState::Paired {
+            chat_id: allowed,
+        } => {
+            if *allowed != chat_id {
+                // Allowlist: messages from any other chat are silently
+                // dropped so a leaked token can't learn about us.
+                return DispatchAction::Drop;
+            }
+            if let Some(rest) = text.strip_prefix('/') {
+                let (name, args) = split_command(rest);
+                if name.is_empty() {
+                    return DispatchAction::Drop;
+                }
+                DispatchAction::RunCommand {
+                    chat_id,
+                    name: name.to_lowercase(),
+                    args: args.to_string(),
+                }
+            } else {
+                DispatchAction::IngestText {
+                    chat_id,
+                    text: text.to_string(),
+                }
+            }
+        }
+    }
+}
+
+fn dispatch_pair(
+    pairing_state: &mut PairingState,
+    secrets: &dyn SecretStore,
+    code: &str,
+    chat_id: i64,
+    now: i64,
+) -> DispatchAction {
     let snapshot = pairing_state.clone();
     let (next, outcome) = pairing::verify_pair(snapshot, code, chat_id, now);
     *pairing_state = next;
-
     match outcome {
         PairOutcome::Paired { chat_id } => {
             if let Err(e) = secrets.set(ACCOUNT_CHAT_ID, &chat_id.to_string()) {
@@ -60,6 +113,17 @@ pub fn dispatch_text(
         PairOutcome::Expired => DispatchAction::ReplyExpired { chat_id },
         PairOutcome::AlreadyPaired => DispatchAction::ReplyAlreadyPaired { chat_id },
         PairOutcome::Ignore => DispatchAction::Drop,
+    }
+}
+
+/// Split "cmd rest of args" into ("cmd", "rest of args"). Trims leading/
+/// trailing whitespace from the name but leaves args verbatim so commands
+/// that care about exact payload (e.g. `/note  foo`) receive what the user
+/// typed.
+fn split_command(s: &str) -> (&str, &str) {
+    match s.find(char::is_whitespace) {
+        Some(i) => (s[..i].trim(), s[i + 1..].trim_start()),
+        None => (s.trim(), ""),
     }
 }
 
@@ -189,22 +253,61 @@ async fn handle_update(
         dispatch_text(&mut p, state.secrets.as_ref(), text, chat_id, now)
     };
 
-    let reply = match &action {
+    match action {
         DispatchAction::Drop => return,
         DispatchAction::ReplyPaired { .. } => {
             let _ = app.emit("telegram:paired", chat_id);
-            "✅ Paired with Stash. Commands coming in the next build."
+            state
+                .sender
+                .enqueue(chat_id, "✅ Paired with Stash. Type /help to see commands.");
         }
-        DispatchAction::ReplyReject { .. } => "❌ Invalid code.",
+        DispatchAction::ReplyReject { .. } => {
+            state.sender.enqueue(chat_id, "❌ Invalid code.");
+        }
         DispatchAction::ReplyExpired { .. } => {
-            "⚠️ Pairing code expired — start again in Stash."
+            state
+                .sender
+                .enqueue(chat_id, "⚠️ Pairing code expired — start again in Stash.");
         }
-        DispatchAction::ReplyAlreadyPaired { .. } => "✅ Already paired with Stash.",
+        DispatchAction::ReplyAlreadyPaired { .. } => {
+            state.sender.enqueue(chat_id, "✅ Already paired with Stash.");
+        }
         DispatchAction::ReplyAborted { .. } => {
-            "⚠️ Too many wrong codes. Pairing cancelled — restart from Stash."
+            state.sender.enqueue(
+                chat_id,
+                "⚠️ Too many wrong codes. Pairing cancelled — restart from Stash.",
+            );
         }
-    };
-    state.sender.enqueue(chat_id, reply);
+        DispatchAction::RunCommand { name, args, .. } => {
+            if let Some(handler) = state.commands.find(&name) {
+                let reply = handler
+                    .handle(
+                        crate::modules::telegram::commands_registry::Ctx { chat_id },
+                        &args,
+                    )
+                    .await;
+                state.sender.enqueue(chat_id, reply.text);
+            } else {
+                state
+                    .sender
+                    .enqueue(chat_id, format!("❓ Unknown command: /{name}"));
+            }
+        }
+        DispatchAction::IngestText { text, .. } => {
+            // Phase 1.5 will persist this to the inbox and optionally
+            // forward to the AI assistant. For now we acknowledge so the
+            // user knows the message was received.
+            tracing::debug!(text_len = text.len(), "inbox ingest stub");
+            state
+                .sender
+                .enqueue(chat_id, "📥 Saved to inbox (inbox UI coming soon).");
+        }
+        DispatchAction::UnknownCommand { name, .. } => {
+            state
+                .sender
+                .enqueue(chat_id, format!("❓ Unknown command: /{name}"));
+        }
+    }
     let _ = app.emit("telegram:status_changed", ());
 }
 
@@ -226,7 +329,7 @@ mod tests {
     }
 
     #[test]
-    fn non_pair_text_is_dropped() {
+    fn non_pair_text_while_pairing_is_dropped() {
         let mut p = active_pairing();
         let s = store();
         assert_eq!(
@@ -242,6 +345,85 @@ mod tests {
         assert_eq!(
             dispatch_text(&mut p, &s, "/pair", 1, 0),
             DispatchAction::Drop
+        );
+    }
+
+    #[test]
+    fn paired_slash_routes_to_registry() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        let s = store();
+        assert_eq!(
+            dispatch_text(&mut p, &s, "/help", 42, 0),
+            DispatchAction::RunCommand {
+                chat_id: 42,
+                name: "help".into(),
+                args: "".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn paired_slash_with_args_preserves_payload() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        let s = store();
+        assert_eq!(
+            dispatch_text(&mut p, &s, "/note hello world", 42, 0),
+            DispatchAction::RunCommand {
+                chat_id: 42,
+                name: "note".into(),
+                args: "hello world".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn paired_command_name_is_lowercased() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        let s = store();
+        assert_eq!(
+            dispatch_text(&mut p, &s, "/Help", 42, 0),
+            DispatchAction::RunCommand {
+                chat_id: 42,
+                name: "help".into(),
+                args: "".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn paired_plain_text_goes_to_inbox() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        let s = store();
+        assert_eq!(
+            dispatch_text(&mut p, &s, "hello bot", 42, 0),
+            DispatchAction::IngestText {
+                chat_id: 42,
+                text: "hello bot".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn paired_allowlist_drops_foreign_chat() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        let s = store();
+        assert_eq!(
+            dispatch_text(&mut p, &s, "/help", 999, 0),
+            DispatchAction::Drop
+        );
+        assert_eq!(
+            dispatch_text(&mut p, &s, "hello", 999, 0),
+            DispatchAction::Drop
+        );
+    }
+
+    #[test]
+    fn paired_pair_gets_already_paired_reply() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        let s = store();
+        assert_eq!(
+            dispatch_text(&mut p, &s, "/pair 123456", 42, 0),
+            DispatchAction::ReplyAlreadyPaired { chat_id: 42 }
         );
     }
 
