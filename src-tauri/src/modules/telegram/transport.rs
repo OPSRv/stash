@@ -279,7 +279,7 @@ async fn handle_update(
             );
         }
         DispatchAction::RunCommand { name, args, .. } => {
-            if let Some(handler) = state.commands.find(&name) {
+            if let Some(handler) = state.find_command(&name) {
                 let reply = handler
                     .handle(
                         crate::modules::telegram::commands_registry::Ctx { chat_id },

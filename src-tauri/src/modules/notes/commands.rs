@@ -1,10 +1,13 @@
 use crate::modules::notes::repo::{Note, NoteSummary, NotesRepo};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 
 pub struct NotesState {
-    pub repo: Mutex<NotesRepo>,
+    /// `Arc` so cross-module integrations (Telegram /note command) can
+    /// clone a handle without duplicating the SQLite connection. Existing
+    /// callers still `.lock()` through transparent `Arc` deref.
+    pub repo: Arc<Mutex<NotesRepo>>,
 }
 
 fn now() -> i64 {

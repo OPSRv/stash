@@ -575,9 +575,9 @@ pub fn run() {
             // Notes
             let notes_db = data_dir.join("notes.sqlite");
             let notes_repo = NotesRepo::new(Connection::open(&notes_db)?)?;
-            app.manage(NotesState {
-                repo: Mutex::new(notes_repo),
-            });
+            let notes_repo = Arc::new(Mutex::new(notes_repo));
+            let notes_repo_for_telegram = Arc::clone(&notes_repo);
+            app.manage(NotesState { repo: notes_repo });
 
             // Pomodoro — timer engine runs in a std::thread so it survives
             // popup hide / webview unload. Frontend is only a projection.
@@ -646,6 +646,18 @@ pub fn run() {
                 telegram_repo,
                 telegram_secrets,
             ));
+            // Cross-module slash commands. Registering here (rather than in
+            // TelegramState::new) keeps the telegram module independent of
+            // the order in which other module states are constructed.
+            telegram_state.register_command(
+                modules::telegram::module_cmds::BatteryCmd,
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::ClipCmd::new(Arc::clone(&shared_repo)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::NoteCmd::new(notes_repo_for_telegram),
+            );
             app.manage(telegram_state);
 
             let warmup_state = Arc::clone(&runner_state);

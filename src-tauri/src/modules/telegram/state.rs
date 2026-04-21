@@ -1,6 +1,6 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
-use super::commands_registry::{CommandRegistry, HelpCmd, StatusCmd};
+use super::commands_registry::{CommandHandler, CommandRegistry, HelpCmd, StatusCmd};
 use super::keyring::SecretStore;
 use super::pairing::PairingState;
 use super::repo::TelegramRepo;
@@ -13,7 +13,10 @@ pub struct TelegramState {
     pub pairing: Mutex<PairingState>,
     pub transport: TransportHandle,
     pub sender: TelegramSender,
-    pub commands: CommandRegistry,
+    /// Slash-command registry. RwLock because module wiring in `lib.rs`
+    /// may call `register` after the state is built; dispatch is read-
+    /// only so concurrent inbound messages share the lock cheaply.
+    pub commands: RwLock<CommandRegistry>,
     /// Handle kept so we can refresh `/help`'s snapshot whenever the
     /// registry gains new entries post-construction.
     pub help: Arc<HelpCmd>,
@@ -25,28 +28,42 @@ impl TelegramState {
         let mut commands = CommandRegistry::new();
         commands.register_arc(help.clone());
         commands.register(StatusCmd);
-        Self::refresh_help_snapshot(&commands, &help);
+        refresh_help_snapshot(&commands, &help);
         Self {
             repo: Mutex::new(repo),
             secrets,
             pairing: Mutex::new(PairingState::Unconfigured),
             transport: TransportHandle::new(),
             sender: TelegramSender::new(),
-            commands,
+            commands: RwLock::new(commands),
             help,
         }
     }
 
-    /// Regenerate the `/help` output from the current registry contents.
-    /// Call after adding commands so the listing stays accurate.
-    pub fn refresh_help_snapshot(commands: &CommandRegistry, help: &HelpCmd) {
-        let entries: Vec<_> = commands
-            .enumerate()
-            .into_iter()
-            .map(|h| (h.name(), h.usage(), h.description()))
-            .collect();
-        help.set_snapshot(entries);
+    /// Register a command at runtime (e.g. from `lib.rs` once module
+    /// states are built). Also refreshes the `/help` snapshot so the
+    /// listing reflects the new entry immediately.
+    pub fn register_command<H: CommandHandler + 'static>(&self, handler: H) {
+        let mut reg = self.commands.write().unwrap();
+        reg.register(handler);
+        refresh_help_snapshot(&reg, &self.help);
     }
+
+    pub fn find_command(
+        &self,
+        name: &str,
+    ) -> Option<Arc<dyn CommandHandler>> {
+        self.commands.read().unwrap().find(name)
+    }
+}
+
+fn refresh_help_snapshot(commands: &CommandRegistry, help: &HelpCmd) {
+    let entries: Vec<_> = commands
+        .enumerate()
+        .into_iter()
+        .map(|h| (h.name(), h.usage(), h.description()))
+        .collect();
+    help.set_snapshot(entries);
 }
 
 #[cfg(test)]

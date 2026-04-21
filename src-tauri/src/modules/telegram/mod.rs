@@ -2,6 +2,7 @@ pub mod commands;
 pub mod commands_registry;
 pub mod file_secrets;
 pub mod keyring;
+pub mod module_cmds;
 pub mod pairing;
 pub mod repo;
 pub mod sender;
