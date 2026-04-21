@@ -58,7 +58,7 @@ impl CommandHandler for BatteryCmd {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum BatterySnapshot {
+pub(crate) enum BatterySnapshot {
     Present { percent: u32, charging: bool },
     /// pmset succeeded but produced no battery line — desktop Mac / server.
     NoBattery,
@@ -71,7 +71,7 @@ enum BatterySnapshot {
 /// On desktop Macs (Mac Mini / Studio / Pro) the output is only
 /// `Now drawing from 'AC Power'` with no battery line — we report that
 /// distinctly so the user gets a useful reply instead of "unavailable".
-fn read_battery() -> BatterySnapshot {
+pub(crate) fn read_battery() -> BatterySnapshot {
     let Ok(out) = Command::new("pmset").args(["-g", "batt"]).output() else {
         return BatterySnapshot::Unknown;
     };
