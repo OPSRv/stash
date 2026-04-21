@@ -1,9 +1,9 @@
 # Telegram Bot + CLI — Design
 
-**Date:** 2026-04-21 (updated 2026-04-22 after Phase 0–2, 4–7 shipped)
-**Status:** Live — Phases 0, 1, 2, 4, 5, 7 complete; Phase 6 shipped
-via AppleScript (EventKit-direct bridge deferred); Phase 3 (AI
-assistant) remains.
+**Date:** 2026-04-21 (updated 2026-04-22 after all MVP phases shipped)
+**Status:** Live — all MVP phases complete. Phase 6 shipped via
+AppleScript (EventKit-direct bridge deferred). Phase 3 Google adapter
+stubbed pending a user who configures Google in Stash → AI.
 
 ## 1. Goals
 
@@ -604,16 +604,22 @@ Licence: all MIT/Apache — fine for bundling. teloxide is well-maintained and u
 
 ### Remaining
 
-- ❌ **Phase 3 — AI assistant + tools**. Design remains as written:
-  provider-agnostic LlmClient (reads the `ai` module's key + model),
-  rolling 50-message chat history persisted in the `chat` table,
-  editable system prompt, tool-use registry with `create_reminder` /
-  `list_reminders` / `cancel_reminder` / `remember_fact` /
-  `list_facts` / `forget_fact` / `get_battery` / `get_last_clip` /
-  `pomodoro_status` / `start_download`. Memory-fact CRUD (`remember`
-  as an explicit slash plus the tool) targets the already-migrated
-  `memory` table. This is the largest remaining slice — ~500–1000
-  lines. Start from a fresh session (context-cost reason).
+- ✅ **Phase 3 — AI assistant + tools**. Provider-agnostic `LlmClient`
+  trait with OpenAI-compatible and Anthropic adapters (Google stubs
+  a `BadResponse` until a user sets it as the provider). Rolling
+  chat history persisted in the `chat` table, size from
+  `AiSettings.context_window` (default 50, clamped [10, 200]).
+  `AiSettings` (system_prompt + context_window) editable via the
+  new Telegram → Prompt sub-tab. Tool registry with nine tools
+  (`create_reminder` / `list_reminders` / `cancel_reminder` /
+  `remember_fact` / `list_facts` / `forget_fact` / `get_battery` /
+  `get_last_clip` / `pomodoro_status`) under a 5 s per-invoke
+  timeout and a redacted `tracing` audit log. Assistant
+  orchestrator caps tool-chain depth at five per user turn and
+  prunes `chat` to `context_window × 4` rows. Free text and /ai
+  route through the assistant; inbox is the fallback when the AI
+  isn't configured. `start_download` moved to the post-MVP backlog
+  alongside the Google adapter.
 
 - ✅ **Phase 7 — CLI transport**. `stash-cli` crate at
   `src-tauri/crates/stash-cli/`; binary `stash`. Unix socket at
@@ -651,11 +657,19 @@ Licence: all MIT/Apache — fine for bundling. teloxide is well-maintained and u
 1. `voice.rs` bridge to whisper module's active model.
 2. Inbox UI: Transcribe button; Advanced toggle wired.
 
-### Phase 3 — AI assistant + tools — ❌ not started
-1. `llm/*` client (OpenAI + Anthropic).
-2. `assistant.rs` orchestration + system prompt / facts injection.
-3. `tools/memory.rs`, `tools/reminders.rs`, `tools/stash.rs`.
-4. `MemoryPanel`, `RemindersPanel`, `AiPromptPanel`.
+### Phase 3 — AI assistant + tools — ✅ shipped (Google adapter + start_download deferred)
+1. `llm/*` client — OpenAI-compatible + Anthropic adapters with
+   pure `to_wire` / `from_wire` helpers for hermetic tests; Google
+   returns a BadResponse-with-message until a real user needs it.
+2. `assistant.rs` orchestration — history + facts injection, tool
+   loop with 5-step depth cap, rolling prune to
+   `context_window × 4`.
+3. `tools/memory.rs`, `tools/reminders.rs`, `tools/stash.rs` —
+   nine tools registered in `build_runtime_assistant`.
+4. `MemoryPanel` + `AiPromptPanel` React components with debounced
+   save + optimistic delete. `RemindersPanel` still deferred — the
+   existing /reminders slash + MemoryPanel cover the day-to-day
+   flows.
 
 ### Phase 4 — Reminders engine — ✅ shipped (RRULE deferred)
 1. `reminders.rs` ticker.
@@ -778,6 +792,29 @@ so a future session doesn't re-learn them the hard way.
 - **CommandRegistry uses `RwLock`** so `lib.rs` can register cross-
   module commands (`/clip`, `/note`, `/music`) *after* `TelegramState`
   is constructed, once their target module states exist.
+- **`reqwest` in this repo has no `json` feature** — all LLM
+  adapters read `.text().await` then `serde_json::from_str` to
+  parse responses. Same for `send().body(value.to_string())` on
+  the request side. When adding a new HTTP client, don't reach
+  for `.json(...)` — it won't compile.
+- **`Box<dyn LlmClient>` isn't `Debug`** — handy when tests
+  pattern-match on `Err(...)` but want to `panic!("{other:?}")`
+  on unexpected Ok. Shared helper `err(Result<Box<...>, E>) -> E`
+  beats per-test pattern gymnastics.
+- **`tauri::AppHandle` has no safe test constructor** — the repo
+  convention (see `commands_registry.rs`) is to skip handler
+  tests that need `AppHandle`. Phase 3 made `ToolCtx.app`
+  `Option<AppHandle>` so registry + per-tool unit tests can
+  construct a ctx with `None`; production always passes `Some`.
+- **`tokio` feature `test-util` is not enabled** — `start_paused`
+  and friends are unavailable. For timeout tests, pass a short
+  explicit `Duration` into the registry via the `#[cfg(test)]`
+  `ToolRegistry::with_timeout` builder rather than mocking time.
+- **Cargo workspace + Tauri build** — the `bundle.resources`
+  path `target/release/stash` is eagerly validated by
+  `tauri-build`, so the CLI binary must be built *before* any
+  `cargo check` / `cargo test` of the app crate. `npm run
+  build:cli` handles it; CI must run it before the normal build.
 - **Tauri `bundle.resources` must exist at build time** — the
   `tauri-build` step eagerly validates every path in
   `tauri.conf.json` `bundle.resources`, so the CLI release binary
