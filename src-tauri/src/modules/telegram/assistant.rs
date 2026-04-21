@@ -11,11 +11,12 @@
 
 use std::sync::Arc;
 
-use super::llm::{ChatMessage, LlmClient, LlmError, LlmRequest, Role, ToolCall};
+use super::llm::{self, ChatMessage, LlmClient, LlmError, LlmRequest, Role, ToolCall};
 use super::repo::{ChatRole, ChatRow, NewChatRow};
 use super::settings::AiSettings;
 use super::state::TelegramState;
 use super::tools::{ToolCtx, ToolRegistry};
+use crate::modules::ai::state::AiState;
 
 /// Hard cap on LLM ↔ tool round-trips per user turn. Without this a
 /// badly-looping tool ("I don't know, let me list_facts again") can
@@ -249,6 +250,65 @@ fn decode_assistant_row(content: &str) -> (String, Vec<ToolCall>) {
         }
     }
     (content.to_string(), Vec::new())
+}
+
+/// Build a live `Assistant` from the running app's managed state.
+///
+/// Reads provider/model/base_url from `settings.json` and the API key
+/// from the AI module's Keychain store, then registers every tool the
+/// runtime knows about. Any failure on the way (missing key, missing
+/// managed state) surfaces as `LlmError` so the dispatcher can turn
+/// it into a clear bot reply.
+pub fn build_runtime_assistant(
+    app: &tauri::AppHandle,
+    state: &Arc<TelegramState>,
+) -> Result<Assistant, LlmError> {
+    use tauri::Manager;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| LlmError::BadResponse(format!("app_data_dir: {e}")))?;
+    let cfg = llm::factory::read_config(&data_dir.join("settings.json"))?;
+
+    let ai_state = app
+        .try_state::<AiState>()
+        .ok_or_else(|| LlmError::BadResponse("AI module state is not initialised".into()))?;
+    let client = llm::factory::build_client(&cfg, &ai_state.secrets)?;
+
+    let mut tools = ToolRegistry::new();
+    tools.register(super::tools::memory::RememberFact);
+    tools.register(super::tools::memory::ListFacts);
+    tools.register(super::tools::memory::ForgetFact);
+    tools.register(super::tools::reminders::CreateReminder);
+    tools.register(super::tools::reminders::ListReminders);
+    tools.register(super::tools::reminders::CancelReminder);
+    tools.register(super::tools::stash::GetBattery);
+    if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>() {
+        tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));
+    }
+    if let Some(pomo) = app.try_state::<Arc<crate::modules::pomodoro::state::PomodoroState>>() {
+        tools.register(super::tools::stash::PomodoroStatus::new(pomo.inner().clone()));
+    }
+
+    Ok(Assistant {
+        state: Arc::clone(state),
+        app: Some(app.clone()),
+        client,
+        tools,
+    })
+}
+
+/// Convenience entry point the dispatcher calls on every free-text
+/// message (and on /ai). Builds the assistant fresh so provider
+/// changes in Settings take effect on the next message without any
+/// explicit refresh step.
+pub async fn handle_user_text(
+    app: &tauri::AppHandle,
+    state: &Arc<TelegramState>,
+    text: &str,
+) -> Result<AssistantReply, LlmError> {
+    let assistant = build_runtime_assistant(app, state)?;
+    assistant.handle(text).await
 }
 
 fn history_to_message(row: &ChatRow) -> ChatMessage {

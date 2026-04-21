@@ -327,27 +327,50 @@ async fn handle_update(
             }
         }
         DispatchAction::IngestText { text, .. } => {
-            let inbox_id = {
-                let msg_id = msg.id.0 as i64;
-                let received_at = now;
-                match state.repo.lock() {
-                    Ok(mut repo) => repo
-                        .insert_text_inbox(msg_id, &text, received_at)
-                        .map_err(|e| e.to_string()),
-                    Err(e) => Err(e.to_string()),
-                }
-            };
-            match inbox_id {
-                Ok(id) => {
-                    tracing::debug!(id, text_len = text.len(), "inbox text ingested");
-                    let _ = app.emit("telegram:inbox_added", id);
-                    state.sender.enqueue(chat_id, "📥 Saved to inbox.");
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "inbox insert failed");
+            // Phase 3: free text goes to the AI assistant when one is
+            // configured. Any missing-piece error (no key, no model,
+            // provider not supported) falls back to the inbox so the
+            // message isn't silently swallowed.
+            match super::assistant::handle_user_text(app, state, &text).await {
+                Ok(reply) => {
+                    let suffix = if reply.truncated {
+                        "\n\n_(simplified — tool chain hit depth cap)_"
+                    } else {
+                        ""
+                    };
                     state
                         .sender
-                        .enqueue(chat_id, "⚠️ Could not save to inbox — check Stash logs.");
+                        .enqueue(chat_id, format!("{}{suffix}", reply.text));
+                }
+                Err(e) => {
+                    tracing::info!(error = %e, "assistant unavailable, falling back to inbox");
+                    let inbox_id = {
+                        let msg_id = msg.id.0 as i64;
+                        let received_at = now;
+                        match state.repo.lock() {
+                            Ok(mut repo) => repo
+                                .insert_text_inbox(msg_id, &text, received_at)
+                                .map_err(|e| e.to_string()),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    };
+                    match inbox_id {
+                        Ok(id) => {
+                            tracing::debug!(id, text_len = text.len(), "inbox text ingested");
+                            let _ = app.emit("telegram:inbox_added", id);
+                            state.sender.enqueue(
+                                chat_id,
+                                format!("📥 Saved to inbox (assistant: {e})."),
+                            );
+                        }
+                        Err(e2) => {
+                            tracing::warn!(error = %e2, "inbox insert failed");
+                            state.sender.enqueue(
+                                chat_id,
+                                "⚠️ Could not save to inbox — check Stash logs.",
+                            );
+                        }
+                    }
                 }
             }
         }

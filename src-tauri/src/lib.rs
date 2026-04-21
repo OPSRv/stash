@@ -718,6 +718,18 @@ pub fn run() {
             telegram_state.register_command(
                 modules::telegram::module_cmds::ForgetCmd::new(Arc::clone(&telegram_state)),
             );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::AiCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::RememberCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::MemoryCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::ForgetFactCmd::new(Arc::clone(&telegram_state)),
+            );
 
             // Outbound watchers — battery + calendar + reminders ticker.
             modules::telegram::battery_watcher::spawn(app.handle().clone());

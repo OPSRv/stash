@@ -788,3 +788,182 @@ mod tests {
         assert!(out.starts_with("🔇"));
     }
 }
+
+// -------------------- AI assistant + memory slash commands --------------------
+
+/// `/ai <question>` — explicit assistant call. Free text without a
+/// leading slash hits the same path via the dispatcher; this slash
+/// lets users be explicit in places where `/` is expected (scripts,
+/// templates, etc.).
+pub struct AiCmd {
+    state: Arc<TelegramState>,
+}
+
+impl AiCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for AiCmd {
+    fn name(&self) -> &'static str {
+        "ai"
+    }
+    fn description(&self) -> &'static str {
+        "Ask the AI assistant"
+    }
+    fn usage(&self) -> &'static str {
+        "/ai <question>"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let prompt = args.trim();
+        if prompt.is_empty() {
+            return Reply::text("Usage: /ai <question>");
+        }
+        match super::assistant::handle_user_text(&ctx.app, &self.state, prompt).await {
+            Ok(reply) => {
+                let suffix = if reply.truncated {
+                    "\n\n_(simplified — tool chain hit depth cap)_"
+                } else {
+                    ""
+                };
+                Reply::text(format!("{}{suffix}", reply.text))
+            }
+            Err(e) => Reply::text(format!("⚠️ {e}")),
+        }
+    }
+}
+
+/// `/remember <fact>` — persist a single fact.
+pub struct RememberCmd {
+    state: Arc<TelegramState>,
+}
+
+impl RememberCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for RememberCmd {
+    fn name(&self) -> &'static str {
+        "remember"
+    }
+    fn description(&self) -> &'static str {
+        "Remember a fact about you"
+    }
+    fn usage(&self) -> &'static str {
+        "/remember <fact>"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let text = args.trim();
+        if text.is_empty() {
+            return Reply::text("Usage: /remember <fact>");
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let result = {
+            let mut repo = match self.state.repo.lock() {
+                Ok(r) => r,
+                Err(e) => return Reply::text(format!("⚠️ repo busy: {e}")),
+            };
+            repo.memory_insert(text, now)
+        };
+        match result {
+            Ok(id) => Reply::text(format!("🧠 Got it. (id {id})")),
+            Err(e) => Reply::text(format!("⚠️ {e}")),
+        }
+    }
+}
+
+/// `/memory` — list stored facts.
+pub struct MemoryCmd {
+    state: Arc<TelegramState>,
+}
+
+impl MemoryCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for MemoryCmd {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+    fn description(&self) -> &'static str {
+        "List everything I'll remember about you"
+    }
+    fn usage(&self) -> &'static str {
+        "/memory"
+    }
+    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
+        let rows = {
+            let repo = match self.state.repo.lock() {
+                Ok(r) => r,
+                Err(e) => return Reply::text(format!("⚠️ repo busy: {e}")),
+            };
+            repo.memory_list()
+        };
+        match rows {
+            Ok(rows) if rows.is_empty() => Reply::text("🗒 No facts yet. `/remember <fact>` to start."),
+            Ok(rows) => {
+                let body = rows
+                    .iter()
+                    .map(|r| format!("• {} (id {})", r.fact, r.id))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Reply::text(format!("🗒 Facts:\n{body}"))
+            }
+            Err(e) => Reply::text(format!("⚠️ {e}")),
+        }
+    }
+}
+
+/// `/forget_fact <id>` — delete a fact. Named distinctly from
+/// `/forget` (which cancels a reminder in Phase 4) so there's no id-
+/// collision ambiguity between the two tables.
+pub struct ForgetFactCmd {
+    state: Arc<TelegramState>,
+}
+
+impl ForgetFactCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for ForgetFactCmd {
+    fn name(&self) -> &'static str {
+        "forget_fact"
+    }
+    fn description(&self) -> &'static str {
+        "Delete a remembered fact by id"
+    }
+    fn usage(&self) -> &'static str {
+        "/forget_fact <id>"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let Ok(id) = args.trim().parse::<i64>() else {
+            return Reply::text("Usage: /forget_fact <id>");
+        };
+        let result = {
+            let mut repo = match self.state.repo.lock() {
+                Ok(r) => r,
+                Err(e) => return Reply::text(format!("⚠️ repo busy: {e}")),
+            };
+            repo.memory_delete(id)
+        };
+        match result {
+            Ok(true) => Reply::text(format!("🧠 Forgot fact {id}.")),
+            Ok(false) => Reply::text(format!("🤷 No fact with id {id}.")),
+            Err(e) => Reply::text(format!("⚠️ {e}")),
+        }
+    }
+}
