@@ -19,19 +19,37 @@ export const CompletedList = ({
   onRetry,
   onExtractSubtitles,
   extractingId,
-}: CompletedListProps) => (
-  <div className="mx-3 rounded-xl overflow-hidden" style={borderStyle}>
-    {jobs.map((job, i) => (
-      <CompletedDownloadRow
-        key={job.id}
-        job={job}
-        zebra={i % 2 === 0}
-        onDelete={onDelete}
-        onPlay={onPlay}
-        onRetry={onRetry}
-        onExtractSubtitles={onExtractSubtitles}
-        extractingSubtitles={extractingId === job.id}
-      />
-    ))}
-  </div>
-);
+}: CompletedListProps) => {
+  // yt-dlp serialises subtitle extraction per-process; while one row is
+  // running, clicking any other CC button silently drops through in the
+  // shell. Rather than leaving those buttons falsely clickable, disable
+  // every row's CC while any one of them is busy, with a tooltip that
+  // explains *why* instead of making users wonder.
+  const busy = extractingId != null;
+  return (
+    <div className="mx-3 rounded-xl overflow-hidden" style={borderStyle}>
+      {jobs.map((job, i) => {
+        const isMe = extractingId === job.id;
+        return (
+          <CompletedDownloadRow
+            key={job.id}
+            job={job}
+            zebra={i % 2 === 0}
+            onDelete={onDelete}
+            onPlay={onPlay}
+            onRetry={onRetry}
+            onExtractSubtitles={onExtractSubtitles}
+            extractingSubtitles={busy}
+            extractingSubtitlesReason={
+              isMe
+                ? 'Extracting subtitles…'
+                : busy
+                  ? 'Another subtitle extraction is running'
+                  : undefined
+            }
+          />
+        );
+      })}
+    </div>
+  );
+};

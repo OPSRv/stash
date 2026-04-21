@@ -394,8 +394,18 @@ export const DownloadsShell = () => {
       <div className="flex-1 overflow-y-auto nice-scroll">
         {active.length > 0 && (
           <>
-            <div className="px-4 pt-3 pb-2 flex items-center justify-between">
+            <div className="px-4 pt-3 pb-1 flex items-center justify-between">
               <SectionLabel>Active · {active.length}</SectionLabel>
+              {/* Keyboard hints aren't free UX — users have no way to know
+                  Space/Backspace do anything here unless we tell them. The
+                  text is muted so it doesn't fight the section label. */}
+              <span className="t-tertiary text-meta flex items-center gap-1">
+                <kbd className="kbd">Space</kbd>
+                <span>pause</span>
+                <span>·</span>
+                <kbd className="kbd">⌫</kbd>
+                <span>cancel</span>
+              </span>
             </div>
             {active.map((job) => (
               <ActiveDownloadRow
@@ -457,7 +467,38 @@ export const DownloadsShell = () => {
           !url.trim() && (
             <EmptyState
               title="No downloads yet"
-              description="Paste a video URL above or drop one in — YouTube, TikTok, Instagram, X, Reddit, Vimeo, Twitch and more."
+              description="Paste a video URL above, drop one from your browser, or tap Paste — YouTube, TikTok, Instagram, X, Reddit, Vimeo, Twitch and more."
+              action={
+                <Button
+                  size="sm"
+                  variant="soft"
+                  tone="accent"
+                  onClick={async () => {
+                    try {
+                      const text = (await readText())?.trim();
+                      if (!text) {
+                        toast({
+                          title: 'Clipboard is empty',
+                          description: 'Copy a video URL first, then try again.',
+                          variant: 'default',
+                          durationMs: 1600,
+                        });
+                        return;
+                      }
+                      setUrl(text);
+                      runDetect(text);
+                    } catch (e) {
+                      toast({
+                        title: 'Couldn\u2019t read clipboard',
+                        description: String(e),
+                        variant: 'error',
+                      });
+                    }
+                  }}
+                >
+                  Paste from clipboard
+                </Button>
+              }
             />
           )}
         <div className="h-6" />

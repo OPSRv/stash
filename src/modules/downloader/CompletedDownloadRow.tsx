@@ -20,6 +20,9 @@ interface CompletedDownloadRowProps {
   /// Lets the parent disable the CC button globally while another extraction
   /// is running — yt-dlp is single-ish, and we don't want overlapping spawns.
   extractingSubtitles?: boolean;
+  /// Tooltip override for the disabled state, so users know whether *this*
+  /// row is extracting or whether another row is blocking the button.
+  extractingSubtitlesReason?: string;
 }
 
 const zebraStyle = { background: 'rgba(255,255,255,0.02)' } as const;
@@ -43,6 +46,7 @@ const CompletedDownloadRowImpl = ({
   onRetry,
   onExtractSubtitles,
   extractingSubtitles = false,
+  extractingSubtitlesReason,
 }: CompletedDownloadRowProps) => {
   const failed = isFailure(job.status);
   const { toast } = useToast();
@@ -120,7 +124,7 @@ const CompletedDownloadRowImpl = ({
           variant="soft"
           onClick={() => onExtractSubtitles(job)}
           disabled={extractingSubtitles}
-          title="Save subtitles to Notes"
+          title={extractingSubtitlesReason ?? 'Save subtitles to Notes'}
           aria-label="Save subtitles to Notes"
         >
           <NoteIcon size={12} />
@@ -181,6 +185,7 @@ export const CompletedDownloadRow = memo(CompletedDownloadRowImpl, (a, b) =>
   a.job === b.job &&
   a.zebra === b.zebra &&
   a.extractingSubtitles === b.extractingSubtitles &&
+  a.extractingSubtitlesReason === b.extractingSubtitlesReason &&
   a.onDelete === b.onDelete &&
   a.onPlay === b.onPlay &&
   a.onRetry === b.onRetry &&
