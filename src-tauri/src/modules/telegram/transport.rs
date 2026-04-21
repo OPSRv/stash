@@ -167,12 +167,11 @@ async fn run_polling(
 }
 
 async fn handle_update(
-    bot: &teloxide::Bot,
+    _bot: &teloxide::Bot,
     app: &AppHandle,
     state: &Arc<TelegramState>,
     update: teloxide::types::Update,
 ) {
-    use teloxide::prelude::*;
     use teloxide::types::UpdateKind;
 
     let UpdateKind::Message(msg) = update.kind else {
@@ -205,12 +204,7 @@ async fn handle_update(
             "⚠️ Too many wrong codes. Pairing cancelled — restart from Stash."
         }
     };
-    if let Err(e) = bot
-        .send_message(teloxide::types::ChatId(chat_id), reply)
-        .await
-    {
-        tracing::warn!(error = %e, "send_message failed");
-    }
+    state.sender.enqueue(chat_id, reply);
     let _ = app.emit("telegram:status_changed", ());
 }
 

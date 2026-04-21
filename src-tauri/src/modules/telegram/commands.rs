@@ -101,6 +101,7 @@ pub async fn telegram_clear_token(
     state: State<'_, Arc<TelegramState>>,
 ) -> Result<(), String> {
     state.transport.stop().await;
+    state.sender.stop();
     state.secrets.delete(ACCOUNT_BOT_TOKEN)?;
     state.secrets.delete(ACCOUNT_CHAT_ID)?;
     *state.pairing.lock().unwrap() = PairingState::Unconfigured;
@@ -134,9 +135,11 @@ pub async fn telegram_start_pairing(
     let new_state = pairing::start_pairing(code, now_secs());
     *state.pairing.lock().unwrap() = new_state.clone();
 
-    // Spin up long-polling so the bot can receive /pair.
+    // Spin up long-polling so the bot can receive /pair, plus the outbound
+    // queue that carries replies.
     let arc = state.inner().clone();
-    arc.transport.start(token, app.clone(), arc.clone()).await?;
+    arc.transport.start(token.clone(), app.clone(), arc.clone()).await?;
+    arc.sender.start(token)?;
 
     let _ = app.emit("telegram:status_changed", ());
     Ok(compute_status(true, &new_state))
@@ -154,6 +157,7 @@ pub async fn telegram_cancel_pairing(
         }
     }
     state.transport.stop().await;
+    state.sender.stop();
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();
     let status = compute_status(has_token, &state.pairing.lock().unwrap());
     let _ = app.emit("telegram:status_changed", ());
@@ -166,6 +170,7 @@ pub async fn telegram_unpair(
     state: State<'_, Arc<TelegramState>>,
 ) -> Result<ConnectionStatus, String> {
     state.transport.stop().await;
+    state.sender.stop();
     state.secrets.delete(ACCOUNT_CHAT_ID)?;
     *state.pairing.lock().unwrap() = PairingState::Unconfigured;
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();

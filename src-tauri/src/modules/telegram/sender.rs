@@ -1,0 +1,195 @@
+//! Outbound message queue. A single tokio task drains an mpsc channel and
+//! calls `bot.send_message` serially — giving us one place to enforce rate
+//! limits (Telegram's Bot API documents 30 msg/s globally, 1 msg/s per chat)
+//! and to retry on transient errors with exponential backoff.
+//!
+//! `enqueue` is synchronous and non-blocking: callers (inbound dispatcher,
+//! reminder ticker, notifier) fire-and-forget. The queue is unbounded because
+//! single-user traffic is tiny and dropping messages silently is worse than
+//! holding a handful of strings.
+
+use std::sync::Mutex;
+use std::time::Duration;
+
+use tokio::sync::{mpsc, oneshot};
+
+/// Minimum gap between `send_message` calls. 1 msg/s per chat is the Telegram
+/// ceiling; with a single-user bot we only ever target one chat at a time.
+const MIN_SEND_GAP: Duration = Duration::from_millis(1_100);
+
+/// Initial backoff; doubled each attempt up to `MAX_RETRIES`.
+const BACKOFF_START: Duration = Duration::from_millis(200);
+const MAX_RETRIES: u32 = 6;
+
+#[derive(Debug, Clone)]
+pub struct Outbound {
+    pub chat_id: i64,
+    pub text: String,
+}
+
+pub struct TelegramSender {
+    slot: Mutex<Option<SenderInner>>,
+}
+
+struct SenderInner {
+    tx: mpsc::UnboundedSender<Outbound>,
+    shutdown: oneshot::Sender<()>,
+}
+
+impl TelegramSender {
+    pub fn new() -> Self {
+        Self {
+            slot: Mutex::new(None),
+        }
+    }
+
+    /// Start the drain task. Safe to call while already running — subsequent
+    /// calls are a no-op until `stop` is called.
+    pub fn start(&self, token: String) -> Result<(), String> {
+        let mut slot = self.slot.lock().unwrap();
+        if slot.is_some() {
+            return Ok(());
+        }
+        let (tx, rx) = mpsc::unbounded_channel::<Outbound>();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            run_drain(token, rx, shutdown_rx).await;
+        });
+        *slot = Some(SenderInner {
+            tx,
+            shutdown: shutdown_tx,
+        });
+        Ok(())
+    }
+
+    pub fn stop(&self) {
+        if let Some(inner) = self.slot.lock().unwrap().take() {
+            let _ = inner.shutdown.send(());
+        }
+    }
+
+    /// Queue a message. Silently dropped on failure — this only happens if
+    /// the drain task is gone, in which case there's nothing useful we can
+    /// do other than log it.
+    pub fn enqueue(&self, chat_id: i64, text: impl Into<String>) {
+        let text = text.into();
+        match self.slot.lock().unwrap().as_ref() {
+            Some(inner) => {
+                if let Err(e) = inner.tx.send(Outbound { chat_id, text }) {
+                    tracing::warn!(error = %e, "telegram sender: enqueue failed");
+                }
+            }
+            None => tracing::debug!(
+                "telegram sender: enqueue dropped (sender not running); chat_id={chat_id}"
+            ),
+        }
+    }
+}
+
+impl Default for TelegramSender {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+async fn run_drain(
+    token: String,
+    mut rx: mpsc::UnboundedReceiver<Outbound>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    use teloxide::prelude::*;
+
+    let bot = Bot::new(token);
+    tracing::info!("telegram sender started");
+    let mut last_send = tokio::time::Instant::now()
+        .checked_sub(MIN_SEND_GAP)
+        .unwrap_or_else(tokio::time::Instant::now);
+
+    loop {
+        tokio::select! {
+            _ = &mut shutdown => {
+                tracing::info!("telegram sender stopping");
+                break;
+            }
+            next = rx.recv() => {
+                let Some(msg) = next else { break };
+
+                // Rate limit: sleep until MIN_SEND_GAP has elapsed since the
+                // last successful send, so a burst of enqueues still paces out.
+                let elapsed = last_send.elapsed();
+                if elapsed < MIN_SEND_GAP {
+                    tokio::time::sleep(MIN_SEND_GAP - elapsed).await;
+                }
+
+                send_with_retry(&bot, &msg).await;
+                last_send = tokio::time::Instant::now();
+            }
+        }
+    }
+}
+
+async fn send_with_retry(bot: &teloxide::Bot, msg: &Outbound) {
+    use teloxide::prelude::*;
+    use teloxide::types::ChatId;
+
+    let mut backoff = BACKOFF_START;
+    for attempt in 0..=MAX_RETRIES {
+        match bot.send_message(ChatId(msg.chat_id), &msg.text).await {
+            Ok(_) => return,
+            Err(e) => {
+                if attempt == MAX_RETRIES {
+                    tracing::warn!(
+                        error = %e,
+                        attempts = attempt + 1,
+                        "telegram sender: giving up after max retries"
+                    );
+                    return;
+                }
+                tracing::debug!(
+                    error = %e,
+                    attempt,
+                    backoff_ms = backoff.as_millis() as u64,
+                    "telegram send failed, retrying"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = backoff.saturating_mul(2).min(Duration::from_secs(30));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enqueue_before_start_is_silent() {
+        let s = TelegramSender::new();
+        // Should not panic or send anywhere.
+        s.enqueue(1, "hello");
+        s.enqueue(1, "world");
+    }
+
+    #[test]
+    fn double_start_is_noop() {
+        let s = TelegramSender::new();
+        // Can't actually start without a tokio runtime, but with a fake
+        // token both calls should succeed and the second be a no-op. We
+        // exercise this under a tokio runtime in an async test below.
+        assert!(s.slot.lock().unwrap().is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn start_then_stop_is_clean() {
+        let s = TelegramSender::new();
+        // Use a clearly-invalid token — the drain task will spin up with a
+        // Bot that will fail on any send attempt, but we never call enqueue
+        // so no network traffic is attempted.
+        s.start("0:fake".into()).unwrap();
+        assert!(s.slot.lock().unwrap().is_some());
+        // Second start = no-op.
+        s.start("0:fake".into()).unwrap();
+        s.stop();
+        assert!(s.slot.lock().unwrap().is_none());
+    }
+}
