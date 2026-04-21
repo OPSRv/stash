@@ -662,6 +662,43 @@ pub fn run() {
             telegram_state.register_command(
                 modules::telegram::module_cmds::NoteCmd::new(notes_repo_for_telegram),
             );
+
+            // Rehydrate paired state from secrets. Without this every app
+            // restart left the bot offline even though bot_token + chat_id
+            // were still on disk — the in-memory pairing state defaulted
+            // back to Unconfigured, so the transport never auto-started.
+            let rehydrate_token = telegram_state
+                .secrets
+                .get(modules::telegram::keyring::ACCOUNT_BOT_TOKEN)
+                .ok()
+                .flatten();
+            let rehydrate_chat = telegram_state
+                .secrets
+                .get(modules::telegram::keyring::ACCOUNT_CHAT_ID)
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse::<i64>().ok());
+            if let (Some(token), Some(chat_id)) = (rehydrate_token, rehydrate_chat) {
+                use modules::telegram::pairing::PairingState;
+                *telegram_state.pairing.lock().unwrap() =
+                    PairingState::Paired { chat_id };
+                let app_handle = app.handle().clone();
+                let arc_state = Arc::clone(&telegram_state);
+                tracing::info!(chat_id, "telegram: rehydrated paired state");
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = arc_state
+                        .transport
+                        .start(token.clone(), app_handle, Arc::clone(&arc_state))
+                        .await
+                    {
+                        tracing::warn!(error = %e, "auto-start transport failed");
+                    }
+                    if let Err(e) = arc_state.sender.start(token) {
+                        tracing::warn!(error = %e, "auto-start sender failed");
+                    }
+                });
+            }
+
             app.manage(telegram_state);
 
             let warmup_state = Arc::clone(&runner_state);
