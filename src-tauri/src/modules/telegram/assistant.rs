@@ -1,0 +1,539 @@
+//! AI assistant orchestrator.
+//!
+//! Takes a user message, loads the rolling chat history and the
+//! remembered facts, fans out to the configured `LlmClient`, runs
+//! any tool-calls the model requests, and writes the whole turn
+//! back into the `chat` table with pruning.
+//!
+//! The orchestrator owns no provider-specific knowledge — it speaks
+//! only the neutral `LlmClient` surface. Swapping between OpenAI and
+//! Anthropic is the factory's job.
+
+use std::sync::Arc;
+
+use super::llm::{ChatMessage, LlmClient, LlmError, LlmRequest, Role, ToolCall};
+use super::repo::{ChatRole, ChatRow, NewChatRow};
+use super::settings::AiSettings;
+use super::state::TelegramState;
+use super::tools::{ToolCtx, ToolRegistry};
+
+/// Hard cap on LLM ↔ tool round-trips per user turn. Without this a
+/// badly-looping tool ("I don't know, let me list_facts again") can
+/// exhaust API credits. Five is generous for any reasonable plan.
+pub const MAX_TOOL_DEPTH: usize = 5;
+
+/// History multiplier — we store `context_window × 4` rows so the
+/// chat table keeps tool + tool-result interleaves from the most
+/// recent turns even when the active window only carries messages
+/// the LLM actually saw.
+pub const HISTORY_FACTOR: usize = 4;
+
+pub struct Assistant {
+    pub state: Arc<TelegramState>,
+    pub app: Option<tauri::AppHandle>,
+    pub client: Box<dyn LlmClient>,
+    pub tools: ToolRegistry,
+}
+
+/// Outcome of a single `handle` call. The dispatcher turns this into
+/// a bot reply via the sender.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssistantReply {
+    pub text: String,
+    /// `true` when we stopped because of the tool-depth cap rather
+    /// than the model giving a clean final answer. UI layer can
+    /// surface a gentle "(simplified)" marker.
+    pub truncated: bool,
+}
+
+impl Assistant {
+    /// Process one user message. Writes every row (user, assistant,
+    /// any intermediate tool rows) to the `chat` table in the same
+    /// sequence the LLM saw them.
+    pub async fn handle(&self, user_text: &str) -> Result<AssistantReply, LlmError> {
+        let ai_settings = AiSettings::load(self.state.as_ref());
+
+        // 1. Load history + facts.
+        let history = self
+            .state
+            .repo
+            .lock()
+            .map_err(|e| LlmError::BadResponse(e.to_string()))?
+            .chat_load_recent(ai_settings.context_window as usize)
+            .map_err(|e| LlmError::BadResponse(e.to_string()))?;
+
+        let facts = self
+            .state
+            .repo
+            .lock()
+            .map_err(|e| LlmError::BadResponse(e.to_string()))?
+            .memory_list()
+            .map_err(|e| LlmError::BadResponse(e.to_string()))?;
+
+        // 2. Build message sequence: system → facts → history → user.
+        let mut messages: Vec<ChatMessage> = Vec::with_capacity(history.len() + 4);
+        messages.push(ChatMessage::system(&ai_settings.system_prompt));
+        if !facts.is_empty() {
+            let joined = facts
+                .iter()
+                .map(|f| format!("- {}", f.fact))
+                .collect::<Vec<_>>()
+                .join("\n");
+            messages.push(ChatMessage::system(format!("Known facts:\n{joined}")));
+        }
+        for row in &history {
+            messages.push(history_to_message(row));
+        }
+        messages.push(ChatMessage::user(user_text));
+
+        // 3. Turn loop.
+        let mut new_rows: Vec<NewChatRow> = Vec::new();
+        new_rows.push(NewChatRow {
+            role: ChatRole::User,
+            content: user_text.to_string(),
+            tool_call_id: None,
+            tool_name: None,
+            created_at: self.now_ms(),
+        });
+
+        let mut depth = 0usize;
+        let tools_spec = self.tools.specs();
+        let mut truncated = false;
+        let final_text: String = loop {
+            let req = LlmRequest {
+                messages: messages.clone(),
+                tools: tools_spec.clone(),
+                ..Default::default()
+            };
+            let resp = self.client.chat(req).await?;
+
+            // Record the assistant turn — even tool-call-only turns
+            // land as assistant rows so chat_load_recent can replay
+            // them on the next call.
+            let assistant_content = resp.text.clone();
+            let tool_calls = resp.tool_calls.clone();
+            let assistant_msg = ChatMessage {
+                role: Role::Assistant,
+                content: assistant_content.clone(),
+                tool_call_id: None,
+                tool_calls: tool_calls.clone(),
+            };
+            messages.push(assistant_msg);
+            new_rows.push(NewChatRow {
+                role: ChatRole::Assistant,
+                content: encode_assistant_row(&assistant_content, &tool_calls),
+                tool_call_id: None,
+                tool_name: None,
+                created_at: self.now_ms(),
+            });
+
+            if tool_calls.is_empty() {
+                break assistant_content;
+            }
+
+            if depth >= MAX_TOOL_DEPTH {
+                truncated = true;
+                // Serve whatever text the model did produce; if none,
+                // a plain cap notice is better than silence.
+                break if assistant_content.trim().is_empty() {
+                    "(Too many tool steps — simplifying.)".to_string()
+                } else {
+                    assistant_content
+                };
+            }
+            depth += 1;
+
+            // 4. Dispatch tool calls and append results.
+            let ctx = self.tool_ctx();
+            for call in tool_calls {
+                let result = match self.tools.invoke(&ctx, &call).await {
+                    Ok(payload) => payload,
+                    Err(e) => format!("{{\"error\":{}}}", serde_json::to_string(&e)
+                        .unwrap_or_else(|_| "\"tool error\"".into())),
+                };
+                messages.push(ChatMessage::tool(call.id.clone(), result.clone()));
+                new_rows.push(NewChatRow {
+                    role: ChatRole::Tool,
+                    content: result,
+                    tool_call_id: Some(call.id),
+                    tool_name: Some(call.name),
+                    created_at: self.now_ms(),
+                });
+            }
+        };
+
+        // 5. Persist + prune.
+        {
+            let mut repo = self
+                .state
+                .repo
+                .lock()
+                .map_err(|e| LlmError::BadResponse(e.to_string()))?;
+            repo.chat_insert(&new_rows)
+                .map_err(|e| LlmError::BadResponse(e.to_string()))?;
+            let keep = (ai_settings.context_window as usize).saturating_mul(HISTORY_FACTOR);
+            let _ = repo.chat_prune(keep);
+        }
+
+        Ok(AssistantReply {
+            text: final_text,
+            truncated,
+        })
+    }
+
+    fn now_ms(&self) -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
+    fn tool_ctx(&self) -> ToolCtx {
+        ToolCtx {
+            app: self.app.clone(),
+            state: Arc::clone(&self.state),
+            now_ms: self.now_ms(),
+        }
+    }
+}
+
+/// Serialize an assistant row for the chat table. Plain text replies
+/// store only their text; tool-call turns also embed the call list as
+/// a compact JSON tail so `history_to_message` can faithfully replay
+/// them on the next LLM call.
+fn encode_assistant_row(text: &str, calls: &[ToolCall]) -> String {
+    if calls.is_empty() {
+        return text.to_string();
+    }
+    let calls_json: Vec<serde_json::Value> = calls
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "id": c.id,
+                "name": c.name,
+                "args": c.args_json,
+            })
+        })
+        .collect();
+    let envelope = serde_json::json!({
+        "text": text,
+        "tool_calls": calls_json,
+    });
+    format!("__tool_turn__{envelope}")
+}
+
+fn decode_assistant_row(content: &str) -> (String, Vec<ToolCall>) {
+    if let Some(rest) = content.strip_prefix("__tool_turn__") {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(rest) {
+            let text = v
+                .get("text")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let calls: Vec<ToolCall> = v
+                .get("tool_calls")
+                .and_then(|a| a.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| {
+                            Some(ToolCall {
+                                id: c.get("id")?.as_str()?.to_string(),
+                                name: c.get("name")?.as_str()?.to_string(),
+                                args_json: c.get("args")?.as_str()?.to_string(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            return (text, calls);
+        }
+    }
+    (content.to_string(), Vec::new())
+}
+
+fn history_to_message(row: &ChatRow) -> ChatMessage {
+    match row.role {
+        ChatRole::User => ChatMessage::user(&row.content),
+        ChatRole::Assistant => {
+            let (text, calls) = decode_assistant_row(&row.content);
+            ChatMessage {
+                role: Role::Assistant,
+                content: text,
+                tool_call_id: None,
+                tool_calls: calls,
+            }
+        }
+        ChatRole::System => ChatMessage::system(&row.content),
+        ChatRole::Tool => ChatMessage {
+            role: Role::Tool,
+            content: row.content.clone(),
+            tool_call_id: row.tool_call_id.clone(),
+            tool_calls: Vec::new(),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::modules::telegram::keyring::{MemStore, SecretStore};
+    use crate::modules::telegram::llm::{LlmResponse, ToolSpec};
+    use crate::modules::telegram::repo::TelegramRepo;
+    use async_trait::async_trait;
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+
+    /// Stub LlmClient with a queue of scripted responses. Each
+    /// `chat` call pops one entry; tests pre-seed the queue with the
+    /// sequence they want to drive.
+    struct ScriptedClient {
+        responses: Mutex<Vec<Result<LlmResponse, LlmError>>>,
+        calls: Mutex<Vec<LlmRequest>>,
+    }
+
+    impl ScriptedClient {
+        fn new(responses: Vec<Result<LlmResponse, LlmError>>) -> Self {
+            Self {
+                responses: Mutex::new(responses),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LlmClient for ScriptedClient {
+        async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            self.calls.lock().unwrap().push(req);
+            let r = self
+                .responses
+                .lock()
+                .unwrap()
+                .drain(..1)
+                .next()
+                .expect("no scripted response left");
+            r
+        }
+    }
+
+    fn fresh_state() -> Arc<TelegramState> {
+        let repo = TelegramRepo::new(Connection::open_in_memory().unwrap()).unwrap();
+        let secrets: Arc<dyn SecretStore> = Arc::new(MemStore::new());
+        Arc::new(TelegramState::new(repo, secrets))
+    }
+
+    fn plain_reply(text: &str) -> LlmResponse {
+        LlmResponse {
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+        }
+    }
+
+    fn tool_reply(call_id: &str, name: &str, args: &str) -> LlmResponse {
+        LlmResponse {
+            text: String::new(),
+            tool_calls: vec![ToolCall {
+                id: call_id.into(),
+                name: name.into(),
+                args_json: args.into(),
+            }],
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn plain_reply_persists_user_and_assistant_rows() {
+        let state = fresh_state();
+        let client = ScriptedClient::new(vec![Ok(plain_reply("hi there"))]);
+        let assistant = Assistant {
+            state: Arc::clone(&state),
+            app: None,
+            client: Box::new(client),
+            tools: ToolRegistry::new(),
+        };
+        let reply = assistant.handle("hello").await.unwrap();
+        assert_eq!(reply.text, "hi there");
+        assert!(!reply.truncated);
+        let rows = state.repo.lock().unwrap().chat_load_recent(10).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].role, ChatRole::User);
+        assert_eq!(rows[0].content, "hello");
+        assert_eq!(rows[1].role, ChatRole::Assistant);
+        assert_eq!(rows[1].content, "hi there");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tool_call_is_dispatched_and_result_feeds_next_turn() {
+        let state = fresh_state();
+        // Seed a memory fact so list_facts has something to return.
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .memory_insert("likes tea", 1)
+            .unwrap();
+
+        let client = ScriptedClient::new(vec![
+            Ok(tool_reply("c1", "list_facts", "{}")),
+            Ok(plain_reply("You like tea.")),
+        ]);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(crate::modules::telegram::tools::memory::ListFacts);
+
+        let assistant = Assistant {
+            state: Arc::clone(&state),
+            app: None,
+            client: Box::new(client),
+            tools,
+        };
+
+        let reply = assistant.handle("what do you know about me?").await.unwrap();
+        assert_eq!(reply.text, "You like tea.");
+        let rows = state.repo.lock().unwrap().chat_load_recent(10).unwrap();
+        // user + assistant(tool call) + tool + assistant(final)
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0].role, ChatRole::User);
+        assert_eq!(rows[1].role, ChatRole::Assistant);
+        assert_eq!(rows[2].role, ChatRole::Tool);
+        assert_eq!(rows[2].tool_name.as_deref(), Some("list_facts"));
+        assert_eq!(rows[3].role, ChatRole::Assistant);
+        assert_eq!(rows[3].content, "You like tea.");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn depth_cap_stops_runaway_tool_loops() {
+        let state = fresh_state();
+        // Eight consecutive tool turns — more than MAX_TOOL_DEPTH
+        // allows.
+        let mut queue: Vec<Result<LlmResponse, LlmError>> = (0..8)
+            .map(|_| Ok(tool_reply("cx", "list_facts", "{}")))
+            .collect();
+        // Final never-reached answer.
+        queue.push(Ok(plain_reply("late answer")));
+        let client = ScriptedClient::new(queue);
+
+        let mut tools = ToolRegistry::new();
+        tools.register(crate::modules::telegram::tools::memory::ListFacts);
+
+        let assistant = Assistant {
+            state: Arc::clone(&state),
+            app: None,
+            client: Box::new(client),
+            tools,
+        };
+        let reply = assistant.handle("loop please").await.unwrap();
+        assert!(reply.truncated);
+        // The cap fires *after* MAX_TOOL_DEPTH loops produced tool
+        // rows; we break on the next tool-call turn without
+        // executing its tools.
+        let rows = state.repo.lock().unwrap().chat_load_recent(100).unwrap();
+        let tool_rows = rows
+            .iter()
+            .filter(|r| r.role == ChatRole::Tool)
+            .count();
+        assert_eq!(tool_rows, MAX_TOOL_DEPTH);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn prune_keeps_history_under_cap() {
+        let state = fresh_state();
+        // Shrink the window so the test isn't dominated by fixture
+        // rows. AiSettings::save persists through the repo so the
+        // orchestrator will pick it up.
+        AiSettings {
+            system_prompt: "p".into(),
+            context_window: 10,
+        }
+        .save(state.as_ref())
+        .unwrap();
+        // Pre-seed 100 rows.
+        let rows: Vec<NewChatRow> = (0..100)
+            .map(|i| NewChatRow {
+                role: if i % 2 == 0 { ChatRole::User } else { ChatRole::Assistant },
+                content: format!("m{i}"),
+                tool_call_id: None,
+                tool_name: None,
+                created_at: i,
+            })
+            .collect();
+        state.repo.lock().unwrap().chat_insert(&rows).unwrap();
+
+        let client = ScriptedClient::new(vec![Ok(plain_reply("ok"))]);
+        let assistant = Assistant {
+            state: Arc::clone(&state),
+            app: None,
+            client: Box::new(client),
+            tools: ToolRegistry::new(),
+        };
+        assistant.handle("next").await.unwrap();
+        let remaining = state.repo.lock().unwrap().chat_load_recent(1000).unwrap();
+        // Window 10 × HISTORY_FACTOR = 40 rows kept.
+        assert_eq!(remaining.len(), 10 * HISTORY_FACTOR);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn system_prompt_and_facts_are_injected() {
+        let state = fresh_state();
+        AiSettings {
+            system_prompt: "be brief".into(),
+            context_window: 50,
+        }
+        .save(state.as_ref())
+        .unwrap();
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .memory_insert("likes tea", 1)
+            .unwrap();
+
+        let inner = ScriptedClient::new(vec![Ok(plain_reply("ok"))]);
+        let calls = Arc::new(Mutex::new(Vec::<LlmRequest>::new()));
+        struct CapturingClient {
+            inner: ScriptedClient,
+            tap: Arc<Mutex<Vec<LlmRequest>>>,
+        }
+        #[async_trait]
+        impl LlmClient for CapturingClient {
+            async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
+                self.tap.lock().unwrap().push(req.clone());
+                self.inner.chat(req).await
+            }
+        }
+        let capturing = CapturingClient {
+            inner,
+            tap: Arc::clone(&calls),
+        };
+        let assistant = Assistant {
+            state: Arc::clone(&state),
+            app: None,
+            client: Box::new(capturing),
+            tools: ToolRegistry::new(),
+        };
+        assistant.handle("hello").await.unwrap();
+        let observed = calls.lock().unwrap().clone();
+        assert_eq!(observed.len(), 1);
+        let msgs = &observed[0].messages;
+        assert_eq!(msgs[0].role, Role::System);
+        assert_eq!(msgs[0].content, "be brief");
+        assert_eq!(msgs[1].role, Role::System);
+        assert!(msgs[1].content.contains("likes tea"));
+        assert_eq!(msgs.last().unwrap().role, Role::User);
+        assert_eq!(msgs.last().unwrap().content, "hello");
+    }
+
+    #[test]
+    fn encode_decode_assistant_row_round_trip() {
+        let calls = vec![ToolCall {
+            id: "c1".into(),
+            name: "list_facts".into(),
+            args_json: "{}".into(),
+        }];
+        let encoded = encode_assistant_row("picking", &calls);
+        let (text, decoded) = decode_assistant_row(&encoded);
+        assert_eq!(text, "picking");
+        assert_eq!(decoded, calls);
+        // Plain text bypasses the envelope.
+        assert_eq!(encode_assistant_row("hi", &[]), "hi");
+        assert_eq!(decode_assistant_row("hi"), ("hi".to_string(), vec![]));
+    }
+}

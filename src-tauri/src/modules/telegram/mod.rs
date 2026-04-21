@@ -1,3 +1,4 @@
+pub mod assistant;
 pub mod battery_watcher;
 pub mod calendar;
 pub mod commands;
