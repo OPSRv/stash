@@ -147,14 +147,14 @@ impl CommandHandler for HelpCmd {
         "help"
     }
     fn description(&self) -> &'static str {
-        "Show available commands"
+        "Показати доступні команди"
     }
     fn usage(&self) -> &'static str {
         "/help"
     }
     async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
         let snap = self.snapshot.lock().unwrap();
-        let mut out = String::from("Available commands:\n");
+        let mut out = String::from("Доступні команди:\n");
         for (_name, usage, desc) in snap.iter() {
             out.push_str(&format!("• {usage} — {desc}\n"));
         }
@@ -172,13 +172,13 @@ impl CommandHandler for StatusCmd {
         "status"
     }
     fn description(&self) -> &'static str {
-        "Show whether Stash is reachable"
+        "Перевірити, що Stash на зв'язку"
     }
     fn usage(&self) -> &'static str {
         "/status"
     }
     async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
-        Reply::text("✅ Stash is online.")
+        Reply::text("✅ Stash на зв'язку.")
     }
 }
 

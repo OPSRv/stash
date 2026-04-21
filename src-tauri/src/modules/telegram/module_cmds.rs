@@ -35,7 +35,7 @@ impl CommandHandler for BatteryCmd {
         "battery"
     }
     fn description(&self) -> &'static str {
-        "Show battery percentage and charging state"
+        "Показати заряд батареї та стан живлення"
     }
     fn usage(&self) -> &'static str {
         "/battery"
@@ -44,14 +44,14 @@ impl CommandHandler for BatteryCmd {
         match read_battery() {
             BatterySnapshot::Present { percent, charging } => {
                 let icon = if charging { "🔌" } else { "🔋" };
-                let status = if charging { "charging" } else { "on battery" };
+                let status = if charging { "заряджається" } else { "від батареї" };
                 Reply::text(format!("{icon} {percent}% — {status}"))
             }
             BatterySnapshot::NoBattery => {
-                Reply::text("🔌 This Mac has no battery (desktop / plugged in).")
+                Reply::text("🔌 У цього Mac немає батареї (desktop / під'єднано до мережі).")
             }
             BatterySnapshot::Unknown => {
-                Reply::text("🪫 Battery info unavailable on this system.")
+                Reply::text("🪫 Не вдалося отримати дані про батарею.")
             }
         }
     }
@@ -126,7 +126,7 @@ impl CommandHandler for ClipCmd {
         "clip"
     }
     fn description(&self) -> &'static str {
-        "Return clipboard item N (newest = 1)"
+        "Показати запис буфера обміну №N (1 = найновіший)"
     }
     fn usage(&self) -> &'static str {
         "/clip [N]"
@@ -141,7 +141,7 @@ impl CommandHandler for ClipCmd {
             .and_then(|repo| repo.list(n).map_err(|e| e.to_string()))
         {
             Ok(v) => v,
-            Err(e) => return Reply::text(format!("⚠️ clipboard error: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ помилка буфера: {e}")),
         };
         match items.get(n - 1) {
             Some(item) if item.kind == "text" => {
@@ -149,7 +149,7 @@ impl CommandHandler for ClipCmd {
                 Reply::text(content)
             }
             Some(item) => Reply::text(format!("📎 [{}] {}", item.kind, item.content)),
-            None => Reply::text(format!("📭 No clipboard entry at position {n}.")),
+            None => Reply::text(format!("📭 Немає запису буфера на позиції {n}.")),
         }
     }
 }
@@ -180,25 +180,25 @@ impl CommandHandler for NoteCmd {
         "note"
     }
     fn description(&self) -> &'static str {
-        "Create a quick note from the text after the command"
+        "Зберегти нотатку з тексту після команди"
     }
     fn usage(&self) -> &'static str {
-        "/note <text>"
+        "/note <текст>"
     }
     async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let body = args.trim();
         if body.is_empty() {
-            return Reply::text("✍️ Usage: /note <text>");
+            return Reply::text("✍️ Використання: /note <текст>");
         }
         let title: String = body.lines().next().unwrap_or("").chars().take(80).collect();
         let title = if title.is_empty() {
-            "Untitled".to_string()
+            "Без заголовка".to_string()
         } else {
             title
         };
         let result = match self.repo.lock() {
             Ok(mut repo) => repo.create(&title, body, now_ms()),
-            Err(e) => return Reply::text(format!("⚠️ notes error: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
         };
         match result {
             Ok(id) => {
@@ -206,9 +206,9 @@ impl CommandHandler for NoteCmd {
                 // reloads on its own writes but has no other signal to
                 // notice a cross-module insert.
                 let _ = ctx.app.emit("notes:changed", id);
-                Reply::text(format!("📝 Saved note #{id}: {title}"))
+                Reply::text(format!("📝 Збережено нотатку №{id}: {title}"))
             }
-            Err(e) => Reply::text(format!("⚠️ notes error: {e}")),
+            Err(e) => Reply::text(format!("⚠️ помилка нотаток: {e}")),
         }
     }
 }
@@ -231,44 +231,44 @@ impl CommandHandler for RemindCmd {
         "remind"
     }
     fn description(&self) -> &'static str {
-        "Schedule a reminder. Formats: `10m text`, `14:30 text`, `tomorrow 9:00 text`, `2026-04-25 14:30 text`"
+        "Запланувати нагадування. Формати: `10m текст`, `14:30 текст`, `tomorrow 9:00 текст`, `2026-04-25 14:30 текст`"
     }
     fn usage(&self) -> &'static str {
-        "/remind <when> <text>"
+        "/remind <коли> <текст>"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
         let now = now_secs();
         let Some((due, text)) = reminders::parse_when(args, now) else {
             return Reply::text(
-                "✍️ Usage: /remind <when> <text>\n\
-                 Examples:\n\
-                 • /remind 10m drink water\n\
-                 • /remind 1h30m call mom\n\
-                 • /remind 14:30 team sync\n\
-                 • /remind tomorrow 9:00 gym\n\
-                 • /remind 2026-04-25 14:30 doctor",
+                "✍️ Використання: /remind <коли> <текст>\n\
+                 Приклади:\n\
+                 • /remind 10m випити води\n\
+                 • /remind 1h30m зателефонувати мамі\n\
+                 • /remind 14:30 нарада команди\n\
+                 • /remind tomorrow 9:00 спортзал\n\
+                 • /remind 2026-04-25 14:30 лікар",
             );
         };
         let created = now * 1000;
         let mut repo = match self.state.repo.lock() {
             Ok(r) => r,
-            Err(e) => return Reply::text(format!("⚠️ reminders error: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
         };
         match repo.insert_reminder(&text, due, created) {
             Ok(id) => {
                 let mins = ((due - now) as f64 / 60.0).round() as i64;
                 let when = if mins < 60 {
-                    format!("in ~{mins} min")
+                    format!("через ~{mins} хв")
                 } else if mins < 24 * 60 {
-                    format!("in ~{} h {} min", mins / 60, mins % 60)
+                    format!("через ~{} год {} хв", mins / 60, mins % 60)
                 } else {
-                    format!("in ~{} day(s)", mins / (24 * 60))
+                    format!("через ~{} дн", mins / (24 * 60))
                 };
                 Reply::text(format!(
-                    "⏰ #{id} scheduled {when}: {text}\n(Cancel with /forget {id})"
+                    "⏰ №{id} заплановано {when}: {text}\n(Скасувати: /forget {id})"
                 ))
             }
-            Err(e) => Reply::text(format!("⚠️ DB error: {e}")),
+            Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
         }
     }
 }
@@ -298,7 +298,7 @@ impl CommandHandler for RemindersCmd {
         "reminders"
     }
     fn description(&self) -> &'static str {
-        "List pending reminders"
+        "Список активних нагадувань"
     }
     fn usage(&self) -> &'static str {
         "/reminders"
@@ -306,34 +306,34 @@ impl CommandHandler for RemindersCmd {
     async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
         let repo = match self.state.repo.lock() {
             Ok(r) => r,
-            Err(e) => return Reply::text(format!("⚠️ reminders error: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
         };
         let items = match repo.list_active_reminders() {
             Ok(v) => v,
-            Err(e) => return Reply::text(format!("⚠️ DB error: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
         };
         if items.is_empty() {
-            return Reply::text("📭 No pending reminders.");
+            return Reply::text("📭 Немає активних нагадувань.");
         }
         let now = now_secs();
-        let mut out = String::from("⏰ Pending:\n");
+        let mut out = String::from("⏰ Активні:\n");
         for r in items.iter().take(20) {
             let delta = r.due_at - now;
             let when = if delta < 0 {
-                "(past)".to_string()
+                "(прострочено)".to_string()
             } else if delta < 60 {
-                "< 1 min".to_string()
+                "< 1 хв".to_string()
             } else if delta < 3600 {
-                format!("{} min", delta / 60)
+                format!("{} хв", delta / 60)
             } else if delta < 86_400 {
-                format!("{} h", delta / 3600)
+                format!("{} год", delta / 3600)
             } else {
-                format!("{} d", delta / 86_400)
+                format!("{} дн", delta / 86_400)
             };
-            out.push_str(&format!("• #{} ({when}) — {}\n", r.id, r.text));
+            out.push_str(&format!("• №{} ({when}) — {}\n", r.id, r.text));
         }
         if items.len() > 20 {
-            out.push_str(&format!("…and {} more\n", items.len() - 20));
+            out.push_str(&format!("…ще {}\n", items.len() - 20));
         }
         Reply::text(out.trim_end().to_string())
     }
@@ -357,23 +357,23 @@ impl CommandHandler for ForgetCmd {
         "forget"
     }
     fn description(&self) -> &'static str {
-        "Cancel a pending reminder by id"
+        "Скасувати активне нагадування за id"
     }
     fn usage(&self) -> &'static str {
         "/forget <id>"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
         let Ok(id): Result<i64, _> = args.trim().parse() else {
-            return Reply::text("✍️ Usage: /forget <id> (see /reminders)");
+            return Reply::text("✍️ Використання: /forget <id> (дивись /reminders)");
         };
         let mut repo = match self.state.repo.lock() {
             Ok(r) => r,
-            Err(e) => return Reply::text(format!("⚠️ reminders error: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
         };
         match repo.cancel_reminder(id) {
-            Ok(true) => Reply::text(format!("🗑️ Cancelled reminder #{id}.")),
-            Ok(false) => Reply::text(format!("❓ No pending reminder #{id}.")),
-            Err(e) => Reply::text(format!("⚠️ DB error: {e}")),
+            Ok(true) => Reply::text(format!("🗑️ Скасовано нагадування №{id}.")),
+            Ok(false) => Reply::text(format!("❓ Немає активного нагадування №{id}.")),
+            Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
         }
     }
 }
@@ -392,7 +392,7 @@ impl CommandHandler for VolumeCmd {
         "volume"
     }
     fn description(&self) -> &'static str {
-        "Show or set macOS system output volume (0–100)"
+        "Показати або змінити гучність macOS (0–100)"
     }
     fn usage(&self) -> &'static str {
         "/volume [N | up | down | mute | unmute]"
@@ -570,7 +570,7 @@ impl CommandHandler for MusicCmd {
         "music"
     }
     fn description(&self) -> &'static str {
-        "Show or control the YouTube Music player"
+        "Показати або керувати плеєром YouTube Music"
     }
     fn usage(&self) -> &'static str {
         "/music [play|pause|next|prev]"
@@ -589,7 +589,7 @@ impl CommandHandler for MusicCmd {
             "play" | "pause" | "toggle" => {
                 match crate::modules::music::commands::music_play_pause(ctx.app.clone()) {
                     Ok(()) => Reply {
-                        text: format!("⏯️ {}", read_after_action(&ctx.app, "toggled")),
+                        text: format!("⏯️ {}", read_after_action(&ctx.app, "перемкнуто")),
                         keyboard: Some(music_keyboard()),
                     },
                     Err(e) => Reply::text(format!("⚠️ {e}")),
@@ -597,20 +597,20 @@ impl CommandHandler for MusicCmd {
             }
             "next" => match crate::modules::music::commands::music_next(ctx.app.clone()) {
                 Ok(()) => Reply {
-                    text: format!("⏭️ {}", read_after_action(&ctx.app, "skipped")),
+                    text: format!("⏭️ {}", read_after_action(&ctx.app, "далі")),
                     keyboard: Some(music_keyboard()),
                 },
                 Err(e) => Reply::text(format!("⚠️ {e}")),
             },
             "prev" => match crate::modules::music::commands::music_prev(ctx.app.clone()) {
                 Ok(()) => Reply {
-                    text: format!("⏮️ {}", read_after_action(&ctx.app, "rewound")),
+                    text: format!("⏮️ {}", read_after_action(&ctx.app, "назад")),
                     keyboard: Some(music_keyboard()),
                 },
                 Err(e) => Reply::text(format!("⚠️ {e}")),
             },
             _ => Reply::text(format!(
-                "✍️ Usage: /music [play|pause|next|prev]. Got: {sub}"
+                "✍️ Використання: /music [play|pause|next|prev]. Отримано: {sub}"
             )),
         }
     }
@@ -650,17 +650,17 @@ fn read_after_action(app: &tauri::AppHandle, verb: &str) -> String {
     std::thread::sleep(std::time::Duration::from_millis(400));
     let snap = read_now_playing(app);
     if !snap.attached {
-        return format!("{verb} (player not attached)");
+        return format!("{verb} (плеєр не підключено)");
     }
     format_now_playing(&snap)
 }
 
 fn format_now_playing(snap: &NowPlaying) -> String {
     if !snap.attached {
-        return "🎵 Player not attached. Open Stash → Music first.".to_string();
+        return "🎵 Плеєр не підключено. Спочатку відкрий Stash → Music.".to_string();
     }
     let title = if snap.title.is_empty() {
-        "(nothing)".to_string()
+        "(нічого)".to_string()
     } else {
         snap.title.clone()
     };
@@ -811,20 +811,20 @@ impl CommandHandler for AiCmd {
         "ai"
     }
     fn description(&self) -> &'static str {
-        "Ask the AI assistant"
+        "Запитати AI-асистента"
     }
     fn usage(&self) -> &'static str {
-        "/ai <question>"
+        "/ai <запитання>"
     }
     async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let prompt = args.trim();
         if prompt.is_empty() {
-            return Reply::text("Usage: /ai <question>");
+            return Reply::text("Використання: /ai <запитання>");
         }
         match super::assistant::handle_user_text(&ctx.app, &self.state, prompt).await {
             Ok(reply) => {
                 let suffix = if reply.truncated {
-                    "\n\n_(simplified — tool chain hit depth cap)_"
+                    "\n\n_(спрощено — досягнуто ліміту ланцюжка інструментів)_"
                 } else {
                     ""
                 };
@@ -852,15 +852,15 @@ impl CommandHandler for RememberCmd {
         "remember"
     }
     fn description(&self) -> &'static str {
-        "Remember a fact about you"
+        "Запам'ятати факт про тебе"
     }
     fn usage(&self) -> &'static str {
-        "/remember <fact>"
+        "/remember <факт>"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
         let text = args.trim();
         if text.is_empty() {
-            return Reply::text("Usage: /remember <fact>");
+            return Reply::text("Використання: /remember <факт>");
         }
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -869,12 +869,12 @@ impl CommandHandler for RememberCmd {
         let result = {
             let mut repo = match self.state.repo.lock() {
                 Ok(r) => r,
-                Err(e) => return Reply::text(format!("⚠️ repo busy: {e}")),
+                Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
             };
             repo.memory_insert(text, now)
         };
         match result {
-            Ok(id) => Reply::text(format!("🧠 Got it. (id {id})")),
+            Ok(id) => Reply::text(format!("🧠 Записав. (id {id})")),
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
     }
@@ -897,7 +897,7 @@ impl CommandHandler for MemoryCmd {
         "memory"
     }
     fn description(&self) -> &'static str {
-        "List everything I'll remember about you"
+        "Показати все, що я пам'ятаю про тебе"
     }
     fn usage(&self) -> &'static str {
         "/memory"
@@ -906,19 +906,19 @@ impl CommandHandler for MemoryCmd {
         let rows = {
             let repo = match self.state.repo.lock() {
                 Ok(r) => r,
-                Err(e) => return Reply::text(format!("⚠️ repo busy: {e}")),
+                Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
             };
             repo.memory_list()
         };
         match rows {
-            Ok(rows) if rows.is_empty() => Reply::text("🗒 No facts yet. `/remember <fact>` to start."),
+            Ok(rows) if rows.is_empty() => Reply::text("🗒 Поки що нічого. Почни з `/remember <факт>`."),
             Ok(rows) => {
                 let body = rows
                     .iter()
                     .map(|r| format!("• {} (id {})", r.fact, r.id))
                     .collect::<Vec<_>>()
                     .join("\n");
-                Reply::text(format!("🗒 Facts:\n{body}"))
+                Reply::text(format!("🗒 Факти:\n{body}"))
             }
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
@@ -944,25 +944,25 @@ impl CommandHandler for ForgetFactCmd {
         "forget_fact"
     }
     fn description(&self) -> &'static str {
-        "Delete a remembered fact by id"
+        "Видалити збережений факт за id"
     }
     fn usage(&self) -> &'static str {
         "/forget_fact <id>"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
         let Ok(id) = args.trim().parse::<i64>() else {
-            return Reply::text("Usage: /forget_fact <id>");
+            return Reply::text("Використання: /forget_fact <id>");
         };
         let result = {
             let mut repo = match self.state.repo.lock() {
                 Ok(r) => r,
-                Err(e) => return Reply::text(format!("⚠️ repo busy: {e}")),
+                Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
             };
             repo.memory_delete(id)
         };
         match result {
-            Ok(true) => Reply::text(format!("🧠 Forgot fact {id}.")),
-            Ok(false) => Reply::text(format!("🤷 No fact with id {id}.")),
+            Ok(true) => Reply::text(format!("🧠 Забув факт {id}.")),
+            Ok(false) => Reply::text(format!("🤷 Немає факту з id {id}.")),
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
     }

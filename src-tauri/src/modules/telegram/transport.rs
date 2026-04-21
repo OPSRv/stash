@@ -287,23 +287,23 @@ async fn handle_update(
             let _ = app.emit("telegram:paired", chat_id);
             state
                 .sender
-                .enqueue(chat_id, "✅ Paired with Stash. Type /help to see commands.");
+                .enqueue(chat_id, "✅ Сполучено зі Stash. /help — список команд.");
         }
         DispatchAction::ReplyReject { .. } => {
-            state.sender.enqueue(chat_id, "❌ Invalid code.");
+            state.sender.enqueue(chat_id, "❌ Невірний код.");
         }
         DispatchAction::ReplyExpired { .. } => {
             state
                 .sender
-                .enqueue(chat_id, "⚠️ Pairing code expired — start again in Stash.");
+                .enqueue(chat_id, "⚠️ Код парування прострочений — почни знову у Stash.");
         }
         DispatchAction::ReplyAlreadyPaired { .. } => {
-            state.sender.enqueue(chat_id, "✅ Already paired with Stash.");
+            state.sender.enqueue(chat_id, "✅ Уже сполучено зі Stash.");
         }
         DispatchAction::ReplyAborted { .. } => {
             state.sender.enqueue(
                 chat_id,
-                "⚠️ Too many wrong codes. Pairing cancelled — restart from Stash.",
+                "⚠️ Забагато невірних кодів. Парування скасовано — почни знову у Stash.",
             );
         }
         DispatchAction::RunCommand { name, args, .. } => {
@@ -323,7 +323,7 @@ async fn handle_update(
             } else {
                 state
                     .sender
-                    .enqueue(chat_id, format!("❓ Unknown command: /{name}"));
+                    .enqueue(chat_id, format!("❓ Невідома команда: /{name}"));
             }
         }
         DispatchAction::IngestText { text, .. } => {
@@ -334,7 +334,7 @@ async fn handle_update(
             match super::assistant::handle_user_text(app, state, &text).await {
                 Ok(reply) => {
                     let suffix = if reply.truncated {
-                        "\n\n_(simplified — tool chain hit depth cap)_"
+                        "\n\n_(спрощено — досягнуто ліміту ланцюжка інструментів)_"
                     } else {
                         ""
                     };
@@ -360,14 +360,14 @@ async fn handle_update(
                             let _ = app.emit("telegram:inbox_added", id);
                             state.sender.enqueue(
                                 chat_id,
-                                format!("📥 Saved to inbox (assistant: {e})."),
+                                format!("📥 Збережено в інбокс (асистент: {e})."),
                             );
                         }
                         Err(e2) => {
                             tracing::warn!(error = %e2, "inbox insert failed");
                             state.sender.enqueue(
                                 chat_id,
-                                "⚠️ Could not save to inbox — check Stash logs.",
+                                "⚠️ Не вдалося зберегти в інбокс — переглянь лог Stash.",
                             );
                         }
                     }
@@ -377,7 +377,7 @@ async fn handle_update(
         DispatchAction::UnknownCommand { name, .. } => {
             state
                 .sender
-                .enqueue(chat_id, format!("❓ Unknown command: /{name}"));
+                .enqueue(chat_id, format!("❓ Невідома команда: /{name}"));
         }
     }
     let _ = app.emit("telegram:status_changed", ());
@@ -432,7 +432,7 @@ async fn handle_media(
         CapVerdict::Unknown => {
             state
                 .sender
-                .enqueue(chat_id, "⚠️ Telegram didn't declare a size — skipping.");
+                .enqueue(chat_id, "⚠️ Telegram не вказав розмір — пропускаю.");
             return;
         }
         CapVerdict::Ok => {}
@@ -453,7 +453,7 @@ async fn handle_media(
             tracing::warn!(error = %e, "inbox: could not create day dir");
             state
                 .sender
-                .enqueue(chat_id, "⚠️ Inbox directory setup failed — check Stash logs.");
+                .enqueue(chat_id, "⚠️ Не вдалося створити папку інбокса — переглянь лог Stash.");
             return;
         }
     };
@@ -465,7 +465,7 @@ async fn handle_media(
             let _ = std::fs::remove_file(&abs); // partial file, best-effort cleanup
             state
                 .sender
-                .enqueue(chat_id, "⚠️ Download from Telegram failed — check Stash logs.");
+                .enqueue(chat_id, "⚠️ Завантаження з Telegram не вдалося — переглянь лог Stash.");
             return;
         }
     };
@@ -540,7 +540,7 @@ async fn handle_media(
                     tracing::warn!(error = %e, "whisper transcription failed");
                     state_for_task
                         .sender
-                        .enqueue(chat_for_task, format!("⚠️ Whisper failed: {e}"));
+                        .enqueue(chat_for_task, format!("⚠️ Whisper не впорався: {e}"));
                 }
             }
         });

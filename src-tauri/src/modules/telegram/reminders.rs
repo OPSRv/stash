@@ -66,7 +66,7 @@ fn flush_due(
 
     for r in due {
         let late = now - r.due_at >= LATE_THRESHOLD_SEC;
-        let prefix = if late { "⏰ (late) " } else { "⏰ " };
+        let prefix = if late { "⏰ (запізно) " } else { "⏰ " };
         state
             .sender
             .enqueue(chat_id, format!("{prefix}{}", r.text));
