@@ -209,7 +209,10 @@ async fn run_polling(
                 tracing::info!("telegram transport stopping");
                 break;
             }
-            result = bot.get_updates().offset(offset).timeout(25) => {
+            // 10s long-poll: short enough that flaky NATs / captive portals
+            // don't reap the idle connection, still long enough to avoid
+            // hot-looping.
+            result = bot.get_updates().offset(offset).timeout(10) => {
                 match result {
                     Ok(list) => {
                         for u in list {
