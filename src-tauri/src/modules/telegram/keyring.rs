@@ -2,7 +2,9 @@
 //! the shared trait defined in the `ai` module — re-exported here so callers
 //! don't need to reach into another module and tests can swap in `MemStore`.
 
-pub use crate::modules::ai::keyring::{KeyringStore, MemStore, SecretStore};
+pub use crate::modules::ai::keyring::{KeyringStore, SecretStore};
+#[cfg(test)]
+pub use crate::modules::ai::keyring::MemStore;
 
 /// Keychain service name for Telegram-owned secrets. Kept distinct from
 /// `com.stash.ai` so clearing one module's secrets never touches another's.

@@ -107,6 +107,10 @@ use modules::ai::{
     repo::AiRepo,
     state::{AiState, KEYRING_SERVICE},
 };
+use modules::telegram::commands::{
+    telegram_cancel_pairing, telegram_clear_token, telegram_has_token, telegram_set_token,
+    telegram_start_pairing, telegram_status, telegram_unpair,
+};
 use modules::clipboard::{
     commands::{
         clipboard_clear, clipboard_copy_only, clipboard_delete, clipboard_link_preview,
@@ -459,6 +463,13 @@ pub fn run() {
             ai_set_api_key,
             ai_delete_api_key,
             ai_has_api_key,
+            telegram_set_token,
+            telegram_clear_token,
+            telegram_has_token,
+            telegram_status,
+            telegram_start_pairing,
+            telegram_cancel_pairing,
+            telegram_unpair,
             webchat_embed,
             webchat_hide,
             webchat_hide_all,
@@ -595,6 +606,23 @@ pub fn run() {
             let ai_secrets: Arc<dyn SecretStore> =
                 Arc::new(KeyringStore::new(KEYRING_SERVICE));
             app.manage(AiState::new(ai_repo, ai_secrets));
+
+            // Telegram — own SQLite + own Keychain service. Wrapped in Arc so
+            // the long-polling transport can clone a handle into its spawned
+            // tokio task.
+            let telegram_db = data_dir.join("telegram.sqlite");
+            let telegram_repo = modules::telegram::repo::TelegramRepo::new(
+                Connection::open(&telegram_db)?,
+            )?;
+            let telegram_secrets: Arc<dyn modules::telegram::keyring::SecretStore> =
+                Arc::new(modules::telegram::keyring::KeyringStore::new(
+                    modules::telegram::keyring::KEYRING_SERVICE,
+                ));
+            let telegram_state = Arc::new(modules::telegram::state::TelegramState::new(
+                telegram_repo,
+                telegram_secrets,
+            ));
+            app.manage(telegram_state);
 
             let warmup_state = Arc::clone(&runner_state);
             std::thread::spawn(move || {

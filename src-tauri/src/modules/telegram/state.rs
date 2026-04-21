@@ -3,11 +3,13 @@ use std::sync::{Arc, Mutex};
 use super::keyring::SecretStore;
 use super::pairing::PairingState;
 use super::repo::TelegramRepo;
+use super::transport::TransportHandle;
 
 pub struct TelegramState {
     pub repo: Mutex<TelegramRepo>,
     pub secrets: Arc<dyn SecretStore>,
     pub pairing: Mutex<PairingState>,
+    pub transport: TransportHandle,
 }
 
 impl TelegramState {
@@ -16,6 +18,7 @@ impl TelegramState {
             repo: Mutex::new(repo),
             secrets,
             pairing: Mutex::new(PairingState::Unconfigured),
+            transport: TransportHandle::new(),
         }
     }
 }

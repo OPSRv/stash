@@ -78,6 +78,7 @@ impl TransportHandle {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn is_running(&self) -> bool {
         self.shutdown.lock().await.is_some()
     }

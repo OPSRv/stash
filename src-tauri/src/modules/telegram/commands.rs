@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -14,9 +15,9 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-/// Connection status projected for the UI. Intentionally carries no secret —
-/// just the pairing code (shown in UI for the user to type into Telegram) and
-/// the paired chat id (public, not a credential).
+/// Connection status projected for the UI. Carries no credential — just the
+/// pairing code (shown for the user to send to the bot) and the paired
+/// chat id (public, not a secret).
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ConnectionStatus {
@@ -77,7 +78,7 @@ pub(super) async fn validate_token(
 
 #[tauri::command]
 pub async fn telegram_set_token(
-    state: State<'_, TelegramState>,
+    state: State<'_, Arc<TelegramState>>,
     token: String,
 ) -> Result<(), String> {
     let client = reqwest::Client::new();
@@ -86,9 +87,10 @@ pub async fn telegram_set_token(
 }
 
 #[tauri::command]
-pub fn telegram_clear_token(state: State<'_, TelegramState>) -> Result<(), String> {
-    // Clearing the token must also unpair — chat_id is meaningless without a
-    // bot to reach it.
+pub async fn telegram_clear_token(
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<(), String> {
+    state.transport.stop().await;
     state.secrets.delete(ACCOUNT_BOT_TOKEN)?;
     state.secrets.delete(ACCOUNT_CHAT_ID)?;
     *state.pairing.lock().unwrap() = PairingState::Unconfigured;
@@ -96,35 +98,42 @@ pub fn telegram_clear_token(state: State<'_, TelegramState>) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn telegram_has_token(state: State<'_, TelegramState>) -> Result<bool, String> {
+pub fn telegram_has_token(state: State<'_, Arc<TelegramState>>) -> Result<bool, String> {
     Ok(state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some())
 }
 
 #[tauri::command]
-pub fn telegram_status(state: State<'_, TelegramState>) -> Result<ConnectionStatus, String> {
+pub fn telegram_status(
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<ConnectionStatus, String> {
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();
     Ok(compute_status(has_token, &state.pairing.lock().unwrap()))
 }
 
 #[tauri::command]
-pub fn telegram_start_pairing(
+pub async fn telegram_start_pairing(
     app: AppHandle,
-    state: State<'_, TelegramState>,
+    state: State<'_, Arc<TelegramState>>,
 ) -> Result<ConnectionStatus, String> {
-    if state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_none() {
+    let Some(token) = state.secrets.get(ACCOUNT_BOT_TOKEN)? else {
         return Err("Paste a bot token first".into());
-    }
+    };
     let code = pairing::generate_code(&mut rand::thread_rng());
     let new_state = pairing::start_pairing(code, now_secs());
     *state.pairing.lock().unwrap() = new_state.clone();
+
+    // Spin up long-polling so the bot can receive /pair.
+    let arc = state.inner().clone();
+    arc.transport.start(token, app.clone(), arc.clone()).await?;
+
     let _ = app.emit("telegram:status_changed", ());
     Ok(compute_status(true, &new_state))
 }
 
 #[tauri::command]
-pub fn telegram_cancel_pairing(
+pub async fn telegram_cancel_pairing(
     app: AppHandle,
-    state: State<'_, TelegramState>,
+    state: State<'_, Arc<TelegramState>>,
 ) -> Result<ConnectionStatus, String> {
     {
         let mut p = state.pairing.lock().unwrap();
@@ -132,6 +141,7 @@ pub fn telegram_cancel_pairing(
             *p = PairingState::Unconfigured;
         }
     }
+    state.transport.stop().await;
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();
     let status = compute_status(has_token, &state.pairing.lock().unwrap());
     let _ = app.emit("telegram:status_changed", ());
@@ -139,10 +149,11 @@ pub fn telegram_cancel_pairing(
 }
 
 #[tauri::command]
-pub fn telegram_unpair(
+pub async fn telegram_unpair(
     app: AppHandle,
-    state: State<'_, TelegramState>,
+    state: State<'_, Arc<TelegramState>>,
 ) -> Result<ConnectionStatus, String> {
+    state.transport.stop().await;
     state.secrets.delete(ACCOUNT_CHAT_ID)?;
     *state.pairing.lock().unwrap() = PairingState::Unconfigured;
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();
@@ -197,9 +208,6 @@ mod tests {
 
     #[test]
     fn serialized_status_never_leaks_token_value() {
-        // Sanity: ConnectionStatus has no field that would carry the actual
-        // bot token. The variant name `token_only` is fine — it's a state
-        // label, not a credential.
         for s in [
             compute_status(false, &PairingState::Unconfigured),
             compute_status(true, &PairingState::Unconfigured),
