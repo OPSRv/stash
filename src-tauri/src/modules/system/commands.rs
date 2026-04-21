@@ -6,7 +6,7 @@ use super::dashboard::{self, DashboardMetrics};
 use super::disk_hogs::{
     self, IosBackup, MailAttachmentsBucket, Screenshot, TmSnapshot, XcodeSimulator,
 };
-use super::displays::{self, DisplayDevice, DisplayInfo, DisplayMode};
+use super::displays::{self, DisplayDevice, DisplayInfo};
 use super::duplicates::{self, DuplicateGroup};
 use super::large_files::{self, ScanSummary};
 use super::launch_agents::{self, LaunchAgent};
@@ -95,20 +95,6 @@ pub async fn system_power_off_display(secondary: u32, master: u32) -> Result<(),
 #[tauri::command]
 pub async fn system_power_on_display(secondary: u32) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || displays::power_on_display(secondary))
-        .await
-        .map_err(|e| format!("join: {e}"))?
-}
-
-#[tauri::command]
-pub async fn system_list_display_modes(id: u32) -> Result<Vec<DisplayMode>, String> {
-    tauri::async_runtime::spawn_blocking(move || Ok::<_, String>(displays::list_display_modes(id)))
-        .await
-        .map_err(|e| format!("join: {e}"))?
-}
-
-#[tauri::command]
-pub async fn system_set_display_mode(id: u32, index: u32) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || displays::set_display_mode(id, index))
         .await
         .map_err(|e| format!("join: {e}"))?
 }

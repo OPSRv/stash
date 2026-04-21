@@ -29,32 +29,6 @@ mod ffi {
     pub const K_CG_CONFIGURE_FOR_SESSION: i32 = 1;
     pub const K_CG_NULL_DIRECT_DISPLAY: CGDirectDisplayID = 0;
 
-    pub type CGDisplayModeRef = *const core::ffi::c_void;
-    pub type CFArrayRef = *const core::ffi::c_void;
-
-    #[link(name = "CoreGraphics", kind = "framework")]
-    extern "C" {
-        pub fn CGDisplayCopyAllDisplayModes(
-            display: CGDirectDisplayID,
-            options: *const core::ffi::c_void,
-        ) -> CFArrayRef;
-        pub fn CGDisplayCopyDisplayMode(display: CGDirectDisplayID) -> CGDisplayModeRef;
-        pub fn CGDisplayModeGetWidth(mode: CGDisplayModeRef) -> usize;
-        pub fn CGDisplayModeGetHeight(mode: CGDisplayModeRef) -> usize;
-        pub fn CGDisplayModeGetPixelWidth(mode: CGDisplayModeRef) -> usize;
-        pub fn CGDisplayModeGetPixelHeight(mode: CGDisplayModeRef) -> usize;
-        pub fn CGDisplayModeGetRefreshRate(mode: CGDisplayModeRef) -> f64;
-        pub fn CGDisplayModeRelease(mode: CGDisplayModeRef);
-        pub fn CGConfigureDisplayWithDisplayMode(
-            config: CGDisplayConfigRef,
-            display: CGDirectDisplayID,
-            mode: CGDisplayModeRef,
-            options: *const core::ffi::c_void,
-        ) -> i32;
-        pub fn CFArrayGetCount(array: CFArrayRef) -> isize;
-        pub fn CFArrayGetValueAtIndex(array: CFArrayRef, index: isize) -> CGDisplayModeRef;
-        pub fn CFRelease(cf: *const core::ffi::c_void);
-    }
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -76,6 +50,12 @@ mod ffi {
             config: CGDisplayConfigRef,
             display: CGDirectDisplayID,
             master: CGDirectDisplayID,
+        ) -> i32;
+        pub fn CGConfigureDisplayOrigin(
+            config: CGDisplayConfigRef,
+            display: CGDirectDisplayID,
+            x: i32,
+            y: i32,
         ) -> i32;
         pub fn CGCompleteDisplayConfiguration(
             config: CGDisplayConfigRef,
@@ -140,8 +120,16 @@ pub fn list_hardware_displays() -> Vec<DisplayDevice> {
         let height_px = unsafe { CGDisplayPixelsHigh(id) } as u32;
         let vendor_id = unsafe { CGDisplayVendorNumber(id) };
         let model_id = unsafe { CGDisplayModelNumber(id) };
-        let supports_brightness = unsafe { DisplayServicesCanChangeBrightness(id) };
-        let brightness = if supports_brightness {
+        // Two separate tracks for brightness capability:
+        //   - DisplayServices: built-in panels, and many Apple-blessed externals
+        //     (Studio Display, LG UltraFine). Accurate getter, smooth setter.
+        //   - DDC/CI over IOAVService: "regular" HDMI/DP monitors. No getter
+        //     we can trust in <50 ms, but the setter is reliable.
+        // We want the UI slider enabled whenever *either* channel works, so
+        // users can drive brightness on USB-C docks where DisplayServices
+        // lies about support.
+        let ds_supports = unsafe { DisplayServicesCanChangeBrightness(id) };
+        let ds_brightness = if ds_supports {
             let mut b: f32 = 0.0;
             let rc = unsafe { DisplayServicesGetBrightness(id, &mut b) };
             if rc == 0 {
@@ -152,6 +140,18 @@ pub fn list_hardware_displays() -> Vec<DisplayDevice> {
         } else {
             None
         };
+        let ddc_supports = !is_builtin && super::ddc::can_control(id);
+        let supports_brightness = ds_supports || ddc_supports;
+        // For DDC-only panels we don't know the current value without doing a
+        // slow 5-byte read; show the last value the user set (or 70% default)
+        // so the slider isn't stuck at zero.
+        let brightness = ds_brightness.or_else(|| {
+            if ddc_supports {
+                Some(saved_store().lock().unwrap().get(&id).copied().unwrap_or(0.7))
+            } else {
+                None
+            }
+        });
         // Correlate with system_profiler's human name if possible. We fall
         // back to "Built-in Display" / "External Display" so the UI always
         // has something to show.
@@ -244,14 +244,29 @@ fn annotate_names(out: &mut [DisplayDevice]) {
 #[cfg(target_os = "macos")]
 pub fn set_display_brightness(id: u32, value: f32) -> Result<(), String> {
     let clamped = value.clamp(0.0, 1.0);
-    let rc = unsafe { ffi::DisplayServicesSetBrightness(id, clamped) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(format!(
-            "DisplayServicesSetBrightness failed for display {id}: rc={rc}"
-        ))
+    // Remember the value regardless of which channel wins — even the DDC
+    // path benefits, since next time we enumerate we can show it instead of
+    // defaulting to 70%.
+    saved_store().lock().unwrap().insert(id, clamped);
+
+    let ds_supports = unsafe { ffi::DisplayServicesCanChangeBrightness(id) };
+    if ds_supports {
+        let rc = unsafe { ffi::DisplayServicesSetBrightness(id, clamped) };
+        if rc == 0 {
+            return Ok(());
+        }
+        // Some USB-C hubs advertise support but fail the write — fall through
+        // to DDC instead of surfacing an error.
     }
+    // DDC path. `can_control` returns false for the built-in panel (no DDC
+    // bus) and for displays whose IOAVService we couldn't match.
+    if super::ddc::can_control(id) {
+        let pct = (clamped * 100.0).round().clamp(0.0, 100.0) as u8;
+        return super::ddc::set_brightness(id, pct);
+    }
+    Err(format!(
+        "дисплей {id} не підтримує ні DisplayServices, ні DDC/CI"
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -271,13 +286,26 @@ pub fn set_display_brightness(_id: u32, _value: f32) -> Result<(), String> {
 ///
 /// We refuse to hide the main display — without it the user has no surface
 /// to issue a follow-up "show" command on.
+/// Hide `secondary` by mirroring it onto `master`, and — if `promote_master`
+/// is set — reposition `master` to origin (0,0) first so macOS treats it as
+/// the new main display. That's the trick BetterDisplay uses to "disable"
+/// whichever display is currently main: you can't mirror the main onto
+/// something else while it's still the main, so we swap main first (all in
+/// one begin/complete block so WindowServer sees a consistent layout).
 #[cfg(target_os = "macos")]
-fn reconfigure_mirror(secondary: u32, master: u32) -> Result<(), String> {
+fn reconfigure_mirror(secondary: u32, master: u32, promote_master: bool) -> Result<(), String> {
     use ffi::*;
     let mut config: CGDisplayConfigRef = std::ptr::null_mut();
     let rc = unsafe { CGBeginDisplayConfiguration(&mut config) };
     if rc != 0 {
         return Err(format!("CGBeginDisplayConfiguration: rc={rc}"));
+    }
+    if promote_master && master != K_CG_NULL_DIRECT_DISPLAY {
+        let rc = unsafe { CGConfigureDisplayOrigin(config, master, 0, 0) };
+        if rc != 0 {
+            unsafe { CGCancelDisplayConfiguration(config) };
+            return Err(format!("CGConfigureDisplayOrigin: rc={rc}"));
+        }
     }
     let rc = unsafe { CGConfigureDisplayMirrorOfDisplay(config, secondary, master) };
     if rc != 0 {
@@ -295,15 +323,13 @@ fn reconfigure_mirror(secondary: u32, master: u32) -> Result<(), String> {
 pub fn set_display_hidden(secondary: u32, master: u32, hide: bool) -> Result<(), String> {
     use ffi::*;
     if hide {
-        if secondary == unsafe { CGMainDisplayID() } {
-            return Err("не можна приховати основний дисплей".into());
-        }
         if master == 0 || secondary == master {
             return Err("потрібен інший дисплей як точка поглинання".into());
         }
+        let promote = secondary == unsafe { CGMainDisplayID() };
+        return reconfigure_mirror(secondary, master, promote);
     }
-    let target_master = if hide { master } else { K_CG_NULL_DIRECT_DISPLAY };
-    reconfigure_mirror(secondary, target_master)
+    reconfigure_mirror(secondary, K_CG_NULL_DIRECT_DISPLAY, false)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -334,12 +360,10 @@ fn saved_store() -> &'static std::sync::Mutex<std::collections::HashMap<u32, f32
 #[cfg(target_os = "macos")]
 pub fn power_off_display(secondary: u32, master: u32) -> Result<(), String> {
     use ffi::*;
-    if secondary == unsafe { CGMainDisplayID() } {
-        return Err("не можна вимкнути основний дисплей".into());
-    }
     if master == 0 || secondary == master {
         return Err("потрібен інший дисплей, на який перенести сеанс".into());
     }
+    let promote_master = secondary == unsafe { CGMainDisplayID() };
     // Step 1 — remember the current brightness so power-on can restore it
     // exactly, not reset the monitor to an awkward default.
     if unsafe { DisplayServicesCanChangeBrightness(secondary) } {
@@ -369,7 +393,7 @@ pub fn power_off_display(secondary: u32, master: u32) -> Result<(), String> {
     if unsafe { DisplayServicesCanChangeBrightness(secondary) } {
         let _ = unsafe { DisplayServicesSetBrightness(secondary, 0.0) };
     }
-    reconfigure_mirror(secondary, master)?;
+    reconfigure_mirror(secondary, master, promote_master)?;
 
     if !ddc_ok {
         // Not an error — user still saw the display go dark through the
@@ -388,7 +412,7 @@ pub fn power_on_display(secondary: u32) -> Result<(), String> {
     // Reverse order: un-mirror first so the restored brightness setting
     // gets sent while the panel is already recognised as a standalone
     // device again; some monitors reject DDC writes while mirrored.
-    reconfigure_mirror(secondary, K_CG_NULL_DIRECT_DISPLAY)?;
+    reconfigure_mirror(secondary, K_CG_NULL_DIRECT_DISPLAY, false)?;
 
     // DDC hardware on — matches whatever power_off did on this monitor.
     let _ = super::ddc::set_power(secondary, true);
@@ -409,124 +433,6 @@ pub fn power_off_display(_s: u32, _m: u32) -> Result<(), String> {
 #[cfg(not(target_os = "macos"))]
 pub fn power_on_display(_s: u32) -> Result<(), String> {
     Err("power on is macOS-only".into())
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct DisplayMode {
-    /// Stable identifier within one session — index into
-    /// `CGDisplayCopyAllDisplayModes`. Used as the handle to pass back
-    /// when the user picks a mode.
-    pub index: u32,
-    pub width_points: u32,
-    pub height_points: u32,
-    pub width_pixels: u32,
-    pub height_pixels: u32,
-    pub refresh_hz: f64,
-    pub is_current: bool,
-}
-
-/// Enumerate the modes CG reports for this display. We keep everything —
-/// stretched, downscaled, non-HiDPI — because BetterDisplay's entire
-/// selling point is that macOS hides most of these by default.
-#[cfg(target_os = "macos")]
-pub fn list_display_modes(id: u32) -> Vec<DisplayMode> {
-    use ffi::*;
-    let arr = unsafe { CGDisplayCopyAllDisplayModes(id, std::ptr::null()) };
-    if arr.is_null() {
-        return Vec::new();
-    }
-    let current = unsafe { CGDisplayCopyDisplayMode(id) };
-    let count = unsafe { CFArrayGetCount(arr) };
-    let mut out = Vec::with_capacity(count as usize);
-    for i in 0..count {
-        let mode = unsafe { CFArrayGetValueAtIndex(arr, i) };
-        if mode.is_null() {
-            continue;
-        }
-        let w = unsafe { CGDisplayModeGetWidth(mode) } as u32;
-        let h = unsafe { CGDisplayModeGetHeight(mode) } as u32;
-        let pw = unsafe { CGDisplayModeGetPixelWidth(mode) } as u32;
-        let ph = unsafe { CGDisplayModeGetPixelHeight(mode) } as u32;
-        let hz = unsafe { CGDisplayModeGetRefreshRate(mode) };
-        let is_current = !current.is_null()
-            && unsafe { CGDisplayModeGetPixelWidth(current) } as u32 == pw
-            && unsafe { CGDisplayModeGetPixelHeight(current) } as u32 == ph
-            && (unsafe { CGDisplayModeGetRefreshRate(current) } - hz).abs() < 0.01;
-        out.push(DisplayMode {
-            index: i as u32,
-            width_points: w,
-            height_points: h,
-            width_pixels: pw,
-            height_pixels: ph,
-            refresh_hz: hz,
-            is_current,
-        });
-    }
-    if !current.is_null() {
-        unsafe { CGDisplayModeRelease(current) };
-    }
-    // Deduplicate: the array often contains near-identical variants. Prefer
-    // the highest refresh for any given (w,h,pw,ph) tuple.
-    out.sort_by(|a, b| {
-        (b.width_pixels, b.height_pixels, b.refresh_hz as i64)
-            .cmp(&(a.width_pixels, a.height_pixels, a.refresh_hz as i64))
-    });
-    let mut seen: std::collections::HashSet<(u32, u32, u32, u32)> = std::collections::HashSet::new();
-    out.retain(|m| {
-        seen.insert((m.width_points, m.height_points, m.width_pixels, m.height_pixels))
-    });
-    unsafe { CFRelease(arr) };
-    out
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn list_display_modes(_id: u32) -> Vec<DisplayMode> {
-    Vec::new()
-}
-
-/// Switch the display to the mode at `index` (session-only). We grab the
-/// CFArray again because CGDisplayMode references aren't retained across
-/// process boundaries anyway.
-#[cfg(target_os = "macos")]
-pub fn set_display_mode(id: u32, index: u32) -> Result<(), String> {
-    use ffi::*;
-    let arr = unsafe { CGDisplayCopyAllDisplayModes(id, std::ptr::null()) };
-    if arr.is_null() {
-        return Err("не вдалось прочитати список режимів".into());
-    }
-    let count = unsafe { CFArrayGetCount(arr) };
-    if index as isize >= count {
-        unsafe { CFRelease(arr) };
-        return Err(format!("режим {index} поза межами"));
-    }
-    let mode = unsafe { CFArrayGetValueAtIndex(arr, index as isize) };
-    if mode.is_null() {
-        unsafe { CFRelease(arr) };
-        return Err("порожній режим".into());
-    }
-    let mut config: CGDisplayConfigRef = std::ptr::null_mut();
-    let rc = unsafe { CGBeginDisplayConfiguration(&mut config) };
-    if rc != 0 {
-        unsafe { CFRelease(arr) };
-        return Err(format!("CGBeginDisplayConfiguration: rc={rc}"));
-    }
-    let rc = unsafe { CGConfigureDisplayWithDisplayMode(config, id, mode, std::ptr::null()) };
-    if rc != 0 {
-        unsafe { CGCancelDisplayConfiguration(config) };
-        unsafe { CFRelease(arr) };
-        return Err(format!("CGConfigureDisplayWithDisplayMode: rc={rc}"));
-    }
-    let rc = unsafe { CGCompleteDisplayConfiguration(config, K_CG_CONFIGURE_FOR_SESSION) };
-    unsafe { CFRelease(arr) };
-    if rc != 0 {
-        return Err(format!("CGCompleteDisplayConfiguration: rc={rc}"));
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn set_display_mode(_id: u32, _i: u32) -> Result<(), String> {
-    Err("resolution change is macOS-only".into())
 }
 
 /// Parse the JSON `system_profiler` emits for `SPDisplaysDataType`. We walk

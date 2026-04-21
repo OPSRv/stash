@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
-import { Select } from '../../shared/ui/Select';
 import { Spinner } from '../../shared/ui/Spinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { useToast } from '../../shared/ui/Toast';
 import {
-  listDisplayModes,
   listHardwareDisplays,
   powerOffDisplay,
   powerOnDisplay,
   setDisplayBrightness,
-  setDisplayMode,
   sleepDisplays,
   type DisplayDevice,
-  type DisplayMode,
 } from './api';
 
 const MoonIcon = () => (
@@ -88,13 +84,15 @@ const DisplayCard = ({
   onPowerOn: (d: DisplayDevice) => void;
 }) => {
   const off = d.mirrors !== 0;
-  // Brightness slider is always shown. When the framework reports it can't
-  // control the panel, we still render it (greyed out) with a tooltip,
-  // because some USB-C docks lie about capability but accept writes anyway.
+  // Brightness slider is always interactive when the display is on: for
+  // built-in / Studio Display we drive DisplayServices; for everything else
+  // we fall back to DDC/CI. The backend picks the right channel, so the UI
+  // never needs to grey the slider out based on capability reporting — which
+  // lies on many USB-C docks anyway.
   const brightness = d.brightness ?? 0.7;
-  const sliderDisabled = off || !d.supports_brightness;
-  const note = !d.supports_brightness
-    ? 'Виробник/хаб не повідомляє про DDC/CI — деякі USB-C доки все одно реагують, спробуйте змінити значення.'
+  const sliderDisabled = off;
+  const note = !d.supports_brightness && !off
+    ? 'Панель не відповідає ні DisplayServices, ні DDC — зміна може не мати ефекту.'
     : undefined;
 
   // NB: `overflow-hidden` is *not* on the outer card any more — if it were,
@@ -161,7 +159,7 @@ const DisplayCard = ({
             )}
           </div>
           <div className="t-tertiary text-meta">
-            {d.width_px}×{d.height_px} · ID {d.id}
+            {d.is_builtin ? 'Вбудований' : 'Зовнішній'} · ID {d.id}
           </div>
         </div>
         {off ? (
@@ -183,12 +181,12 @@ const DisplayCard = ({
             leadingIcon={<PowerIcon />}
             onClick={() => onPowerOff(d)}
             loading={powering}
-            disabled={d.is_main || alone}
+            disabled={alone}
             title={
-              d.is_main
-                ? 'Не можна вимкнути основний дисплей'
-                : alone
-                ? 'Потрібен щонайменше один інший дисплей'
+              alone
+                ? 'Потрібен щонайменше один інший дисплей як точка поглинання'
+                : d.is_main
+                ? 'Вимкнути основний дисплей (інший стане основним)'
                 : 'Вимкнути цей дисплей'
             }
           >
@@ -204,76 +202,6 @@ const DisplayCard = ({
         disabled={sliderDisabled}
         note={note}
       />
-
-      <ResolutionPicker displayId={d.id} disabled={off} />
-    </div>
-  );
-};
-
-const ResolutionPicker = ({
-  displayId,
-  disabled,
-}: {
-  displayId: number;
-  disabled: boolean;
-}) => {
-  const [modes, setModes] = useState<DisplayMode[] | null>(null);
-  const { toast } = useToast();
-
-  useEffect(() => {
-    let alive = true;
-    listDisplayModes(displayId)
-      .then((m) => alive && setModes(m))
-      .catch(() => alive && setModes([]));
-    return () => {
-      alive = false;
-    };
-  }, [displayId]);
-
-  const current = modes?.find((m) => m.is_current) ?? modes?.[0];
-  const formatMode = (m: DisplayMode): string => {
-    const hidpi = m.width_pixels !== m.width_points ? ' (HiDPI)' : '';
-    const hz = m.refresh_hz > 0 ? ` @ ${Math.round(m.refresh_hz)}Hz` : '';
-    return `${m.width_points}×${m.height_points}${hz}${hidpi}`;
-  };
-
-  if (!modes) {
-    return null;
-  }
-  if (modes.length === 0) {
-    return <div className="t-tertiary text-[11px] mt-2">Режими недоступні</div>;
-  }
-
-  const options = modes.map((m) => ({
-    value: String(m.index),
-    label: formatMode(m),
-  }));
-
-  return (
-    <div className="mt-2 flex items-center gap-2">
-      <span className="t-tertiary text-[11px] shrink-0">Режим:</span>
-      <div className="flex-1 min-w-0">
-        <Select
-          value={String(current?.index ?? 0)}
-          options={options}
-          disabled={disabled}
-          placement="auto"
-          onChange={async (v) => {
-            const idx = Number(v);
-            try {
-              await setDisplayMode(displayId, idx);
-              const fresh = await listDisplayModes(displayId);
-              setModes(fresh);
-            } catch (err) {
-              toast({
-                title: 'Режим не застосовано',
-                description: String(err),
-                variant: 'error',
-              });
-            }
-          }}
-        />
-      </div>
     </div>
   );
 };
@@ -384,9 +312,9 @@ export const DisplaysPanel = () => {
         <div>
           <div className="t-primary text-title font-semibold">Дисплеї</div>
           <div className="t-tertiary text-meta">
-            Повний контроль per-display: абсолютна яскравість через DisplayServices та
-            програмне Вимкнути/Увімкнути через CoreGraphics. Основний дисплей завжди
-            лишається увімкненим.
+            Яскравість через DisplayServices або DDC/CI · Вимкнути / Увімкнути
+            будь-який дисплей (коли вимикаєте основний — інший автоматично стає
+            основним).
           </div>
         </div>
         <Button
@@ -434,7 +362,7 @@ export const DisplaysPanel = () => {
         title="Вимкнути цей дисплей?"
         description={
           pendingOff
-            ? `${pendingOff.name} буде програмно вимкнено: яскравість опуститься до 0, екран перейде в DPMS-сон (зовнішні монітори) або лишиться чорним (вбудований), і macOS перестане переносити туди вікна. Поточне значення яскравості запамʼятається — при увімкненні відновиться.`
+            ? `${pendingOff.name}${pendingOff.is_main ? ' (основний — спочатку зробимо основним інший дисплей)' : ''} буде програмно вимкнено: яскравість опуститься до 0, зовнішній монітор перейде в DPMS-сон, macOS перестане переносити туди вікна. Поточна яскравість запамʼятається — при увімкненні відновиться.`
             : undefined
         }
         confirmLabel="Вимкнути"

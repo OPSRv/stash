@@ -170,10 +170,10 @@ use modules::system::commands::{
     system_list_mail_attachments, system_list_privacy, system_list_processes,
     system_list_screenshots, system_list_tm_snapshots, system_list_trash_bins,
     system_list_xcode_simulators, system_lock_screen, system_reindex_spotlight,
-    system_docker_prune, system_docker_status, system_list_display_modes,
+    system_docker_prune, system_docker_status,
     system_power_off_display, system_power_on_display, system_scan_large_files,
     system_scan_node_modules, system_set_display_brightness, system_set_display_hidden,
-    system_set_display_mode, system_sleep_displays, system_sleep_now,
+    system_sleep_displays, system_sleep_now,
     system_toggle_launch_agent, system_trash_path,
 };
 use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
@@ -425,8 +425,6 @@ pub fn run() {
             system_set_display_hidden,
             system_power_off_display,
             system_power_on_display,
-            system_list_display_modes,
-            system_set_display_mode,
             system_docker_status,
             system_docker_prune,
             music_status,

@@ -65,22 +65,6 @@ export const powerOffDisplay = (secondary: number, master: number): Promise<void
 export const powerOnDisplay = (secondary: number): Promise<void> =>
   invoke('system_power_on_display', { secondary });
 
-export interface DisplayMode {
-  index: number;
-  width_points: number;
-  height_points: number;
-  width_pixels: number;
-  height_pixels: number;
-  refresh_hz: number;
-  is_current: boolean;
-}
-
-export const listDisplayModes = (id: number): Promise<DisplayMode[]> =>
-  invoke('system_list_display_modes', { id });
-
-export const setDisplayMode = (id: number, index: number): Promise<void> =>
-  invoke('system_set_display_mode', { id, index });
-
 // ---- docker ----
 export interface DockerUsageItem {
   kind: string;

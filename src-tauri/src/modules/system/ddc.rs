@@ -252,3 +252,24 @@ fn write_vcp(display: u32, vcp: u8, value: u16) -> Result<(), String> {
 pub fn set_power(display: u32, on: bool) -> Result<(), String> {
     write_vcp(display, 0xD6, if on { 1 } else { 5 })
 }
+
+/// VCP 0x10 — Luminance (brightness). Most monitors use 0..100 for the
+/// value, a handful report a non-standard max via the Get-VCP response; we
+/// clamp to 100 which every tested DDC-CI panel accepts. `percent` is 0..100.
+pub fn set_brightness(display: u32, percent: u8) -> Result<(), String> {
+    write_vcp(display, 0x10, percent.min(100) as u16)
+}
+
+/// True when this display answers our IOAVService lookup. Used by the UI so
+/// the brightness slider stays enabled for external panels that don't respond
+/// to DisplayServices but do accept DDC writes (most USB-C docks and every
+/// HDMI monitor with standard VESA DDC/CI).
+pub fn can_control(display: u32) -> bool {
+    match find_av_service(display) {
+        Some(svc) => {
+            unsafe { CFRelease(svc as CFTypeRef) };
+            true
+        }
+        None => false,
+    }
+}
