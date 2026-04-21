@@ -5,6 +5,7 @@ pub mod commands_registry;
 pub mod file_secrets;
 pub mod inbox;
 pub mod keyring;
+pub mod llm;
 pub mod module_cmds;
 pub mod notifier;
 pub mod pairing;
