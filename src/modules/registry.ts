@@ -7,6 +7,7 @@ import { musicModule } from './music';
 import { notesModule } from './notes';
 import { pomodoroModule } from './pomodoro';
 import { systemModule } from './system';
+import { telegramModule } from './telegram';
 import { terminalModule } from './terminal';
 import { translatorModule } from './translator';
 import { settingsModule } from '../settings';
@@ -17,6 +18,7 @@ export const modules: ModuleDefinition[] = [
   notesModule,
   translatorModule,
   aiModule,
+  telegramModule,
   musicModule,
   metronomeModule,
   pomodoroModule,
