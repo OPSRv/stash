@@ -97,6 +97,13 @@ export type WebChatService = {
    * vs Safari UAs.
    */
   userAgent?: string | null;
+  /**
+   * Persisted zoom level for this service, 1 = 100%. Applied when the
+   * webview is embedded and bumped by the `⌘+ / ⌘- / ⌘0` shortcuts.
+   * Clamped to `[0.5, 2.0]` — values outside that range tend to break
+   * chat UIs and defeat the point of a narrow popup.
+   */
+  zoom?: number;
 };
 
 export const DEFAULT_WEB_SERVICES: WebChatService[] = [

@@ -8,6 +8,7 @@ export const webchatEmbed = (args: {
   width: number;
   height: number;
   userAgent?: string | null;
+  initialZoom?: number | null;
 }): Promise<void> =>
   invoke('webchat_embed', {
     service: args.service,
@@ -17,7 +18,14 @@ export const webchatEmbed = (args: {
     width: args.width,
     height: args.height,
     userAgent: args.userAgent ?? null,
+    initialZoom: args.initialZoom ?? null,
   });
+
+/// Update the zoom level of an already-embedded service. Silent no-op when
+/// the webview hasn't been attached yet — the next `webchatEmbed` picks the
+/// persisted value up from settings.
+export const webchatSetZoom = (service: string, zoom: number): Promise<void> =>
+  invoke('webchat_set_zoom', { service, zoom });
 
 export const webchatHide = (service: string): Promise<void> =>
   invoke('webchat_hide', { service });
@@ -26,6 +34,18 @@ export const webchatHideAll = (): Promise<void> => invoke('webchat_hide_all');
 
 export const webchatReload = (service: string, url: string): Promise<void> =>
   invoke('webchat_reload', { service, url });
+
+/// Current URL of the embedded webview — where the user actually navigated,
+/// not the `url` passed to `webchat_embed`. Rejects if the webview is not
+/// currently attached.
+export const webchatCurrentUrl = (service: string): Promise<string> =>
+  invoke('webchat_current_url', { service });
+
+export const webchatBack = (service: string): Promise<void> =>
+  invoke('webchat_back', { service });
+
+export const webchatForward = (service: string): Promise<void> =>
+  invoke('webchat_forward', { service });
 
 export const webchatClose = (service: string): Promise<void> =>
   invoke('webchat_close', { service });

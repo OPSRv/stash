@@ -7,8 +7,7 @@ const load = () =>
 
 export const aiModule: ModuleDefinition = {
   id: 'ai',
-  title: 'Web',
-  tabShortcutDigit: 9,
+  title: 'AI',
   PopupView: lazy(load),
   preloadPopup: load,
 };

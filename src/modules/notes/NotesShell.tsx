@@ -452,7 +452,6 @@ export const NotesShell = () => {
           aiBaseUrl: settings.aiBaseUrl,
           aiSystemPrompt: settings.aiSystemPrompt,
           aiApiKeys: settings.aiApiKeys,
-          aiWebServices: settings.aiWebServices,
         });
         if (cancelled()) return;
         if (polish.kind !== 'ok') {

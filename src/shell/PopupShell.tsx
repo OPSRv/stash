@@ -30,8 +30,8 @@ import { GlobalSearch } from '../shared/ui/GlobalSearch';
 import { TranslationBanner } from '../modules/clipboard/TranslationBanner';
 import { NowPlayingBar } from '../modules/music/NowPlayingBar';
 import { musicHide, type NowPlaying } from '../modules/music/api';
-import { WebchatNowPlayingBar } from '../modules/ai/WebchatNowPlayingBar';
-import { webchatCloseAll, type WebchatNowPlaying } from '../modules/ai/webchatApi';
+import { WebchatNowPlayingBar } from '../modules/web/WebchatNowPlayingBar';
+import { webchatCloseAll, type WebchatNowPlaying } from '../modules/web/webchatApi';
 import { applyTheme, subscribeTheme } from '../settings/theme';
 
 export const PopupShell = () => {
@@ -577,20 +577,20 @@ export const PopupShell = () => {
               }
             />
           )}
-          {webchatNp && webchatNp.title && activeId !== 'ai' && (
+          {webchatNp && webchatNp.title && activeId !== 'web' && (
             <WebchatNowPlayingBar
               state={webchatNp}
               serviceUrl={webchatServices.find((w) => w.id === webchatNp.service)?.url}
               onOpen={() => {
-                openTab('ai');
-                // Tell AiShell which service to surface when it mounts.
+                openTab('web');
+                // Tell WebShell which tab to surface when it mounts.
                 try {
-                  localStorage.setItem('stash.ai.lastMode', webchatNp.service);
+                  localStorage.setItem('stash.web.lastTab', webchatNp.service);
                 } catch {
                   // ignore
                 }
                 window.dispatchEvent(
-                  new CustomEvent('stash:ai-open-service', {
+                  new CustomEvent('stash:web-open-service', {
                     detail: webchatNp.service,
                   }),
                 );

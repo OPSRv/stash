@@ -4,12 +4,7 @@ import { DEFAULT_SETTINGS, loadSettings, type Settings } from '../../settings/st
 
 export type AiSettings = Pick<
   Settings,
-  | 'aiProvider'
-  | 'aiModel'
-  | 'aiBaseUrl'
-  | 'aiSystemPrompt'
-  | 'aiApiKeys'
-  | 'aiWebServices'
+  'aiProvider' | 'aiModel' | 'aiBaseUrl' | 'aiSystemPrompt' | 'aiApiKeys'
 >;
 
 const pick = (s: Settings): AiSettings => ({
@@ -18,7 +13,6 @@ const pick = (s: Settings): AiSettings => ({
   aiBaseUrl: s.aiBaseUrl,
   aiSystemPrompt: s.aiSystemPrompt,
   aiApiKeys: s.aiApiKeys,
-  aiWebServices: s.aiWebServices,
 });
 
 const defaults: AiSettings = pick(DEFAULT_SETTINGS);

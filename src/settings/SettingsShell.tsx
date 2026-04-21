@@ -16,6 +16,7 @@ import { DownloadsTab } from './DownloadsTab';
 import { GeneralTab } from './GeneralTab';
 import { NotesTab } from './NotesTab';
 import { TerminalTab } from './TerminalTab';
+import { WebTab } from './WebTab';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
 import { applyTheme, broadcastTheme } from './theme';
 
@@ -27,6 +28,7 @@ type Tab =
   | 'terminal'
   | 'notes'
   | 'ai'
+  | 'web'
   | 'about';
 
 const Stroke = ({ d }: { d: string }) => (
@@ -107,6 +109,15 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
   },
   {
     id: 'ai',
+    label: 'AI',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 2 L15 9 L22 12 L15 15 L12 22 L9 15 L2 12 L9 9 Z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'web',
     label: 'Web',
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -259,6 +270,7 @@ export const SettingsShell = () => {
           />
         )}
         {tab === 'ai' && <AiTab settings={settings} onChange={update} />}
+        {tab === 'web' && <WebTab settings={settings} onChange={update} />}
         {tab === 'about' && <AboutTab />}
       </main>
     </div>

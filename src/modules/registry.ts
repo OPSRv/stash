@@ -10,6 +10,7 @@ import { systemModule } from './system';
 import { telegramModule } from './telegram';
 import { terminalModule } from './terminal';
 import { translatorModule } from './translator';
+import { webModule } from './web';
 import { settingsModule } from '../settings';
 
 export const modules: ModuleDefinition[] = [
@@ -18,6 +19,7 @@ export const modules: ModuleDefinition[] = [
   notesModule,
   translatorModule,
   aiModule,
+  webModule,
   telegramModule,
   musicModule,
   metronomeModule,

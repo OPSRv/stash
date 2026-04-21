@@ -16,7 +16,6 @@ const baseSettings: AiSettings = {
   aiBaseUrl: null,
   aiSystemPrompt: '',
   aiApiKeys: { openai: 'sk-test' },
-  aiWebServices: [],
 };
 
 describe('polishTranscript', () => {
