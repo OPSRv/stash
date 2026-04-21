@@ -11,7 +11,10 @@ edition = "2021"
 
 [lib]
 name = "stash_app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# `staticlib` was added by the default tauri template for future iOS
+# support; Stash is macOS-only and dropping it saves ~660 MB per debug
+# build plus keeps CI / dev disks from running out of space.
+crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

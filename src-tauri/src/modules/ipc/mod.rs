@@ -12,6 +12,8 @@ pub mod install;
 pub mod protocol;
 pub mod server;
 
-pub use install::{stash_cli_install, stash_cli_status, stash_cli_uninstall};
-pub use protocol::{Request, Response};
-pub use server::{socket_path, spawn};
+// Consumers reach into the submodules directly (e.g. tauri's
+// `generate_handler!` macro needs the full path to a command's
+// `__cmd__` item, which the blanket re-export hides). Keeping the
+// submodules `pub` is enough.
+pub use server::spawn;

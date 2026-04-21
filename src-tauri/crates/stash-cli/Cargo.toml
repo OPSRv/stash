@@ -13,8 +13,6 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "time"] }
 dirs-next = "2"
 
-[profile.release]
-lto = "thin"
-codegen-units = 1
-panic = "abort"
-strip = "symbols"
+# Profile rules live at the workspace root (src-tauri/Cargo.toml) — a
+# per-crate `[profile.*]` block is ignored when the crate is part of a
+# workspace, and Cargo warns about it on every build.
