@@ -146,13 +146,45 @@ pub fn to_wire(req: &LlmRequest) -> Value {
                 json!({
                     "name": t.name,
                     "description": t.description,
-                    "parameters": t.schema,
+                    "parameters": sanitize_schema(&t.schema),
                 })
             })
             .collect();
         body["tools"] = json!([{ "functionDeclarations": decls }]);
     }
     body
+}
+
+/// Strip JSON-Schema fields Gemini rejects. OpenAPI 3.0 subset is
+/// what the Generative Language API documents; `additionalProperties`,
+/// `$schema`, `definitions`, and a handful of draft-07 niceties get
+/// rejected with a 400 "Unknown name …: Cannot find field." Recursing
+/// keeps nested object/array schemas clean too.
+fn sanitize_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (k, v) in map {
+                if matches!(
+                    k.as_str(),
+                    "additionalProperties"
+                        | "$schema"
+                        | "$id"
+                        | "$ref"
+                        | "definitions"
+                        | "$defs"
+                        | "examples"
+                        | "default"
+                ) {
+                    continue;
+                }
+                out.insert(k.clone(), sanitize_schema(v));
+            }
+            Value::Object(out)
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(sanitize_schema).collect()),
+        other => other.clone(),
+    }
 }
 
 fn assistant_to_wire(msg: &ChatMessage) -> Value {
@@ -287,6 +319,62 @@ mod tests {
         };
         let wire = to_wire(&req);
         assert_eq!(wire["tools"][0]["functionDeclarations"][0]["name"], "ping");
+    }
+
+    #[test]
+    fn sanitize_drops_fields_gemini_rejects() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "default": "x",
+                    "examples": ["a", "b"]
+                },
+                "meta": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {}
+                }
+            },
+            "required": ["text"]
+        });
+        let cleaned = sanitize_schema(&schema);
+        assert!(cleaned.get("additionalProperties").is_none());
+        assert!(cleaned.get("$schema").is_none());
+        let text = &cleaned["properties"]["text"];
+        assert!(text.get("default").is_none());
+        assert!(text.get("examples").is_none());
+        assert!(cleaned["properties"]["meta"]
+            .get("additionalProperties")
+            .is_none());
+        // Structural fields survive.
+        assert_eq!(cleaned["type"], "object");
+        assert_eq!(cleaned["required"], json!(["text"]));
+    }
+
+    #[test]
+    fn to_wire_sanitizes_tool_schemas() {
+        let req = LlmRequest {
+            messages: vec![ChatMessage::user("x")],
+            tools: vec![ToolSpec {
+                name: "remember".into(),
+                description: "".into(),
+                schema: json!({
+                    "type": "object",
+                    "properties": { "text": { "type": "string" } },
+                    "required": ["text"],
+                    "additionalProperties": false
+                }),
+            }],
+            ..Default::default()
+        };
+        let wire = to_wire(&req);
+        let params = &wire["tools"][0]["functionDeclarations"][0]["parameters"];
+        assert!(params.get("additionalProperties").is_none());
+        assert_eq!(params["properties"]["text"]["type"], "string");
     }
 
     #[test]
