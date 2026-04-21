@@ -511,6 +511,9 @@ pub fn run() {
             telegram_reveal_inbox_file,
             telegram_get_notification_settings,
             telegram_set_notification_settings,
+            modules::ipc::install::stash_cli_status,
+            modules::ipc::install::stash_cli_install,
+            modules::ipc::install::stash_cli_uninstall,
             webchat_embed,
             webchat_hide,
             webchat_hide_all,
@@ -758,7 +761,13 @@ pub fn run() {
                 });
             }
 
+            let telegram_for_ipc = Arc::clone(&telegram_state);
             app.manage(telegram_state);
+
+            // Local IPC transport for the `stash` CLI. Shares the
+            // telegram CommandRegistry so commands added once are
+            // reachable from both Telegram and the terminal.
+            modules::ipc::spawn(app.handle().clone(), telegram_for_ipc);
 
             let warmup_state = Arc::clone(&runner_state);
             std::thread::spawn(move || {

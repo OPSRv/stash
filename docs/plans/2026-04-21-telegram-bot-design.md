@@ -1,9 +1,9 @@
 # Telegram Bot + CLI — Design
 
-**Date:** 2026-04-21 (updated 2026-04-22 after Phase 0–2, 4–6 shipped)
-**Status:** Live — Phases 0, 1, 2, 4, 5 complete; Phase 6 shipped via
-AppleScript (EventKit-direct bridge deferred); Phases 3 (AI assistant)
-and 7 (CLI) remain.
+**Date:** 2026-04-21 (updated 2026-04-22 after Phase 0–2, 4–7 shipped)
+**Status:** Live — Phases 0, 1, 2, 4, 5, 7 complete; Phase 6 shipped
+via AppleScript (EventKit-direct bridge deferred); Phase 3 (AI
+assistant) remains.
 
 ## 1. Goals
 
@@ -615,10 +615,15 @@ Licence: all MIT/Apache — fine for bundling. teloxide is well-maintained and u
   `memory` table. This is the largest remaining slice — ~500–1000
   lines. Start from a fresh session (context-cost reason).
 
-- ❌ **Phase 7 — CLI transport**. Design unchanged: `stash-cli` crate,
-  Unix socket at `ipc.sock` (0600), JSON-line protocol, bundled binary
-  + first-launch install prompt, `stash claude [path]` launcher.
-  Independent of Phase 3 — can ship in either order.
+- ✅ **Phase 7 — CLI transport**. `stash-cli` crate at
+  `src-tauri/crates/stash-cli/`; binary `stash`. Unix socket at
+  `<app_data>/ipc.sock` (0600), one JSON-line request/response per
+  connection. Settings → General → Integrations row calls
+  `stash_cli_install`/`stash_cli_uninstall`; prefers
+  `/usr/local/bin/stash` via `osascript` with admin, falls back to
+  `~/.local/bin/stash`. Deferred from MVP: first-launch modal, `stash
+  completions`, `stash claude [path]` launcher (the design for those
+  stays in §6A.3/§6A.5/§6A.7 for a follow-up slice).
 
 - **Deferred / post-MVP (unchanged)**: RRULE recurrence, Google
   Calendar / Apple Reminders *write* integration, Google Drive upload
@@ -672,13 +677,25 @@ Licence: all MIT/Apache — fine for bundling. teloxide is well-maintained and u
    which the current single-line "📅 title in N minutes" doesn't use.
    Swap to EventKit later if an Attendees / Recurrence feature lands.)*
 
-### Phase 7 — CLI transport — ❌ not started
-1. `stash-cli` crate + bundled binary (`tauri.conf.json` resources).
-2. IPC server tokio task on app startup (Unix socket, JSON lines).
-3. Reuse `CommandRegistry` — no handler duplication.
-4. First-launch modal; Settings → Integrations row with Install/Uninstall.
-5. `stash completions` for zsh/bash/fish.
-6. Tests: IPC request/response round-trip via in-proc socket; CLI binary smoke-test via subprocess; "app not running" exit code.
+### Phase 7 — CLI transport — ✅ shipped (completions + first-launch modal + `stash claude` deferred)
+1. `stash-cli` crate + bundled binary (`tauri.conf.json`
+   `bundle.resources` → `bin/stash`). Workspace root added to
+   `src-tauri/Cargo.toml`; `npm run build:cli` builds the release
+   binary before `vite build`.
+2. IPC server tokio task on app startup (Unix socket at
+   `<app_data>/ipc.sock`, mode `0600`, JSON lines).
+3. Reuses `CommandRegistry` via the same `Ctx` (`chat_id = 0` as the
+   CLI sentinel — no handler currently reads it; if one starts, it
+   must treat `0` as "no Telegram chat").
+4. **Shipped**: Settings → General → Integrations row
+   (Install/Uninstall; prefers `/usr/local/bin/stash` via admin-
+   `osascript`, falls back to `~/.local/bin/stash`).
+5. **Deferred**: first-launch modal, `stash completions`,
+   `stash claude [path]` launcher.
+6. Tests: `serve_one` round-trip via `UnixStream::pair` (no Tauri
+   runtime needed); CLI binary smoke tests via subprocess + tmpdir
+   socket, covering ok/err/missing-socket/`--json` paths; frontend
+   RTL coverage for the Settings row including error surfacing.
 
 Each phase ships with tests green, a visible UI increment, and can be used standalone.
 
@@ -761,6 +778,23 @@ so a future session doesn't re-learn them the hard way.
 - **CommandRegistry uses `RwLock`** so `lib.rs` can register cross-
   module commands (`/clip`, `/note`, `/music`) *after* `TelegramState`
   is constructed, once their target module states exist.
+- **Tauri `bundle.resources` must exist at build time** — the
+  `tauri-build` step eagerly validates every path in
+  `tauri.conf.json` `bundle.resources`, so the CLI release binary
+  has to exist *before* any `cargo check`/`cargo test` of the app
+  crate. `npm run build:cli` (added in package.json) builds it; CI
+  and first-time contributors need to run it once before
+  `cargo test -p stash-app`.
+- **`generate_handler![...]` requires direct module paths** — re-
+  exporting a `#[tauri::command]` via `pub use foo::bar;` looks
+  fine at compile time but the macro can't find the hidden
+  `__cmd__bar` item through the re-export. Always list the full
+  path (`modules::ipc::install::stash_cli_status`) in
+  `generate_handler!`.
+- **CLI Ctx sentinel** — `chat_id = 0` marks a CLI-originated
+  invocation. No handler reads `chat_id` today, but when one needs
+  to (e.g. per-chat quotas), it must treat `0` as "not a Telegram
+  chat" and either synthesize a reply destination or fail cleanly.
 - **Local date math** is done without `chrono` via a hand-rolled
   `ymd_from_days` / `days_from_ymd` pair; the only platform coupling
   is `date +%z` for the local offset. Good enough for inbox day

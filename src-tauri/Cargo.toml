@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/stash-cli"]
+resolver = "2"
+
 [package]
 name = "stash-app"
 version = "0.1.0"

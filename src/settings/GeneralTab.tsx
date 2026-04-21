@@ -2,6 +2,7 @@ import { Toggle } from '../shared/ui/Toggle';
 import { BackupSection } from './BackupSection';
 import { SettingRow } from './SettingRow';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
+import { StashCliRow } from './StashCliRow';
 
 interface GeneralTabProps {
   autostartOn: boolean;
@@ -24,6 +25,13 @@ export const GeneralTab = ({ autostartOn, onToggleAutostart }: GeneralTabProps) 
             />
           }
         />
+      </div>
+    </section>
+
+    <section>
+      <SettingsSectionHeader label="INTEGRATIONS" />
+      <div className="divide-y divide-white/5">
+        <StashCliRow />
       </div>
     </section>
 
