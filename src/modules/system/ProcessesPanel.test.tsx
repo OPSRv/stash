@@ -93,8 +93,8 @@ describe('ProcessesPanel', () => {
     await waitFor(() => expect(screen.getByText('giant')).toBeInTheDocument());
     const names = screen
       .getAllByRole('row')
-      .slice(1)
-      .map((r) => r.querySelector('td .font-medium')?.textContent?.trim());
+      .slice(1) // first row is the pinned header
+      .map((r) => r.querySelector('.font-medium')?.textContent?.trim());
     expect(names).toEqual(['giant', 'mid', 'small-heavy']);
     expect(screen.getByRole('radio', { name: /RAM/ })).toHaveAttribute('aria-checked', 'true');
   });

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { Button } from '../../shared/ui/Button';
 import { Toggle } from '../../shared/ui/Toggle';
@@ -8,6 +9,18 @@ import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
 import { killProcess, listProcesses, type ProcessInfo } from './api';
 import { HEAVY_RSS_BYTES, formatBytes, formatCpu } from './format';
+import { usePausedInterval } from './usePausedInterval';
+
+/// Tints the RAM bar green → yellow → red as a process grows heavier. The
+/// thresholds are tuned for typical Mac RAM footprints: under 500 MB is
+/// unremarkable, 1 GB starts to matter, ≥2 GB is actively expensive.
+const rssColour = (bytes: number): string => {
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 2) return '#ff3a6f';
+  if (gb >= 1) return '#ff914d';
+  if (gb >= 0.5) return '#ffd86b';
+  return '#5ee2c4';
+};
 
 const REFRESH_MS = 2000;
 
@@ -39,13 +52,11 @@ export const ProcessesPanel = () => {
 
   useEffect(() => {
     mountedRef.current = true;
-    fetchOnce();
-    const id = window.setInterval(fetchOnce, REFRESH_MS);
     return () => {
       mountedRef.current = false;
-      window.clearInterval(id);
     };
-  }, [fetchOnce]);
+  }, []);
+  usePausedInterval(fetchOnce, REFRESH_MS);
 
   const filtered = useMemo(() => {
     if (!rows) return null;
@@ -92,6 +103,36 @@ export const ProcessesPanel = () => {
   );
 
   const heavyCount = rows?.filter((p) => p.rss_bytes >= HEAVY_RSS_BYTES).length ?? 0;
+
+  // Virtualize the rows so a 500-process list doesn't force React to
+  // reconcile 500 table rows every 2 s. @tanstack/react-virtual renders
+  // only what fits in the scroll viewport + a small overscan window.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const ROW_HEIGHT = 44;
+  const rowCount = filtered?.length ?? 0;
+  const virtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 8,
+    // jsdom never fires ResizeObserver, which leaves the virtualizer with
+    // an empty viewport and zero rendered rows in tests. Wrap the default
+    // observer so we publish an initial rect from `clientWidth/Height`
+    // synchronously — real browsers still get live updates via the
+    // ResizeObserver subscription below, tests get a stable 600×600 from
+    // setup.ts's clientHeight stub.
+    observeElementRect: (instance, cb) => {
+      const el = instance.scrollElement as HTMLElement | null;
+      if (el) cb({ width: el.clientWidth, height: el.clientHeight });
+      if (typeof ResizeObserver === 'undefined' || !el) return () => undefined;
+      const ro = new ResizeObserver(() => {
+        cb({ width: el.clientWidth, height: el.clientHeight });
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    },
+  });
+  const virtualRows = virtualizer.getVirtualItems();
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -143,12 +184,12 @@ export const ProcessesPanel = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className="flex-1 min-h-0 flex flex-col">
         {error && (
           <div className="p-4 t-danger text-body">Помилка: {error}</div>
         )}
         {!error && rows === null && (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex-1 flex items-center justify-center">
             <Spinner />
           </div>
         )}
@@ -163,62 +204,96 @@ export const ProcessesPanel = () => {
           />
         )}
         {!error && filtered && filtered.length > 0 && (
-          <table className="w-full text-meta" role="table">
-            <thead className="sticky top-0 z-[1]" style={{ background: 'var(--color-surface)' }}>
-              <tr className="t-tertiary">
-                <th className="text-left font-normal px-3 py-1.5">Процес</th>
-                <th className="text-right font-normal px-2 py-1.5 w-[80px]">RAM</th>
-                <th className="text-right font-normal px-2 py-1.5 w-[60px]">CPU</th>
-                <th className="text-left font-normal px-2 py-1.5 w-[80px]">PID</th>
-                <th className="px-2 py-1.5 w-[130px]" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((p) => (
-                <tr
-                  key={p.pid}
-                  className="border-t hair hover:bg-[var(--color-surface-hover)]"
-                >
-                  <td className="px-3 py-1.5 t-primary">
-                    <div className="font-medium truncate max-w-[260px]" title={p.command}>
-                      {p.name}
+          <>
+            {/* Header row — kept outside the virtualizer so it stays pinned
+                regardless of scroll position. Grid template matches the
+                rows below so columns align. */}
+            <div
+              className="grid border-b hair px-0 py-1.5 t-tertiary text-meta"
+              style={{ gridTemplateColumns: '1fr 90px 60px 70px 140px' }}
+              role="row"
+            >
+              <div className="px-3">Процес</div>
+              <div className="px-2 text-right">RAM</div>
+              <div className="px-2 text-right">CPU</div>
+              <div className="px-2">PID</div>
+              <div />
+            </div>
+            <div
+              ref={scrollRef}
+              className="flex-1 min-h-0 overflow-auto"
+              role="table"
+              aria-rowcount={rowCount}
+            >
+              <div
+                style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+              >
+                {virtualRows.map((vrow) => {
+                  const p = filtered[vrow.index];
+                  return (
+                    <div
+                      key={p.pid}
+                      role="row"
+                      className="grid items-center border-t hair hover:bg-[var(--color-surface-hover)] text-meta absolute inset-x-0"
+                      style={{
+                        gridTemplateColumns: '1fr 90px 60px 70px 140px',
+                        transform: `translateY(${vrow.start}px)`,
+                        height: ROW_HEIGHT,
+                      }}
+                    >
+                      <div className="px-3 min-w-0">
+                        <div className="t-primary font-medium truncate" title={p.command}>
+                          {p.name}
+                        </div>
+                        <div className="t-tertiary text-[11px] truncate" title={p.command}>
+                          {p.user}
+                        </div>
+                      </div>
+                      <div className="px-2 text-right tabular-nums">
+                        <span
+                          className="inline-flex items-center gap-1.5 t-primary"
+                          title={`${(p.rss_bytes / (1024 * 1024)).toFixed(1)} MB`}
+                        >
+                          <span
+                            aria-hidden
+                            className="w-1.5 h-1.5 rounded-full shrink-0"
+                            style={{
+                              background: rssColour(p.rss_bytes),
+                              boxShadow: `0 0 6px ${rssColour(p.rss_bytes)}99`,
+                            }}
+                          />
+                          {formatBytes(p.rss_bytes)}
+                        </span>
+                      </div>
+                      <div className="px-2 text-right tabular-nums t-secondary">
+                        {formatCpu(p.cpu_percent)}
+                      </div>
+                      <div className="px-2 tabular-nums t-tertiary">{p.pid}</div>
+                      <div className="px-2 flex items-center justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setKill({ proc: p, force: false })}
+                          title="Надіслати SIGTERM (чемне завершення)"
+                        >
+                          Завершити
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="soft"
+                          tone="danger"
+                          onClick={() => setKill({ proc: p, force: true })}
+                          title="Надіслати SIGKILL (примусово)"
+                        >
+                          Force
+                        </Button>
+                      </div>
                     </div>
-                    <div className="t-tertiary text-[11px] truncate max-w-[260px]" title={p.command}>
-                      {p.user}
-                    </div>
-                  </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums t-primary">
-                    {formatBytes(p.rss_bytes)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right tabular-nums t-secondary">
-                    {formatCpu(p.cpu_percent)}
-                  </td>
-                  <td className="px-2 py-1.5 tabular-nums t-tertiary">{p.pid}</td>
-                  <td className="px-2 py-1.5">
-                    <div className="flex items-center justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setKill({ proc: p, force: false })}
-                        title="Надіслати SIGTERM (чемне завершення)"
-                      >
-                        Завершити
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="soft"
-                        tone="danger"
-                        onClick={() => setKill({ proc: p, force: true })}
-                        title="Надіслати SIGKILL (примусово)"
-                      >
-                        Force
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
       </div>
 

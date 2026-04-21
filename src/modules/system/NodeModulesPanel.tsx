@@ -1,0 +1,297 @@
+import { useCallback, useMemo, useState } from 'react';
+import { Button } from '../../shared/ui/Button';
+import { Spinner } from '../../shared/ui/Spinner';
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { EmptyState } from '../../shared/ui/EmptyState';
+import { useToast } from '../../shared/ui/Toast';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { cancelScan, scanNodeModules, trashPath, type NodeModulesEntry } from './api';
+import { pickFolder } from './pickFolder';
+import { formatBytes } from './format';
+
+const formatDate = (secs: number): string => {
+  if (!secs) return '—';
+  return new Date(secs * 1000).toLocaleDateString();
+};
+
+export const NodeModulesPanel = () => {
+  const [root, setRoot] = useState<string | null>(null);
+  const [entries, setEntries] = useState<NodeModulesEntry[] | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { toast } = useToast();
+
+  const chooseFolder = useCallback(async () => {
+    const picked = await pickFolder();
+    if (!picked) return;
+    setRoot(picked);
+    setEntries(null);
+    setSelected(new Set());
+    setScanning(true);
+    setError(null);
+    try {
+      const list = await scanNodeModules(picked);
+      setEntries(list);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  const toggleOne = (p: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (!entries) return;
+    if (selected.size === entries.length) setSelected(new Set());
+    else setSelected(new Set(entries.map((e) => e.path)));
+  };
+
+  const totalAll = useMemo(
+    () => (entries ?? []).reduce((acc, e) => acc + e.size_bytes, 0),
+    [entries],
+  );
+  const totalSelected = useMemo(
+    () =>
+      (entries ?? [])
+        .filter((e) => selected.has(e.path))
+        .reduce((acc, e) => acc + e.size_bytes, 0),
+    [entries, selected],
+  );
+
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const bulkDelete = useCallback(async () => {
+    if (!entries) return;
+    setConfirmOpen(false);
+    const targets = entries.filter((e) => selected.has(e.path));
+    let freed = 0;
+    let failed = 0;
+    setProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i += 1) {
+      const t = targets[i];
+      try {
+        await trashPath(t.path);
+        freed += t.size_bytes;
+      } catch {
+        failed += 1;
+      }
+      setProgress({ done: i + 1, total: targets.length });
+    }
+    setProgress(null);
+    if (failed === 0) {
+      toast({
+        title: `Видалено ${targets.length} node_modules`,
+        description: `Звільнено ${formatBytes(freed)}`,
+        variant: 'success',
+      });
+    } else {
+      toast({
+        title: `Частково видалено (${failed} помилок)`,
+        description: `Звільнено ${formatBytes(freed)}`,
+        variant: 'error',
+      });
+    }
+    // Re-scan to reflect the filesystem state.
+    if (root) {
+      setScanning(true);
+      try {
+        setEntries(await scanNodeModules(root));
+        setSelected(new Set());
+      } finally {
+        setScanning(false);
+      }
+    }
+  }, [entries, selected, root, toast]);
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      <header
+        className="px-4 py-3 relative overflow-hidden"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(94,226,196,0.10), rgba(23,178,106,0.18))',
+          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
+        }}
+      >
+        <div
+          aria-hidden
+          className="absolute -top-10 -right-6 w-40 h-40 rounded-full"
+          style={{
+            background: 'radial-gradient(closest-side, rgba(23,178,106,0.35), transparent)',
+            filter: 'blur(10px)',
+          }}
+        />
+        <div className="relative flex items-center gap-4">
+          <div
+            aria-hidden
+            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
+            style={{
+              background: 'linear-gradient(135deg,#5ee2c4,#17b26a)',
+              boxShadow: '0 8px 24px -8px rgba(23,178,106,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
+            }}
+          >
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 7l9-4 9 4v10l-9 4-9-4z" />
+              <path d="M3 7l9 4 9-4M12 11v10" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="t-primary text-title font-semibold">node_modules</div>
+            <div className="t-tertiary text-meta truncate">
+              {root ?? 'Оберіть папку — знайдемо всі node_modules рекурсивно'}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1.5">
+            {entries && (
+              <div className="t-primary font-semibold text-title tabular-nums">
+                {formatBytes(totalAll)}
+              </div>
+            )}
+            <div className="flex items-center gap-1">
+              {scanning && (
+                <Button
+                  size="sm"
+                  variant="soft"
+                  tone="danger"
+                  onClick={() => cancelScan('node_modules').catch(() => undefined)}
+                >
+                  Зупинити
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="solid"
+                tone="accent"
+                onClick={chooseFolder}
+                loading={scanning}
+              >
+                {root ? 'Інша папка' : 'Обрати папку'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {entries && entries.length > 0 && (
+        <div className="px-4 py-1.5 border-b hair flex items-center justify-between t-secondary text-meta">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={selected.size === entries.length}
+              onChange={toggleAll}
+              className="ring-focus"
+            />
+            Обрати все ({entries.length})
+          </label>
+          <div className="flex items-center gap-3">
+            <span>
+              Обрано <span className="t-primary font-medium">{formatBytes(totalSelected)}</span>
+            </span>
+            {progress ? (
+              <span className="t-tertiary text-meta tabular-nums">
+                {progress.done} з {progress.total}…
+              </span>
+            ) : (
+              <Button
+                size="sm"
+                variant="soft"
+                tone="danger"
+                disabled={selected.size === 0}
+                onClick={() => setConfirmOpen(true)}
+              >
+                У кошик
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 overflow-auto">
+        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {!error && scanning && (
+          <div className="flex flex-col items-center justify-center h-full gap-2">
+            <Spinner />
+            <div className="t-tertiary text-meta">Скануємо {root}…</div>
+          </div>
+        )}
+        {!error && !scanning && !entries && (
+          <EmptyState
+            title="Готово до сканування"
+            description="Натисніть «Обрати папку». Скануємо лише верхні node_modules — не спускаємось у вкладені."
+          />
+        )}
+        {!error && entries && entries.length === 0 && (
+          <EmptyState title="Жодного node_modules не знайдено" />
+        )}
+        {!error && entries && entries.length > 0 && (
+          <ul className="divide-y hair">
+            {entries.map((e) => {
+              const checked = selected.has(e.path);
+              return (
+                <li
+                  key={e.path}
+                  onClick={() => toggleOne(e.path)}
+                  className={`px-4 py-2 flex items-center gap-3 cursor-pointer ${
+                    checked ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleOne(e.path)}
+                    onClick={(ev) => ev.stopPropagation()}
+                    className="ring-focus shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="t-primary text-body font-medium truncate" title={e.path}>
+                      {e.project.split('/').slice(-2).join('/')}
+                    </div>
+                    <div className="t-tertiary text-meta truncate" title={e.path}>
+                      {e.project}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="t-primary tabular-nums font-medium">
+                      {formatBytes(e.size_bytes)}
+                    </div>
+                    <div className="t-tertiary text-[11px]">{formatDate(e.last_modified)}</div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      revealItemInDir(e.path).catch(() => undefined);
+                    }}
+                  >
+                    Показати
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="Перемістити обрані node_modules у кошик?"
+        description={`Буде переміщено ${selected.size} node_modules (${formatBytes(totalSelected)}). Виконайте npm install / pnpm install щоб відновити.`}
+        confirmLabel="У кошик"
+        tone="danger"
+        onConfirm={bulkDelete}
+        onCancel={() => setConfirmOpen(false)}
+      />
+    </div>
+  );
+};
