@@ -105,7 +105,7 @@ fn memory_stats() -> (u64 /* used */, u64 /* total */, f32 /* pressure% */) {
     (used, total, pressure)
 }
 
-fn parse_top_snapshot(text: &str) -> (f32, f32, f32, f32, u64) {
+fn parse_top_snapshot(text: &str) -> (f32, f32, f32, f32, u64, u32) {
     // top -l 1 -n 0 emits, in order:
     //   "Processes: …"
     //   "Load Avg: 3.22, 2.11, 1.80"
@@ -118,9 +118,15 @@ fn parse_top_snapshot(text: &str) -> (f32, f32, f32, f32, u64) {
     let mut load5 = 0.0f32;
     let mut load15 = 0.0f32;
     let mut uptime = 0u64;
+    let mut procs: u32 = 0;
     for line in text.lines() {
         let l = line.trim();
-        if let Some(rest) = l.strip_prefix("Load Avg: ") {
+        if let Some(rest) = l.strip_prefix("Processes: ") {
+            // "550 total, 3 running, …" → grab the first integer.
+            if let Some(num) = rest.split_whitespace().next() {
+                procs = num.parse().unwrap_or(0);
+            }
+        } else if let Some(rest) = l.strip_prefix("Load Avg: ") {
             let mut parts = rest.split(',');
             load1 = parts.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
             load5 = parts.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
@@ -161,7 +167,7 @@ fn parse_top_snapshot(text: &str) -> (f32, f32, f32, f32, u64) {
             }
         }
     }
-    (cpu, load1, load5, load15, uptime)
+    (cpu, load1, load5, load15, uptime, procs)
 }
 
 fn primary_interface() -> Option<String> {
@@ -392,33 +398,43 @@ fn ping_rtt() -> Option<f32> {
     parse_ping_stdout(&String::from_utf8_lossy(&out.stdout))
 }
 
-fn process_count() -> u32 {
-    Command::new("ps")
-        .args(["-axo", "pid="])
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().count() as u32)
-        .unwrap_or(0)
+/// Parse a `df -k` row into (used, total, free) in bytes.
+///
+/// On APFS `df -k /` reports the read-only System volume for Used (~11 GB)
+/// while Available is the shared container-level free space (~15 GB on a
+/// nearly-full disk). Computing `free = total − used` therefore gives a
+/// wildly optimistic number. Instead we take Available as the source of
+/// truth for free space and derive used as `total − free` — matches what
+/// Finder / "About This Mac" shows.
+pub fn parse_df_row(text: &str) -> Option<(u64, u64, u64)> {
+    let mut lines = text.lines();
+    lines.next()?; // header
+    let row = lines.next()?;
+    let cols: Vec<&str> = row.split_whitespace().collect();
+    if cols.len() < 4 {
+        return None;
+    }
+    let total = cols[1].parse::<u64>().ok()? * 1024;
+    let available = cols[3].parse::<u64>().ok()? * 1024;
+    let used = total.saturating_sub(available);
+    Some((used, total, available))
 }
 
-fn disk_usage() -> (u64, u64) {
-    // `df -k /` → "Filesystem 1024-blocks Used Available Capacity …"
-    let out = match Command::new("df").args(["-k", "/"]).output() {
-        Ok(o) if o.status.success() => o,
-        _ => return (0, 0),
-    };
-    let s = String::from_utf8_lossy(&out.stdout);
-    let mut lines = s.lines();
-    lines.next();
-    if let Some(row) = lines.next() {
-        let cols: Vec<&str> = row.split_whitespace().collect();
-        if cols.len() >= 4 {
-            let total = cols[1].parse::<u64>().unwrap_or(0) * 1024;
-            let used = cols[2].parse::<u64>().unwrap_or(0) * 1024;
-            return (used, total);
+fn disk_usage() -> (u64, u64, u64) {
+    // Prefer the Data volume on APFS — its Used reflects user data, which
+    // is what people mean by "disk usage". Fall back to `/` if that path
+    // isn't present (older macOS / non-APFS).
+    for target in ["/System/Volumes/Data", "/"] {
+        if let Ok(o) = Command::new("df").args(["-k", target]).output() {
+            if o.status.success() {
+                let s = String::from_utf8_lossy(&o.stdout);
+                if let Some(v) = parse_df_row(&s) {
+                    return v;
+                }
+            }
         }
     }
-    (0, 0)
+    (0, 0, 0)
 }
 
 fn battery_state() -> (Option<f32>, Option<bool>) {
@@ -445,10 +461,9 @@ pub fn metrics() -> DashboardMetrics {
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
-    let (cpu, load1, load5, load15, uptime) = parse_top_snapshot(&top_out);
+    let (cpu, load1, load5, load15, uptime, procs) = parse_top_snapshot(&top_out);
     let (mem_used, mem_total, mem_pressure) = memory_stats();
-    let (disk_used, disk_total) = disk_usage();
-    let disk_free = disk_total.saturating_sub(disk_used);
+    let (disk_used, disk_total, disk_free) = disk_usage();
     let (bat_pct, bat_charging) = battery_state();
     let primary = primary_interface();
     let interfaces = list_interfaces(primary.as_deref());
@@ -466,7 +481,7 @@ pub fn metrics() -> DashboardMetrics {
         battery_percent: bat_pct,
         battery_charging: bat_charging,
         uptime_seconds: uptime,
-        process_count: process_count(),
+        process_count: procs,
         interfaces,
         ping_ms: ping_rtt(),
     }
@@ -484,11 +499,24 @@ mod tests {
                     SharedLibs: foo\n\
                     MemRegions: foo\n\
                     PhysMem: 23G used (1200M wired, 5G compressor), 8G unused.\n";
-        let (cpu, l1, l5, l15, _uptime) = parse_top_snapshot(text);
+        let (cpu, l1, l5, l15, _uptime, procs) = parse_top_snapshot(text);
         assert!((cpu - 15.11).abs() < 0.01);
         assert!((l1 - 3.22).abs() < 0.01);
         assert!((l5 - 2.11).abs() < 0.01);
         assert!((l15 - 1.80).abs() < 0.01);
+        assert_eq!(procs, 500);
+    }
+
+    #[test]
+    fn parse_df_row_uses_available_column() {
+        // Mimic APFS Data volume where only ~15 GB is free on a ~146 GB
+        // container. Our code must report 15 GB free, not 146 − 11 GB.
+        let text = "Filesystem   1024-blocks      Used Available Capacity iused     ifree %iused  Mounted on\n\
+                    /dev/disk1s5  146485224 114479308 15826024     88% 1346231 158260240    1%   /System/Volumes/Data\n";
+        let (used, total, free) = parse_df_row(text).unwrap();
+        assert_eq!(total, 146485224u64 * 1024);
+        assert_eq!(free, 15826024u64 * 1024);
+        assert_eq!(used, total - free);
     }
 
     #[test]
