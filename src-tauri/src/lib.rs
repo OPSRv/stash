@@ -183,8 +183,8 @@ use modules::system::commands::{
 use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
 use modules::terminal::state::TerminalState;
 use modules::webchat::commands::{
-    webchat_close, webchat_close_all, webchat_embed, webchat_hide, webchat_hide_all,
-    webchat_reload, webchat_toggle_play,
+    webchat_close, webchat_close_all, webchat_current_url, webchat_embed, webchat_hide,
+    webchat_hide_all, webchat_reload, webchat_toggle_play,
 };
 use modules::translator::{
     commands::{
@@ -477,6 +477,7 @@ pub fn run() {
             webchat_close,
             webchat_close_all,
             webchat_toggle_play,
+            webchat_current_url,
             tray::tray_set_menu,
             tray::tray_set_player_icons,
             tray::tray_set_player_artwork,
@@ -610,14 +611,37 @@ pub fn run() {
             // Telegram — own SQLite + own Keychain service. Wrapped in Arc so
             // the long-polling transport can clone a handle into its spawned
             // tokio task.
+            //
+            // Keychain requires a signed macOS binary to persist entries;
+            // unsigned `tauri dev` builds silently succeed on set and then
+            // return NoEntry on get. We probe at startup with a canary
+            // value — if the round-trip fails we fall back to an encrypted
+            // file in app data dir so the flow works end-to-end. Signed
+            // release builds always pass the probe and use Keychain.
             let telegram_db = data_dir.join("telegram.sqlite");
             let telegram_repo = modules::telegram::repo::TelegramRepo::new(
                 Connection::open(&telegram_db)?,
             )?;
             let telegram_secrets: Arc<dyn modules::telegram::keyring::SecretStore> =
-                Arc::new(modules::telegram::keyring::KeyringStore::new(
+                if modules::telegram::file_secrets::keyring_roundtrip_ok(
                     modules::telegram::keyring::KEYRING_SERVICE,
-                ));
+                ) {
+                    tracing::info!("telegram: OS keyring available, using Keychain");
+                    Arc::new(modules::telegram::keyring::KeyringStore::new(
+                        modules::telegram::keyring::KEYRING_SERVICE,
+                    ))
+                } else {
+                    let secrets_dir = data_dir.join("telegram");
+                    std::fs::create_dir_all(&secrets_dir).ok();
+                    let secrets_path = secrets_dir.join(".secrets.bin");
+                    tracing::warn!(
+                        path = %secrets_path.display(),
+                        "telegram: OS keyring unavailable (unsigned dev build?), using file fallback"
+                    );
+                    Arc::new(modules::telegram::file_secrets::FileSecretStore::new(
+                        secrets_path,
+                    )?)
+                };
             let telegram_state = Arc::new(modules::telegram::state::TelegramState::new(
                 telegram_repo,
                 telegram_secrets,
