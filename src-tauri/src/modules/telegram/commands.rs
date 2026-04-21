@@ -51,11 +51,15 @@ pub(super) async fn validate_token(
     token: &str,
 ) -> Result<(), String> {
     let url = format!("https://api.telegram.org/bot{token}/getMe");
+    tracing::info!("validating bot token");
     let resp = client
         .get(&url)
         .send()
         .await
-        .map_err(|e| format!("network: {e}"))?;
+        .map_err(|e| {
+            tracing::warn!(error = %e, "getMe network error");
+            format!("network: {e}")
+        })?;
     if !resp.status().is_success() {
         return Err(format!(
             "Telegram rejected the token (HTTP {})",
@@ -81,9 +85,15 @@ pub async fn telegram_set_token(
     state: State<'_, Arc<TelegramState>>,
     token: String,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    tracing::info!("telegram_set_token invoked (token len={})", token.len());
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
     validate_token(&client, &token).await?;
-    state.secrets.set(ACCOUNT_BOT_TOKEN, &token)
+    state.secrets.set(ACCOUNT_BOT_TOKEN, &token)?;
+    tracing::info!("bot token saved to keychain");
+    Ok(())
 }
 
 #[tauri::command]
