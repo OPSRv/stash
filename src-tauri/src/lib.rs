@@ -1,4 +1,6 @@
+mod backup;
 mod modules;
+mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -158,6 +160,7 @@ use modules::music::commands::{
     music_show, music_status,
 };
 use modules::search::commands::global_search;
+use modules::system::commands::{system_kill_process, system_list_processes};
 use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
 use modules::terminal::state::TerminalState;
 use modules::webchat::commands::{
@@ -173,11 +176,7 @@ use modules::translator::{
 };
 
 use rusqlite::Connection;
-use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
-};
+use tauri::{Emitter, Manager, WindowEvent};
 use tauri_plugin_positioner::{Position, WindowExt};
 
 /// Fast poll applied for ~30s after the last observed change. Keeps the
@@ -232,16 +231,22 @@ pub fn run() {
                 } else {
                     "webchat:nowplaying"
                 };
-                let _ = ctx.app_handle().emit(
+                let app = ctx.app_handle();
+                let _ = app.emit(
                     event,
                     serde_json::json!({
                         "service": service,
                         "playing": playing,
-                        "title": title,
-                        "artist": artist,
+                        "title": title.clone(),
+                        "artist": artist.clone(),
                         "artwork": artwork,
                     }),
                 );
+                // YT Music only — webchat services ride their own bar and
+                // don't (yet) participate in the tray player block.
+                if service.is_empty() {
+                    tray::on_music_nowplaying(app, playing, title, artist);
+                }
             }
             tauri::http::Response::builder()
                 .status(204)
@@ -367,6 +372,8 @@ pub fn run() {
             whisper_get_active,
             whisper_transcribe_path,
             global_search,
+            system_list_processes,
+            system_kill_process,
             music_status,
             music_embed,
             music_show,
@@ -406,6 +413,16 @@ pub fn run() {
             webchat_close,
             webchat_close_all,
             webchat_toggle_play,
+            tray::tray_set_menu,
+            tray::tray_set_player_icons,
+            tray::tray_set_player_artwork,
+            backup::commands::backup_describe,
+            backup::commands::backup_export,
+            backup::commands::backup_suggest_filename,
+            backup::commands::backup_inspect,
+            backup::commands::backup_import,
+            backup::commands::backup_last_error,
+            backup::commands::backup_dismiss_error,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -430,6 +447,10 @@ pub fn run() {
                 version = env!("CARGO_PKG_VERSION"),
                 "stash starting"
             );
+            // Apply any pending backup import *before* any repo opens its
+            // SQLite connection — otherwise the replace-on-disk would race
+            // with live connections and produce "malformed" errors.
+            backup::import::apply_pending_if_any(&data_dir);
             let db_path = data_dir.join("stash.sqlite");
             let images_dir = data_dir.join("clipboard-images");
             std::fs::create_dir_all(&images_dir).ok();
@@ -533,55 +554,8 @@ pub fn run() {
                 }
             });
 
-            let show = MenuItem::with_id(app, "show", "Open", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
-
-            // Custom colour tray icon (graphite + accent blue — mirrors the
-            // app logo). We opt out of template mode so macOS renders the
-            // original colours instead of flattening to a mono silhouette.
-            // Falls back to the window icon if the file cannot be found
-            // (dev before first `tauri build`).
-            let tray_icon = {
-                let bytes = include_bytes!("../icons/tray.png");
-                tauri::image::Image::from_bytes(bytes)
-                    .ok()
-                    .unwrap_or_else(|| app.default_window_icon().unwrap().clone())
-            };
-            let tray = TrayIconBuilder::with_id("main")
-                .icon(tray_icon)
-                .icon_as_template(false)
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
-                    "quit" => app.exit(0),
-                    "show" => {
-                        if let Some(win) = resolve_popup(app) {
-                            let pos_state = app.state::<Arc<PopupPositionState>>();
-                            position_popup(&win, &pos_state);
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    let app = tray.app_handle();
-                    tauri_plugin_positioner::on_tray_event(app, &event);
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        if let Some(win) = resolve_popup(app) {
-                            let pos_state = app.state::<Arc<PopupPositionState>>();
-                            toggle_popup(&win, &pos_state);
-                        }
-                    }
-                })
-                .build(app)?;
-            let _ = tray;
+            app.manage(Arc::new(tray::TrayState::new()));
+            tray::install(app.handle())?;
 
             #[cfg(desktop)]
             {

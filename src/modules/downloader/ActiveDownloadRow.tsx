@@ -1,5 +1,6 @@
 import { CloseIcon, PauseIcon, PlayIcon } from '../../shared/ui/icons';
 import { Card } from '../../shared/ui/Card';
+import { IconButton } from '../../shared/ui/IconButton';
 import { PlatformBadge } from './PlatformBadge';
 import { formatBytes, type DownloadJob } from './api';
 import { STATUS_LABELS } from './downloads.constants';
@@ -14,7 +15,6 @@ interface ActiveDownloadRowProps {
 const thumbStyle = { background: 'rgba(0,0,0,0.4)' } as const;
 const trackStyle = { background: 'rgba(255,255,255,0.08)' } as const;
 const inactiveFillStyle = { background: 'rgba(255,255,255,0.35)' } as const;
-const iconButtonStyle = { background: 'rgba(255,255,255,0.04)' } as const;
 
 export const ActiveDownloadRow = ({
   job,
@@ -73,24 +73,23 @@ export const ActiveDownloadRow = ({
           <span className="t-tertiary text-meta">{STATUS_LABELS[job.status]}</span>
         </div>
       </div>
-      <button
-        onClick={isPaused ? onResume : onPause}
-        className="t-secondary hover:t-primary p-1.5 rounded-md"
-        style={iconButtonStyle}
-        title={isPaused ? 'Resume' : 'Pause'}
-        aria-label={isPaused ? 'Resume' : 'Pause'}
-      >
-        {isPaused ? <PlayIcon /> : <PauseIcon />}
-      </button>
-      <button
-        onClick={onCancel}
-        className="t-secondary hover:t-primary p-1.5 rounded-md"
-        style={iconButtonStyle}
-        title="Cancel"
-        aria-label="Cancel"
-      >
-        <CloseIcon />
-      </button>
+      <div className="shrink-0 flex items-center gap-1">
+        <IconButton
+          onClick={isPaused ? onResume : onPause}
+          title={isPaused ? 'Resume (Space)' : 'Pause (Space)'}
+          stopPropagation={false}
+        >
+          {isPaused ? <PlayIcon size={13} /> : <PauseIcon size={13} />}
+        </IconButton>
+        <IconButton
+          onClick={onCancel}
+          title="Cancel (⌫)"
+          tone="danger"
+          stopPropagation={false}
+        >
+          <CloseIcon size={13} />
+        </IconButton>
+      </div>
     </Card>
   );
 };

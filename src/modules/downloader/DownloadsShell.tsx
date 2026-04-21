@@ -5,12 +5,9 @@ import { VideoPlayer } from '../../shared/ui/VideoPlayer';
 import { ActiveDownloadRow } from './ActiveDownloadRow';
 import { CompletedGrid } from './CompletedGrid';
 import { CompletedList } from './CompletedList';
-import { DetectSkeletonCard } from './DetectSkeletonCard';
-import { DetectedPreviewCard } from './DetectedPreviewCard';
+import { DetectSessionCard } from './DetectSessionCard';
 import { DownloadUrlBar } from './DownloadUrlBar';
 import { DropOverlay } from './DropOverlay';
-import { QualityPicker } from './QualityPicker';
-import { Spinner } from '../../shared/ui/Spinner';
 import { Button } from '../../shared/ui/Button';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
@@ -18,11 +15,7 @@ import { EmptyState } from '../../shared/ui/EmptyState';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
-import {
-  DEFAULT_QUALITY_OPTIONS,
-  DETECT_SLOW_HINT_THRESHOLD_SEC,
-  SUPPORTED_VIDEO_URL,
-} from './downloads.constants';
+import { SUPPORTED_VIDEO_URL } from './downloads.constants';
 import { useDownloadJobs } from './useDownloadJobs';
 import { useUrlDropTarget } from './useUrlDropTarget';
 import { useVideoDetect } from './useVideoDetect';
@@ -32,7 +25,6 @@ import {
   clearCompleted,
   deleteJob,
   extractSubtitles,
-  formatDuration,
   pause,
   resume,
   retry,
@@ -40,20 +32,13 @@ import {
   type DownloadJob,
   type QualityOption,
 } from './api';
+import type { DetectSession } from './useVideoDetect';
 import { notesCreate } from '../notes/api';
 
 type CompletedView = 'list' | 'grid';
 
-const durationBadgeStyle = { background: 'var(--color-scrim-strong)' } as const;
-const errorBannerStyle = {
-  background: 'var(--color-danger-bg)',
-  color: 'var(--color-danger-fg)',
-  border: '1px solid var(--color-danger-border)',
-} as const;
-
 export const DownloadsShell = () => {
   const [url, setUrl] = useState('');
-  const [pickedFormat, setPickedFormat] = useState<QualityOption | null>(null);
   const [playing, setPlaying] = useState<string | null>(null);
   const [completedView, setCompletedView] = useState<CompletedView>('grid');
   const [clearCompletedOpen, setClearCompletedOpen] = useState(false);
@@ -61,45 +46,13 @@ export const DownloadsShell = () => {
   const { toast } = useToast();
   const { announce } = useAnnounce();
 
-  const detectState = useVideoDetect();
-  const { detecting, elapsedSec, quick, detected, error: detectError, run, cancel: cancelDetect, reset } = detectState;
+  const { sessions, detecting, elapsedSec, run, cancel: cancelDetect, dismiss, clearAll } =
+    useVideoDetect();
   const { active, completed, reload } = useDownloadJobs();
-
-  // Quality options we actually render: real ones from the full detect when
-  // available, otherwise the generic ladder so the user can pick + download
-  // immediately after pasting a URL instead of waiting ~20 s for
-  // `yt-dlp --dump-json`. The runner resolves format at download time from
-  // `height` + `kind`, so placeholder `format_id`s on the defaults are fine.
-  const qualityOptions: QualityOption[] =
-    detected?.qualities && detected.qualities.length > 0
-      ? detected.qualities
-      : (DEFAULT_QUALITY_OPTIONS as unknown as QualityOption[]);
-
-  // When the full detect resolves, swap the user's selected placeholder for
-  // the matching real option (same height + kind) so the eventual Download
-  // click carries the richer format_id. If they haven't picked yet, seed to
-  // 1080p by default.
-  useEffect(() => {
-    if (!detected) return;
-    setPickedFormat((prev) => {
-      if (!prev) {
-        return (
-          detected.qualities.find((q) => q.kind === 'video' && q.height === 1080) ??
-          detected.qualities[0] ??
-          null
-        );
-      }
-      const matched = detected.qualities.find(
-        (q) => q.kind === prev.kind && q.height === prev.height
-      );
-      return matched ?? prev;
-    });
-  }, [detected]);
 
   const runDetect = useCallback(
     (value: string) => {
-      setPickedFormat(null);
-      void run(value);
+      run(value);
     },
     [run]
   );
@@ -155,39 +108,49 @@ export const DownloadsShell = () => {
 
   const { isDragOver, handlers: dropHandlers } = useUrlDropTarget(onUrlDropped);
 
-  const startDownload = useCallback(async () => {
-    const chosen = pickedFormat ?? qualityOptions[0] ?? null;
-    if (!url.trim() || !chosen) return;
-    // Prefer full-detect metadata if it already landed; otherwise use the
-    // oEmbed quick preview. Neither is required — the backend can download
-    // from just a URL + height/kind.
-    const title = detected?.info.title ?? quick?.preview.title ?? null;
-    const thumbnail = detected?.info.thumbnail ?? quick?.preview.thumbnail ?? null;
-    try {
-      await start({
-        url: url.trim(),
-        title,
-        thumbnail,
-        format_id: chosen.format_id.startsWith('auto-') ? null : chosen.format_id,
-        height: chosen.height ?? null,
-        kind: chosen.kind,
-      });
-      reset();
-      setPickedFormat(null);
-      setUrl('');
-      reload();
-      announce('Download started');
-      toast({ title: 'Download started', variant: 'success', durationMs: 2500 });
-    } catch (e) {
-      console.error('start failed', e);
-      toast({
-        title: 'Could not start download',
-        description: String(e),
-        variant: 'error',
-        action: { label: 'Retry', onClick: () => void startDownload() },
-      });
-    }
-  }, [detected, quick, pickedFormat, qualityOptions, url, reset, reload, toast, announce]);
+  const startDownloadForSession = useCallback(
+    async ({
+      session,
+      chosen,
+    }: {
+      session: DetectSession;
+      chosen: QualityOption;
+    }) => {
+      const { detected, quick } = session;
+      const title = detected?.info.title ?? quick?.preview.title ?? null;
+      const thumbnail = detected?.info.thumbnail ?? quick?.preview.thumbnail ?? null;
+      try {
+        await start({
+          url: session.url,
+          title,
+          thumbnail,
+          format_id: chosen.format_id.startsWith('auto-') ? null : chosen.format_id,
+          height: chosen.height ?? null,
+          kind: chosen.kind,
+        });
+        dismiss(session.id);
+        // Only clear the URL bar if it still matches this session's URL; a
+        // fast-typing user might have pasted the next one already, and we
+        // don't want to wipe their input.
+        setUrl((prev) => (prev === session.url ? '' : prev));
+        reload();
+        announce('Download started');
+        toast({ title: 'Download started', variant: 'success', durationMs: 2500 });
+      } catch (e) {
+        console.error('start failed', e);
+        toast({
+          title: 'Could not start download',
+          description: String(e),
+          variant: 'error',
+          action: {
+            label: 'Retry',
+            onClick: () => void startDownloadForSession({ session, chosen }),
+          },
+        });
+      }
+    },
+    [announce, dismiss, reload, toast]
+  );
 
   const performCancel = useCallback(
     (id: number) => {
@@ -320,76 +283,28 @@ export const DownloadsShell = () => {
         elapsedSec={elapsedSec}
         onUrlChange={setUrl}
         onDetect={() => runDetect(url)}
-        onCancel={cancelDetect}
+        onCancel={() => {
+          // URL-bar Cancel = cancel the newest in-flight detect. Individual
+          // cards own their own dismiss for the rest of the queue.
+          const latest = [...sessions].reverse().find((s) => s.detecting);
+          if (latest) cancelDetect(latest.id);
+        }}
+        onClear={() => {
+          setUrl('');
+          clearAll();
+        }}
+        canClear={url.trim().length > 0 || sessions.length > 0}
       />
 
-      {detecting && !detected && !quick && (
-        <DetectSkeletonCard
-          elapsedSec={elapsedSec}
-          onDismiss={() => {
-            cancelDetect();
-            reset();
-            setUrl('');
-          }}
+      {sessions.map((session) => (
+        <DetectSessionCard
+          key={session.id}
+          session={session}
+          onDismiss={() => dismiss(session.id)}
+          onCancel={() => cancelDetect(session.id)}
+          onDownload={startDownloadForSession}
         />
-      )}
-
-      {detecting && elapsedSec > DETECT_SLOW_HINT_THRESHOLD_SEC && (quick || detected) && (
-        <div className="mx-4 mt-1 t-tertiary text-meta">
-          YouTube and a few other sites can take 20–40 seconds on the first
-          fetch; subsequent detects of the same URL are instant.
-        </div>
-      )}
-
-      {(detected || quick) && (
-        <DetectedPreviewCard
-          platform={detected?.platform ?? quick!.platform}
-          title={detected?.info.title ?? quick!.preview.title}
-          uploader={detected?.info.uploader ?? quick!.preview.uploader}
-          thumbnail={detected?.info.thumbnail ?? quick!.preview.thumbnail}
-          onDismiss={() => {
-            cancelDetect();
-            reset();
-            setUrl('');
-          }}
-          overlayBadge={
-            detected?.info.duration ? (
-              <div
-                className="absolute bottom-1 right-1 text-[10px] font-mono text-white/90 px-1 rounded"
-                style={durationBadgeStyle}
-              >
-                {formatDuration(detected.info.duration)}
-              </div>
-            ) : undefined
-          }
-          footerText={
-            detected
-              ? `${detected.qualities.length} quality options`
-              : (
-                <span className="flex items-center gap-1.5">
-                  <Spinner size={12} /> Fetching exact sizes — pick a quality and download now
-                </span>
-              )
-          }
-          trailing={
-            <QualityPicker
-              options={qualityOptions}
-              selected={pickedFormat ?? qualityOptions[0] ?? null}
-              onSelect={setPickedFormat}
-              onDownload={startDownload}
-            />
-          }
-        />
-      )}
-
-      {detectError && (
-        <div
-          className="mx-4 mt-3 t-tertiary text-meta px-3 py-2 rounded-md"
-          style={errorBannerStyle}
-        >
-          {detectError}
-        </div>
-      )}
+      ))}
 
       <div className="flex-1 overflow-y-auto nice-scroll">
         {active.length > 0 && (
@@ -461,9 +376,7 @@ export const DownloadsShell = () => {
 
         {active.length === 0 &&
           completed.length === 0 &&
-          !detected &&
-          !quick &&
-          !detecting &&
+          sessions.length === 0 &&
           !url.trim() && (
             <EmptyState
               title="No downloads yet"

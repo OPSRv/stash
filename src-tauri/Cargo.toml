@@ -50,6 +50,9 @@ symphonia = { version = "0.5", features = ["all"] }
 rubato = "0.15"
 whisper-rs = { version = "0.14", features = ["raw-api"] }
 lru = "0.12"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+walkdir = "2"
+tempfile = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"

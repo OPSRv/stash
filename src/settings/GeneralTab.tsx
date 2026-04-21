@@ -1,4 +1,5 @@
 import { Toggle } from '../shared/ui/Toggle';
+import { BackupSection } from './BackupSection';
 import { SettingRow } from './SettingRow';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
 
@@ -25,5 +26,7 @@ export const GeneralTab = ({ autostartOn, onToggleAutostart }: GeneralTabProps) 
         />
       </div>
     </section>
+
+    <BackupSection />
   </div>
 );

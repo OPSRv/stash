@@ -56,6 +56,7 @@ vi.mock('@tauri-apps/plugin-notification', () => ({
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   open: vi.fn().mockResolvedValue(null),
+  save: vi.fn().mockResolvedValue(null),
 }));
 
 // jsdom doesn't ship ResizeObserver; @tanstack/react-virtual uses it to react

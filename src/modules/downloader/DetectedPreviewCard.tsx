@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react';
 import { Card } from '../../shared/ui/Card';
-import { IconButton } from '../../shared/ui/IconButton';
-import { CloseIcon } from '../../shared/ui/icons';
 import { PlatformBadge } from './PlatformBadge';
 import type { Platform } from './api';
 
@@ -14,10 +12,6 @@ interface DetectedPreviewCardProps {
   footerText?: ReactNode;
   trailing?: ReactNode;
   muted?: boolean;
-  /** When provided, renders a ✕ in the top-right that drops the detected
-   *  preview. Used from the shell to cancel + clear the URL bar without
-   *  having to click Cancel and then delete the URL manually. */
-  onDismiss?: () => void;
 }
 
 const thumbStyle = { background: 'rgba(0,0,0,0.6)' } as const;
@@ -36,24 +30,12 @@ export const DetectedPreviewCard = ({
   footerText,
   trailing,
   muted = false,
-  onDismiss,
 }: DetectedPreviewCardProps) => (
   <Card
     padding="md"
     rounded="xl"
-    className={`mx-4 mt-3 flex flex-wrap gap-3 items-center relative${muted ? ' opacity-85' : ''}`}
+    className={`mx-4 mt-3 flex flex-wrap gap-3 items-center${muted ? ' opacity-85' : ''}`}
   >
-    {onDismiss && (
-      <div className="absolute top-1.5 right-1.5">
-        <IconButton
-          onClick={onDismiss}
-          title="Dismiss"
-          stopPropagation={false}
-        >
-          <CloseIcon size={12} />
-        </IconButton>
-      </div>
-    )}
     <div
       className="w-27.5 h-15.5 rounded-md overflow-hidden relative shrink-0"
       style={thumbStyle}

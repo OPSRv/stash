@@ -6,92 +6,160 @@ import {
   type QuickDetect,
 } from './api';
 
-interface UseVideoDetectResult {
+/// One in-flight or completed detect invocation. The shell keeps a list of
+/// these so pasting a second URL before the first resolves stacks a new
+/// card instead of clobbering the previous detect — a common scenario when
+/// a user copies several videos in a row and wants to queue them all up.
+export interface DetectSession {
+  id: string;
+  url: string;
   detecting: boolean;
+  startedAt: number;
   elapsedSec: number;
   quick: QuickDetect | null;
   detected: DetectedVideo | null;
   error: string | null;
-  run: (url: string) => Promise<void>;
-  cancel: () => void;
-  reset: () => void;
 }
 
-/// Owns the "user pasted a URL → tell them what it is" state machine:
-/// kicks off an oEmbed quick preview alongside the full yt-dlp round-trip,
-/// tracks elapsed time, and debounces against stale responses via an epoch
-/// counter so an in-flight detect can't overwrite a newer one.
+interface UseVideoDetectResult {
+  sessions: DetectSession[];
+  /** Back-compat accessors — the shell's URL bar and keyboard handlers still
+   *  think in terms of "the current detect". We expose the freshest session's
+   *  fields so existing UI copy doesn't have to learn about the queue. */
+  detecting: boolean;
+  elapsedSec: number;
+  run: (url: string) => void;
+  /** Cancel the in-flight detect for a specific session. Leaves the session
+   *  in the list with `error: 'Cancelled'` so the card can still show why. */
+  cancel: (id: string) => void;
+  /** Remove a session from the list (card dismiss). */
+  dismiss: (id: string) => void;
+  /** Remove all sessions — used when the user nukes the URL bar or a
+   *  download starts from a session (that card should go away). */
+  clearAll: () => void;
+}
+
+const nextId = (() => {
+  let n = 0;
+  return () => `d${Date.now().toString(36)}-${(++n).toString(36)}`;
+})();
+
+/// Owns the "user pasted a URL → tell them what it is" state machine.
+/// Each `run(url)` pushes a new `DetectSession`; detects run in parallel on
+/// the JS side (the Rust pipeline serialises what it has to internally), so
+/// the user can paste several videos and pick quality/download on each
+/// without waiting for the first to finish.
 export const useVideoDetect = (): UseVideoDetectResult => {
-  const [detecting, setDetecting] = useState(false);
-  const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [quick, setQuick] = useState<QuickDetect | null>(null);
-  const [detected, setDetected] = useState<DetectedVideo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const epochRef = useRef(0);
+  const [sessions, setSessions] = useState<DetectSession[]>([]);
+  /// Per-session cancel flag: incremented when the user clicks cancel so
+  /// the in-flight promise knows to drop its result on return. Keyed by
+  /// session id so flipping one doesn't stomp on another.
+  const cancelledRef = useRef<Set<string>>(new Set());
 
+  // Tick elapsed seconds for every actively-detecting session. One interval
+  // handles all of them — no proliferating timers per card.
   useEffect(() => {
-    if (!startedAt) return;
-    const timer = window.setInterval(
-      () => setElapsedSec(Math.floor((Date.now() - startedAt) / 1000)),
-      200
-    );
+    const anyActive = sessions.some((s) => s.detecting);
+    if (!anyActive) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.detecting
+            ? { ...s, elapsedSec: Math.floor((now - s.startedAt) / 1000) }
+            : s,
+        ),
+      );
+    }, 200);
     return () => window.clearInterval(timer);
-  }, [startedAt]);
+  }, [sessions]);
 
-  const reset = useCallback(() => {
-    epochRef.current += 1;
-    setDetecting(false);
-    setStartedAt(null);
-    setElapsedSec(0);
-    setQuick(null);
-    setDetected(null);
-    setError(null);
+  const dismiss = useCallback((id: string) => {
+    cancelledRef.current.add(id);
+    setSessions((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
-  const cancel = useCallback(() => {
-    epochRef.current += 1;
-    setDetecting(false);
-    setStartedAt(null);
-    setError('Cancelled');
+  const clearAll = useCallback(() => {
+    setSessions((prev) => {
+      prev.forEach((s) => cancelledRef.current.add(s.id));
+      return [];
+    });
   }, []);
 
-  const run = useCallback(async (url: string) => {
+  const cancel = useCallback((id: string) => {
+    cancelledRef.current.add(id);
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.id === id ? { ...s, detecting: false, error: s.error ?? 'Cancelled' } : s,
+      ),
+    );
+  }, []);
+
+  const run = useCallback((url: string) => {
     const trimmed = url.trim();
     if (!trimmed) return;
-    const myEpoch = ++epochRef.current;
-    setDetecting(true);
-    setStartedAt(Date.now());
-    setElapsedSec(0);
-    setError(null);
-    setQuick(null);
-    setDetected(null);
+    const id = nextId();
+    const session: DetectSession = {
+      id,
+      url: trimmed,
+      detecting: true,
+      startedAt: Date.now(),
+      elapsedSec: 0,
+      quick: null,
+      detected: null,
+      error: null,
+    };
+    setSessions((prev) => [...prev, session]);
 
     // Fire oEmbed quick-preview in parallel — it typically resolves in
-    // ~500ms and lets the UI paint title/thumbnail immediately while the
+    // ~500 ms and lets the UI paint title/thumbnail immediately while the
     // full yt-dlp extraction continues.
     detectQuick(trimmed)
       .then((q) => {
-        if (epochRef.current === myEpoch && q) setQuick(q);
+        if (cancelledRef.current.has(id) || !q) return;
+        setSessions((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, quick: q } : s)),
+        );
       })
       .catch(() => {
         // Silent: the full detect will either succeed or report its own error.
       });
 
-    try {
-      const result = await detect(trimmed);
-      if (epochRef.current !== myEpoch) return;
-      setDetected(result);
-    } catch (e) {
-      if (epochRef.current !== myEpoch) return;
-      setError(String(e));
-    } finally {
-      if (epochRef.current === myEpoch) {
-        setDetecting(false);
-        setStartedAt(null);
-      }
-    }
+    detect(trimmed)
+      .then((result) => {
+        if (cancelledRef.current.has(id)) return;
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === id
+              ? { ...s, detected: result, detecting: false }
+              : s,
+          ),
+        );
+      })
+      .catch((e) => {
+        if (cancelledRef.current.has(id)) return;
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === id ? { ...s, error: String(e), detecting: false } : s,
+          ),
+        );
+      });
   }, []);
 
-  return { detecting, elapsedSec, quick, detected, error, run, cancel, reset };
+  const detectingAny = sessions.some((s) => s.detecting);
+  // The URL bar shows elapsed time for the latest in-flight detect (the
+  // one a user is most likely waiting on); older detects still show their
+  // own time in their own card.
+  const latestElapsed =
+    [...sessions].reverse().find((s) => s.detecting)?.elapsedSec ?? 0;
+
+  return {
+    sessions,
+    detecting: detectingAny,
+    elapsedSec: latestElapsed,
+    run,
+    cancel,
+    dismiss,
+    clearAll,
+  };
 };

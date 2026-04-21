@@ -56,6 +56,7 @@ export const DetectSkeletonCard = ({ elapsedSec, onDismiss }: Props) => (
         <IconButton
           onClick={onDismiss}
           title="Dismiss"
+          tone="danger"
           stopPropagation={false}
         >
           <CloseIcon size={12} />

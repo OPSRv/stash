@@ -6,6 +6,7 @@ import { metronomeModule } from './metronome';
 import { musicModule } from './music';
 import { notesModule } from './notes';
 import { pomodoroModule } from './pomodoro';
+import { systemModule } from './system';
 import { terminalModule } from './terminal';
 import { translatorModule } from './translator';
 import { settingsModule } from '../settings';
@@ -20,6 +21,7 @@ export const modules: ModuleDefinition[] = [
   metronomeModule,
   pomodoroModule,
   terminalModule,
+  systemModule,
   settingsModule,
 ];
 

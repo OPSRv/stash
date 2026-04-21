@@ -1,6 +1,7 @@
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
-import { LinkIcon } from '../../shared/ui/icons';
+import { CloseIcon, LinkIcon } from '../../shared/ui/icons';
 import { Button } from '../../shared/ui/Button';
+import { IconButton } from '../../shared/ui/IconButton';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
 
@@ -11,6 +12,11 @@ interface DownloadUrlBarProps {
   onUrlChange: (next: string) => void;
   onDetect: () => void;
   onCancel: () => void;
+  /** Wipe the URL input AND any queued detect cards. Only rendered when the
+   *  user actually has something to clear, so the button doesn't take up
+   *  space on an empty bar. */
+  onClear?: () => void;
+  canClear?: boolean;
 }
 
 export const DownloadUrlBar = ({
@@ -20,6 +26,8 @@ export const DownloadUrlBar = ({
   onUrlChange,
   onDetect,
   onCancel,
+  onClear,
+  canClear = false,
 }: DownloadUrlBarProps) => {
   const { toast } = useToast();
   const pasteFromClipboard = async () => {
@@ -64,6 +72,15 @@ export const DownloadUrlBar = ({
         title={url || undefined}
         className="flex-1 bg-transparent outline-none text-body t-primary min-w-0"
       />
+      {canClear && onClear && (
+        <IconButton
+          onClick={onClear}
+          title="Clear URL and dismiss all detect cards"
+          stopPropagation={false}
+        >
+          <CloseIcon size={12} />
+        </IconButton>
+      )}
       <Button size="xs" onClick={pasteFromClipboard}>
         Paste
       </Button>
@@ -74,7 +91,7 @@ export const DownloadUrlBar = ({
           tone="danger"
           onClick={onCancel}
           leadingIcon={<Spinner size={12} />}
-          title="Cancel"
+          title="Cancel the latest detect"
         >
           Cancel · {elapsedSec}s
         </Button>

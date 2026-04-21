@@ -6,6 +6,7 @@ pub mod music;
 pub mod notes;
 pub mod pomodoro;
 pub mod search;
+pub mod system;
 pub mod terminal;
 pub mod translator;
 pub mod webchat;

@@ -200,7 +200,7 @@ describe('ActiveDownloadRow', () => {
         onResume={onResume}
       />
     );
-    await user.click(screen.getByRole('button', { name: 'Pause' }));
+    await user.click(screen.getByRole('button', { name: /^Pause\b/ }));
     expect(onPause).toHaveBeenCalled();
 
     rerender(
@@ -211,7 +211,7 @@ describe('ActiveDownloadRow', () => {
         onResume={onResume}
       />
     );
-    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    await user.click(screen.getByRole('button', { name: /^Resume\b/ }));
     expect(onResume).toHaveBeenCalled();
   });
 
@@ -226,7 +226,7 @@ describe('ActiveDownloadRow', () => {
         onResume={() => {}}
       />
     );
-    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(screen.getByRole('button', { name: /^Cancel\b/ }));
     expect(onCancel).toHaveBeenCalled();
   });
 });

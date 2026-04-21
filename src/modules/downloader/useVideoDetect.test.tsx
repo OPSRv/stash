@@ -37,49 +37,76 @@ describe('useVideoDetect', () => {
     vi.mocked(detectQuick).mockReset();
   });
 
-  it('starts in the idle state', () => {
+  it('starts with an empty session list', () => {
     const { result } = renderHook(() => useVideoDetect());
+    expect(result.current.sessions).toEqual([]);
     expect(result.current.detecting).toBe(false);
-    expect(result.current.detected).toBeNull();
-    expect(result.current.error).toBeNull();
-    expect(result.current.quick).toBeNull();
   });
 
-  it('run() with empty string is a no-op', async () => {
+  it('run() with empty string is a no-op', () => {
     vi.mocked(detect).mockResolvedValue(fakeDetected);
     vi.mocked(detectQuick).mockResolvedValue(fakeQuick);
     const { result } = renderHook(() => useVideoDetect());
-    await act(async () => {
-      await result.current.run('   ');
+    act(() => {
+      result.current.run('   ');
     });
     expect(detect).not.toHaveBeenCalled();
-    expect(result.current.detecting).toBe(false);
+    expect(result.current.sessions).toEqual([]);
   });
 
-  it('surfaces quick preview and full detection', async () => {
+  it('surfaces quick preview and full detection for a session', async () => {
     vi.mocked(detectQuick).mockResolvedValue(fakeQuick);
     vi.mocked(detect).mockResolvedValue(fakeDetected);
     const { result } = renderHook(() => useVideoDetect());
-    await act(async () => {
-      await result.current.run('https://youtu.be/abc');
+    act(() => {
+      result.current.run('https://youtu.be/abc');
     });
-    expect(result.current.detected).toEqual(fakeDetected);
-    expect(result.current.detecting).toBe(false);
-    await waitFor(() => expect(result.current.quick).toEqual(fakeQuick));
+    await waitFor(() => {
+      const s = result.current.sessions[0];
+      expect(s?.detected).toEqual(fakeDetected);
+      expect(s?.detecting).toBe(false);
+    });
+    await waitFor(() => {
+      expect(result.current.sessions[0]?.quick).toEqual(fakeQuick);
+    });
   });
 
-  it('sets error when detect throws', async () => {
+  it('sets the session error when detect throws', async () => {
     vi.mocked(detectQuick).mockRejectedValue(new Error('quick fail'));
     vi.mocked(detect).mockRejectedValue(new Error('boom'));
     const { result } = renderHook(() => useVideoDetect());
-    await act(async () => {
-      await result.current.run('https://youtu.be/abc');
+    act(() => {
+      result.current.run('https://youtu.be/abc');
     });
-    expect(result.current.error).toContain('boom');
-    expect(result.current.detected).toBeNull();
+    await waitFor(() => {
+      const s = result.current.sessions[0];
+      expect(s?.error).toContain('boom');
+      expect(s?.detected).toBeNull();
+    });
   });
 
-  it('reset() clears state and advances the epoch so stale responses are ignored', async () => {
+  it('stacks multiple sessions when run() is called in sequence', async () => {
+    let n = 0;
+    vi.mocked(detect).mockImplementation(() => {
+      n += 1;
+      return Promise.resolve({ ...fakeDetected, info: { ...fakeDetected.info, title: `T${n}` } });
+    });
+    vi.mocked(detectQuick).mockResolvedValue(null);
+    const { result } = renderHook(() => useVideoDetect());
+    act(() => {
+      result.current.run('https://youtu.be/a');
+      result.current.run('https://youtu.be/b');
+      result.current.run('https://youtu.be/c');
+    });
+    expect(result.current.sessions).toHaveLength(3);
+    expect(result.current.sessions.map((s) => s.url)).toEqual([
+      'https://youtu.be/a',
+      'https://youtu.be/b',
+      'https://youtu.be/c',
+    ]);
+  });
+
+  it('dismiss() removes a session and swallows any late response for it', async () => {
     let resolve: (v: DetectedVideo) => void = () => {};
     vi.mocked(detect).mockImplementation(
       () => new Promise<DetectedVideo>((r) => (resolve = r))
@@ -87,31 +114,44 @@ describe('useVideoDetect', () => {
     vi.mocked(detectQuick).mockResolvedValue(null);
     const { result } = renderHook(() => useVideoDetect());
     act(() => {
-      void result.current.run('https://youtu.be/abc');
+      result.current.run('https://youtu.be/abc');
     });
-    expect(result.current.detecting).toBe(true);
-    act(() => result.current.reset());
-    expect(result.current.detecting).toBe(false);
+    const id = result.current.sessions[0]!.id;
+    act(() => result.current.dismiss(id));
+    expect(result.current.sessions).toEqual([]);
     await act(async () => {
       resolve(fakeDetected);
-      // Flush microtasks.
       await Promise.resolve();
     });
-    // Stale resolution must not populate detected after reset().
-    expect(result.current.detected).toBeNull();
+    expect(result.current.sessions).toEqual([]);
   });
 
-  it('cancel() flags state as Cancelled', async () => {
+  it('cancel() marks a session as Cancelled without removing it', () => {
     vi.mocked(detect).mockImplementation(
       () => new Promise<DetectedVideo>(() => {})
     );
     vi.mocked(detectQuick).mockResolvedValue(null);
     const { result } = renderHook(() => useVideoDetect());
     act(() => {
-      void result.current.run('https://youtu.be/abc');
+      result.current.run('https://youtu.be/abc');
     });
-    act(() => result.current.cancel());
-    expect(result.current.error).toBe('Cancelled');
-    expect(result.current.detecting).toBe(false);
+    const id = result.current.sessions[0]!.id;
+    act(() => result.current.cancel(id));
+    const s = result.current.sessions[0]!;
+    expect(s.error).toBe('Cancelled');
+    expect(s.detecting).toBe(false);
+  });
+
+  it('clearAll() drops every queued session', () => {
+    vi.mocked(detect).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(detectQuick).mockResolvedValue(null);
+    const { result } = renderHook(() => useVideoDetect());
+    act(() => {
+      result.current.run('https://youtu.be/a');
+      result.current.run('https://youtu.be/b');
+    });
+    expect(result.current.sessions).toHaveLength(2);
+    act(() => result.current.clearAll());
+    expect(result.current.sessions).toEqual([]);
   });
 });
