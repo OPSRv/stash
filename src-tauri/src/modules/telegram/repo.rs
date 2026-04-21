@@ -177,6 +177,14 @@ impl TelegramRepo {
         )?;
         Ok(())
     }
+
+    pub fn set_inbox_transcript(&mut self, id: i64, transcript: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE inbox SET transcript = ?1 WHERE id = ?2",
+            params![transcript, id],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -282,5 +290,16 @@ mod tests {
         repo.mark_inbox_routed(id, "notes").unwrap();
         let items = repo.list_inbox(10).unwrap();
         assert_eq!(items[0].routed_to.as_deref(), Some("notes"));
+    }
+
+    #[test]
+    fn set_inbox_transcript_persists() {
+        let mut repo = fresh();
+        let id = repo
+            .insert_media_inbox(1, "voice", Some("a.ogg"), Some("audio/ogg"), Some(3), None, 1)
+            .unwrap();
+        repo.set_inbox_transcript(id, "hello world").unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert_eq!(items[0].transcript.as_deref(), Some("hello world"));
     }
 }

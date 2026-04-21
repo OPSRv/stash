@@ -36,6 +36,43 @@ fn is_downloaded(path: &PathBuf, expected: u64) -> bool {
         .unwrap_or(false)
 }
 
+/// Transcribe `audio` using whichever model the user has made active in
+/// the Whisper tab. Returns the text. Used by the Telegram inbox (voice
+/// auto-transcription) and future cross-module integrations — one place
+/// to pick the active model means these callers don't duplicate the
+/// "download state → catalog → model file" lookup.
+pub async fn transcribe_with_active_model(
+    app: &AppHandle,
+    audio: PathBuf,
+    language: Option<String>,
+) -> Result<String, String> {
+    let state: tauri::State<'_, WhisperStateHandle> = app.state();
+    let active = state
+        .config
+        .lock()
+        .unwrap()
+        .active_model_id
+        .clone()
+        .ok_or_else(|| "no active whisper model — download one first".to_string())?;
+    drop(state);
+    let spec = catalog::find(&active).ok_or_else(|| format!("unknown model: {active}"))?;
+    let model = model_path(app, &active)?;
+    if !is_downloaded(&model, spec.size_bytes) {
+        return Err("active model is not downloaded".into());
+    }
+    if !audio.is_file() {
+        return Err(format!("audio file not found: {}", audio.display()));
+    }
+    let lang = language.unwrap_or_else(|| "uk".into());
+    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) / 2).max(2)
+        as i32;
+    tauri::async_runtime::spawn_blocking(move || {
+        pipeline::transcribe(&audio, &model, &lang, threads).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn whisper_list_models(
     app: AppHandle,

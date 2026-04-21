@@ -436,13 +436,17 @@ async fn handle_media(
     };
 
     let msg_id = msg.id.0 as i64;
-    if let Err(e) = record_media(app, state, msg_id, &intent, &rel, now) {
-        tracing::warn!(error = %e, "inbox: repo insert failed");
-        state
-            .sender
-            .enqueue(chat_id, "⚠️ Could not persist inbox record — file kept on disk.");
-        return;
-    }
+    let inbox_id = match record_media(app, state, msg_id, &intent, &rel, now) {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::warn!(error = %e, "inbox: repo insert failed");
+            state.sender.enqueue(
+                chat_id,
+                "⚠️ Could not persist inbox record — file kept on disk.",
+            );
+            return;
+        }
+    };
     bump_used_bytes(state, &day, bytes);
 
     let human_size = if bytes >= 1_048_576 {
@@ -462,6 +466,50 @@ async fn handle_media(
         intent.kind, human_size, duration_tag
     );
     state.sender.enqueue(chat_id, reply);
+
+    // Voice messages trigger Whisper transcription in the background.
+    // Keeping this off the request path means a bad model config never
+    // blocks the inbox write — the row is already persisted above.
+    if intent.kind == "voice" {
+        let audio_abs = abs.clone();
+        let app_for_task = app.clone();
+        let state_for_task = Arc::clone(state);
+        let chat_for_task = chat_id;
+        tauri::async_runtime::spawn(async move {
+            match crate::modules::whisper::commands::transcribe_with_active_model(
+                &app_for_task,
+                audio_abs,
+                None,
+            )
+            .await
+            {
+                Ok(text) => {
+                    let trimmed = text.trim().to_string();
+                    if trimmed.is_empty() {
+                        return;
+                    }
+                    if let Ok(mut repo) = state_for_task.repo.lock() {
+                        let _ = repo.set_inbox_transcript(inbox_id, &trimmed);
+                    }
+                    use tauri::Emitter;
+                    let _ = app_for_task.emit("telegram:inbox_updated", inbox_id);
+                    let preview = trimmed.chars().take(200).collect::<String>();
+                    let reply = if trimmed.chars().count() > 200 {
+                        format!("🎤 {preview}…")
+                    } else {
+                        format!("🎤 {preview}")
+                    };
+                    state_for_task.sender.enqueue(chat_for_task, reply);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "whisper transcription failed");
+                    state_for_task
+                        .sender
+                        .enqueue(chat_for_task, format!("⚠️ Whisper failed: {e}"));
+                }
+            }
+        });
+    }
 }
 
 #[cfg(test)]
