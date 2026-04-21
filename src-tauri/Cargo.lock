@@ -4969,6 +4969,7 @@ dependencies = [
  "tauri-plugin-store",
  "teloxide",
  "tempfile",
+ "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
