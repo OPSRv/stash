@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use super::keyring::{ACCOUNT_BOT_TOKEN, ACCOUNT_CHAT_ID};
 use super::pairing::{self, PairingState};
+use super::repo::InboxItem;
 use super::state::TelegramState;
 
 fn now_secs() -> i64 {
@@ -162,6 +163,52 @@ pub async fn telegram_cancel_pairing(
     let status = compute_status(has_token, &state.pairing.lock().unwrap());
     let _ = app.emit("telegram:status_changed", ());
     Ok(status)
+}
+
+#[tauri::command]
+pub fn telegram_list_inbox(
+    state: State<'_, Arc<TelegramState>>,
+    limit: Option<usize>,
+) -> Result<Vec<InboxItem>, String> {
+    state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .list_inbox(limit.unwrap_or(200))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn telegram_delete_inbox_item(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+    id: i64,
+) -> Result<(), String> {
+    state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .delete_inbox_item(id)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("telegram:inbox_updated", id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn telegram_mark_inbox_routed(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+    id: i64,
+    target: String,
+) -> Result<(), String> {
+    state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .mark_inbox_routed(id, &target)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("telegram:inbox_updated", id);
+    Ok(())
 }
 
 #[tauri::command]

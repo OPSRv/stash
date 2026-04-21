@@ -1,7 +1,23 @@
 use rusqlite::{params, Connection, OptionalExtension, Result};
+use serde::Serialize;
 
 pub struct TelegramRepo {
     conn: Connection,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct InboxItem {
+    pub id: i64,
+    pub telegram_message_id: i64,
+    pub kind: String,
+    pub text_content: Option<String>,
+    pub file_path: Option<String>,
+    pub mime_type: Option<String>,
+    pub duration_sec: Option<i64>,
+    pub transcript: Option<String>,
+    pub caption: Option<String>,
+    pub received_at: i64,
+    pub routed_to: Option<String>,
 }
 
 impl TelegramRepo {
@@ -74,6 +90,63 @@ impl TelegramRepo {
         )?;
         Ok(())
     }
+
+    /// Record a text-only inbox item. Media types (voice, photo, document)
+    /// land via a separate path that downloads the file first — added in a
+    /// later phase.
+    pub fn insert_text_inbox(
+        &mut self,
+        telegram_message_id: i64,
+        text: &str,
+        received_at: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO inbox(telegram_message_id, kind, text_content, received_at)
+             VALUES(?1, 'text', ?2, ?3)",
+            params![telegram_message_id, text, received_at],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn list_inbox(&self, limit: usize) -> Result<Vec<InboxItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, telegram_message_id, kind, text_content, file_path,
+                    mime_type, duration_sec, transcript, caption, received_at, routed_to
+             FROM inbox
+             ORDER BY received_at DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |r| {
+            Ok(InboxItem {
+                id: r.get(0)?,
+                telegram_message_id: r.get(1)?,
+                kind: r.get(2)?,
+                text_content: r.get(3)?,
+                file_path: r.get(4)?,
+                mime_type: r.get(5)?,
+                duration_sec: r.get(6)?,
+                transcript: r.get(7)?,
+                caption: r.get(8)?,
+                received_at: r.get(9)?,
+                routed_to: r.get(10)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn delete_inbox_item(&mut self, id: i64) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM inbox WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn mark_inbox_routed(&mut self, id: i64, target: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE inbox SET routed_to = ?1 WHERE id = ?2",
+            params![target, id],
+        )?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -138,5 +211,46 @@ mod tests {
             [],
         );
         assert!(err.is_err(), "kind CHECK must reject unknown values");
+    }
+
+    #[test]
+    fn text_inbox_round_trip() {
+        let mut repo = fresh();
+        let id = repo.insert_text_inbox(101, "hello world", 1_000).unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, id);
+        assert_eq!(items[0].telegram_message_id, 101);
+        assert_eq!(items[0].kind, "text");
+        assert_eq!(items[0].text_content.as_deref(), Some("hello world"));
+        assert_eq!(items[0].received_at, 1_000);
+        assert!(items[0].routed_to.is_none());
+    }
+
+    #[test]
+    fn list_inbox_orders_by_received_desc() {
+        let mut repo = fresh();
+        repo.insert_text_inbox(1, "old", 100).unwrap();
+        repo.insert_text_inbox(2, "new", 200).unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert_eq!(items[0].text_content.as_deref(), Some("new"));
+        assert_eq!(items[1].text_content.as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn delete_inbox_item_removes_row() {
+        let mut repo = fresh();
+        let id = repo.insert_text_inbox(1, "x", 1).unwrap();
+        repo.delete_inbox_item(id).unwrap();
+        assert!(repo.list_inbox(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn mark_inbox_routed_sets_target() {
+        let mut repo = fresh();
+        let id = repo.insert_text_inbox(1, "x", 1).unwrap();
+        repo.mark_inbox_routed(id, "notes").unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert_eq!(items[0].routed_to.as_deref(), Some("notes"));
     }
 }

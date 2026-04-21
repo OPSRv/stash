@@ -108,7 +108,8 @@ use modules::ai::{
     state::{AiState, KEYRING_SERVICE},
 };
 use modules::telegram::commands::{
-    telegram_cancel_pairing, telegram_clear_token, telegram_has_token, telegram_set_token,
+    telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
+    telegram_has_token, telegram_list_inbox, telegram_mark_inbox_routed, telegram_set_token,
     telegram_start_pairing, telegram_status, telegram_unpair,
 };
 use modules::clipboard::{
@@ -470,6 +471,9 @@ pub fn run() {
             telegram_start_pairing,
             telegram_cancel_pairing,
             telegram_unpair,
+            telegram_list_inbox,
+            telegram_delete_inbox_item,
+            telegram_mark_inbox_routed,
             webchat_embed,
             webchat_hide,
             webchat_hide_all,

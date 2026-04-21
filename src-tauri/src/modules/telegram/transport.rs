@@ -294,13 +294,29 @@ async fn handle_update(
             }
         }
         DispatchAction::IngestText { text, .. } => {
-            // Phase 1.5 will persist this to the inbox and optionally
-            // forward to the AI assistant. For now we acknowledge so the
-            // user knows the message was received.
-            tracing::debug!(text_len = text.len(), "inbox ingest stub");
-            state
-                .sender
-                .enqueue(chat_id, "📥 Saved to inbox (inbox UI coming soon).");
+            let inbox_id = {
+                let msg_id = msg.id.0 as i64;
+                let received_at = now;
+                match state.repo.lock() {
+                    Ok(mut repo) => repo
+                        .insert_text_inbox(msg_id, &text, received_at)
+                        .map_err(|e| e.to_string()),
+                    Err(e) => Err(e.to_string()),
+                }
+            };
+            match inbox_id {
+                Ok(id) => {
+                    tracing::debug!(id, text_len = text.len(), "inbox text ingested");
+                    let _ = app.emit("telegram:inbox_added", id);
+                    state.sender.enqueue(chat_id, "📥 Saved to inbox.");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "inbox insert failed");
+                    state
+                        .sender
+                        .enqueue(chat_id, "⚠️ Could not save to inbox — check Stash logs.");
+                }
+            }
         }
         DispatchAction::UnknownCommand { name, .. } => {
             state
