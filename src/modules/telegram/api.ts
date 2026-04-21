@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
+  AiSettings,
   ConnectionStatus,
   InboxItem,
   NotificationSettings,
@@ -41,3 +42,9 @@ export const getNotificationSettings = (): Promise<NotificationSettings> =>
 export const setNotificationSettings = (
   settings: NotificationSettings,
 ): Promise<void> => invoke('telegram_set_notification_settings', { settings });
+
+export const getAiSettings = (): Promise<AiSettings> =>
+  invoke('telegram_get_ai_settings');
+
+export const setAiSettings = (settings: AiSettings): Promise<void> =>
+  invoke('telegram_set_ai_settings', { settings });

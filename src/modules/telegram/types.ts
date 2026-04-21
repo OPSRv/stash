@@ -30,3 +30,8 @@ export type NotificationSettings = {
   calendar_lead_minutes: number;
   battery_threshold_pct: number;
 };
+
+export type AiSettings = {
+  system_prompt: string;
+  context_window: number;
+};

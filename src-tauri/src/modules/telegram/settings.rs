@@ -23,6 +23,16 @@ pub const KEY_BATTERY_THRESHOLD: &str = "pref.battery_threshold_pct";
 pub const DEFAULT_CALENDAR_LEAD_MIN: u32 = 10;
 pub const DEFAULT_BATTERY_THRESHOLD: u32 = 20;
 
+pub const KEY_AI_SYSTEM_PROMPT: &str = "ai.system_prompt";
+pub const KEY_AI_CONTEXT_WINDOW: &str = "ai.context_window";
+
+pub const DEFAULT_AI_SYSTEM_PROMPT: &str =
+    "You are a helpful assistant for Oleksandr inside Telegram. \
+     Answer concisely. Use tools when they would save the user time.";
+pub const DEFAULT_AI_CONTEXT_WINDOW: u32 = 50;
+pub const MIN_AI_CONTEXT_WINDOW: u32 = 10;
+pub const MAX_AI_CONTEXT_WINDOW: u32 = 200;
+
 /// Shape sent to / received from the frontend. Booleans default to
 /// `true`; knobs fall back to the constants above.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +102,61 @@ fn bool_to_kv(b: bool) -> String {
     if b { "1" } else { "0" }.to_string()
 }
 
+/// AI assistant settings — editable system prompt + rolling chat history
+/// window. Persisted in the same `kv` table as notification settings.
+/// The LLM provider/model/key are intentionally NOT here: those live in
+/// the `ai` module so there's one place to configure them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AiSettings {
+    pub system_prompt: String,
+    pub context_window: u32,
+}
+
+impl AiSettings {
+    pub fn load(state: &TelegramState) -> Self {
+        let repo = state.repo.lock().ok();
+        let system_prompt = repo
+            .as_ref()
+            .and_then(|r| r.kv_get(KEY_AI_SYSTEM_PROMPT).ok().flatten())
+            .unwrap_or_else(|| DEFAULT_AI_SYSTEM_PROMPT.to_string());
+        let context_window = repo
+            .as_ref()
+            .and_then(|r| r.kv_get(KEY_AI_CONTEXT_WINDOW).ok().flatten())
+            .and_then(|s| s.parse::<u32>().ok())
+            .map(clamp_context_window)
+            .unwrap_or(DEFAULT_AI_CONTEXT_WINDOW);
+        Self {
+            system_prompt,
+            context_window,
+        }
+    }
+
+    pub fn save(&self, state: &TelegramState) -> Result<(), String> {
+        let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+        let prompt = self.system_prompt.trim();
+        let prompt = if prompt.is_empty() {
+            DEFAULT_AI_SYSTEM_PROMPT
+        } else {
+            prompt
+        };
+        repo.kv_set(KEY_AI_SYSTEM_PROMPT, prompt)
+            .map_err(|e| e.to_string())?;
+        repo.kv_set(
+            KEY_AI_CONTEXT_WINDOW,
+            &clamp_context_window(self.context_window).to_string(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+/// Context-window values outside `[10, 200]` tend to either starve the
+/// assistant of continuity or blow up prompt size — clamp rather than
+/// reject so an out-of-range slider move can't brick the UI.
+pub fn clamp_context_window(n: u32) -> u32 {
+    n.clamp(MIN_AI_CONTEXT_WINDOW, MAX_AI_CONTEXT_WINDOW)
+}
+
 /// Check whether a notifier category is currently enabled. Used by the
 /// notifier before it touches the sender, so toggling in the UI takes
 /// effect on the next event.
@@ -156,6 +221,58 @@ mod tests {
         n.save(&s).unwrap();
         let reloaded = NotificationSettings::load(&s);
         assert_eq!(reloaded, n);
+    }
+
+    #[test]
+    fn ai_settings_default_when_kv_empty() {
+        let s = fresh();
+        let ai = AiSettings::load(&s);
+        assert_eq!(ai.system_prompt, DEFAULT_AI_SYSTEM_PROMPT);
+        assert_eq!(ai.context_window, DEFAULT_AI_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn ai_settings_round_trip() {
+        let s = fresh();
+        let ai = AiSettings {
+            system_prompt: "You are a snarky cat.".into(),
+            context_window: 80,
+        };
+        ai.save(&s).unwrap();
+        let reloaded = AiSettings::load(&s);
+        assert_eq!(reloaded, ai);
+    }
+
+    #[test]
+    fn ai_settings_clamp_context_window() {
+        let s = fresh();
+        AiSettings {
+            system_prompt: "p".into(),
+            context_window: 9999,
+        }
+        .save(&s)
+        .unwrap();
+        assert_eq!(AiSettings::load(&s).context_window, MAX_AI_CONTEXT_WINDOW);
+
+        AiSettings {
+            system_prompt: "p".into(),
+            context_window: 1,
+        }
+        .save(&s)
+        .unwrap();
+        assert_eq!(AiSettings::load(&s).context_window, MIN_AI_CONTEXT_WINDOW);
+    }
+
+    #[test]
+    fn ai_settings_empty_prompt_falls_back_to_default() {
+        let s = fresh();
+        AiSettings {
+            system_prompt: "   ".into(),
+            context_window: 50,
+        }
+        .save(&s)
+        .unwrap();
+        assert_eq!(AiSettings::load(&s).system_prompt, DEFAULT_AI_SYSTEM_PROMPT);
     }
 
     #[test]

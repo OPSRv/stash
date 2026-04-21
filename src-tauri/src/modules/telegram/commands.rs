@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, State};
 use super::keyring::{ACCOUNT_BOT_TOKEN, ACCOUNT_CHAT_ID};
 use super::pairing::{self, PairingState};
 use super::repo::InboxItem;
-use super::settings::NotificationSettings;
+use super::settings::{AiSettings, NotificationSettings};
 use super::state::TelegramState;
 
 fn now_secs() -> i64 {
@@ -225,6 +225,21 @@ pub fn telegram_get_notification_settings(
 pub fn telegram_set_notification_settings(
     state: State<'_, Arc<TelegramState>>,
     settings: NotificationSettings,
+) -> Result<(), String> {
+    settings.save(state.as_ref())
+}
+
+#[tauri::command]
+pub fn telegram_get_ai_settings(
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<AiSettings, String> {
+    Ok(AiSettings::load(state.as_ref()))
+}
+
+#[tauri::command]
+pub fn telegram_set_ai_settings(
+    state: State<'_, Arc<TelegramState>>,
+    settings: AiSettings,
 ) -> Result<(), String> {
     settings.save(state.as_ref())
 }
