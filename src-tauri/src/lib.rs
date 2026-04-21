@@ -721,9 +721,6 @@ pub fn run() {
                 modules::telegram::module_cmds::ForgetCmd::new(Arc::clone(&telegram_state)),
             );
             telegram_state.register_command(
-                modules::telegram::module_cmds::AiCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
                 modules::telegram::module_cmds::RememberCmd::new(Arc::clone(&telegram_state)),
             );
             telegram_state.register_command(

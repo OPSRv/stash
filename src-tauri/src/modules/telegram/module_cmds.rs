@@ -789,51 +789,8 @@ mod tests {
     }
 }
 
-// -------------------- AI assistant + memory slash commands --------------------
-
-/// `/ai <question>` — explicit assistant call. Free text without a
-/// leading slash hits the same path via the dispatcher; this slash
-/// lets users be explicit in places where `/` is expected (scripts,
-/// templates, etc.).
-pub struct AiCmd {
-    state: Arc<TelegramState>,
-}
-
-impl AiCmd {
-    pub fn new(state: Arc<TelegramState>) -> Self {
-        Self { state }
-    }
-}
-
-#[async_trait]
-impl CommandHandler for AiCmd {
-    fn name(&self) -> &'static str {
-        "ai"
-    }
-    fn description(&self) -> &'static str {
-        "Запитати AI-асистента"
-    }
-    fn usage(&self) -> &'static str {
-        "/ai <запитання>"
-    }
-    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
-        let prompt = args.trim();
-        if prompt.is_empty() {
-            return Reply::text("Використання: /ai <запитання>");
-        }
-        match super::assistant::handle_user_text(&ctx.app, &self.state, prompt).await {
-            Ok(reply) => {
-                let suffix = if reply.truncated {
-                    "\n\n_(спрощено — досягнуто ліміту ланцюжка інструментів)_"
-                } else {
-                    ""
-                };
-                Reply::text(format!("{}{suffix}", reply.text))
-            }
-            Err(e) => Reply::text(format!("⚠️ {e}")),
-        }
-    }
-}
+// -------------------- Memory slash commands --------------------
+// (Assistant chat is the free-text default — no `/ai` slash needed.)
 
 /// `/remember <fact>` — persist a single fact.
 pub struct RememberCmd {

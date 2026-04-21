@@ -49,6 +49,12 @@ pub struct AiConfig {
     pub provider: AiProvider,
     pub model: String,
     pub base_url: Option<String>,
+    /// Fallback API key read from `settings.json → aiApiKeys[<provider>]`.
+    /// Used when the OS keyring is unavailable (unsigned dev builds on
+    /// macOS silently drop Keychain writes) — the FE already stores the
+    /// key in settings.json for its own needs, so reusing it keeps the
+    /// dev loop working with no extra configuration.
+    pub api_key_fallback: Option<String>,
 }
 
 /// Read the active AI config from `settings.json`. Missing file or
@@ -75,10 +81,17 @@ pub fn read_config(settings_path: &Path) -> Result<AiConfig, LlmError> {
         .get("aiBaseUrl")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
+    let api_key_fallback = value
+        .get("aiApiKeys")
+        .and_then(|m| m.get(provider.key_account()))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     Ok(AiConfig {
         provider,
         model,
         base_url,
+        api_key_fallback,
     })
 }
 
@@ -95,6 +108,7 @@ pub fn build_client(
     let key = ai_secrets
         .get(cfg.provider.key_account())
         .map_err(|e| LlmError::BadResponse(format!("keyring: {e}")))?
+        .or_else(|| cfg.api_key_fallback.clone())
         .ok_or(LlmError::Auth)?;
 
     if cfg.model.trim().is_empty() {
@@ -165,6 +179,32 @@ mod tests {
         assert_eq!(cfg.provider, AiProvider::Anthropic);
         assert_eq!(cfg.model, "claude-3-5-sonnet-latest");
         assert!(cfg.base_url.is_none());
+        assert!(cfg.api_key_fallback.is_none());
+    }
+
+    #[test]
+    fn read_config_surfaces_api_key_from_settings_map() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"aiProvider":"openai","aiModel":"gpt-4o-mini","aiApiKeys":{"openai":"sk-from-file"}}"#,
+        )
+        .unwrap();
+        let cfg = read_config(&path).unwrap();
+        assert_eq!(cfg.api_key_fallback.as_deref(), Some("sk-from-file"));
+    }
+
+    #[test]
+    fn build_client_uses_settings_fallback_when_keyring_empty() {
+        let secrets: Arc<dyn SecretStore> = Arc::new(MemStore::new());
+        let cfg = AiConfig {
+            provider: AiProvider::OpenAi,
+            model: "gpt-4o-mini".into(),
+            base_url: None,
+            api_key_fallback: Some("sk-from-file".into()),
+        };
+        assert!(build_client(&cfg, &secrets).is_ok());
     }
 
     #[test]
@@ -192,6 +232,7 @@ mod tests {
             provider: AiProvider::OpenAi,
             model: "gpt-4o-mini".into(),
             base_url: None,
+            api_key_fallback: None,
         };
         assert_eq!(err(build_client(&cfg, &secrets)), LlmError::Auth);
     }
@@ -203,6 +244,7 @@ mod tests {
             provider: AiProvider::OpenAi,
             model: "gpt-4o-mini".into(),
             base_url: None,
+            api_key_fallback: None,
         };
         assert!(build_client(&cfg, &secrets).is_ok());
     }
@@ -214,6 +256,7 @@ mod tests {
             provider: AiProvider::Anthropic,
             model: "claude-3-5-sonnet-latest".into(),
             base_url: None,
+            api_key_fallback: None,
         };
         assert!(build_client(&cfg, &secrets).is_ok());
     }
@@ -225,6 +268,7 @@ mod tests {
             provider: AiProvider::Custom,
             model: "any".into(),
             base_url: None,
+            api_key_fallback: None,
         };
         match err(build_client(&cfg, &secrets)) {
             LlmError::BadResponse(m) => assert!(m.to_lowercase().contains("base url")),
@@ -239,6 +283,7 @@ mod tests {
             provider: AiProvider::OpenAi,
             model: "".into(),
             base_url: None,
+            api_key_fallback: None,
         };
         match err(build_client(&cfg, &secrets)) {
             LlmError::BadResponse(m) => assert!(m.to_lowercase().contains("model")),
@@ -253,6 +298,7 @@ mod tests {
             provider: AiProvider::Google,
             model: "gemini-pro".into(),
             base_url: None,
+            api_key_fallback: None,
         };
         match err(build_client(&cfg, &secrets)) {
             LlmError::BadResponse(m) => assert!(m.to_lowercase().contains("google")),
