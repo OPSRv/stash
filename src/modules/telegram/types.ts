@@ -21,3 +21,12 @@ export type InboxItem = {
 };
 
 export type RouteTarget = 'notes' | 'clipboard';
+
+export type NotificationSettings = {
+  pomodoro: boolean;
+  download_complete: boolean;
+  battery_low: boolean;
+  calendar: boolean;
+  calendar_lead_minutes: number;
+  battery_threshold_pct: number;
+};

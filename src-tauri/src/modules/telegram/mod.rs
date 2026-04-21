@@ -1,4 +1,5 @@
 pub mod battery_watcher;
+pub mod calendar;
 pub mod commands;
 pub mod commands_registry;
 pub mod file_secrets;
@@ -10,5 +11,6 @@ pub mod pairing;
 pub mod reminders;
 pub mod repo;
 pub mod sender;
+pub mod settings;
 pub mod state;
 pub mod transport;

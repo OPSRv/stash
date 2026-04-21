@@ -59,6 +59,13 @@ pub fn notify_if_paired(app: &AppHandle, category: Category, text: impl Into<Str
         _ => return,
     };
 
+    // Per-category toggle check — user may have silenced this kind.
+    // Double-deref: State<'_, Arc<T>> → Arc<T> → T.
+    if !super::settings::category_enabled(&**state, category) {
+        tracing::debug!(?category, "telegram notifier: disabled in settings");
+        return;
+    }
+
     // Cooldown check — per category, global (single-user).
     let now = Instant::now();
     {

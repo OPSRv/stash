@@ -1,5 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ConnectionStatus, InboxItem, RouteTarget } from './types';
+import type {
+  ConnectionStatus,
+  InboxItem,
+  NotificationSettings,
+  RouteTarget,
+} from './types';
 
 export const setToken = (token: string): Promise<void> =>
   invoke('telegram_set_token', { token });
@@ -29,3 +34,10 @@ export const markInboxRouted = (id: number, target: RouteTarget): Promise<void> 
 
 export const revealInboxFile = (id: number): Promise<void> =>
   invoke('telegram_reveal_inbox_file', { id });
+
+export const getNotificationSettings = (): Promise<NotificationSettings> =>
+  invoke('telegram_get_notification_settings');
+
+export const setNotificationSettings = (
+  settings: NotificationSettings,
+): Promise<void> => invoke('telegram_set_notification_settings', { settings });

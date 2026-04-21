@@ -14,26 +14,32 @@ use tauri::AppHandle;
 use super::notifier::{notify_if_paired, Category};
 
 const POLL_PERIOD: Duration = Duration::from_secs(5 * 60);
-const THRESHOLD_PERCENT: u32 = 20;
 
 /// Spawn the watcher. Idempotent in practice — called once from `lib.rs`
 /// at setup time; repeated calls just add a second harmless ticker.
 pub fn spawn(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
+        use tauri::Manager;
         let mut tick = tokio::time::interval(POLL_PERIOD);
-        // First tick fires immediately; skip it so we don't alert before
-        // the pairing rehydrate has had a chance to run.
+        // Skip the instant first tick so rehydrate can finish.
         tick.tick().await;
         loop {
             tick.tick().await;
-            if let Some((percent, charging)) = read_pmset_percent() {
-                if !charging && percent <= THRESHOLD_PERCENT {
-                    notify_if_paired(
-                        &app,
-                        Category::BatteryLow,
-                        format!("🪫 Battery low: {percent}% — plug in when you can."),
-                    );
-                }
+            let Some((percent, charging)) = read_pmset_percent() else {
+                continue;
+            };
+            // Look up the user's threshold — defaults to 20 when kv row
+            // is missing (pristine install).
+            let threshold = app
+                .try_state::<std::sync::Arc<super::state::TelegramState>>()
+                .map(|s| super::settings::NotificationSettings::load(&**s).battery_threshold_pct)
+                .unwrap_or(20);
+            if !charging && percent <= threshold {
+                notify_if_paired(
+                    &app,
+                    Category::BatteryLow,
+                    format!("🪫 Battery low: {percent}% — plug in when you can."),
+                );
             }
         }
     });

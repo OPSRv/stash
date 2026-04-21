@@ -109,9 +109,10 @@ use modules::ai::{
 };
 use modules::telegram::commands::{
     telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
-    telegram_has_token, telegram_list_inbox, telegram_mark_inbox_routed,
-    telegram_reveal_inbox_file, telegram_set_token, telegram_start_pairing, telegram_status,
-    telegram_unpair,
+    telegram_get_notification_settings, telegram_has_token, telegram_list_inbox,
+    telegram_mark_inbox_routed, telegram_reveal_inbox_file,
+    telegram_set_notification_settings, telegram_set_token, telegram_start_pairing,
+    telegram_status, telegram_unpair,
 };
 use modules::clipboard::{
     commands::{
@@ -508,6 +509,8 @@ pub fn run() {
             telegram_delete_inbox_item,
             telegram_mark_inbox_routed,
             telegram_reveal_inbox_file,
+            telegram_get_notification_settings,
+            telegram_set_notification_settings,
             webchat_embed,
             webchat_hide,
             webchat_hide_all,
@@ -711,8 +714,9 @@ pub fn run() {
                 modules::telegram::module_cmds::ForgetCmd::new(Arc::clone(&telegram_state)),
             );
 
-            // Outbound watchers — battery + reminders ticker.
+            // Outbound watchers — battery + calendar + reminders ticker.
             modules::telegram::battery_watcher::spawn(app.handle().clone());
+            modules::telegram::calendar::spawn(app.handle().clone());
             modules::telegram::reminders::spawn(
                 app.handle().clone(),
                 Arc::clone(&telegram_state),

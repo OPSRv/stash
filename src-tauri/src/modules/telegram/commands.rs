@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, State};
 use super::keyring::{ACCOUNT_BOT_TOKEN, ACCOUNT_CHAT_ID};
 use super::pairing::{self, PairingState};
 use super::repo::InboxItem;
+use super::settings::NotificationSettings;
 use super::state::TelegramState;
 
 fn now_secs() -> i64 {
@@ -213,6 +214,21 @@ pub fn telegram_mark_inbox_routed(
 
 /// Reveal a media inbox file in Finder. Resolves the relative
 /// `file_path` against the Tauri app data dir and runs `open -R`.
+#[tauri::command]
+pub fn telegram_get_notification_settings(
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<NotificationSettings, String> {
+    Ok(NotificationSettings::load(state.as_ref()))
+}
+
+#[tauri::command]
+pub fn telegram_set_notification_settings(
+    state: State<'_, Arc<TelegramState>>,
+    settings: NotificationSettings,
+) -> Result<(), String> {
+    settings.save(state.as_ref())
+}
+
 #[tauri::command]
 pub fn telegram_reveal_inbox_file(
     app: AppHandle,

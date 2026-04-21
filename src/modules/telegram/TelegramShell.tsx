@@ -3,12 +3,14 @@ import { useState } from 'react';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConnectionPanel } from './sections/ConnectionPanel';
 import { InboxPanel } from './sections/InboxPanel';
+import { NotificationsPanel } from './sections/NotificationsPanel';
 
-type SubTab = 'connection' | 'inbox';
+type SubTab = 'connection' | 'inbox' | 'notifications';
 
 const OPTIONS = [
   { value: 'connection' as const, label: 'Connection' },
   { value: 'inbox' as const, label: 'Inbox' },
+  { value: 'notifications' as const, label: 'Alerts' },
 ];
 
 export function TelegramShell() {
@@ -23,7 +25,9 @@ export function TelegramShell() {
           ariaLabel="Telegram sub-tabs"
         />
       </div>
-      {tab === 'connection' ? <ConnectionPanel /> : <InboxPanel />}
+      {tab === 'connection' && <ConnectionPanel />}
+      {tab === 'inbox' && <InboxPanel />}
+      {tab === 'notifications' && <NotificationsPanel />}
     </div>
   );
 }
