@@ -8,11 +8,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
-use super::commands_registry::{CommandHandler, Ctx, Reply};
+use super::commands_registry::{CommandHandler, Ctx, InlineButton, InlineKeyboard, Reply};
 use crate::modules::clipboard::commands::ClipboardState;
 use crate::modules::notes::repo::NotesRepo;
+use crate::tray::TrayState;
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -206,6 +207,138 @@ impl CommandHandler for NoteCmd {
             }
             Err(e) => Reply::text(format!("⚠️ notes error: {e}")),
         }
+    }
+}
+
+// -------------------- /music --------------------
+
+pub struct MusicCmd;
+
+#[async_trait]
+impl CommandHandler for MusicCmd {
+    fn name(&self) -> &'static str {
+        "music"
+    }
+    fn description(&self) -> &'static str {
+        "Show or control the YouTube Music player"
+    }
+    fn usage(&self) -> &'static str {
+        "/music [play|pause|next|prev]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let sub = args.trim().to_lowercase();
+        match sub.as_str() {
+            "" | "status" => {
+                let snapshot = read_now_playing(&ctx.app);
+                let text = format_now_playing(&snapshot);
+                Reply {
+                    text,
+                    keyboard: Some(music_keyboard()),
+                }
+            }
+            "play" | "pause" | "toggle" => {
+                match crate::modules::music::commands::music_play_pause(ctx.app.clone()) {
+                    Ok(()) => Reply {
+                        text: format!("⏯️ {}", read_after_action(&ctx.app, "toggled")),
+                        keyboard: Some(music_keyboard()),
+                    },
+                    Err(e) => Reply::text(format!("⚠️ {e}")),
+                }
+            }
+            "next" => match crate::modules::music::commands::music_next(ctx.app.clone()) {
+                Ok(()) => Reply {
+                    text: format!("⏭️ {}", read_after_action(&ctx.app, "skipped")),
+                    keyboard: Some(music_keyboard()),
+                },
+                Err(e) => Reply::text(format!("⚠️ {e}")),
+            },
+            "prev" => match crate::modules::music::commands::music_prev(ctx.app.clone()) {
+                Ok(()) => Reply {
+                    text: format!("⏮️ {}", read_after_action(&ctx.app, "rewound")),
+                    keyboard: Some(music_keyboard()),
+                },
+                Err(e) => Reply::text(format!("⚠️ {e}")),
+            },
+            _ => Reply::text(format!(
+                "✍️ Usage: /music [play|pause|next|prev]. Got: {sub}"
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct NowPlaying {
+    playing: bool,
+    title: String,
+    artist: String,
+    attached: bool,
+}
+
+fn read_now_playing(app: &tauri::AppHandle) -> NowPlaying {
+    let attached = app.webviews().contains_key("music");
+    let Some(tray) = app.try_state::<Arc<TrayState>>() else {
+        return NowPlaying {
+            attached,
+            ..NowPlaying::default()
+        };
+    };
+    // Read music snapshot through the Mutex. `tray::music` is private —
+    // use the public read helper.
+    let snap = crate::tray::read_music_snapshot(&tray);
+    NowPlaying {
+        playing: snap.playing,
+        title: snap.title,
+        artist: snap.artist,
+        attached,
+    }
+}
+
+/// Wait a blink for the webview to update its now-playing state after a
+/// control click, then format whatever we see — so `/music pause` reports
+/// the post-action state rather than the pre-action one.
+fn read_after_action(app: &tauri::AppHandle, verb: &str) -> String {
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let snap = read_now_playing(app);
+    if !snap.attached {
+        return format!("{verb} (player not attached)");
+    }
+    format_now_playing(&snap)
+}
+
+fn format_now_playing(snap: &NowPlaying) -> String {
+    if !snap.attached {
+        return "🎵 Player not attached. Open Stash → Music first.".to_string();
+    }
+    let title = if snap.title.is_empty() {
+        "(nothing)".to_string()
+    } else {
+        snap.title.clone()
+    };
+    let who = if snap.artist.is_empty() {
+        String::new()
+    } else {
+        format!(" — {}", snap.artist)
+    };
+    let icon = if snap.playing { "▶️" } else { "⏸️" };
+    format!("{icon} {title}{who}")
+}
+
+fn music_keyboard() -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![vec![
+            InlineButton {
+                text: "⏮️".into(),
+                callback_data: "music:prev".into(),
+            },
+            InlineButton {
+                text: "⏯️".into(),
+                callback_data: "music:toggle".into(),
+            },
+            InlineButton {
+                text: "⏭️".into(),
+                callback_data: "music:next".into(),
+            },
+        ]],
     }
 }
 

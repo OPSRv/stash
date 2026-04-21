@@ -666,6 +666,7 @@ pub fn run() {
             telegram_state.register_command(
                 modules::telegram::module_cmds::NoteCmd::new(notes_repo_for_telegram),
             );
+            telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
 
             // Rehydrate paired state from secrets. Without this every app
             // restart left the bot offline even though bot_token + chat_id

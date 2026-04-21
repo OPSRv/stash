@@ -193,6 +193,9 @@ async fn run_polling(
     let bot = Bot::new(token);
     tracing::info!("telegram transport started");
 
+    // Publish slash commands so they show up in Telegram's / autocomplete.
+    publish_bot_commands(&bot, &state).await;
+
     // Resume from last seen update_id so we don't re-process messages after
     // restart. Stored in the kv table (written below on every successful batch).
     let mut offset: i32 = state
@@ -240,6 +243,13 @@ async fn handle_update(
     update: teloxide::types::Update,
 ) {
     use teloxide::types::UpdateKind;
+
+    // Button presses on inline keyboards arrive as CallbackQuery. Treated
+    // exactly like a typed slash command after allowlist verification.
+    if let UpdateKind::CallbackQuery(q) = update.kind {
+        handle_callback(bot, app, state, q).await;
+        return;
+    }
 
     let UpdateKind::Message(msg) = update.kind else {
         return;
@@ -307,7 +317,9 @@ async fn handle_update(
                         &args,
                     )
                     .await;
-                state.sender.enqueue(chat_id, reply.text);
+                state
+                    .sender
+                    .enqueue_with_keyboard(chat_id, reply.text, reply.keyboard);
             } else {
                 state
                     .sender
@@ -509,6 +521,84 @@ async fn handle_media(
                 }
             }
         });
+    }
+}
+
+async fn handle_callback(
+    bot: &teloxide::Bot,
+    app: &AppHandle,
+    state: &Arc<TelegramState>,
+    q: teloxide::types::CallbackQuery,
+) {
+    use teloxide::prelude::*;
+
+    let Some(data) = q.data.clone() else {
+        return;
+    };
+    // Allowlist: only the paired chat's user can drive buttons.
+    let user_id = q.from.id.0 as i64;
+    let allowed = matches!(
+        &*state.pairing.lock().unwrap(),
+        PairingState::Paired { chat_id } if *chat_id == user_id
+    );
+    if !allowed {
+        // Best-effort acknowledgement so Telegram doesn't keep the button
+        // spinning on the foreign user's side.
+        let _ = bot.answer_callback_query(q.id.clone()).await;
+        return;
+    }
+
+    // "ns:action[:arg]" — dispatch to a registered command named `ns`.
+    let (ns, action) = match data.split_once(':') {
+        Some((a, b)) => (a.to_string(), b.to_string()),
+        None => (data.clone(), String::new()),
+    };
+
+    let reply = if let Some(handler) = state.find_command(&ns) {
+        Some(
+            handler
+                .handle(
+                    crate::modules::telegram::commands_registry::Ctx {
+                        chat_id: user_id,
+                        app: app.clone(),
+                    },
+                    &action,
+                )
+                .await,
+        )
+    } else {
+        None
+    };
+
+    // Always answer the callback (dismiss the loading indicator).
+    let _ = bot.answer_callback_query(q.id).await;
+
+    if let Some(reply) = reply {
+        state
+            .sender
+            .enqueue_with_keyboard(user_id, reply.text, reply.keyboard);
+    }
+}
+
+/// Publish the command list to Telegram's Bot API so the native client
+/// offers autocomplete when the user types `/`. Best-effort — a failure
+/// here doesn't break the transport, just skips the nice-to-have.
+pub async fn publish_bot_commands(bot: &teloxide::Bot, state: &TelegramState) {
+    use teloxide::prelude::*;
+    use teloxide::types::BotCommand;
+    let cmds: Vec<BotCommand> = {
+        let reg = state.commands.read().unwrap();
+        reg.enumerate()
+            .into_iter()
+            // `/pair` is meaningless outside the pairing window.
+            .filter(|h| h.name() != "pair")
+            .map(|h| BotCommand::new(h.name(), h.description()))
+            .collect()
+    };
+    if let Err(e) = bot.set_my_commands(cmds).await {
+        tracing::warn!(error = %e, "setMyCommands failed");
+    } else {
+        tracing::info!("published bot commands to Telegram");
     }
 }
 

@@ -102,6 +102,13 @@ impl TrayState {
     }
 }
 
+/// Cheap snapshot of the current track — used by the Telegram `/music`
+/// command so it doesn't have to reach into the YouTube Music webview
+/// synchronously.
+pub fn read_music_snapshot(state: &TrayState) -> PlayerSnapshot {
+    state.music.lock().unwrap().clone()
+}
+
 /// Forward a scraped YT-Music status into tray state. Returns `true` when
 /// the snapshot actually changed, so the caller can skip rebuilding the
 /// native menu on the noisy 2 s polling cadence.

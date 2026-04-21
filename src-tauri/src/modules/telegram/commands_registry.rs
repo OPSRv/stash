@@ -11,17 +11,35 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-/// Reply a handler wants delivered to the user. Plain text for now; Phase 1
-/// keeps formatting simple.
+/// Reply a handler wants delivered to the user. Optionally carries an
+/// inline keyboard for buttons; the transport layer converts it to the
+/// teloxide shape before sending.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
     pub text: String,
+    pub keyboard: Option<InlineKeyboard>,
 }
 
 impl Reply {
     pub fn text(s: impl Into<String>) -> Self {
-        Self { text: s.into() }
+        Self {
+            text: s.into(),
+            keyboard: None,
+        }
     }
+}
+
+/// Transport-agnostic inline-keyboard description. Telegram transport
+/// translates to teloxide::types::InlineKeyboardMarkup before sending.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineKeyboard {
+    pub rows: Vec<Vec<InlineButton>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineButton {
+    pub text: String,
+    pub callback_data: String,
 }
 
 /// Context handed to every handler. Carries the chat id plus a Tauri

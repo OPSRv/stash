@@ -25,6 +25,8 @@ const MAX_RETRIES: u32 = 6;
 pub struct Outbound {
     pub chat_id: i64,
     pub text: String,
+    /// Optional inline keyboard sent alongside the message.
+    pub keyboard: Option<super::commands_registry::InlineKeyboard>,
 }
 
 pub struct TelegramSender {
@@ -68,14 +70,27 @@ impl TelegramSender {
         }
     }
 
-    /// Queue a message. Silently dropped on failure — this only happens if
-    /// the drain task is gone, in which case there's nothing useful we can
-    /// do other than log it.
+    /// Queue a plain text message. Silently dropped on failure — this only
+    /// happens if the drain task is gone, in which case there's nothing
+    /// useful we can do other than log it.
     pub fn enqueue(&self, chat_id: i64, text: impl Into<String>) {
+        self.enqueue_with_keyboard(chat_id, text, None);
+    }
+
+    pub fn enqueue_with_keyboard(
+        &self,
+        chat_id: i64,
+        text: impl Into<String>,
+        keyboard: Option<super::commands_registry::InlineKeyboard>,
+    ) {
         let text = text.into();
         match self.slot.lock().unwrap().as_ref() {
             Some(inner) => {
-                if let Err(e) = inner.tx.send(Outbound { chat_id, text }) {
+                if let Err(e) = inner.tx.send(Outbound {
+                    chat_id,
+                    text,
+                    keyboard,
+                }) {
                     tracing::warn!(error = %e, "telegram sender: enqueue failed");
                 }
             }
@@ -130,11 +145,30 @@ async fn run_drain(
 
 async fn send_with_retry(bot: &teloxide::Bot, msg: &Outbound) {
     use teloxide::prelude::*;
-    use teloxide::types::ChatId;
+    use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
+
+    let keyboard = msg.keyboard.as_ref().map(|k| {
+        let rows: Vec<Vec<InlineKeyboardButton>> = k
+            .rows
+            .iter()
+            .map(|r| {
+                r.iter()
+                    .map(|b| {
+                        InlineKeyboardButton::callback(b.text.clone(), b.callback_data.clone())
+                    })
+                    .collect()
+            })
+            .collect();
+        InlineKeyboardMarkup::new(rows)
+    });
 
     let mut backoff = BACKOFF_START;
     for attempt in 0..=MAX_RETRIES {
-        match bot.send_message(ChatId(msg.chat_id), &msg.text).await {
+        let mut req = bot.send_message(ChatId(msg.chat_id), &msg.text);
+        if let Some(k) = keyboard.clone() {
+            req = req.reply_markup(k);
+        }
+        match req.await {
             Ok(_) => return,
             Err(e) => {
                 if attempt == MAX_RETRIES {
