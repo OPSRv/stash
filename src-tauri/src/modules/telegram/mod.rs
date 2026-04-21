@@ -12,6 +12,7 @@ pub mod pairing;
 pub mod reminders;
 pub mod repo;
 pub mod sender;
+pub mod tools;
 pub mod settings;
 pub mod state;
 pub mod transport;

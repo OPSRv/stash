@@ -6,6 +6,7 @@
 //! trait so it never learns a provider-specific detail.
 
 pub mod anthropic;
+pub mod factory;
 pub mod openai;
 
 use async_trait::async_trait;
