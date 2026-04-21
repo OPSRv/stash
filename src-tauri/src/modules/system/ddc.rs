@@ -96,6 +96,122 @@ extern "C" {
     ) -> i32;
 }
 
+// ---- Intel Mac DDC path: IOFramebufferI2CInterface + IOI2C ----
+//
+// On Apple Silicon we reach the monitor through IOAVService. On Intel Macs
+// that class isn't registered at all — instead every AppleIntelFramebuffer
+// exposes an `IOFramebufferI2CInterface` child that talks to the monitor's
+// DDC bus via the old IOKit I²C API. This is what ddcctl and pre-M1
+// MonitorControl use.
+//
+// Matching a CGDirectDisplayID to the right framebuffer on modern macOS
+// (10.15+) is non-trivial without the deprecated `CGDisplayIOServicePort`.
+// Since a typical Intel Mac mini has only one external monitor at a time
+// and unused framebuffers silently drop the write, we broadcast to every
+// IOFramebufferI2CInterface. The monitor that owns the path responds; the
+// rest are no-ops.
+
+#[link(name = "IOKit", kind = "framework")]
+extern "C" {
+    fn IOI2CInterfaceOpen(
+        interface: IoServiceT,
+        options: u32,
+        connect: *mut *mut c_void,
+    ) -> KernReturnT;
+    fn IOI2CInterfaceClose(connect: *mut c_void, options: u32) -> KernReturnT;
+    fn IOI2CSendRequest(
+        connect: *mut c_void,
+        options: u32,
+        request: *mut IOI2CRequest,
+    ) -> KernReturnT;
+}
+
+const K_IO_I2C_NO_TRANSACTION_TYPE: u64 = 0;
+const K_IO_I2C_SIMPLE_TRANSACTION_TYPE: u64 = 1;
+
+#[repr(C)]
+struct IOI2CRequest {
+    send_transaction_type: u64,
+    reply_transaction_type: u64,
+    send_address: u32,
+    reply_address: u32,
+    send_sub_address: u8,
+    reply_sub_address: u8,
+    _reserved_a: [u8; 2],
+    min_reply_delay: u64,
+    result: i32,
+    _pad_result: u32,
+    send_buffer: usize,
+    send_bytes: u32,
+    send_flags: u16,
+    _reserved_b: u16,
+    reply_buffer: usize,
+    reply_bytes: u32,
+    reply_flags: u16,
+    _reserved_c: u16,
+    _reserved_d: [u32; 16],
+}
+
+fn intel_send_packet(packet: &[u8]) -> Result<(), String> {
+    let services = iter_services("IOFramebufferI2CInterface", |_| true);
+    if services.is_empty() {
+        return Err("no IOFramebufferI2CInterface on this Mac".into());
+    }
+
+    let mut any_ok = false;
+    let mut last_err: Option<String> = None;
+
+    for svc in services {
+        let mut connect: *mut c_void = std::ptr::null_mut();
+        let rc = unsafe { IOI2CInterfaceOpen(svc, 0, &mut connect) };
+        if rc != KERN_SUCCESS || connect.is_null() {
+            last_err = Some(format!("IOI2CInterfaceOpen: rc={rc}"));
+            unsafe { IOObjectRelease(svc) };
+            continue;
+        }
+
+        let mut req = IOI2CRequest {
+            send_transaction_type: K_IO_I2C_SIMPLE_TRANSACTION_TYPE,
+            reply_transaction_type: K_IO_I2C_NO_TRANSACTION_TYPE,
+            send_address: 0x6E,
+            reply_address: 0,
+            send_sub_address: 0,
+            reply_sub_address: 0,
+            _reserved_a: [0; 2],
+            min_reply_delay: 0,
+            result: 0,
+            _pad_result: 0,
+            send_buffer: packet.as_ptr() as usize,
+            send_bytes: packet.len() as u32,
+            send_flags: 0,
+            _reserved_b: 0,
+            reply_buffer: 0,
+            reply_bytes: 0,
+            reply_flags: 0,
+            _reserved_c: 0,
+            _reserved_d: [0; 16],
+        };
+        let rc = unsafe { IOI2CSendRequest(connect, 0, &mut req) };
+        unsafe { IOI2CInterfaceClose(connect, 0) };
+        unsafe { IOObjectRelease(svc) };
+
+        if rc == KERN_SUCCESS && req.result == KERN_SUCCESS {
+            any_ok = true;
+        } else {
+            last_err = Some(format!(
+                "IOI2CSendRequest: rc={rc} result={}",
+                req.result
+            ));
+        }
+    }
+
+    if any_ok {
+        Ok(())
+    } else {
+        Err(last_err.unwrap_or_else(|| "no I2C interface accepted the write".into()))
+    }
+}
+
 const K_CF_STRING_ENCODING_ASCII: u32 = 0x0600;
 
 fn cfstr(s: &str) -> Option<CFStringRef> {
@@ -255,36 +371,75 @@ fn find_av_service(display: u32) -> Option<*const c_void> {
     None
 }
 
-/// Assemble and send a VCP SET command over DDC/CI. `vcp` is the opcode
-/// (0xD6 = Power Mode, 0x10 = Luminance…); `value` is a 16-bit setting.
-/// Packet layout per VESA DDC/CI spec:
-///   0x51 [length|0x80] 0x03 <vcp> <valueHi> <valueLo> <checksum>
-/// Checksum is XOR of destination address 0x6E with bytes [0..6].
-fn write_vcp(display: u32, vcp: u8, value: u16) -> Result<(), String> {
-    let svc = find_av_service(display)
-        .ok_or_else(|| "DDC service not found for this display".to_string())?;
-    let mut pkt = [0u8; 8];
-    pkt[0] = 0x51; // source address
-    pkt[1] = 0x84; // 0x80 | 4 data bytes
-    pkt[2] = 0x03; // VCP set
+/// Build the 7-byte DDC/CI Set-VCP packet per VESA MCCS:
+///   [0x51, 0x80|N, 0x03, opcode, valHi, valLo, checksum]
+/// Checksum is `0x6E XOR` of all preceding bytes (0x6E is the destination
+/// address on the 7-bit I²C bus = 0x37<<1).
+fn build_vcp_set_packet(vcp: u8, value: u16) -> [u8; 7] {
+    let mut pkt = [0u8; 7];
+    pkt[0] = 0x51;
+    pkt[1] = 0x84;
+    pkt[2] = 0x03;
     pkt[3] = vcp;
     pkt[4] = ((value >> 8) & 0xFF) as u8;
     pkt[5] = (value & 0xFF) as u8;
-    let mut checksum: u8 = 0x6E; // destination address
+    let mut cs: u8 = 0x6E;
     for b in &pkt[..6] {
-        checksum ^= b;
+        cs ^= b;
     }
-    pkt[6] = checksum;
+    pkt[6] = cs;
+    pkt
+}
 
-    // The DDC receiver buffer starts at offset 1 of our packet (the
-    // `IOAVServiceWriteI2C` signature wants a pointer to the data portion,
-    // not the source address). Length of payload is 6.
-    let rc = unsafe { IOAVServiceWriteI2C(svc, 0x37, 0x51, pkt[1..].as_ptr(), 6) };
-    unsafe { CFRelease(svc as CFTypeRef) };
-    if rc == KERN_SUCCESS {
-        Ok(())
-    } else {
-        Err(format!("IOAVServiceWriteI2C: rc={rc}"))
+fn write_vcp(display: u32, vcp: u8, value: u16) -> Result<(), String> {
+    let pkt = build_vcp_set_packet(vcp, value);
+
+    // Path 1: Apple Silicon. IOAVServiceWriteI2C expects the payload *after*
+    // the source-address byte (because dataAddress=0x51 is sent for us).
+    if let Some(svc) = find_av_service(display) {
+        let rc = unsafe { IOAVServiceWriteI2C(svc, 0x37, 0x51, pkt[1..].as_ptr(), 6) };
+        unsafe { CFRelease(svc as CFTypeRef) };
+        if rc == KERN_SUCCESS {
+            return Ok(());
+        }
+        // Fall through to Intel path — some Macs expose both.
+    }
+
+    // Path 2: Intel Mac via IOFramebufferI2CInterface. The wire-level
+    // IOI2CSendRequest wants the *full* 7-byte packet starting with the
+    // source address, because it controls the whole I²C transaction.
+    intel_send_packet(&pkt)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vcp_packet_has_valid_checksum_for_power_off() {
+        // VCP 0xD6 = 5 ("hard off"). Checksum must XOR 0x6E with all other
+        // bytes — the receiving monitor validates this and drops the packet
+        // otherwise, which is exactly what bit us on the user's bug report.
+        let pkt = build_vcp_set_packet(0xD6, 5);
+        assert_eq!(pkt[..6], [0x51, 0x84, 0x03, 0xD6, 0x00, 0x05]);
+        let mut cs: u8 = 0x6E;
+        for b in &pkt[..6] {
+            cs ^= b;
+        }
+        assert_eq!(pkt[6], cs);
+    }
+
+    #[test]
+    fn vcp_packet_for_brightness_mid_value() {
+        let pkt = build_vcp_set_packet(0x10, 50);
+        assert_eq!(pkt[3], 0x10);
+        assert_eq!(pkt[4], 0x00);
+        assert_eq!(pkt[5], 50);
+        let mut cs: u8 = 0x6E;
+        for b in &pkt[..6] {
+            cs ^= b;
+        }
+        assert_eq!(pkt[6], cs);
     }
 }
 
@@ -301,16 +456,27 @@ pub fn set_brightness(display: u32, percent: u8) -> Result<(), String> {
     write_vcp(display, 0x10, percent.min(100) as u16)
 }
 
-/// True when this display answers our IOAVService lookup. Used by the UI so
-/// the brightness slider stays enabled for external panels that don't respond
-/// to DisplayServices but do accept DDC writes (most USB-C docks and every
-/// HDMI monitor with standard VESA DDC/CI).
+/// True when this display has *some* DDC path we can attempt. On Apple
+/// Silicon that's the IOAVService lookup; on Intel it's the presence of at
+/// least one IOFramebufferI2CInterface. We treat "path available" as
+/// "worth enabling the slider" — the actual write may still fail (cheap
+/// HDMI adapters, KVMs, certain USB-C docks strip I²C), but the user should
+/// see the attempt.
 pub fn can_control(display: u32) -> bool {
-    match find_av_service(display) {
-        Some(svc) => {
-            unsafe { CFRelease(svc as CFTypeRef) };
-            true
-        }
-        None => false,
+    if unsafe { CGDisplayIsBuiltin(display) } != 0 {
+        return false;
     }
+    if let Some(svc) = find_av_service(display) {
+        unsafe { CFRelease(svc as CFTypeRef) };
+        return true;
+    }
+    // Intel fallback: any IOFramebufferI2CInterface means we have a DDC bus
+    // we can try. We don't filter to a specific framebuffer here — the
+    // slider enable/disable is coarse; the write itself is broadcast.
+    let services = iter_services("IOFramebufferI2CInterface", |_| true);
+    let any = !services.is_empty();
+    for svc in services {
+        unsafe { IOObjectRelease(svc) };
+    }
+    any
 }

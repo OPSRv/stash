@@ -32,9 +32,14 @@ mod ffi {
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
-        pub fn CGGetActiveDisplayList(
+        /// Unlike `CGGetActiveDisplayList`, this also reports displays that
+        /// are currently mirror-slaves — which is exactly the state we put
+        /// a display in when the user "disables" it. Without this, a
+        /// disabled display would vanish from our UI and there'd be no way
+        /// to re-enable it. Matches what System Settings > Displays does.
+        pub fn CGGetOnlineDisplayList(
             max_displays: u32,
-            active_displays: *mut CGDirectDisplayID,
+            online_displays: *mut CGDirectDisplayID,
             display_count: *mut u32,
         ) -> i32;
         pub fn CGMainDisplayID() -> CGDirectDisplayID;
@@ -108,7 +113,7 @@ pub fn list_hardware_displays() -> Vec<DisplayDevice> {
     use ffi::*;
     let mut ids: [CGDirectDisplayID; 16] = [0; 16];
     let mut count: u32 = 0;
-    let rc = unsafe { CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count) };
+    let rc = unsafe { CGGetOnlineDisplayList(16, ids.as_mut_ptr(), &mut count) };
     if rc != 0 {
         return Vec::new();
     }
