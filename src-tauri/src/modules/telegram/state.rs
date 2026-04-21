@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use super::commands_registry::{CommandRegistry, HelpCmd, StatusCmd};
 use super::keyring::SecretStore;
 use super::pairing::PairingState;
 use super::repo::TelegramRepo;
@@ -12,17 +13,39 @@ pub struct TelegramState {
     pub pairing: Mutex<PairingState>,
     pub transport: TransportHandle,
     pub sender: TelegramSender,
+    pub commands: CommandRegistry,
+    /// Handle kept so we can refresh `/help`'s snapshot whenever the
+    /// registry gains new entries post-construction.
+    pub help: Arc<HelpCmd>,
 }
 
 impl TelegramState {
     pub fn new(repo: TelegramRepo, secrets: Arc<dyn SecretStore>) -> Self {
+        let help = Arc::new(HelpCmd::new());
+        let mut commands = CommandRegistry::new();
+        commands.register_arc(help.clone());
+        commands.register(StatusCmd);
+        Self::refresh_help_snapshot(&commands, &help);
         Self {
             repo: Mutex::new(repo),
             secrets,
             pairing: Mutex::new(PairingState::Unconfigured),
             transport: TransportHandle::new(),
             sender: TelegramSender::new(),
+            commands,
+            help,
         }
+    }
+
+    /// Regenerate the `/help` output from the current registry contents.
+    /// Call after adding commands so the listing stays accurate.
+    pub fn refresh_help_snapshot(commands: &CommandRegistry, help: &HelpCmd) {
+        let entries: Vec<_> = commands
+            .enumerate()
+            .into_iter()
+            .map(|h| (h.name(), h.usage(), h.description()))
+            .collect();
+        help.set_snapshot(entries);
     }
 }
 

@@ -273,6 +273,22 @@ pub fn webchat_toggle_play(app: AppHandle, service: String) -> Result<(), String
     Ok(())
 }
 
+/// Return the *current* URL of the embedded webview — i.e. where the user
+/// has navigated to, not the home URL we passed to `webchat_embed`. Powers
+/// the "Save as tab" button: if the user clicked around inside a chat and
+/// ended up on a specific thread, that's what gets pinned as a new tab.
+#[tauri::command]
+pub fn webchat_current_url(app: AppHandle, service: String) -> Result<String, String> {
+    let label = label_for(&service)?;
+    let wv = app
+        .webviews()
+        .get(&label)
+        .cloned()
+        .ok_or_else(|| format!("webview {label} is not attached"))?;
+    let url = wv.url().map_err(|e| e.to_string())?;
+    Ok(url.to_string())
+}
+
 /// Destroy the webview entirely. Next embed creates a fresh session — used
 /// by the Reset button when a user wants to sign out / clear state.
 #[tauri::command]
