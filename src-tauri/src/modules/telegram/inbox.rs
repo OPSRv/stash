@@ -128,6 +128,12 @@ pub fn today_str(now_secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
+/// Public wrapper used by the reminders module — same logic, just not
+/// `pub(super)`-hidden so another sibling module can reach it.
+pub fn local_offset_seconds_public() -> i64 {
+    local_offset_seconds()
+}
+
 /// Naive local offset based on `std::time` — not DST-aware across future
 /// changes but fine for the "day counter reset" use case.
 fn local_offset_seconds() -> i64 {

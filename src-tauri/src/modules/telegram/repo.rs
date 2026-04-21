@@ -185,6 +185,74 @@ impl TelegramRepo {
         )?;
         Ok(())
     }
+
+    // -------------------- reminders --------------------
+
+    pub fn insert_reminder(&mut self, text: &str, due_at: i64, created_at: i64) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO reminders(text, due_at, sent, cancelled, created_at)
+             VALUES(?1, ?2, 0, 0, ?3)",
+            params![text, due_at, created_at],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn list_active_reminders(&self) -> Result<Vec<super::reminders::Reminder>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, text, due_at, sent, cancelled
+             FROM reminders
+             WHERE cancelled = 0 AND sent = 0
+             ORDER BY due_at ASC
+             LIMIT 200",
+        )?;
+        let rows = stmt.query_map([], map_reminder_row)?;
+        rows.collect()
+    }
+
+    pub fn due_reminders(
+        &self,
+        now: i64,
+        limit: usize,
+    ) -> Result<Vec<super::reminders::Reminder>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, text, due_at, sent, cancelled
+             FROM reminders
+             WHERE cancelled = 0 AND sent = 0 AND due_at <= ?1
+             ORDER BY due_at ASC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![now, limit as i64], map_reminder_row)?;
+        rows.collect()
+    }
+
+    pub fn mark_reminder_sent(&mut self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE reminders SET sent = 1 WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn cancel_reminder(&mut self, id: i64) -> Result<bool> {
+        let changed = self.conn.execute(
+            "UPDATE reminders SET cancelled = 1
+             WHERE id = ?1 AND cancelled = 0 AND sent = 0",
+            params![id],
+        )?;
+        Ok(changed > 0)
+    }
+}
+
+fn map_reminder_row(row: &rusqlite::Row<'_>) -> Result<super::reminders::Reminder> {
+    let sent: i64 = row.get(3)?;
+    let cancelled: i64 = row.get(4)?;
+    Ok(super::reminders::Reminder {
+        id: row.get(0)?,
+        text: row.get(1)?,
+        due_at: row.get(2)?,
+        sent: sent != 0,
+        cancelled: cancelled != 0,
+    })
 }
 
 #[cfg(test)]

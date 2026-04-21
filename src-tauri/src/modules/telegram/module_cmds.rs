@@ -11,6 +11,9 @@ use async_trait::async_trait;
 use tauri::{Emitter, Manager};
 
 use super::commands_registry::{CommandHandler, Ctx, InlineButton, InlineKeyboard, Reply};
+use super::reminders;
+use super::repo::TelegramRepo;
+use super::state::TelegramState;
 use crate::modules::clipboard::commands::ClipboardState;
 use crate::modules::notes::repo::NotesRepo;
 use crate::tray::TrayState;
@@ -209,6 +212,175 @@ impl CommandHandler for NoteCmd {
         }
     }
 }
+
+// -------------------- /remind --------------------
+
+pub struct RemindCmd {
+    state: Arc<TelegramState>,
+}
+
+impl RemindCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for RemindCmd {
+    fn name(&self) -> &'static str {
+        "remind"
+    }
+    fn description(&self) -> &'static str {
+        "Schedule a reminder. Formats: `10m text`, `14:30 text`, `tomorrow 9:00 text`, `2026-04-25 14:30 text`"
+    }
+    fn usage(&self) -> &'static str {
+        "/remind <when> <text>"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let now = now_secs();
+        let Some((due, text)) = reminders::parse_when(args, now) else {
+            return Reply::text(
+                "✍️ Usage: /remind <when> <text>\n\
+                 Examples:\n\
+                 • /remind 10m drink water\n\
+                 • /remind 1h30m call mom\n\
+                 • /remind 14:30 team sync\n\
+                 • /remind tomorrow 9:00 gym\n\
+                 • /remind 2026-04-25 14:30 doctor",
+            );
+        };
+        let created = now * 1000;
+        let mut repo = match self.state.repo.lock() {
+            Ok(r) => r,
+            Err(e) => return Reply::text(format!("⚠️ reminders error: {e}")),
+        };
+        match repo.insert_reminder(&text, due, created) {
+            Ok(id) => {
+                let mins = ((due - now) as f64 / 60.0).round() as i64;
+                let when = if mins < 60 {
+                    format!("in ~{mins} min")
+                } else if mins < 24 * 60 {
+                    format!("in ~{} h {} min", mins / 60, mins % 60)
+                } else {
+                    format!("in ~{} day(s)", mins / (24 * 60))
+                };
+                Reply::text(format!(
+                    "⏰ #{id} scheduled {when}: {text}\n(Cancel with /forget {id})"
+                ))
+            }
+            Err(e) => Reply::text(format!("⚠️ DB error: {e}")),
+        }
+    }
+}
+
+fn now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+// -------------------- /reminders --------------------
+
+pub struct RemindersCmd {
+    state: Arc<TelegramState>,
+}
+
+impl RemindersCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for RemindersCmd {
+    fn name(&self) -> &'static str {
+        "reminders"
+    }
+    fn description(&self) -> &'static str {
+        "List pending reminders"
+    }
+    fn usage(&self) -> &'static str {
+        "/reminders"
+    }
+    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
+        let repo = match self.state.repo.lock() {
+            Ok(r) => r,
+            Err(e) => return Reply::text(format!("⚠️ reminders error: {e}")),
+        };
+        let items = match repo.list_active_reminders() {
+            Ok(v) => v,
+            Err(e) => return Reply::text(format!("⚠️ DB error: {e}")),
+        };
+        if items.is_empty() {
+            return Reply::text("📭 No pending reminders.");
+        }
+        let now = now_secs();
+        let mut out = String::from("⏰ Pending:\n");
+        for r in items.iter().take(20) {
+            let delta = r.due_at - now;
+            let when = if delta < 0 {
+                "(past)".to_string()
+            } else if delta < 60 {
+                "< 1 min".to_string()
+            } else if delta < 3600 {
+                format!("{} min", delta / 60)
+            } else if delta < 86_400 {
+                format!("{} h", delta / 3600)
+            } else {
+                format!("{} d", delta / 86_400)
+            };
+            out.push_str(&format!("• #{} ({when}) — {}\n", r.id, r.text));
+        }
+        if items.len() > 20 {
+            out.push_str(&format!("…and {} more\n", items.len() - 20));
+        }
+        Reply::text(out.trim_end().to_string())
+    }
+}
+
+// -------------------- /forget --------------------
+
+pub struct ForgetCmd {
+    state: Arc<TelegramState>,
+}
+
+impl ForgetCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for ForgetCmd {
+    fn name(&self) -> &'static str {
+        "forget"
+    }
+    fn description(&self) -> &'static str {
+        "Cancel a pending reminder by id"
+    }
+    fn usage(&self) -> &'static str {
+        "/forget <id>"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let Ok(id): Result<i64, _> = args.trim().parse() else {
+            return Reply::text("✍️ Usage: /forget <id> (see /reminders)");
+        };
+        let mut repo = match self.state.repo.lock() {
+            Ok(r) => r,
+            Err(e) => return Reply::text(format!("⚠️ reminders error: {e}")),
+        };
+        match repo.cancel_reminder(id) {
+            Ok(true) => Reply::text(format!("🗑️ Cancelled reminder #{id}.")),
+            Ok(false) => Reply::text(format!("❓ No pending reminder #{id}.")),
+            Err(e) => Reply::text(format!("⚠️ DB error: {e}")),
+        }
+    }
+}
+
+// unused import silencer while the helper is only used in reminders.rs
+#[allow(dead_code)]
+fn _keep_import(_: &TelegramRepo) {}
 
 // -------------------- /volume --------------------
 

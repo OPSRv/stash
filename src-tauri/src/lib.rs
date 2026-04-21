@@ -701,6 +701,22 @@ pub fn run() {
             );
             telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
             telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
+            telegram_state.register_command(
+                modules::telegram::module_cmds::RemindCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::RemindersCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::ForgetCmd::new(Arc::clone(&telegram_state)),
+            );
+
+            // Outbound watchers — battery + reminders ticker.
+            modules::telegram::battery_watcher::spawn(app.handle().clone());
+            modules::telegram::reminders::spawn(
+                app.handle().clone(),
+                Arc::clone(&telegram_state),
+            );
 
             // Rehydrate paired state from secrets. Without this every app
             // restart left the bot offline even though bot_token + chat_id
