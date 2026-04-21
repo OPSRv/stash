@@ -35,4 +35,25 @@ describe('telegram api', () => {
     await api.unpair();
     expect(invoke).toHaveBeenCalledWith('telegram_unpair');
   });
+
+  it('listInbox forwards the limit', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await api.listInbox(50);
+    expect(invoke).toHaveBeenCalledWith('telegram_list_inbox', { limit: 50 });
+  });
+
+  it('markInboxRouted forwards id and target', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await api.markInboxRouted(7, 'notes');
+    expect(invoke).toHaveBeenCalledWith('telegram_mark_inbox_routed', {
+      id: 7,
+      target: 'notes',
+    });
+  });
+
+  it('deleteInboxItem forwards id', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await api.deleteInboxItem(9);
+    expect(invoke).toHaveBeenCalledWith('telegram_delete_inbox_item', { id: 9 });
+  });
 });
