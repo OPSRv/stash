@@ -53,6 +53,8 @@ lru = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
 tempfile = "3"
+teloxide = { version = "0.13", default-features = false, features = ["rustls", "macros"] }
+rand = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
