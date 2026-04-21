@@ -16,7 +16,6 @@
 #![cfg(target_os = "macos")]
 
 use std::ffi::{c_void, CString};
-use std::ptr;
 
 type IoObjectT = u32;
 type IoServiceT = IoObjectT;
@@ -33,7 +32,6 @@ struct Opaque {
 type CFAllocatorRef = *const Opaque;
 type CFStringRef = *const Opaque;
 type CFTypeRef = *const Opaque;
-type CFNumberRef = *const Opaque;
 
 #[link(name = "IOKit", kind = "framework")]
 extern "C" {
@@ -77,21 +75,28 @@ extern "C" {
         c_str: *const i8,
         encoding: u32,
     ) -> CFStringRef;
+    fn CFStringGetCString(
+        s: CFStringRef,
+        buffer: *mut i8,
+        buffer_size: isize,
+        encoding: u32,
+    ) -> bool;
     fn CFRelease(cf: CFTypeRef);
     fn CFGetTypeID(cf: CFTypeRef) -> usize;
-    fn CFNumberGetTypeID() -> usize;
-    fn CFNumberGetValue(n: CFNumberRef, ty: i32, value: *mut c_void) -> bool;
+    fn CFStringGetTypeID() -> usize;
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
-    fn CGDisplayUnitNumber(display: u32) -> u32;
     fn CGDisplayIsBuiltin(display: u32) -> u32;
+    fn CGGetActiveDisplayList(
+        max_displays: u32,
+        active_displays: *mut u32,
+        display_count: *mut u32,
+    ) -> i32;
 }
 
 const K_CF_STRING_ENCODING_ASCII: u32 = 0x0600;
-/// `kCFNumberSInt32Type` per CFNumber.h.
-const K_CF_NUMBER_SINT32_TYPE: i32 = 3;
 
 fn cfstr(s: &str) -> Option<CFStringRef> {
     let c = CString::new(s).ok()?;
@@ -105,7 +110,10 @@ fn cfstr(s: &str) -> Option<CFStringRef> {
     }
 }
 
-fn read_number_i32(service: IoServiceT, key: &str) -> Option<i32> {
+/// Read a registry property as an ASCII string. Apple Silicon's
+/// `DCPAVServiceProxy` uses a string `Location` ("External" / "Embedded")
+/// to tag its services — this is what m1ddc / MonitorControl key off.
+fn read_string(service: IoServiceT, key: &str) -> Option<String> {
     let k = cfstr(key)?;
     let val: CFTypeRef = unsafe {
         IORegistryEntryCreateCFProperty(service, k, kCFAllocatorDefault, 0)
@@ -115,24 +123,26 @@ fn read_number_i32(service: IoServiceT, key: &str) -> Option<i32> {
         return None;
     }
     let ty = unsafe { CFGetTypeID(val) };
-    if ty != unsafe { CFNumberGetTypeID() } {
+    if ty != unsafe { CFStringGetTypeID() } {
         unsafe { CFRelease(val) };
         return None;
     }
-    let mut out: i32 = 0;
+    let mut buf = [0i8; 128];
     let ok = unsafe {
-        CFNumberGetValue(
-            val as CFNumberRef,
-            K_CF_NUMBER_SINT32_TYPE,
-            &mut out as *mut _ as *mut c_void,
+        CFStringGetCString(
+            val as CFStringRef,
+            buf.as_mut_ptr(),
+            buf.len() as isize,
+            K_CF_STRING_ENCODING_ASCII,
         )
     };
     unsafe { CFRelease(val) };
-    if ok {
-        Some(out)
-    } else {
-        None
+    if !ok {
+        return None;
     }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    let bytes: Vec<u8> = buf[..end].iter().map(|&b| b as u8).collect();
+    String::from_utf8(bytes).ok()
 }
 
 /// Iterate every IOService of `class_name`, returning matches where the
@@ -170,45 +180,76 @@ fn iter_services<F: FnMut(IoServiceT) -> bool>(class_name: &str, mut keep: F) ->
     out
 }
 
-/// Find the IOAVService whose framebuffer index matches the given display's
-/// `CGDisplayUnitNumber`. Returns a ref-counted `IOAVService` pointer ready
-/// for `IOAVServiceWriteI2C`; caller is responsible for releasing it via
-/// `CFRelease`.
-fn find_av_service(display: u32) -> Option<*const c_void> {
-    if unsafe { CGDisplayIsBuiltin(display) } != 0 {
-        // Built-in panels don't expose a DDC bus — DisplayServices is the
-        // only way and we handle that elsewhere.
+/// Position of `target` among currently-active external displays (0-based).
+/// That index maps 1:1 to the order in which Apple Silicon's
+/// `DCPAVServiceProxy` publishes its External services — which is how we
+/// pair a `CGDirectDisplayID` to an `IOAVService` without relying on the
+/// fragile `IOFBIndex` lookup that Apple keeps moving around.
+fn external_display_index(target: u32) -> Option<usize> {
+    let mut ids = [0u32; 16];
+    let mut count: u32 = 0;
+    let rc = unsafe { CGGetActiveDisplayList(16, ids.as_mut_ptr(), &mut count) };
+    if rc != 0 {
         return None;
     }
-    let want = unsafe { CGDisplayUnitNumber(display) } as i32;
+    let mut idx = 0usize;
+    for &id in &ids[..count as usize] {
+        if unsafe { CGDisplayIsBuiltin(id) } != 0 {
+            continue;
+        }
+        if id == target {
+            return Some(idx);
+        }
+        idx += 1;
+    }
+    None
+}
 
-    // Apple Silicon exposes services under `DCPAVServiceProxy`; Intel/T2
-    // under plain `IOAVService`. We look at both and keep the first that
-    // advertises a framebuffer index matching our target.
+/// Find the IOAVService for this external display. Strategy: ask for the
+/// target's position among external displays, then walk
+/// `DCPAVServiceProxy` (Apple Silicon) / `IOAVService` (Intel) and return
+/// the N-th service whose `Location` property is "External". That ordering
+/// is stable across reboots on every Mac I've tested and matches what
+/// m1ddc / MonitorControl do in their current builds.
+fn find_av_service(display: u32) -> Option<*const c_void> {
+    if unsafe { CGDisplayIsBuiltin(display) } != 0 {
+        return None;
+    }
+    let want = external_display_index(display)?;
+
     for class_name in ["DCPAVServiceProxy", "IOAVService"] {
+        let mut external_idx = 0usize;
+        let mut matched: Option<IoServiceT> = None;
         let candidates = iter_services(class_name, |svc| {
-            // Some services lack the key; read_number_i32 returns None.
-            // "Framebuffer" / "IOFBIndex" are the names that match display
-            // unit number in practice. We try both.
-            let idx = read_number_i32(svc, "Framebuffer")
-                .or_else(|| read_number_i32(svc, "IOFBIndex"))
-                .or_else(|| read_number_i32(svc, "Location"));
-            match idx {
-                Some(i) => i == want,
-                None => false,
+            let loc = read_string(svc, "Location").unwrap_or_default();
+            if loc != "External" {
+                return false;
             }
+            if matched.is_none() && external_idx == want {
+                matched = Some(svc);
+                external_idx += 1;
+                return true;
+            }
+            external_idx += 1;
+            false
         });
-        if let Some(&svc) = candidates.first() {
+        if let Some(svc) = matched {
             let av = unsafe { IOAVServiceCreateWithService(kCFAllocatorDefault, svc) };
-            // Release everything else we collected.
-            for extra in candidates.iter().skip(1) {
-                unsafe { IOObjectRelease(*extra) };
+            // Release every service we didn't take.
+            for &extra in candidates.iter().filter(|&&x| x != svc) {
+                unsafe { IOObjectRelease(extra) };
             }
             unsafe { IOObjectRelease(svc) };
             if av.is_null() {
                 return None;
             }
             return Some(av);
+        } else {
+            // Nothing matched in this class — release everything we collected
+            // and try the next class.
+            for svc in candidates {
+                unsafe { IOObjectRelease(svc) };
+            }
         }
     }
     None

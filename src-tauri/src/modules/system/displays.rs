@@ -384,23 +384,23 @@ pub fn power_off_display(secondary: u32, master: u32) -> Result<(), String> {
     // channel, and a few cheap HDMI-over-USB adapters ignore the opcode.
     // Either way we ALSO fall through to the software dim+mirror path
     // below, so the user gets the best result their hardware allows.
-    let ddc_ok = super::ddc::set_power(secondary, false).is_ok();
+    let ddc_power_ok = super::ddc::set_power(secondary, false).is_ok();
 
-    // Step 3 — dim to 0 and mirror. On hardware where DDC worked this is
-    // redundant but harmless; on hardware where it didn't, this is what
-    // actually darkens the panel and stops the system from placing
-    // windows on a now-black surface.
+    // Step 3 — belt-and-suspenders dim. VCP 0xD6 (power) is optional on
+    // many monitors but VCP 0x10 (brightness) is mandatory per DDC/CI, so
+    // pushing brightness to 0 gives us a dark panel even when the power
+    // opcode was ignored. For built-in panels DisplayServices gets the job.
     if unsafe { DisplayServicesCanChangeBrightness(secondary) } {
         let _ = unsafe { DisplayServicesSetBrightness(secondary, 0.0) };
     }
+    let ddc_dim_ok = super::ddc::set_brightness(secondary, 0).is_ok();
+
     reconfigure_mirror(secondary, master, promote_master)?;
 
-    if !ddc_ok {
-        // Not an error — user still saw the display go dark through the
-        // mirror+dim fallback. Just a breadcrumb for the logs.
+    if !ddc_power_ok && !ddc_dim_ok {
         tracing::info!(
             display = secondary,
-            "ddc set_power failed; relied on mirror+brightness fallback"
+            "ddc unavailable; display is mirrored but may remain lit"
         );
     }
     Ok(())
