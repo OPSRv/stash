@@ -17,6 +17,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::Value;
 
+pub mod memory;
+
 use super::llm::{ToolCall, ToolSpec};
 use super::state::TelegramState;
 
