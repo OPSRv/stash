@@ -1,7 +1,9 @@
 # Telegram Bot + CLI — Design
 
-**Date:** 2026-04-21
-**Status:** Draft (post-brainstorming, pre-implementation plan)
+**Date:** 2026-04-21 (updated 2026-04-22 after Phase 0–2, 4–6 shipped)
+**Status:** Live — Phases 0, 1, 2, 4, 5 complete; Phase 6 shipped via
+AppleScript (EventKit-direct bridge deferred); Phases 3 (AI assistant)
+and 7 (CLI) remain.
 
 ## 1. Goals
 
@@ -567,7 +569,62 @@ Licence: all MIT/Apache — fine for bundling. teloxide is well-maintained and u
 
 ## 11. Phased implementation plan
 
-**Phase 0 — Skeleton & pairing (end-to-end thinnest slice)**
+> **Status legend** — ✅ shipped, ⚠️ partial, ❌ not started.
+
+### Shipped in 2026-04-21 / 04-22 session
+
+- ✅ **Phase 0** — keyring + pairing state machine + transport + ConnectionPanel.
+- ✅ **Phase 1** — sender with rate-limit + retry, text inbox persistence,
+  /help /status /battery /clip /note /music /volume slash commands,
+  InboxPanel with routing buttons, setMyCommands auto-publishes the
+  command list to Telegram's autocomplete.
+- ✅ **Phase 1.5+** — voice / photo / document / video downloads with
+  per-file 20 MB and per-day 50 MB caps; files live at
+  `<app_data>/telegram/inbox/YYYY-MM-DD/<uuid>.<ext>` with the
+  relative path stored in the DB. "Open" button reveals in Finder.
+- ✅ **Phase 2** — voice messages auto-transcribed via Whisper's active
+  model; transcript stored on the inbox row; bot replies with a
+  preview. `transcribe_with_active_model` public helper in the whisper
+  module so the AI assistant (Phase 3) can reuse the same path.
+- ✅ **Phase 4** — reminders engine: `/remind` parser (compact offsets,
+  wall-clock, `tomorrow HH:MM`, absolute `YYYY-MM-DD HH:MM`), 30-second
+  ticker, `/reminders` list, `/forget <id>` cancel, "(late)" marker on
+  missed firings. RRULE recurrence deferred.
+- ✅ **Phase 5** — outbound notifier with per-category cooldown:
+  Pomodoro transitions, Download complete, Battery low (with settings-
+  backed threshold). Calendar category added in Phase 6. Per-category
+  toggles live in the Alerts sub-tab.
+- ✅ **Phase 6** — Calendar.app events polled via `osascript` every 60 s,
+  dedupe by event UID, "📅 <title> in N minutes" alert when an event
+  crosses the user's lead window. First run prompts for Automation
+  permission in macOS settings. **Note**: the original design called
+  for `objc2-event-kit`; AppleScript ships without new deps or
+  entitlement plumbing and is swap-in-compatible if a future phase
+  wants finer-grained EventKit calls (attendees, recurrence etc.).
+
+### Remaining
+
+- ❌ **Phase 3 — AI assistant + tools**. Design remains as written:
+  provider-agnostic LlmClient (reads the `ai` module's key + model),
+  rolling 50-message chat history persisted in the `chat` table,
+  editable system prompt, tool-use registry with `create_reminder` /
+  `list_reminders` / `cancel_reminder` / `remember_fact` /
+  `list_facts` / `forget_fact` / `get_battery` / `get_last_clip` /
+  `pomodoro_status` / `start_download`. Memory-fact CRUD (`remember`
+  as an explicit slash plus the tool) targets the already-migrated
+  `memory` table. This is the largest remaining slice — ~500–1000
+  lines. Start from a fresh session (context-cost reason).
+
+- ❌ **Phase 7 — CLI transport**. Design unchanged: `stash-cli` crate,
+  Unix socket at `ipc.sock` (0600), JSON-line protocol, bundled binary
+  + first-launch install prompt, `stash claude [path]` launcher.
+  Independent of Phase 3 — can ship in either order.
+
+- **Deferred / post-MVP (unchanged)**: RRULE recurrence, Google
+  Calendar / Apple Reminders *write* integration, Google Drive upload
+  for inbox, TTS voice replies, multi-bot support.
+
+### Phase 0 — Skeleton & pairing (end-to-end thinnest slice) — ✅ shipped
 1. Rust `telegram` module scaffolding + registry wiring.
 2. `keyring.rs` store; `state.rs`; `commands.rs` for token + status.
 3. `transport.rs` with teloxide long-polling (just `/pair` handler + allowlist).
@@ -576,38 +633,46 @@ Licence: all MIT/Apache — fine for bundling. teloxide is well-maintained and u
 6. DB migrations for all tables (even if unused — one-shot migration).
 7. Smoke test: pair a real bot, verify `chat_id` landed.
 
-**Phase 1 — Inbox & outbound basics**
+### Phase 1 — Inbox & outbound basics — ✅ shipped (expanded)
 1. `sender.rs` with serial queue + retry.
 2. `inbox.rs` persistence; text/photo/document/voice file downloads with size cap.
 3. `InboxPanel` UI + tests; one-click routing (`→ Notes`, `→ Clipboard`, `→ Transcribe`, `→ Finder`).
-4. `commands_registry.rs` with core slash handlers (`/help`, `/status`, `/clip`, `/battery`, `/note`, `/tr`, `/pomodoro`, `/dl`).
+4. `commands_registry.rs` with core slash handlers (`/help`, `/status`,
+   `/clip`, `/battery`, `/note`). Also shipped: `/music` (with inline
+   keyboard buttons), `/volume`. `/tr` / `/dl` / `/pomodoro` deferred
+   — pattern is proven, add on demand.
 
-**Phase 2 — Voice → whisper → text**
+### Phase 2 — Voice → whisper → text — ✅ shipped
 1. `voice.rs` bridge to whisper module's active model.
 2. Inbox UI: Transcribe button; Advanced toggle wired.
 
-**Phase 3 — AI assistant + tools**
+### Phase 3 — AI assistant + tools — ❌ not started
 1. `llm/*` client (OpenAI + Anthropic).
 2. `assistant.rs` orchestration + system prompt / facts injection.
 3. `tools/memory.rs`, `tools/reminders.rs`, `tools/stash.rs`.
 4. `MemoryPanel`, `RemindersPanel`, `AiPromptPanel`.
 
-**Phase 4 — Reminders engine**
+### Phase 4 — Reminders engine — ✅ shipped (RRULE deferred)
 1. `reminders.rs` ticker.
 2. RRULE advancement.
 3. Wake-from-sleep "(late)" marker.
 
-**Phase 5 — Outbound notifications**
+### Phase 5 — Outbound notifications — ✅ shipped
 1. `notifier.rs` bus; dedup; rate limits.
 2. Wire battery, pomodoro, downloader modules to push events through it.
 3. `NotificationsPanel` toggle matrix.
 
-**Phase 6 — EventKit calendar**
+### Phase 6 — Calendar (via AppleScript, not EventKit) — ✅ shipped
 1. `calendar.rs` bridge + permission request.
 2. Lookahead ticker.
-3. Error state UI when permission denied.
+3. Error state UI when permission denied. *(Shipped change: used
+   `osascript` + Calendar.app Automation permission rather than
+   `objc2-event-kit`. The switch buys us zero new deps and no
+   entitlement plumbing; we lose only finer-grained event metadata
+   which the current single-line "📅 title in N minutes" doesn't use.
+   Swap to EventKit later if an Attendees / Recurrence feature lands.)*
 
-**Phase 7 — CLI transport**
+### Phase 7 — CLI transport — ❌ not started
 1. `stash-cli` crate + bundled binary (`tauri.conf.json` resources).
 2. IPC server tokio task on app startup (Unix socket, JSON lines).
 3. Reuse `CommandRegistry` — no handler duplication.
@@ -658,3 +723,46 @@ Each phase ships with tests green, a visible UI increment, and can be used stand
 - Which LLM provider to wire first? Likely whichever is already configured in `ai` module (reuse key). If none, OpenAI first (commonest user key).
 - Rate-limit strategy for abuse scenarios — current design assumes single-user trust. Revisit if multi-user lands.
 - Whether to expose a command palette (`/?`) for fuzzy command search when > 20 commands accumulate post-MVP.
+
+## 16. Implementation notes surfaced during 2026-04-21/22 build
+
+These are post-fact reality checks worth keeping alongside the design
+so a future session doesn't re-learn them the hard way.
+
+- **Unsigned dev-build macOS Keychain** silently drops `set_password`
+  writes. Solved with a canary-roundtrip probe in `file_secrets.rs` —
+  if the probe fails, the module falls back to an AES-128-CBC-
+  encrypted file at `<app_data>/telegram/.secrets.bin` keyed by the
+  machine's hostname. Signed release builds hit the Keychain path
+  normally. The probe uses a *fresh* `keyring::Entry` on the read leg
+  because same-Entry in-process state can mask the failure.
+- **Rehydrate paired state** at app setup — `TelegramState::new()`
+  always starts `Unconfigured` otherwise, so every restart stranded
+  a previously-paired bot offline. We now re-read `bot_token` +
+  `chat_id` from secrets and auto-spawn transport + sender when both
+  are present.
+- **Long-poll idle timeout** must stay short (10 s used) — 25 s was
+  getting reaped by intermediate NATs, spamming the log with three
+  `getUpdates timed out` warnings per minute of idle.
+- **tokio** was only transitively available via teloxide; we added
+  it as a direct dep with `rt-multi-thread + macros + sync + time +
+  fs + io-util` features for `spawn_blocking`, `fs::File` streaming,
+  and `time::interval` in the watchers.
+- **reqwest** in this repo is compiled without the `json` feature;
+  we parse Telegram responses with `text().await` + `serde_json::from_str`.
+- **Notes cross-module refresh** — the notes sidebar reloads on its
+  own writes but had no trigger for external inserts. `/note` now
+  emits `notes:changed`; `NotesShell` listens and calls `reload()`.
+  Same pattern applies whenever another module mutates a repo the
+  UI is holding summaries for.
+- **Ctx carries `AppHandle`** — necessary for any handler that wants
+  to `emit` cross-module events. Added after `/note` landed without
+  a refresh signal.
+- **CommandRegistry uses `RwLock`** so `lib.rs` can register cross-
+  module commands (`/clip`, `/note`, `/music`) *after* `TelegramState`
+  is constructed, once their target module states exist.
+- **Local date math** is done without `chrono` via a hand-rolled
+  `ymd_from_days` / `days_from_ymd` pair; the only platform coupling
+  is `date +%z` for the local offset. Good enough for inbox day
+  partitioning + reminder parsing; swap to `chrono` if we grow DST
+  edge cases.
