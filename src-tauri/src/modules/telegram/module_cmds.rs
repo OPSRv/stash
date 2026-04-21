@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use tauri::Emitter;
 
 use super::commands_registry::{CommandHandler, Ctx, Reply};
 use crate::modules::clipboard::commands::ClipboardState;
@@ -37,46 +38,70 @@ impl CommandHandler for BatteryCmd {
     }
     async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
         match read_battery() {
-            Some((percent, charging)) => {
+            BatterySnapshot::Present { percent, charging } => {
                 let icon = if charging { "🔌" } else { "🔋" };
                 let status = if charging { "charging" } else { "on battery" };
                 Reply::text(format!("{icon} {percent}% — {status}"))
             }
-            None => Reply::text("🪫 Battery info unavailable on this system."),
+            BatterySnapshot::NoBattery => {
+                Reply::text("🔌 This Mac has no battery (desktop / plugged in).")
+            }
+            BatterySnapshot::Unknown => {
+                Reply::text("🪫 Battery info unavailable on this system.")
+            }
         }
     }
 }
 
-/// Parse `pmset -g batt` output — shape:
+#[derive(Debug, PartialEq, Eq)]
+enum BatterySnapshot {
+    Present { percent: u32, charging: bool },
+    /// pmset succeeded but produced no battery line — desktop Mac / server.
+    NoBattery,
+    /// pmset absent, failed, or returned garbage.
+    Unknown,
+}
+
+/// Parse `pmset -g batt` output — shape on laptops:
 ///   `  -InternalBattery-0 (id=...) 87%; charging; 2:31 remaining present: true`
-fn read_battery() -> Option<(u32, bool)> {
-    let out = Command::new("pmset").args(["-g", "batt"]).output().ok()?;
+/// On desktop Macs (Mac Mini / Studio / Pro) the output is only
+/// `Now drawing from 'AC Power'` with no battery line — we report that
+/// distinctly so the user gets a useful reply instead of "unavailable".
+fn read_battery() -> BatterySnapshot {
+    let Ok(out) = Command::new("pmset").args(["-g", "batt"]).output() else {
+        return BatterySnapshot::Unknown;
+    };
     if !out.status.success() {
-        return None;
+        return BatterySnapshot::Unknown;
     }
     let text = String::from_utf8_lossy(&out.stdout);
     parse_pmset(&text)
 }
 
-fn parse_pmset(s: &str) -> Option<(u32, bool)> {
-    // Find "NN%" and read the word after the semicolon.
-    let pct_idx = s.find('%')?;
+fn parse_pmset(s: &str) -> BatterySnapshot {
+    // Look for "NN%" on any line.
+    let Some(pct_idx) = s.find('%') else {
+        // No percent sign at all — desktop Mac has no battery line.
+        return BatterySnapshot::NoBattery;
+    };
     let prefix = &s[..pct_idx];
     let pct_start = prefix
         .rfind(|c: char| !c.is_ascii_digit())
         .map(|i| i + 1)
         .unwrap_or(0);
-    let percent: u32 = prefix[pct_start..].parse().ok()?;
+    let Ok(percent) = prefix[pct_start..].parse::<u32>() else {
+        return BatterySnapshot::Unknown;
+    };
     let rest = &s[pct_idx + 1..];
     let charging = rest
         .split(';')
         .nth(1)
         .map(|s| {
             let w = s.trim().to_lowercase();
-            w == "charging" || w == "AC attached".to_lowercase() || w.starts_with("ac")
+            w == "charging" || w.starts_with("ac")
         })
         .unwrap_or(false);
-    Some((percent, charging))
+    BatterySnapshot::Present { percent, charging }
 }
 
 // -------------------- /clip --------------------
@@ -156,7 +181,7 @@ impl CommandHandler for NoteCmd {
     fn usage(&self) -> &'static str {
         "/note <text>"
     }
-    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let body = args.trim();
         if body.is_empty() {
             return Reply::text("✍️ Usage: /note <text>");
@@ -167,12 +192,18 @@ impl CommandHandler for NoteCmd {
         } else {
             title
         };
-        let mut repo = match self.repo.lock() {
-            Ok(r) => r,
+        let result = match self.repo.lock() {
+            Ok(mut repo) => repo.create(&title, body, now_ms()),
             Err(e) => return Reply::text(format!("⚠️ notes error: {e}")),
         };
-        match repo.create(&title, body, now_ms()) {
-            Ok(id) => Reply::text(format!("📝 Saved note #{id}: {title}")),
+        match result {
+            Ok(id) => {
+                // Nudge the Notes panel to refresh — the panel normally
+                // reloads on its own writes but has no other signal to
+                // notice a cross-module insert.
+                let _ = ctx.app.emit("notes:changed", id);
+                Reply::text(format!("📝 Saved note #{id}: {title}"))
+            }
             Err(e) => Reply::text(format!("⚠️ notes error: {e}")),
         }
     }
@@ -185,24 +216,49 @@ mod tests {
     #[test]
     fn pmset_parses_typical_output() {
         let s = "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=123) 87%; discharging; 2:31 remaining present: true\n";
-        assert_eq!(parse_pmset(s), Some((87, false)));
+        assert_eq!(
+            parse_pmset(s),
+            BatterySnapshot::Present {
+                percent: 87,
+                charging: false,
+            }
+        );
     }
 
     #[test]
     fn pmset_parses_charging() {
         let s = " -InternalBattery-0 (id=1) 42%; charging; 1:10 present: true\n";
-        assert_eq!(parse_pmset(s), Some((42, true)));
+        assert_eq!(
+            parse_pmset(s),
+            BatterySnapshot::Present {
+                percent: 42,
+                charging: true,
+            }
+        );
     }
 
     #[test]
     fn pmset_parses_ac_attached() {
         let s = " -InternalBattery-0 (id=1) 100%; AC attached; not charging present: true\n";
-        assert_eq!(parse_pmset(s), Some((100, true)));
+        assert_eq!(
+            parse_pmset(s),
+            BatterySnapshot::Present {
+                percent: 100,
+                charging: true,
+            }
+        );
     }
 
     #[test]
-    fn pmset_nonsense_returns_none() {
-        assert_eq!(parse_pmset("nothing useful here"), None);
+    fn pmset_desktop_mac_without_battery() {
+        assert_eq!(parse_pmset("Now drawing from 'AC Power'\n"), BatterySnapshot::NoBattery);
+    }
+
+    #[test]
+    fn pmset_garbled_returns_unknown() {
+        // A percent sign but no parsable number nearby → Unknown, not
+        // NoBattery, because we did see a %.
+        assert_eq!(parse_pmset("abc%def"), BatterySnapshot::Unknown);
     }
 
     #[test]

@@ -285,7 +285,10 @@ async fn handle_update(
             if let Some(handler) = state.find_command(&name) {
                 let reply = handler
                     .handle(
-                        crate::modules::telegram::commands_registry::Ctx { chat_id },
+                        crate::modules::telegram::commands_registry::Ctx {
+                            chat_id,
+                            app: app.clone(),
+                        },
                         &args,
                     )
                     .await;

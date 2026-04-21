@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
@@ -226,6 +227,20 @@ export const NotesShell = () => {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
+
+  // Cross-module inserts (e.g. Telegram /note) fire `notes:changed` so the
+  // sidebar refreshes without the user re-typing in the search box.
+  useEffect(() => {
+    let cancel: (() => void) | undefined;
+    listen('notes:changed', () => {
+      void reload();
+    }).then((un) => {
+      cancel = un;
+    });
+    return () => {
+      cancel?.();
+    };
+  }, [reload]);
 
   const active = activeNote;
 
