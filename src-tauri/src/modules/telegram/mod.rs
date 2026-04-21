@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod commands_registry;
 pub mod file_secrets;
+pub mod inbox;
 pub mod keyring;
 pub mod module_cmds;
 pub mod pairing;

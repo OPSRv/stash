@@ -273,6 +273,29 @@ pub fn webchat_toggle_play(app: AppHandle, service: String) -> Result<(), String
     Ok(())
 }
 
+/// Navigate the embedded webview back one step in its history. Safe no-op
+/// when there is nothing to go back to — the browser's `history.back()`
+/// handles that silently.
+#[tauri::command]
+pub fn webchat_back(app: AppHandle, service: String) -> Result<(), String> {
+    let label = label_for(&service)?;
+    if let Some(wv) = app.webviews().get(&label).cloned() {
+        wv.eval("history.back()").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Navigate the embedded webview forward one step in its history. Safe no-op
+/// when there is nothing to go forward to.
+#[tauri::command]
+pub fn webchat_forward(app: AppHandle, service: String) -> Result<(), String> {
+    let label = label_for(&service)?;
+    if let Some(wv) = app.webviews().get(&label).cloned() {
+        wv.eval("history.forward()").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Return the *current* URL of the embedded webview — i.e. where the user
 /// has navigated to, not the home URL we passed to `webchat_embed`. Powers
 /// the "Save as tab" button: if the user clicked around inside a chat and

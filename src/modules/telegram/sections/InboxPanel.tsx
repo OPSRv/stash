@@ -130,6 +130,20 @@ export function InboxPanel() {
                 >
                   → Clipboard
                 </Button>
+                {item.file_path && (
+                  <Button
+                    size="xs"
+                    disabled={busyId === item.id}
+                    onClick={() =>
+                      runOn(item.id, async () => {
+                        await api.revealInboxFile(item.id);
+                      })
+                    }
+                    title="Reveal in Finder"
+                  >
+                    Open
+                  </Button>
+                )}
                 <Button
                   size="xs"
                   tone="danger"

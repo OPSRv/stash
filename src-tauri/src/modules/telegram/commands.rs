@@ -211,6 +211,41 @@ pub fn telegram_mark_inbox_routed(
     Ok(())
 }
 
+/// Reveal a media inbox file in Finder. Resolves the relative
+/// `file_path` against the Tauri app data dir and runs `open -R`.
+#[tauri::command]
+pub fn telegram_reveal_inbox_file(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+    id: i64,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let items = state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .list_inbox(500)
+        .map_err(|e| e.to_string())?;
+    let item = items
+        .into_iter()
+        .find(|i| i.id == id)
+        .ok_or_else(|| format!("inbox item {id} not found"))?;
+    let rel = item
+        .file_path
+        .ok_or_else(|| "inbox item has no file".to_string())?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    let abs = data_dir.join(&rel);
+    std::process::Command::new("open")
+        .args(["-R"])
+        .arg(&abs)
+        .spawn()
+        .map_err(|e| format!("open: {e}"))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn telegram_unpair(
     app: AppHandle,

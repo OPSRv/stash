@@ -109,8 +109,9 @@ use modules::ai::{
 };
 use modules::telegram::commands::{
     telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
-    telegram_has_token, telegram_list_inbox, telegram_mark_inbox_routed, telegram_set_token,
-    telegram_start_pairing, telegram_status, telegram_unpair,
+    telegram_has_token, telegram_list_inbox, telegram_mark_inbox_routed,
+    telegram_reveal_inbox_file, telegram_set_token, telegram_start_pairing, telegram_status,
+    telegram_unpair,
 };
 use modules::clipboard::{
     commands::{
@@ -184,8 +185,8 @@ use modules::system::commands::{
 use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
 use modules::terminal::state::TerminalState;
 use modules::webchat::commands::{
-    webchat_close, webchat_close_all, webchat_current_url, webchat_embed, webchat_hide,
-    webchat_hide_all, webchat_reload, webchat_toggle_play,
+    webchat_back, webchat_close, webchat_close_all, webchat_current_url, webchat_embed,
+    webchat_forward, webchat_hide, webchat_hide_all, webchat_reload, webchat_toggle_play,
 };
 use modules::translator::{
     commands::{
@@ -474,6 +475,7 @@ pub fn run() {
             telegram_list_inbox,
             telegram_delete_inbox_item,
             telegram_mark_inbox_routed,
+            telegram_reveal_inbox_file,
             webchat_embed,
             webchat_hide,
             webchat_hide_all,
@@ -482,6 +484,8 @@ pub fn run() {
             webchat_close_all,
             webchat_toggle_play,
             webchat_current_url,
+            webchat_back,
+            webchat_forward,
             tray::tray_set_menu,
             tray::tray_set_player_icons,
             tray::tray_set_player_artwork,

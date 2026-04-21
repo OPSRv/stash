@@ -234,7 +234,7 @@ async fn run_polling(
 }
 
 async fn handle_update(
-    _bot: &teloxide::Bot,
+    bot: &teloxide::Bot,
     app: &AppHandle,
     state: &Arc<TelegramState>,
     update: teloxide::types::Update,
@@ -244,12 +244,27 @@ async fn handle_update(
     let UpdateKind::Message(msg) = update.kind else {
         return;
     };
-    let Some(text) = msg.text() else { return };
     let chat_id = msg.chat.id.0;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
+
+    // Media path — voice / photo / document / video. Only persisted when
+    // the sender is on the allowlist (Paired.chat_id == msg.chat_id).
+    if let Some(intent) = super::inbox::extract_media(&msg) {
+        let is_allowed = matches!(
+            &*state.pairing.lock().unwrap(),
+            super::pairing::PairingState::Paired { chat_id: allowed } if *allowed == chat_id
+        );
+        if !is_allowed {
+            return; // allowlist drop
+        }
+        handle_media(bot, app, state, &msg, intent, now).await;
+        return;
+    }
+
+    let Some(text) = msg.text() else { return };
 
     let action = {
         let mut p = state.pairing.lock().unwrap();
@@ -331,6 +346,122 @@ async fn handle_update(
         }
     }
     let _ = app.emit("telegram:status_changed", ());
+}
+
+async fn handle_media(
+    bot: &teloxide::Bot,
+    app: &AppHandle,
+    state: &Arc<TelegramState>,
+    msg: &teloxide::types::Message,
+    intent: super::inbox::MediaIntent,
+    now: i64,
+) {
+    use super::inbox::{
+        bump_used_bytes, check_caps, download_to, record_media, target_paths, today_str,
+        today_used_bytes, CapVerdict,
+    };
+    use tauri::Manager;
+
+    let chat_id = msg.chat.id.0;
+    let day = today_str(now);
+    let used = today_used_bytes(state, &day);
+
+    match check_caps(intent.declared_size, used) {
+        CapVerdict::OverPerFile { limit, size } => {
+            state.sender.enqueue(
+                chat_id,
+                format!(
+                    "⚠️ File too big: {} MB (per-file cap {} MB). Skipped.",
+                    size / 1_048_576,
+                    limit / 1_048_576
+                ),
+            );
+            return;
+        }
+        CapVerdict::OverPerDay {
+            limit,
+            used,
+            attempted,
+        } => {
+            state.sender.enqueue(
+                chat_id,
+                format!(
+                    "⚠️ Daily inbox quota hit: {} MB used + {} MB pending > {} MB cap. Try tomorrow.",
+                    used / 1_048_576,
+                    attempted / 1_048_576,
+                    limit / 1_048_576,
+                ),
+            );
+            return;
+        }
+        CapVerdict::Unknown => {
+            state
+                .sender
+                .enqueue(chat_id, "⚠️ Telegram didn't declare a size — skipping.");
+            return;
+        }
+        CapVerdict::Ok => {}
+    }
+
+    // Resolve the app data dir every call — cheap lookup through Manager.
+    let data_dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, "inbox: app_data_dir lookup failed");
+            return;
+        }
+    };
+
+    let (abs, rel) = match target_paths(&data_dir, &day, intent.extension) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "inbox: could not create day dir");
+            state
+                .sender
+                .enqueue(chat_id, "⚠️ Inbox directory setup failed — check Stash logs.");
+            return;
+        }
+    };
+
+    let bytes = match download_to(bot, &intent.file_id, &abs).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!(error = %e, "inbox: download failed");
+            let _ = std::fs::remove_file(&abs); // partial file, best-effort cleanup
+            state
+                .sender
+                .enqueue(chat_id, "⚠️ Download from Telegram failed — check Stash logs.");
+            return;
+        }
+    };
+
+    let msg_id = msg.id.0 as i64;
+    if let Err(e) = record_media(app, state, msg_id, &intent, &rel, now) {
+        tracing::warn!(error = %e, "inbox: repo insert failed");
+        state
+            .sender
+            .enqueue(chat_id, "⚠️ Could not persist inbox record — file kept on disk.");
+        return;
+    }
+    bump_used_bytes(state, &day, bytes);
+
+    let human_size = if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.0} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    };
+    let duration_tag = intent
+        .duration_sec
+        .filter(|s| *s > 0)
+        .map(|s| format!(" · {s}s"))
+        .unwrap_or_default();
+    let reply = format!(
+        "📥 Saved {} ({}{}). See it in Stash → Telegram → Inbox.",
+        intent.kind, human_size, duration_tag
+    );
+    state.sender.enqueue(chat_id, reply);
 }
 
 #[cfg(test)]

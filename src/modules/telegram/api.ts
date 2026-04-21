@@ -26,3 +26,6 @@ export const deleteInboxItem = (id: number): Promise<void> =>
 
 export const markInboxRouted = (id: number, target: RouteTarget): Promise<void> =>
   invoke('telegram_mark_inbox_routed', { id, target });
+
+export const revealInboxFile = (id: number): Promise<void> =>
+  invoke('telegram_reveal_inbox_file', { id });

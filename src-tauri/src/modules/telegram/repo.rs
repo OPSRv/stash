@@ -108,6 +108,36 @@ impl TelegramRepo {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Record a media inbox row (voice / photo / document / video). Caller
+    /// has already downloaded the file and knows its relative path under
+    /// the app data dir.
+    pub fn insert_media_inbox(
+        &mut self,
+        telegram_message_id: i64,
+        kind: &str,
+        file_path: Option<&str>,
+        mime_type: Option<&str>,
+        duration_sec: Option<i64>,
+        caption: Option<&str>,
+        received_at: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO inbox(telegram_message_id, kind, file_path, mime_type,
+                               duration_sec, caption, received_at)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                telegram_message_id,
+                kind,
+                file_path,
+                mime_type,
+                duration_sec,
+                caption,
+                received_at
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
     pub fn list_inbox(&self, limit: usize) -> Result<Vec<InboxItem>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, telegram_message_id, kind, text_content, file_path,
