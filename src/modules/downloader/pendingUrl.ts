@@ -5,7 +5,7 @@
 /// fired (and there was no listener in place yet).
 ///
 /// Keeping this out of React state is intentional: it has to survive the gap
-/// between `openTab('downloader')` and the lazy chunk finishing its import.
+/// between `openTab('downloads')` and the lazy chunk finishing its import.
 let pending: string | null = null;
 
 export function setPendingDownloaderUrl(url: string | null): void {

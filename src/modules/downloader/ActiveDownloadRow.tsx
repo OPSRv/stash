@@ -22,7 +22,10 @@ export const ActiveDownloadRow = ({
   onPause,
   onResume,
 }: ActiveDownloadRowProps) => {
-  const progressPct = Math.round(job.progress * 100);
+  // Clamp to [0, 100] — yt-dlp occasionally emits progress values above 1
+  // when a post-processing step bumps bytes_done past bytes_total, and a
+  // "104%" readout under the play icon looks like a bug.
+  const progressPct = Math.max(0, Math.min(100, Math.round(job.progress * 100)));
   const bytesLabel =
     job.bytes_done && job.bytes_total ? formatBytes(job.bytes_done) : null;
   const isPaused = job.status === 'paused';

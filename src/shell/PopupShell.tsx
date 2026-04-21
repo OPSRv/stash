@@ -366,7 +366,7 @@ export const PopupShell = () => {
           const text = (await readText())?.trim();
           if (!text || !SUPPORTED_VIDEO_URL.test(text)) return;
           setPendingDownloaderUrl(text);
-          openTab('downloader');
+          openTab('downloads');
           window.dispatchEvent(
             new CustomEvent('stash:downloader-prefill', { detail: text }),
           );

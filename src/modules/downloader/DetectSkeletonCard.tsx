@@ -1,9 +1,14 @@
 import { Card } from '../../shared/ui/Card';
+import { IconButton } from '../../shared/ui/IconButton';
 import { Spinner } from '../../shared/ui/Spinner';
+import { CloseIcon } from '../../shared/ui/icons';
 
 interface Props {
   /** Seconds since detect started. Used to escalate the secondary label. */
   elapsedSec: number;
+  /** Optional dismiss action. When provided, renders a ✕ in the top-right so
+   *  the user can abort a runaway detect without waiting it out. */
+  onDismiss?: () => void;
 }
 
 const stageFor = (sec: number): string => {
@@ -16,7 +21,7 @@ const stageFor = (sec: number): string => {
 /// Placeholder card shown between detect-start and the first signal (oEmbed
 /// quick-preview or full detect). Gives the user a concrete "something is
 /// happening and here's what" signal instead of a bare spinner in the URL bar.
-export const DetectSkeletonCard = ({ elapsedSec }: Props) => (
+export const DetectSkeletonCard = ({ elapsedSec, onDismiss }: Props) => (
   <Card
     padding="md"
     rounded="xl"
@@ -46,5 +51,16 @@ export const DetectSkeletonCard = ({ elapsedSec }: Props) => (
         </span>
       </div>
     </div>
+    {onDismiss && (
+      <div className="shrink-0">
+        <IconButton
+          onClick={onDismiss}
+          title="Dismiss"
+          stopPropagation={false}
+        >
+          <CloseIcon size={12} />
+        </IconButton>
+      </div>
+    )}
   </Card>
 );

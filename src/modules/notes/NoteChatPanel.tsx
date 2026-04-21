@@ -195,16 +195,14 @@ export const NoteChatPanel = ({ noteId, noteTitle, noteBody, onClose }: Props) =
             streamingContent={chat.streamingContent}
             emptyHero={emptyHero}
           />
-          <div className="border-t hair px-3 py-2">
-            <ChatComposer
-              value={input}
-              onChange={setInput}
-              onSend={send}
-              onStop={chat.stop}
-              isStreaming={chat.isStreaming}
-              placeholder="Ask about this note…"
-            />
-          </div>
+          <ChatComposer
+            value={input}
+            onChange={setInput}
+            onSend={send}
+            onStop={chat.stop}
+            isStreaming={chat.isStreaming}
+            placeholder="Ask about this note…"
+          />
         </>
       )}
     </aside>

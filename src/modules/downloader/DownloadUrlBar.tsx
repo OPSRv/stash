@@ -2,6 +2,7 @@ import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { LinkIcon } from '../../shared/ui/icons';
 import { Button } from '../../shared/ui/Button';
 import { Spinner } from '../../shared/ui/Spinner';
+import { useToast } from '../../shared/ui/Toast';
 
 interface DownloadUrlBarProps {
   url: string;
@@ -20,15 +21,28 @@ export const DownloadUrlBar = ({
   onDetect,
   onCancel,
 }: DownloadUrlBarProps) => {
+  const { toast } = useToast();
   const pasteFromClipboard = async () => {
     try {
-      const text = await readText();
-      if (text) {
-        onUrlChange(text);
-        onDetect();
+      const text = (await readText())?.trim();
+      if (!text) {
+        toast({
+          title: 'Clipboard is empty',
+          description: 'Copy a video URL first, then press Paste.',
+          variant: 'default',
+          durationMs: 1600,
+        });
+        return;
       }
+      onUrlChange(text);
+      onDetect();
     } catch (e) {
       console.error('paste failed', e);
+      toast({
+        title: 'Couldn\u2019t read clipboard',
+        description: String(e),
+        variant: 'error',
+      });
     }
   };
 
@@ -45,7 +59,10 @@ export const DownloadUrlBar = ({
           if (e.key === 'Enter') onDetect();
         }}
         placeholder="Paste a YouTube / TikTok / Instagram / X / Reddit URL"
-        className="flex-1 bg-transparent outline-none text-body t-primary"
+        // Tooltip mirrors the field so a long URL that's clipped visually
+        // is still fully inspectable on hover.
+        title={url || undefined}
+        className="flex-1 bg-transparent outline-none text-body t-primary min-w-0"
       />
       <Button size="xs" onClick={pasteFromClipboard}>
         Paste

@@ -81,9 +81,20 @@ const CompletedDownloadRowImpl = ({
         {failed ? <CloseIcon size={12} /> : <CheckIcon size={12} />}
       </div>
       <PlatformBadge platform={job.platform} />
-      <span className="t-primary text-body truncate flex-1">
-        {job.target_path ? job.target_path.split('/').pop() : (job.title ?? job.url)}
-      </span>
+      <div className="flex-1 min-w-0">
+        <div className="t-primary text-body truncate">
+          {job.target_path ? job.target_path.split('/').pop() : (job.title ?? job.url)}
+        </div>
+        {failed && job.error && (
+          <div
+            className="t-tertiary text-meta truncate"
+            title={job.error}
+            style={{ color: 'rgba(255, 107, 107, 0.85)' }}
+          >
+            {job.error}
+          </div>
+        )}
+      </div>
       {job.bytes_total && (
         <span className="t-tertiary text-meta font-mono">{formatBytes(job.bytes_total)}</span>
       )}

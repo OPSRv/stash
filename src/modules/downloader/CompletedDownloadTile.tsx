@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { CloseIcon, PlayIcon } from '../../shared/ui/icons';
+import { CloseIcon, PlayIcon, ReuseIcon } from '../../shared/ui/icons';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { PlatformBadge } from './PlatformBadge';
 import type { DownloadJob } from './api';
@@ -12,6 +12,9 @@ interface CompletedDownloadTileProps {
   /// list row so both views can fully remove a download. Callbacks receive
   /// the job's id/path so parents can pass stable references.
   onDelete: (id: number, purgeFile: boolean) => void;
+  /// Retry a failed/cancelled download. Grid view renders a retry button on
+  /// failed tiles so the user doesn't have to flip to list view to recover.
+  onRetry?: (id: number) => void;
 }
 
 const tileStyle = {
@@ -29,6 +32,7 @@ const CompletedDownloadTileImpl = ({
   job,
   onPlay,
   onDelete,
+  onRetry,
 }: CompletedDownloadTileProps) => {
   const failed = isFailure(job.status);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -39,15 +43,28 @@ const CompletedDownloadTileImpl = ({
     setDeleteOpen(true);
   };
 
+  const onTileClick = () => {
+    if (failed) return; // retry is the only meaningful action on a failed tile
+    onPlay(job.target_path);
+  };
+
   return (
     <div
-      className="group relative rounded-lg overflow-hidden cursor-pointer"
+      className={`group relative rounded-lg overflow-hidden ${failed ? 'cursor-default' : 'cursor-pointer'}`}
       style={tileStyle}
-      onClick={failed ? undefined : () => onPlay(job.target_path)}
+      onClick={onTileClick}
     >
-      <div className="aspect-video relative" style={thumbStyle}>
+      <div
+        className="aspect-video relative"
+        style={thumbStyle}
+        title={failed ? job.error ?? 'Download failed' : undefined}
+      >
         {job.thumbnail_url ? (
-          <img src={job.thumbnail_url} alt="" className="w-full h-full object-cover" />
+          <img
+            src={job.thumbnail_url}
+            alt=""
+            className={`w-full h-full object-cover ${failed ? 'opacity-40' : ''}`}
+          />
         ) : (
           <div className="w-full h-full flex items-center justify-center t-tertiary text-meta">
             {failed ? 'Failed' : 'No preview'}
@@ -60,6 +77,21 @@ const CompletedDownloadTileImpl = ({
           >
             <PlayIcon size={36} className="text-white" />
           </div>
+        )}
+        {failed && onRetry && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry(job.id);
+            }}
+            className="absolute inset-0 flex items-center justify-center gap-1.5 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+            style={hoverOverlayStyle}
+            aria-label="Retry download"
+            title={job.error ? `Retry — ${job.error}` : 'Retry download'}
+          >
+            <ReuseIcon size={16} />
+            <span className="text-meta">Retry</span>
+          </button>
         )}
         <button
           onClick={openDelete}
@@ -103,5 +135,8 @@ const CompletedDownloadTileImpl = ({
 /// ticks (download progress, transient hover state). Memoising skips tiles
 /// whose own job snapshot hasn't changed.
 export const CompletedDownloadTile = memo(CompletedDownloadTileImpl, (a, b) =>
-  a.job === b.job && a.onPlay === b.onPlay && a.onDelete === b.onDelete,
+  a.job === b.job &&
+  a.onPlay === b.onPlay &&
+  a.onDelete === b.onDelete &&
+  a.onRetry === b.onRetry,
 );

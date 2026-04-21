@@ -324,7 +324,14 @@ export const DownloadsShell = () => {
       />
 
       {detecting && !detected && !quick && (
-        <DetectSkeletonCard elapsedSec={elapsedSec} />
+        <DetectSkeletonCard
+          elapsedSec={elapsedSec}
+          onDismiss={() => {
+            cancelDetect();
+            reset();
+            setUrl('');
+          }}
+        />
       )}
 
       {detecting && elapsedSec > DETECT_SLOW_HINT_THRESHOLD_SEC && (quick || detected) && (
@@ -340,6 +347,11 @@ export const DownloadsShell = () => {
           title={detected?.info.title ?? quick!.preview.title}
           uploader={detected?.info.uploader ?? quick!.preview.uploader}
           thumbnail={detected?.info.thumbnail ?? quick!.preview.thumbnail}
+          onDismiss={() => {
+            cancelDetect();
+            reset();
+            setUrl('');
+          }}
           overlayBadge={
             detected?.info.duration ? (
               <div
@@ -431,6 +443,7 @@ export const DownloadsShell = () => {
                 jobs={completed}
                 onPlay={handlePlay}
                 onDelete={handleDeleteJob}
+                onRetry={handleRetryJob}
               />
             )}
           </>
