@@ -61,13 +61,22 @@ pub fn spawn(app: AppHandle, state: Arc<TelegramState>) {
         }
     }
 
-    let listener = match UnixListener::bind(&path) {
+    // Bind via the std type first — `tokio::net::UnixListener::bind`
+    // panics when called outside a Tokio runtime, and Tauri's setup
+    // hook runs on the main thread before the async runtime is
+    // attached. The std listener goes non-blocking and is promoted
+    // to a Tokio one *inside* the spawned task.
+    let std_listener = match std::os::unix::net::UnixListener::bind(&path) {
         Ok(l) => l,
         Err(e) => {
             tracing::warn!(error = %e, "ipc: bind failed, CLI disabled");
             return;
         }
     };
+    if let Err(e) = std_listener.set_nonblocking(true) {
+        tracing::warn!(error = %e, "ipc: set_nonblocking failed");
+        return;
+    }
 
     // Owner-only rwx on the socket file. `UnixListener::bind` creates
     // it with the process umask applied — don't trust that to land on
@@ -79,6 +88,13 @@ pub fn spawn(app: AppHandle, state: Arc<TelegramState>) {
     tracing::info!(path = %path.display(), "ipc: listening");
 
     tauri::async_runtime::spawn(async move {
+        let listener = match UnixListener::from_std(std_listener) {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::warn!(error = %e, "ipc: from_std failed");
+                return;
+            }
+        };
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
