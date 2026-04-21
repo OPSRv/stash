@@ -117,7 +117,9 @@ pub fn telegram_status(
     state: State<'_, Arc<TelegramState>>,
 ) -> Result<ConnectionStatus, String> {
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();
-    Ok(compute_status(has_token, &state.pairing.lock().unwrap()))
+    let status = compute_status(has_token, &state.pairing.lock().unwrap());
+    tracing::info!(has_token, status = ?status, "telegram_status");
+    Ok(status)
 }
 
 #[tauri::command]
