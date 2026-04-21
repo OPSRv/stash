@@ -5,6 +5,9 @@
 //! The assistant orchestrator drives clients through the `LlmClient`
 //! trait so it never learns a provider-specific detail.
 
+pub mod anthropic;
+pub mod openai;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
