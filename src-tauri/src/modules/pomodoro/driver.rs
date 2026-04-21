@@ -95,27 +95,35 @@ pub fn emit_events(app: &AppHandle, events: &[EngineEvent]) {
     }) = last_transition
     {
         let title = transition_text(*from_posture, *to_posture);
+        let body = format!("Next: {}", block_name);
         let _ = app
             .notification()
             .builder()
-            .title(title)
-            .body(format!("Next: {}", block_name))
+            .title(&title)
+            .body(&body)
             .show();
+        crate::modules::telegram::notifier::notify_if_paired(
+            app,
+            crate::modules::telegram::notifier::Category::Pomodoro,
+            format!("🍅 {title} · {block_name}"),
+        );
     }
     if let Some(EngineEvent::SessionDone {
         blocks_completed,
         total_sec,
     }) = events.iter().rev().find(|e| matches!(e, EngineEvent::SessionDone { .. }))
     {
+        let summary = format!("{} блоків · {} хв", blocks_completed, total_sec / 60);
         let _ = app
             .notification()
             .builder()
             .title("Сесія завершена")
-            .body(format!(
-                "{} блоків · {} хв",
-                blocks_completed,
-                total_sec / 60
-            ))
+            .body(&summary)
             .show();
+        crate::modules::telegram::notifier::notify_if_paired(
+            app,
+            crate::modules::telegram::notifier::Category::Pomodoro,
+            format!("🍅 Сесія завершена — {summary}"),
+        );
     }
 }

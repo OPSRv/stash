@@ -4,6 +4,7 @@ pub mod file_secrets;
 pub mod inbox;
 pub mod keyring;
 pub mod module_cmds;
+pub mod notifier;
 pub mod pairing;
 pub mod repo;
 pub mod sender;

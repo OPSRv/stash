@@ -267,7 +267,17 @@ pub fn spawn_download(
                 let _ = repo.set_completed(job_id, &path, now());
                 let _ = app_clone.emit(
                     "downloader:completed",
-                    serde_json::json!({ "id": job_id, "path": path }),
+                    serde_json::json!({ "id": job_id, "path": path.clone() }),
+                );
+                // Mirror to Telegram if a chat is paired.
+                let name = std::path::Path::new(&path)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| format!("job #{job_id}"));
+                crate::modules::telegram::notifier::notify_if_paired(
+                    &app_clone,
+                    crate::modules::telegram::notifier::Category::DownloadComplete,
+                    format!("⬇️ Download finished — {name}"),
                 );
                 drop(repo);
                 // Clear any retry-counter state we accumulated before success so

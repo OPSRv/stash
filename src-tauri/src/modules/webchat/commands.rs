@@ -17,7 +17,7 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 ///
 /// We do NOT strip Tauri's own IPC bridge — the host page is a trusted
 /// external chat UI and never calls Tauri APIs. Runs once, idempotent.
-/// `{SERVICE_ID}` is substituted with the caller's service id at embed time.
+/// `{SERVICE_ID}` and `{INITIAL_ZOOM}` are substituted at embed time.
 const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
 (function(){
   try {
@@ -46,6 +46,82 @@ const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
   if (window.__stashWebchatNpInstalled) return;
   window.__stashWebchatNpInstalled = true;
   var SERVICE_ID = "{SERVICE_ID}";
+  var INITIAL_ZOOM = {INITIAL_ZOOM};
+
+  // --- zoom -------------------------------------------------------------
+  // Applied on every (re)load so SPA route changes that swap <body> don't
+  // reset the user's preferred zoom. Re-applied commands from Rust evaluate
+  // the same assignment; we expose a tiny hook so those evals have a single
+  // place to look up the current value.
+  function applyZoom(z){
+    try {
+      var v = (typeof z === 'number' && isFinite(z)) ? z : INITIAL_ZOOM;
+      if (document.body) document.body.style.zoom = String(v);
+      INITIAL_ZOOM = v;
+    } catch(_) {}
+  }
+  window.__stashWebchatApplyZoom = applyZoom;
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){ applyZoom(INITIAL_ZOOM); }, { once: true });
+  } else {
+    applyZoom(INITIAL_ZOOM);
+  }
+
+  // --- shortcut forwarder ----------------------------------------------
+  // Native child webviews receive key events before our React tree does.
+  // Capture ⌘-chorded keys we care about at the document level, forward
+  // them to the host via the stashnp:// bus, and prevent the webview's
+  // default so (e.g.) ⌘R doesn't bypass our progress bar wiring.
+  var SHORTCUT_KEYS = { 'r':1, '[':1, ']':1, 'l':1, 'w':1, '=':1, '+':1, '-':1, '0':1 };
+  document.addEventListener('keydown', function(e){
+    if (!e.metaKey) return;
+    var k = (e.key || '').toLowerCase();
+    if (!SHORTCUT_KEYS[k]) return;
+    try {
+      var qs = new URLSearchParams({
+        kind: 'shortcut',
+        service: SERVICE_ID,
+        key: k,
+        shift: e.shiftKey ? '1' : '0'
+      });
+      new Image().src = 'stashnp://report/shortcut?' + qs.toString();
+      e.preventDefault();
+      e.stopPropagation();
+    } catch(_) {}
+  }, true);
+
+  // --- loading reporter ------------------------------------------------
+  // readystatechange is the broadest signal available without a
+  // WKNavigationDelegate. SPA pushState/popstate nudges cover the cases
+  // where readyState stays 'complete' across in-page navigations.
+  function reportLoading(state){
+    try {
+      var qs = new URLSearchParams({ kind: 'loading', service: SERVICE_ID, state: state });
+      new Image().src = 'stashnp://report/loading?' + qs.toString();
+    } catch(_) {}
+  }
+  document.addEventListener('readystatechange', function(){
+    if (document.readyState === 'loading') reportLoading('start');
+    else if (document.readyState === 'complete') {
+      reportLoading('end');
+      applyZoom(INITIAL_ZOOM);
+    }
+  });
+  window.addEventListener('load', function(){ reportLoading('end'); applyZoom(INITIAL_ZOOM); });
+  try {
+    var _push = history.pushState;
+    history.pushState = function(){
+      reportLoading('start');
+      var r = _push.apply(this, arguments);
+      setTimeout(function(){ reportLoading('end'); }, 400);
+      return r;
+    };
+    window.addEventListener('popstate', function(){
+      reportLoading('start');
+      setTimeout(function(){ reportLoading('end'); }, 400);
+    });
+  } catch(_) {}
+
   var last = '';
   function pickArtwork(m){
     try {
@@ -99,6 +175,18 @@ const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
 /// find/hide/close them without needing to know their URLs at cleanup time.
 const LABEL_PREFIX: &str = "webchat-";
 
+/// Clamp an incoming zoom value to the same `[0.5, 2.0]` band the frontend
+/// enforces and emit a JS-safe numeric literal. Anything missing or outside
+/// the band falls back to `1` so the injected script always has a parseable
+/// number — an unsubstituted placeholder would throw inside the page.
+fn sanitize_zoom(value: Option<f64>) -> String {
+    let z = value
+        .filter(|v| v.is_finite())
+        .map(|v| v.clamp(0.5, 2.0))
+        .unwrap_or(1.0);
+    format!("{z:.2}")
+}
+
 fn label_for(service: &str) -> Result<String, String> {
     let trimmed = service.trim();
     if trimmed.is_empty() {
@@ -148,6 +236,7 @@ pub fn webchat_embed(
     width: f64,
     height: f64,
     user_agent: Option<String>,
+    initial_zoom: Option<f64>,
 ) -> Result<(), String> {
     let label = label_for(&service)?;
     let popup = popup_window(&app)?;
@@ -167,7 +256,10 @@ pub fn webchat_embed(
     let ua = user_agent
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| SAFARI_UA.to_string());
-    let script = WEBVIEW_DISGUISE_TEMPLATE.replace("{SERVICE_ID}", &service);
+    let zoom_literal = sanitize_zoom(initial_zoom);
+    let script = WEBVIEW_DISGUISE_TEMPLATE
+        .replace("{SERVICE_ID}", &service)
+        .replace("{INITIAL_ZOOM}", &zoom_literal);
     let mut builder =
         tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed))
             .user_agent(&ua)
@@ -312,6 +404,26 @@ pub fn webchat_current_url(app: AppHandle, service: String) -> Result<String, St
     Ok(url.to_string())
 }
 
+/// Update the CSS zoom of the embedded service, clamped to `[0.5, 2.0]`.
+/// We call through the helper installed by the injection script so the new
+/// value is also remembered for the next SPA navigation (which would
+/// otherwise rerender `<body>` and drop the style). No-op if the webview is
+/// not attached — the next `webchat_embed` will pick up the persisted value.
+#[tauri::command]
+pub fn webchat_set_zoom(app: AppHandle, service: String, zoom: f64) -> Result<(), String> {
+    let label = label_for(&service)?;
+    if let Some(wv) = app.webviews().get(&label).cloned() {
+        let z = sanitize_zoom(Some(zoom));
+        let script = format!(
+            "try {{ (window.__stashWebchatApplyZoom || function(v){{ \
+                if (document.body) document.body.style.zoom = String(v); \
+            }})({z}); }} catch(_) {{}}"
+        );
+        wv.eval(&script).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Destroy the webview entirely. Next embed creates a fresh session — used
 /// by the Reset button when a user wants to sign out / clear state.
 #[tauri::command]
@@ -325,7 +437,16 @@ pub fn webchat_close(app: AppHandle, service: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{label_for, SAFARI_UA};
+    use super::{label_for, sanitize_zoom, SAFARI_UA};
+
+    #[test]
+    fn sanitize_zoom_clamps_and_formats() {
+        assert_eq!(sanitize_zoom(None), "1.00");
+        assert_eq!(sanitize_zoom(Some(f64::NAN)), "1.00");
+        assert_eq!(sanitize_zoom(Some(0.1)), "0.50");
+        assert_eq!(sanitize_zoom(Some(5.0)), "2.00");
+        assert_eq!(sanitize_zoom(Some(1.234)), "1.23");
+    }
 
     #[test]
     fn label_format_is_stable() {
