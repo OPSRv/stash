@@ -154,20 +154,30 @@ fn hostname() -> String {
 }
 
 /// Probe whether the OS keyring can round-trip a secret. Used at app setup
-/// to decide between `KeyringStore` and `FileSecretStore`. Writes a canary
-/// value, reads it back, and cleans up — no leftover entries on success.
+/// to decide between `KeyringStore` and `FileSecretStore`.
+///
+/// Writes a canary via one `Entry`, reads it via a *freshly constructed*
+/// `Entry`, and cleans up. The fresh-entry reread matters: on unsigned
+/// macOS dev builds, `set_password` + same-`Entry` `get_password` can
+/// appear to work (in-process ephemeral state) while a new `Entry` instance
+/// returns `NoEntry` — which is exactly the pattern the Tauri commands hit
+/// (set and get happen in different command invocations).
 pub fn keyring_roundtrip_ok(service: &str) -> bool {
     const CANARY_ACCOUNT: &str = "_stash_probe";
     const CANARY_VALUE: &str = "ok";
-    let Ok(entry) = keyring::Entry::new(service, CANARY_ACCOUNT) else {
+    let Ok(writer) = keyring::Entry::new(service, CANARY_ACCOUNT) else {
         return false;
     };
-    if entry.set_password(CANARY_VALUE).is_err() {
+    if writer.set_password(CANARY_VALUE).is_err() {
         return false;
     }
-    let ok = matches!(entry.get_password(), Ok(v) if v == CANARY_VALUE);
+    let Ok(reader) = keyring::Entry::new(service, CANARY_ACCOUNT) else {
+        let _ = writer.delete_credential();
+        return false;
+    };
+    let ok = matches!(reader.get_password(), Ok(v) if v == CANARY_VALUE);
     // Best-effort cleanup — don't care if delete fails.
-    let _ = entry.delete_credential();
+    let _ = writer.delete_credential();
     ok
 }
 
