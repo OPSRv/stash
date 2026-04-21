@@ -186,7 +186,8 @@ use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
 use modules::terminal::state::TerminalState;
 use modules::webchat::commands::{
     webchat_back, webchat_close, webchat_close_all, webchat_current_url, webchat_embed,
-    webchat_forward, webchat_hide, webchat_hide_all, webchat_reload, webchat_toggle_play,
+    webchat_forward, webchat_hide, webchat_hide_all, webchat_reload, webchat_set_zoom,
+    webchat_toggle_play,
 };
 use modules::translator::{
     commands::{
@@ -229,44 +230,75 @@ pub fn run() {
                 let mut artist = String::new();
                 let mut artwork = String::new();
                 let mut service = String::new();
+                let mut kind = String::new();
+                let mut state = String::new();
+                let mut key = String::new();
+                let mut shift = false;
                 for pair in q.split('&') {
                     let mut it = pair.splitn(2, '=');
-                    let key = it.next().unwrap_or("");
+                    let k = it.next().unwrap_or("");
                     let val = it.next().unwrap_or("");
                     let decoded = percent_decode(val);
-                    match key {
+                    match k {
                         "playing" => playing = decoded == "1",
                         "title" => title = decoded,
                         "artist" => artist = decoded,
                         "artwork" => artwork = decoded,
                         "service" => service = decoded,
+                        "kind" => kind = decoded,
+                        "state" => state = decoded,
+                        "key" => key = decoded,
+                        "shift" => shift = decoded == "1",
                         _ => {}
                     }
                 }
-                // `service` distinguishes a webchat report (YouTube running
-                // inside the Gemini/ChatGPT web pane, etc.) from the YT Music
-                // report — we fan them out on different events so the shell
-                // renders them through independent now-playing bars.
-                let event = if service.is_empty() {
-                    "music:nowplaying"
-                } else {
-                    "webchat:nowplaying"
-                };
                 let app = ctx.app_handle();
-                let _ = app.emit(
-                    event,
-                    serde_json::json!({
-                        "service": service,
-                        "playing": playing,
-                        "title": title.clone(),
-                        "artist": artist.clone(),
-                        "artwork": artwork,
-                    }),
-                );
-                // YT Music only — webchat services ride their own bar and
-                // don't (yet) participate in the tray player block.
-                if service.is_empty() {
-                    tray::on_music_nowplaying(app, playing, title, artist);
+                match kind.as_str() {
+                    // Loading ticks — frontend shows a thin progress bar per
+                    // service. `state` is "start"|"end".
+                    "loading" => {
+                        let _ = app.emit(
+                            "webchat:loading",
+                            serde_json::json!({ "service": service, "state": state }),
+                        );
+                    }
+                    // Meta-chorded keys captured inside the child webview and
+                    // bubbled up so the React shell can react (nav, zoom, URL
+                    // bar focus, close tab).
+                    "shortcut" => {
+                        let _ = app.emit(
+                            "webchat:shortcut",
+                            serde_json::json!({
+                                "service": service,
+                                "key": key,
+                                "shift": shift,
+                            }),
+                        );
+                    }
+                    // Default (missing or "np") — now-playing, same as before.
+                    // `service` distinguishes a webchat report from the YT
+                    // Music report; we fan them out on different events so
+                    // the shell renders independent now-playing bars.
+                    _ => {
+                        let event = if service.is_empty() {
+                            "music:nowplaying"
+                        } else {
+                            "webchat:nowplaying"
+                        };
+                        let _ = app.emit(
+                            event,
+                            serde_json::json!({
+                                "service": service,
+                                "playing": playing,
+                                "title": title.clone(),
+                                "artist": artist.clone(),
+                                "artwork": artwork,
+                            }),
+                        );
+                        if service.is_empty() {
+                            tray::on_music_nowplaying(app, playing, title, artist);
+                        }
+                    }
                 }
             }
             tauri::http::Response::builder()
@@ -486,6 +518,7 @@ pub fn run() {
             webchat_current_url,
             webchat_back,
             webchat_forward,
+            webchat_set_zoom,
             tray::tray_set_menu,
             tray::tray_set_player_icons,
             tray::tray_set_player_artwork,
@@ -667,6 +700,7 @@ pub fn run() {
                 modules::telegram::module_cmds::NoteCmd::new(notes_repo_for_telegram),
             );
             telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
 
             // Rehydrate paired state from secrets. Without this every app
             // restart left the bot offline even though bot_token + chat_id
