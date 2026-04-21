@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::anthropic::AnthropicClient;
+use super::google::GoogleClient;
 use super::openai::OpenAiClient;
 use super::{LlmClient, LlmError};
 use crate::modules::telegram::keyring::SecretStore;
@@ -97,6 +98,7 @@ pub fn read_config(settings_path: &Path) -> Result<AiConfig, LlmError> {
 
 const OPENAI_DEFAULT_BASE: &str = "https://api.openai.com/v1";
 const ANTHROPIC_DEFAULT_BASE: &str = "https://api.anthropic.com/v1";
+const GOOGLE_DEFAULT_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 /// Construct a provider-specific `LlmClient`. Callers must supply
 /// the shared AI `SecretStore` (pointing at `com.stash.ai`); missing
@@ -139,11 +141,13 @@ pub fn build_client(
                 .unwrap_or_else(|| ANTHROPIC_DEFAULT_BASE.to_string());
             Ok(Box::new(AnthropicClient::new(base, key, cfg.model.clone())))
         }
-        AiProvider::Google => Err(LlmError::BadResponse(
-            "Google (Gemini) provider is not yet supported by the Telegram assistant. \
-             Switch to OpenAI or Anthropic in Stash → AI, or stay with /slash commands."
-                .into(),
-        )),
+        AiProvider::Google => {
+            let base = cfg
+                .base_url
+                .clone()
+                .unwrap_or_else(|| GOOGLE_DEFAULT_BASE.to_string());
+            Ok(Box::new(GoogleClient::new(base, key, cfg.model.clone())))
+        }
     }
 }
 
@@ -292,17 +296,14 @@ mod tests {
     }
 
     #[test]
-    fn build_client_google_returns_unsupported_message() {
+    fn build_client_google_with_key_builds() {
         let secrets = secrets_with("google", "k");
         let cfg = AiConfig {
             provider: AiProvider::Google,
-            model: "gemini-pro".into(),
+            model: "gemini-1.5-flash".into(),
             base_url: None,
             api_key_fallback: None,
         };
-        match err(build_client(&cfg, &secrets)) {
-            LlmError::BadResponse(m) => assert!(m.to_lowercase().contains("google")),
-            e => panic!("expected BadResponse, got {e}"),
-        }
+        assert!(build_client(&cfg, &secrets).is_ok());
     }
 }

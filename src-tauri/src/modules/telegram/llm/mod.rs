@@ -7,6 +7,7 @@
 
 pub mod anthropic;
 pub mod factory;
+pub mod google;
 pub mod openai;
 
 use async_trait::async_trait;

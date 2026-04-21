@@ -2,8 +2,7 @@
 
 **Date:** 2026-04-21 (updated 2026-04-22 after all MVP phases shipped)
 **Status:** Live — all MVP phases complete. Phase 6 shipped via
-AppleScript (EventKit-direct bridge deferred). Phase 3 Google adapter
-stubbed pending a user who configures Google in Stash → AI.
+AppleScript (EventKit-direct bridge deferred).
 
 ## 1. Goals
 
@@ -657,10 +656,10 @@ Licence: all MIT/Apache — fine for bundling. teloxide is well-maintained and u
 1. `voice.rs` bridge to whisper module's active model.
 2. Inbox UI: Transcribe button; Advanced toggle wired.
 
-### Phase 3 — AI assistant + tools — ✅ shipped (Google adapter + start_download deferred)
-1. `llm/*` client — OpenAI-compatible + Anthropic adapters with
-   pure `to_wire` / `from_wire` helpers for hermetic tests; Google
-   returns a BadResponse-with-message until a real user needs it.
+### Phase 3 — AI assistant + tools — ✅ shipped (start_download deferred)
+1. `llm/*` client — OpenAI-compatible, Anthropic and Google (Gemini)
+   adapters, each with pure `to_wire` / `from_wire` helpers for
+   hermetic tests.
 2. `assistant.rs` orchestration — history + facts injection, tool
    loop with 5-step depth cap, rolling prune to
    `context_window × 4`.
