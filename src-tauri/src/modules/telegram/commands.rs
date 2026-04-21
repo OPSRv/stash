@@ -245,6 +245,23 @@ pub fn telegram_set_ai_settings(
 }
 
 #[tauri::command]
+pub fn telegram_list_memory(
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<Vec<super::repo::MemoryRow>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.memory_list().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn telegram_delete_memory(
+    state: State<'_, Arc<TelegramState>>,
+    id: i64,
+) -> Result<bool, String> {
+    let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.memory_delete(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn telegram_reveal_inbox_file(
     app: AppHandle,
     state: State<'_, Arc<TelegramState>>,

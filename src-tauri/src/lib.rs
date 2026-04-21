@@ -109,10 +109,10 @@ use modules::ai::{
 };
 use modules::telegram::commands::{
     telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
-    telegram_get_ai_settings, telegram_get_notification_settings, telegram_has_token,
-    telegram_list_inbox, telegram_mark_inbox_routed, telegram_reveal_inbox_file,
-    telegram_set_ai_settings, telegram_set_notification_settings, telegram_set_token,
-    telegram_start_pairing, telegram_status, telegram_unpair,
+    telegram_delete_memory, telegram_get_ai_settings, telegram_get_notification_settings,
+    telegram_has_token, telegram_list_inbox, telegram_list_memory, telegram_mark_inbox_routed,
+    telegram_reveal_inbox_file, telegram_set_ai_settings, telegram_set_notification_settings,
+    telegram_set_token, telegram_start_pairing, telegram_status, telegram_unpair,
 };
 use modules::clipboard::{
     commands::{
@@ -513,6 +513,8 @@ pub fn run() {
             telegram_set_notification_settings,
             telegram_get_ai_settings,
             telegram_set_ai_settings,
+            telegram_list_memory,
+            telegram_delete_memory,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,
             modules::ipc::install::stash_cli_uninstall,

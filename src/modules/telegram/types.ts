@@ -35,3 +35,9 @@ export type AiSettings = {
   system_prompt: string;
   context_window: number;
 };
+
+export type MemoryRow = {
+  id: number;
+  fact: string;
+  created_at: number;
+};

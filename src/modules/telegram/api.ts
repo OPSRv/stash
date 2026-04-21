@@ -3,6 +3,7 @@ import type {
   AiSettings,
   ConnectionStatus,
   InboxItem,
+  MemoryRow,
   NotificationSettings,
   RouteTarget,
 } from './types';
@@ -48,3 +49,9 @@ export const getAiSettings = (): Promise<AiSettings> =>
 
 export const setAiSettings = (settings: AiSettings): Promise<void> =>
   invoke('telegram_set_ai_settings', { settings });
+
+export const listMemory = (): Promise<MemoryRow[]> =>
+  invoke('telegram_list_memory');
+
+export const deleteMemory = (id: number): Promise<boolean> =>
+  invoke('telegram_delete_memory', { id });
