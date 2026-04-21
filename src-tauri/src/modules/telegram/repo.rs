@@ -5,6 +5,68 @@ pub struct TelegramRepo {
     conn: Connection,
 }
 
+/// Role of a chat row. Mirrors the `role` CHECK constraint so the
+/// mapping lives in one place; `as_str` is the single source of truth
+/// for the serialized form.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatRole {
+    User,
+    Assistant,
+    System,
+    Tool,
+}
+
+impl ChatRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChatRole::User => "user",
+            ChatRole::Assistant => "assistant",
+            ChatRole::System => "system",
+            ChatRole::Tool => "tool",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "user" => Some(Self::User),
+            "assistant" => Some(Self::Assistant),
+            "system" => Some(Self::System),
+            "tool" => Some(Self::Tool),
+            _ => None,
+        }
+    }
+}
+
+/// Single row in the chat history table. Tool rows carry
+/// `tool_call_id` + `tool_name`; other roles leave them `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRow {
+    pub id: i64,
+    pub role: ChatRole,
+    pub content: String,
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub created_at: i64,
+}
+
+/// Shape handed to `chat_insert` — same as `ChatRow` minus `id`, which
+/// SQLite assigns on insert.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewChatRow {
+    pub role: ChatRole,
+    pub content: String,
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MemoryRow {
+    pub id: i64,
+    pub fact: String,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct InboxItem {
     pub id: i64,
@@ -233,6 +295,120 @@ impl TelegramRepo {
         Ok(())
     }
 
+    /// Insert a memory fact. Empty / whitespace-only facts are rejected
+    /// here rather than relying on a CHECK constraint — the error
+    /// message is friendlier surfaced at this layer.
+    pub fn memory_insert(&mut self, fact: &str, created_at: i64) -> Result<i64> {
+        let trimmed = fact.trim();
+        if trimmed.is_empty() {
+            return Err(rusqlite::Error::InvalidParameterName(
+                "fact must not be empty".into(),
+            ));
+        }
+        self.conn.execute(
+            "INSERT INTO memory(fact, created_at) VALUES(?1, ?2)",
+            params![trimmed, created_at],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// List memory facts, newest first.
+    pub fn memory_list(&self) -> Result<Vec<MemoryRow>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, fact, created_at FROM memory ORDER BY id DESC")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(MemoryRow {
+                    id: r.get(0)?,
+                    fact: r.get(1)?,
+                    created_at: r.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Delete a memory fact. Returns `true` when a row was removed,
+    /// `false` when the id was unknown — handlers surface that as a
+    /// user-facing "unknown id" reply rather than a hard error.
+    pub fn memory_delete(&mut self, id: i64) -> Result<bool> {
+        let changed = self
+            .conn
+            .execute("DELETE FROM memory WHERE id = ?1", params![id])?;
+        Ok(changed > 0)
+    }
+
+    /// Append chat rows in a single transaction. Rows are inserted in
+    /// the order supplied so a user + assistant (+ tool) turn lands
+    /// atomically — partial writes on crash would confuse the history
+    /// loader.
+    pub fn chat_insert(&mut self, rows: &[NewChatRow]) -> Result<Vec<i64>> {
+        let tx = self.conn.transaction()?;
+        let mut ids = Vec::with_capacity(rows.len());
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO chat(role, content, tool_call_id, tool_name, created_at)
+                 VALUES(?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for row in rows {
+                stmt.execute(params![
+                    row.role.as_str(),
+                    row.content,
+                    row.tool_call_id,
+                    row.tool_name,
+                    row.created_at,
+                ])?;
+                ids.push(tx.last_insert_rowid());
+            }
+        }
+        tx.commit()?;
+        Ok(ids)
+    }
+
+    /// Load the most recent `limit` chat rows in chronological order
+    /// (oldest first), ready to feed straight into an LLM prompt.
+    pub fn chat_load_recent(&self, limit: usize) -> Result<Vec<ChatRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, role, content, tool_call_id, tool_name, created_at
+             FROM chat ORDER BY id DESC LIMIT ?1",
+        )?;
+        let mut rows: Vec<ChatRow> = stmt
+            .query_map(params![limit as i64], |r| {
+                let role_str: String = r.get(1)?;
+                let role = ChatRole::parse(&role_str).ok_or_else(|| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        1,
+                        rusqlite::types::Type::Text,
+                        format!("unknown chat role {role_str}").into(),
+                    )
+                })?;
+                Ok(ChatRow {
+                    id: r.get(0)?,
+                    role,
+                    content: r.get(2)?,
+                    tool_call_id: r.get(3)?,
+                    tool_name: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>>>()?;
+        rows.reverse();
+        Ok(rows)
+    }
+
+    /// Keep the newest `keep` rows; delete the rest. Returns the number
+    /// of rows removed. No-op when the table already fits.
+    pub fn chat_prune(&mut self, keep: usize) -> Result<usize> {
+        let deleted = self.conn.execute(
+            "DELETE FROM chat WHERE id NOT IN (
+                 SELECT id FROM chat ORDER BY id DESC LIMIT ?1
+             )",
+            params![keep as i64],
+        )?;
+        Ok(deleted)
+    }
+
     pub fn cancel_reminder(&mut self, id: i64) -> Result<bool> {
         let changed = self.conn.execute(
             "UPDATE reminders SET cancelled = 1
@@ -369,5 +545,119 @@ mod tests {
         repo.set_inbox_transcript(id, "hello world").unwrap();
         let items = repo.list_inbox(10).unwrap();
         assert_eq!(items[0].transcript.as_deref(), Some("hello world"));
+    }
+
+    fn chat_row(role: ChatRole, content: &str, created_at: i64) -> NewChatRow {
+        NewChatRow {
+            role,
+            content: content.to_string(),
+            tool_call_id: None,
+            tool_name: None,
+            created_at,
+        }
+    }
+
+    #[test]
+    fn chat_insert_and_load_recent_chronological() {
+        let mut repo = fresh();
+        let ids = repo
+            .chat_insert(&[
+                chat_row(ChatRole::User, "hello", 1),
+                chat_row(ChatRole::Assistant, "hi there", 2),
+            ])
+            .unwrap();
+        assert_eq!(ids.len(), 2);
+        let rows = repo.chat_load_recent(10).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].role, ChatRole::User);
+        assert_eq!(rows[0].content, "hello");
+        assert_eq!(rows[1].role, ChatRole::Assistant);
+        assert_eq!(rows[1].content, "hi there");
+    }
+
+    #[test]
+    fn chat_load_recent_caps_and_returns_newest_window() {
+        let mut repo = fresh();
+        for i in 0..6 {
+            repo.chat_insert(&[chat_row(ChatRole::User, &format!("m{i}"), i as i64)])
+                .unwrap();
+        }
+        let rows = repo.chat_load_recent(3).unwrap();
+        assert_eq!(rows.len(), 3);
+        // Chronological within the window, so we get the three newest in
+        // insertion order.
+        assert_eq!(rows[0].content, "m3");
+        assert_eq!(rows[1].content, "m4");
+        assert_eq!(rows[2].content, "m5");
+    }
+
+    #[test]
+    fn chat_prune_keeps_newest_and_returns_deleted_count() {
+        let mut repo = fresh();
+        for i in 0..5 {
+            repo.chat_insert(&[chat_row(ChatRole::User, &format!("m{i}"), i as i64)])
+                .unwrap();
+        }
+        let deleted = repo.chat_prune(2).unwrap();
+        assert_eq!(deleted, 3);
+        let rows = repo.chat_load_recent(10).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].content, "m3");
+        assert_eq!(rows[1].content, "m4");
+    }
+
+    #[test]
+    fn chat_prune_is_noop_when_under_cap() {
+        let mut repo = fresh();
+        repo.chat_insert(&[chat_row(ChatRole::User, "only", 1)])
+            .unwrap();
+        let deleted = repo.chat_prune(10).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(repo.chat_load_recent(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn memory_insert_list_delete_round_trip() {
+        let mut repo = fresh();
+        assert!(repo.memory_list().unwrap().is_empty());
+
+        let a = repo.memory_insert("likes tea", 1).unwrap();
+        let b = repo.memory_insert("works from Kyiv", 2).unwrap();
+        let rows = repo.memory_list().unwrap();
+        assert_eq!(rows.len(), 2);
+        // Newest first — `b` comes before `a`.
+        assert_eq!(rows[0].id, b);
+        assert_eq!(rows[0].fact, "works from Kyiv");
+        assert_eq!(rows[1].id, a);
+
+        assert!(repo.memory_delete(a).unwrap());
+        assert_eq!(repo.memory_list().unwrap().len(), 1);
+        assert!(!repo.memory_delete(a).unwrap());
+    }
+
+    #[test]
+    fn memory_insert_rejects_empty_fact() {
+        let mut repo = fresh();
+        assert!(repo.memory_insert("   ", 1).is_err());
+        assert!(repo.memory_insert("", 1).is_err());
+        assert!(repo.memory_list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn chat_insert_preserves_tool_metadata() {
+        let mut repo = fresh();
+        repo.chat_insert(&[NewChatRow {
+            role: ChatRole::Tool,
+            content: "{\"ok\":true}".into(),
+            tool_call_id: Some("call_123".into()),
+            tool_name: Some("get_battery".into()),
+            created_at: 1,
+        }])
+        .unwrap();
+        let rows = repo.chat_load_recent(10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].role, ChatRole::Tool);
+        assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_123"));
+        assert_eq!(rows[0].tool_name.as_deref(), Some("get_battery"));
     }
 }
