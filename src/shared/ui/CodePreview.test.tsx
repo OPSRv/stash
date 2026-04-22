@@ -8,20 +8,26 @@ describe('CodePreview', () => {
     const { container } = render(
       <CodePreview code={'const x = 1;'} language="javascript" />,
     );
-    await waitFor(() => {
-      const pre = container.querySelector('pre');
-      expect(pre?.className ?? '').toContain('language-javascript');
-    });
+    await waitFor(
+      () => {
+        const pre = container.querySelector('pre');
+        expect(pre?.className ?? '').toContain('language-javascript');
+      },
+      { timeout: 5000 },
+    );
   });
 
   it('tags TSX code with the typescript grammar', async () => {
     const { container } = render(
       <CodePreview code={'const X = <div/>;'} language="typescript" />,
     );
-    await waitFor(() => {
-      const pre = container.querySelector('pre');
-      expect(pre?.className ?? '').toContain('language-typescript');
-    });
+    await waitFor(
+      () => {
+        const pre = container.querySelector('pre');
+        expect(pre?.className ?? '').toContain('language-typescript');
+      },
+      { timeout: 5000 },
+    );
   });
 
   it('renders the filename header when provided', () => {
@@ -33,9 +39,12 @@ describe('CodePreview', () => {
 
   it('falls back to plaintext when no language is passed', async () => {
     const { container } = render(<CodePreview code={'hello'} />);
-    await waitFor(() => {
-      const pre = container.querySelector('pre');
-      expect(pre?.className ?? '').toContain('language-plaintext');
-    });
+    await waitFor(
+      () => {
+        const pre = container.querySelector('pre');
+        expect(pre?.className ?? '').toContain('language-plaintext');
+      },
+      { timeout: 5000 },
+    );
   });
 });

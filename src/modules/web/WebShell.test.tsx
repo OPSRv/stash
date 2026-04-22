@@ -119,11 +119,33 @@ describe('WebShell (Arc-style sidebar)', () => {
       'Rename',
       'Duplicate',
       'Pin',
-      'Copy URL',
+      'Copy URL ⌘⇧C',
       'Close (free RAM)',
       'Close others',
       'Delete tab',
     ]);
+  });
+
+  test('⌘⇧C copies the active tab’s URL to the system clipboard', async () => {
+    const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+    vi.mocked(writeText).mockClear();
+    renderShell();
+    // Activate the second tab.
+    const gemini = screen.getByRole('tab', { name: 'Gemini' });
+    fireEvent.click(gemini);
+    // Fire the host shortcut.
+    fireEvent.keyDown(window, { key: 'c', metaKey: true, shiftKey: true });
+    expect(vi.mocked(writeText)).toHaveBeenCalledWith('https://gemini.google.com/app');
+  });
+
+  test('per-tab copy-URL button invokes writeText with that tab’s URL', async () => {
+    const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+    vi.mocked(writeText).mockClear();
+    renderShell();
+    // Hover doesn't matter in jsdom (no hover); the button is in the DOM, just disabled visually.
+    const btn = screen.getByLabelText('Copy URL of ChatGPT');
+    fireEvent.click(btn);
+    expect(vi.mocked(writeText)).toHaveBeenCalledWith('https://chat.openai.com');
   });
 
   test('context menu shows Unpin for a pinned tab', () => {

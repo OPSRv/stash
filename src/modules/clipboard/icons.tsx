@@ -19,14 +19,14 @@ export const TextIcon = () => (
 );
 
 /// Globe — reads as "web URL from the browser" at a glance. The old
-/// chain-links glyph worked but looked like "anchor link" semantics
-/// from word processors; users copying via ⌘⇧C in Safari/Chrome
-/// expect a web indicator, not a paperclip.
+/// chain-links glyph looked like word-processor anchor semantics;
+/// users copying via ⌘⇧C in Safari/Chrome expect a web indicator.
 export const LinkIcon = () => (
   <svg {...iconProps}>
     <circle cx="12" cy="12" r="9" />
     <path d="M3 12h18" />
-    <path d="M12 3a13 13 0 0 1 0 18M12 3a13 13 0 0 0 0 18" />
+    <path d="M12 3a10 10 0 0 1 0 18" />
+    <path d="M12 3a10 10 0 0 0 0 18" />
   </svg>
 );
 

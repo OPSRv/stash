@@ -539,25 +539,45 @@ fn volume_bar(percent: u32) -> String {
 }
 
 fn volume_keyboard() -> InlineKeyboard {
+    // Second row mirrors `music_keyboard()` — callback namespaces route
+    // by first segment, so `music:*` from here hits MusicCmd just like
+    // it would from `/music`. Reply carries its own volume keyboard
+    // back, so the user stays in one message.
     InlineKeyboard {
-        rows: vec![vec![
-            InlineButton {
-                text: "➖10".into(),
-                callback_data: "volume:down".into(),
-            },
-            InlineButton {
-                text: "🔇".into(),
-                callback_data: "volume:mute".into(),
-            },
-            InlineButton {
-                text: "🔊".into(),
-                callback_data: "volume:unmute".into(),
-            },
-            InlineButton {
-                text: "➕10".into(),
-                callback_data: "volume:up".into(),
-            },
-        ]],
+        rows: vec![
+            vec![
+                InlineButton {
+                    text: "➖10".into(),
+                    callback_data: "volume:down".into(),
+                },
+                InlineButton {
+                    text: "🔇".into(),
+                    callback_data: "volume:mute".into(),
+                },
+                InlineButton {
+                    text: "🔊".into(),
+                    callback_data: "volume:unmute".into(),
+                },
+                InlineButton {
+                    text: "➕10".into(),
+                    callback_data: "volume:up".into(),
+                },
+            ],
+            vec![
+                InlineButton {
+                    text: "⏮️".into(),
+                    callback_data: "music:prev".into(),
+                },
+                InlineButton {
+                    text: "⏯️".into(),
+                    callback_data: "music:toggle".into(),
+                },
+                InlineButton {
+                    text: "⏭️".into(),
+                    callback_data: "music:next".into(),
+                },
+            ],
+        ],
     }
 }
 
@@ -588,32 +608,24 @@ impl CommandHandler for MusicCmd {
                     ..Default::default()
                 }
             }
-            "play" | "pause" | "toggle" => {
-                match crate::modules::music::commands::music_play_pause(ctx.app.clone()) {
-                    Ok(()) => Reply {
-                        text: format!("⏯️ {}", read_after_action(&ctx.app, "перемкнуто")),
-                        keyboard: Some(music_keyboard()),
-                        ..Default::default()
-                    },
-                    Err(e) => Reply::text(format!("⚠️ {e}")),
-                }
-            }
-            "next" => match crate::modules::music::commands::music_next(ctx.app.clone()) {
-                Ok(()) => Reply {
-                    text: format!("⏭️ {}", read_after_action(&ctx.app, "далі")),
-                    keyboard: Some(music_keyboard()),
-                    ..Default::default()
-                },
-                Err(e) => Reply::text(format!("⚠️ {e}")),
-            },
-            "prev" => match crate::modules::music::commands::music_prev(ctx.app.clone()) {
-                Ok(()) => Reply {
-                    text: format!("⏮️ {}", read_after_action(&ctx.app, "назад")),
-                    keyboard: Some(music_keyboard()),
-                    ..Default::default()
-                },
-                Err(e) => Reply::text(format!("⚠️ {e}")),
-            },
+            "play" | "pause" | "toggle" => run_music_action(
+                &ctx,
+                crate::modules::music::commands::music_play_pause,
+                "⏯️",
+                "перемкнуто",
+            ),
+            "next" => run_music_action(
+                &ctx,
+                crate::modules::music::commands::music_next,
+                "⏭️",
+                "далі",
+            ),
+            "prev" => run_music_action(
+                &ctx,
+                crate::modules::music::commands::music_prev,
+                "⏮️",
+                "назад",
+            ),
             _ => Reply::text(format!(
                 "✍️ Використання: /music [play|pause|next|prev]. Отримано: {sub}"
             )),
@@ -676,6 +688,52 @@ fn format_now_playing(snap: &NowPlaying) -> String {
     };
     let icon = if snap.playing { "▶️" } else { "⏸️" };
     format!("{icon} {title}{who}")
+}
+
+/// Dispatch a music-player click and shape the Reply uniformly. When
+/// the Music webview isn't attached yet (user hasn't opened the tab
+/// this session), reveal the popup on the Music tab so the child
+/// webview mounts — and send the keyboard back so the remote user can
+/// retry once the player is live. Other errors also keep the keyboard
+/// so the user isn't stranded after a transient click failure.
+fn run_music_action(
+    ctx: &Ctx,
+    action: fn(tauri::AppHandle) -> Result<(), String>,
+    emoji: &str,
+    verb: &str,
+) -> Reply {
+    match action(ctx.app.clone()) {
+        Ok(()) => Reply {
+            text: format!("{emoji} {}", read_after_action(&ctx.app, verb)),
+            keyboard: Some(music_keyboard()),
+            ..Default::default()
+        },
+        Err(e) if e.contains("not attached") => {
+            reveal_music_tab(&ctx.app);
+            Reply {
+                text: "📻 Плеєр ще не відкритий — відкриваю у Stash. Спробуй кнопку ще раз за кілька секунд."
+                    .to_string(),
+                keyboard: Some(music_keyboard()),
+                ..Default::default()
+            }
+        }
+        Err(e) => Reply {
+            text: format!("⚠️ {e}"),
+            keyboard: Some(music_keyboard()),
+            ..Default::default()
+        },
+    }
+}
+
+/// Mirror of the `⌘⇧N` shortcut for Notes: show the popup, focus it,
+/// and tell the frontend to jump to the Music tab so `MusicShell`
+/// mounts and attaches the YouTube-Music child webview.
+fn reveal_music_tab(app: &tauri::AppHandle) {
+    let _ = app.emit("nav:activate", "music");
+    if let Some(win) = app.get_webview_window("popup") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
 }
 
 fn music_keyboard() -> InlineKeyboard {
@@ -1008,11 +1066,7 @@ impl CommandHandler for ScreenshotCmd {
         "screenshot"
     }
     fn description(&self) -> &'static str {
-        "Captures every connected screen and sends them back as files \
-         (uncompressed PNGs, not re-encoded photos). Pass `main` to \
-         capture only the primary display. Each PNG is written to the \
-         OS temp dir; the reply text lists the file paths so CLI users \
-         can open them locally."
+        "Скрін усіх екранів у PNG (без перекодування). `main` — лише головний."
     }
     fn usage(&self) -> &'static str {
         "/screenshot [main]"
@@ -1060,9 +1114,7 @@ impl CommandHandler for DisplayCmd {
         "display"
     }
     fn description(&self) -> &'static str {
-        "Turn the displays off immediately while leaving the Mac awake — \
-         Claude, builds, downloads and any background tasks keep running. \
-         Press any key or move the mouse to bring them back. No sudo."
+        "Погасити екрани. Mac і фонові задачі (Claude, білди, завантаження) працюють далі."
     }
     fn usage(&self) -> &'static str {
         "/display"
@@ -1092,10 +1144,7 @@ impl CommandHandler for SleepCmd {
         "sleep"
     }
     fn description(&self) -> &'static str {
-        "Put the Mac to sleep. With no argument sleeps immediately; with \
-         a duration like `15m`, `30s` or `1h` schedules sleep after that \
-         delay (default unit is minutes, so `30` = 30 min). Use `cancel` \
-         to abort a pending timer, `status` to see remaining time."
+        "Приспати Mac. Без аргументу — зараз; `15m` / `30s` / `1h` — за таймером. `cancel` / `status`."
     }
     fn usage(&self) -> &'static str {
         "/sleep [<duration>|cancel|status]"
@@ -1121,11 +1170,7 @@ impl CommandHandler for ShutdownCmd {
         "shutdown"
     }
     fn description(&self) -> &'static str {
-        "Shut the Mac down. With no argument shuts down immediately; with \
-         a duration like `30m` schedules shutdown after that delay. Use \
-         `cancel` to abort a pending timer, `status` to see remaining time. \
-         Unsaved work in open apps may block the shutdown — the command \
-         surfaces that as an error."
+        "Вимкнути Mac. Без аргументу — зараз; `30m` — за таймером. `cancel` / `status`. Незбережені документи можуть блокувати."
     }
     fn usage(&self) -> &'static str {
         "/shutdown [<duration>|cancel|status]"

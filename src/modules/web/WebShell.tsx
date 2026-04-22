@@ -295,12 +295,19 @@ export const WebShell = () => {
   }, [closeService]);
 
   // Host-side shortcuts:
-  //   ⌘W — close the active tab's webview
-  //   ⌘S — toggle the sidebar
+  //   ⌘W       — close the active tab's webview
+  //   ⌘S       — toggle the sidebar
+  //   ⌘⇧C      — copy the active tab's URL to the system clipboard
+  //              (mirrors Safari/Chrome's "Copy Link to Current Page")
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
       const k = e.key.toLowerCase();
+      if (e.shiftKey && k === 'c' && activeService) {
+        e.preventDefault();
+        copyServiceUrl(activeService).catch(() => {});
+        return;
+      }
       if (k === 'w' && storedActive) {
         e.preventDefault();
         closeService(storedActive).catch(() => {});
@@ -311,7 +318,7 @@ export const WebShell = () => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [closeService, storedActive, toggleCollapsed]);
+  }, [closeService, storedActive, toggleCollapsed, activeService, copyServiceUrl]);
 
   // Per-service loading state → drives the favicon pulse. Mirrors the
   // subscription inside `EmbeddedWebChat`; two subscribers to the same
@@ -518,18 +525,47 @@ export const WebShell = () => {
           </button>
         )}
         {!isRenaming && !collapsed && (
-          <button
-            type="button"
-            aria-label={`Close ${s.label}`}
-            title={`Close ${s.label} (free RAM; reopens on click)`}
-            onClick={(e) => {
-              e.stopPropagation();
-              closeService(s.id).catch(() => {});
-            }}
-            className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:text-red-400 px-1.5 py-1 mr-0.5 rounded-md text-meta transition-opacity"
-          >
-            ×
-          </button>
+          <>
+            <button
+              type="button"
+              aria-label={`Copy URL of ${s.label}`}
+              title={`Copy URL (⌘⇧C)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                copyServiceUrl(s).catch(() => {});
+              }}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:t-primary px-1.5 py-1 rounded-md transition-opacity"
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="9" />
+                <path d="M3 12h18" />
+                <path d="M12 3a10 10 0 0 1 0 18" />
+                <path d="M12 3a10 10 0 0 0 0 18" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label={`Close ${s.label}`}
+              title={`Close ${s.label} (free RAM; reopens on click)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                closeService(s.id).catch(() => {});
+              }}
+              className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:text-red-400 px-1.5 py-1 mr-0.5 rounded-md text-meta transition-opacity"
+            >
+              ×
+            </button>
+          </>
         )}
       </div>
     );
@@ -791,7 +827,7 @@ export const WebShell = () => {
               setContextMenu(null);
             }}
           >
-            Copy URL
+            Copy URL <span className="t-tertiary text-[10.5px] font-mono ml-2">⌘⇧C</span>
           </ContextMenuItem>
           <div className="h-px my-1 mx-1" style={{ background: 'var(--color-hairline)' }} />
           <ContextMenuItem

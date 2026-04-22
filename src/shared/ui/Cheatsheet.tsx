@@ -47,6 +47,15 @@ const metronomeShortcuts: ShortcutGroup = {
   ],
 };
 
+const webShortcuts: ShortcutGroup = {
+  title: 'Web',
+  items: [
+    { keys: ['⌘W'], label: 'Close the active web tab (keeps it in the list)' },
+    { keys: ['⌘S'], label: 'Collapse / expand sidebar' },
+    { keys: ['⌘⇧C'], label: 'Copy active tab’s URL to clipboard' },
+  ],
+};
+
 const downloadsShortcuts: ShortcutGroup = {
   title: 'Downloads',
   items: [
@@ -84,6 +93,7 @@ export const Cheatsheet = ({
 
   const groups: ShortcutGroup[] = [globalShortcuts];
   if (!tab || tab === 'clipboard') groups.push(clipboardShortcuts);
+  if (!tab || tab === 'web') groups.push(webShortcuts);
   if (!tab || tab === 'downloads') groups.push(downloadsShortcuts);
   if (!tab || tab === 'metronome') groups.push(metronomeShortcuts);
 
