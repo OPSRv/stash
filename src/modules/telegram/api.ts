@@ -34,6 +34,11 @@ export const deleteInboxItem = (id: number): Promise<void> =>
 export const markInboxRouted = (id: number, target: RouteTarget): Promise<void> =>
   invoke('telegram_mark_inbox_routed', { id, target });
 
+/** Create a Notes entry from an inbox row and copy any attached file
+ *  into that note's attachments directory. Returns the new note_id. */
+export const sendInboxToNotes = (id: number): Promise<number> =>
+  invoke('telegram_send_inbox_to_notes', { id });
+
 export const revealInboxFile = (id: number): Promise<void> =>
   invoke('telegram_reveal_inbox_file', { id });
 

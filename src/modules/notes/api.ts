@@ -80,3 +80,28 @@ export const notesSaveImageFile = (path: string): Promise<string> =>
  *  images dir are accepted. */
 export const notesReadImageByPath = (path: string): Promise<Uint8Array> =>
   invoke<number[]>('notes_read_image_path', { path }).then((arr) => new Uint8Array(arr));
+
+export type NoteAttachment = {
+  id: number;
+  note_id: number;
+  file_path: string;
+  original_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_at: number;
+};
+
+export const notesListAttachments = (noteId: number): Promise<NoteAttachment[]> =>
+  invoke('notes_list_attachments', { noteId });
+
+/** Copy `sourcePath` into the note's private attachments directory and
+ *  record a row. The original file on disk is *not* moved — removing the
+ *  attachment later only unlinks the copy. */
+export const notesAddAttachment = (
+  noteId: number,
+  sourcePath: string,
+): Promise<NoteAttachment> =>
+  invoke('notes_add_attachment', { noteId, sourcePath });
+
+export const notesRemoveAttachment = (id: number): Promise<void> =>
+  invoke('notes_remove_attachment', { id });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { appDataDir, join } from '@tauri-apps/api/path';
 
 import { IconButton } from '../../../shared/ui/IconButton';
 import * as api from '../api';
@@ -72,7 +73,24 @@ export function InboxPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      setItems(await api.listInbox());
+      const rows = await api.listInbox();
+      // Backend stores `file_path` relative to the app data dir. The
+      // asset protocol (used by <img>, <audio>, <video>) needs an
+      // absolute path, so we resolve once and rewrite the field in
+      // place before handing the list to the renderer.
+      const base = await appDataDir();
+      const resolved = await Promise.all(
+        rows.map(async (row): Promise<InboxItem> => {
+          if (!row.file_path) return row;
+          // `appDataDir()` in tests is mocked to a literal path; treat
+          // anything already absolute as passthrough so we don't
+          // double-prefix. On macOS that's "starts with /".
+          if (row.file_path.startsWith('/')) return row;
+          const abs = await join(base, row.file_path);
+          return { ...row, file_path: abs };
+        }),
+      );
+      setItems(resolved);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -200,40 +218,47 @@ export function InboxPanel() {
                         </span>
                       )}
                       <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                        <RowAction
+                          label="Save to Notes"
+                          disabled={busyId === item.id || item.routed_to === 'notes'}
+                          onClick={() =>
+                            runOn(item.id, async () => {
+                              await api.sendInboxToNotes(item.id);
+                              // Hop to the Notes tab so the user sees
+                              // the freshly-created entry + attachment
+                              // right away — without this the save
+                              // looks silent.
+                              window.dispatchEvent(
+                                new CustomEvent('stash:navigate', {
+                                  detail: 'notes',
+                                }),
+                              );
+                            })
+                          }
+                          icon={
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                              <path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4z" />
+                              <path d="M16 4v4h4" />
+                              <path d="M8 12h8M8 16h6" />
+                            </svg>
+                          }
+                        />
                         {item.kind === 'text' && (
-                          <>
-                            <RowAction
-                              label="Route to Notes"
-                              disabled={busyId === item.id || !!item.routed_to}
-                              onClick={() =>
-                                runOn(item.id, () =>
-                                  api.markInboxRouted(item.id, 'notes'),
-                                )
-                              }
-                              icon={
-                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                  <path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4z" />
-                                  <path d="M16 4v4h4" />
-                                  <path d="M8 12h8M8 16h6" />
-                                </svg>
-                              }
-                            />
-                            <RowAction
-                              label="Route to Clipboard"
-                              disabled={busyId === item.id || !!item.routed_to}
-                              onClick={() =>
-                                runOn(item.id, () =>
-                                  api.markInboxRouted(item.id, 'clipboard'),
-                                )
-                              }
-                              icon={
-                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                  <rect x="8" y="2" width="8" height="4" rx="1" />
-                                  <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                                </svg>
-                              }
-                            />
-                          </>
+                          <RowAction
+                            label="Route to Clipboard"
+                            disabled={busyId === item.id || !!item.routed_to}
+                            onClick={() =>
+                              runOn(item.id, () =>
+                                api.markInboxRouted(item.id, 'clipboard'),
+                              )
+                            }
+                            icon={
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <rect x="8" y="2" width="8" height="4" rx="1" />
+                                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                              </svg>
+                            }
+                          />
                         )}
                         {item.file_path && (
                           <RowAction

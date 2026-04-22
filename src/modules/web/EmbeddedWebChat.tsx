@@ -9,10 +9,10 @@ import { userAgentFor } from '../../shared/browserUA';
 import { Input } from '../../shared/ui/Input';
 import { useToast } from '../../shared/ui/Toast';
 
+import { Favicon } from './Favicon';
 import type { WebShortcutDetail } from './WebShell';
 import { clampZoom, isEmbeddableUrl, ZOOM_STEP } from './webServiceUtils';
 import {
-  faviconUrlFor,
   webchatBack,
   webchatClose,
   webchatCurrentUrl,
@@ -382,7 +382,6 @@ export const EmbeddedWebChat = ({
     }
   }, [service.id, syncBounds]);
 
-  const favicon = faviconUrlFor(service.url);
   const host = (() => {
     try {
       return new URL(service.url).hostname;
@@ -456,18 +455,7 @@ export const EmbeddedWebChat = ({
               className="flex items-center gap-2 flex-1 min-w-0 h-7 px-2 text-meta t-secondary hover:t-primary rounded-md text-left"
               title="Edit URL (⌘L)"
             >
-              {favicon && (
-                <img
-                  src={favicon}
-                  alt=""
-                  width={14}
-                  height={14}
-                  className="rounded-sm shrink-0"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-              )}
+              <Favicon url={service.url} label={service.label} size={14} />
               <span className="t-primary font-medium shrink-0">{service.label}</span>
               <span className="t-tertiary truncate">{host}</span>
               {zoom !== 1 && (

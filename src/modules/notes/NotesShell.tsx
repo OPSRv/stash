@@ -24,6 +24,7 @@ import { useToast } from '../../shared/ui/Toast';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
+import { NoteAttachmentsPanel } from './NoteAttachmentsPanel';
 import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { SaveStatusPill, type SaveStatus } from './SaveStatusPill';
@@ -1029,6 +1030,7 @@ export const NotesShell = () => {
                 )}
               </div>
             </div>
+            {activeId != null && <NoteAttachmentsPanel noteId={activeId} />}
             <div className="flex-1 flex min-h-0">
               {showEditor && (
                 <div

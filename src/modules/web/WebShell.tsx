@@ -8,9 +8,10 @@ import { useToast } from '../../shared/ui/Toast';
 
 import { AddWebServiceModal } from './AddWebServiceModal';
 import { EmbeddedWebChat } from './EmbeddedWebChat';
+import { Favicon } from './Favicon';
 import { useWebServices } from './useWebServices';
 import { isEmbeddableUrl, reorderServices } from './webServiceUtils';
-import { faviconUrlFor, webchatClose, webchatHideAll } from './webchatApi';
+import { webchatClose, webchatHideAll } from './webchatApi';
 
 /// MIME type we use for drag-reordering tabs so we don't collide with the
 /// `text/uri-list` drop target on the same tab bar (which opens the add
@@ -423,7 +424,6 @@ export const WebShell = () => {
 
   const renderTab = (s: WebChatService) => {
     const active = storedActive === s.id;
-    const favicon = faviconUrlFor(s.url, 16);
     const isRenaming = renaming === s.id;
     const beingDragged = dragId === s.id;
     const loading = !!loadingMap[s.id];
@@ -501,26 +501,7 @@ export const WebShell = () => {
             aria-label={collapsed ? s.label : undefined}
           >
             <span className="relative shrink-0 inline-flex items-center justify-center w-[14px] h-[14px]">
-              {favicon ? (
-                <img
-                  src={favicon}
-                  alt=""
-                  width={14}
-                  height={14}
-                  className="rounded-sm"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                  }}
-                />
-              ) : (
-                <span
-                  aria-hidden="true"
-                  className="w-full h-full rounded-sm flex items-center justify-center text-[9px] font-semibold t-primary"
-                  style={{ background: 'rgba(var(--stash-accent-rgb), 0.25)' }}
-                >
-                  {s.label.slice(0, 1).toUpperCase()}
-                </span>
-              )}
+              <Favicon url={s.url} label={s.label} size={14} />
               {loading && (
                 <span
                   aria-hidden="true"
@@ -596,11 +577,18 @@ export const WebShell = () => {
           title={collapsed ? 'Home — all services' : 'Home — all services'}
           aria-label="Home"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" className="shrink-0">
-            <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
-            <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
-            <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
-            <rect x="8" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            aria-hidden="true"
+            className="shrink-0"
+            style={{ color: 'rgb(var(--stash-accent-rgb))' }}
+          >
+            <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" fill="currentColor" opacity="0.9" />
+            <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" fill="currentColor" opacity="0.55" />
+            <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" fill="currentColor" opacity="0.55" />
+            <rect x="8" y="8" width="4.5" height="4.5" rx="1" fill="currentColor" opacity="0.9" />
           </svg>
           {!collapsed && <span className="truncate">Home</span>}
         </button>
@@ -658,8 +646,16 @@ export const WebShell = () => {
           title="Add web tab (or drop a URL onto the sidebar)"
           aria-label="Add web tab"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" className="shrink-0">
-            <path d="M7 2.5 V11.5 M2.5 7 H11.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            aria-hidden="true"
+            className="shrink-0"
+            style={{ color: 'rgb(var(--stash-accent-rgb))' }}
+          >
+            <circle cx="7" cy="7" r="6" fill="currentColor" opacity="0.18" />
+            <path d="M7 3.5 V10.5 M3.5 7 H10.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
           {!collapsed && <span className="truncate">New tab</span>}
         </button>
@@ -727,7 +723,6 @@ export const WebShell = () => {
                 </div>
               )}
               {services.map((s) => {
-                const favicon = faviconUrlFor(s.url, 64);
                 let host = s.url;
                 try {
                   host = new URL(s.url).hostname;
@@ -742,25 +737,7 @@ export const WebShell = () => {
                     className="group flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:bg-white/[0.04] transition-colors text-center"
                     style={{ background: 'var(--color-surface)' }}
                   >
-                    {favicon ? (
-                      <img
-                        src={favicon}
-                        alt=""
-                        width={40}
-                        height={40}
-                        className="rounded-md"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <div
-                        className="w-10 h-10 rounded-md flex items-center justify-center t-primary font-semibold"
-                        style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
-                      >
-                        {s.label.slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
+                    <Favicon url={s.url} label={s.label} size={40} className="!rounded-md" />
                     <div className="t-primary text-body font-medium">{s.label}</div>
                     <div className="t-tertiary text-meta truncate max-w-full">{host}</div>
                   </button>

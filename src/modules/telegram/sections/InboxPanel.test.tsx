@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
-import { __emit } from '@tauri-apps/api/event';
+// `__emit` is a test-only helper installed by `src/test/setup.ts` —
+// re-typed here because the real `@tauri-apps/api/event` surface
+// doesn't declare it.
+import * as events from '@tauri-apps/api/event';
+const __emit = (events as unknown as { __emit: (e: string, p: unknown) => void }).__emit;
 
 import { InboxPanel } from './InboxPanel';
 import type { InboxItem } from '../types';
@@ -45,7 +49,7 @@ describe('<InboxPanel />', () => {
     render(<InboxPanel />);
     expect(await screen.findByText('paycheck arrived')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /route to notes/i }),
+      screen.getByRole('button', { name: /save to notes/i }),
     ).toBeEnabled();
     expect(
       screen.getByRole('button', { name: /route to clipboard/i }),
@@ -53,23 +57,22 @@ describe('<InboxPanel />', () => {
     expect(screen.getByRole('button', { name: /^delete$/i })).toBeEnabled();
   });
 
-  it('routing button calls telegram_mark_inbox_routed', async () => {
+  it('save-to-notes calls telegram_send_inbox_to_notes', async () => {
     const user = userEvent.setup();
     vi.mocked(invoke).mockImplementation(async (cmd) => {
       if (cmd === 'telegram_list_inbox')
         return [mkItem({ id: 7, text_content: 'something' })];
-      if (cmd === 'telegram_mark_inbox_routed') return undefined;
+      if (cmd === 'telegram_send_inbox_to_notes') return 42;
       return undefined;
     });
     render(<InboxPanel />);
     await screen.findByText('something');
     await user.click(
-      screen.getByRole('button', { name: /route to notes/i }),
+      screen.getByRole('button', { name: /save to notes/i }),
     );
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith('telegram_mark_inbox_routed', {
+      expect(invoke).toHaveBeenCalledWith('telegram_send_inbox_to_notes', {
         id: 7,
-        target: 'notes',
       }),
     );
   });
@@ -91,7 +94,7 @@ describe('<InboxPanel />', () => {
     );
   });
 
-  it('non-text items omit routing buttons (file actions only)', async () => {
+  it('non-text items keep save-to-notes plus file actions', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd) => {
       if (cmd === 'telegram_list_inbox')
         return [
@@ -107,9 +110,13 @@ describe('<InboxPanel />', () => {
     });
     render(<InboxPanel />);
     await screen.findByTestId('inbox-item-5');
+    // Clipboard routing only makes sense for text rows — non-text hides it.
     expect(
-      screen.queryByRole('button', { name: /route to notes/i }),
+      screen.queryByRole('button', { name: /route to clipboard/i }),
     ).toBeNull();
+    expect(
+      screen.getByRole('button', { name: /save to notes/i }),
+    ).toBeEnabled();
     expect(screen.getByRole('button', { name: /reveal in finder/i })).toBeEnabled();
     expect(screen.getByRole('button', { name: /^delete$/i })).toBeEnabled();
   });

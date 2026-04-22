@@ -7,6 +7,16 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (p: string) => `asset://localhost/${p}`,
 }));
 
+vi.mock('@tauri-apps/api/path', () => ({
+  appDataDir: vi.fn().mockResolvedValue('/test-app-data'),
+  appLocalDataDir: vi.fn().mockResolvedValue('/test-app-local'),
+  join: vi.fn(async (...parts: string[]) => parts.filter(Boolean).join('/')),
+  resolve: vi.fn(async (...parts: string[]) => parts.filter(Boolean).join('/')),
+  basename: vi.fn(async (p: string) => p.replace(/^.*[\\/]/, '')),
+  dirname: vi.fn(async (p: string) => p.replace(/[\\/][^\\/]*$/, '')),
+  sep: vi.fn().mockReturnValue('/'),
+}));
+
 // Event mock — remembers listeners per event name and exposes `__emit`
 // so tests can drive UI paths that react to Tauri events without going
 // through the real IPC. `listen` still returns an unsubscribe fn so
