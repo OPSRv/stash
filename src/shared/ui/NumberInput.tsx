@@ -3,7 +3,6 @@ import {
   useCallback,
   useId,
   useMemo,
-  useRef,
   useState,
   type KeyboardEvent,
 } from 'react';

@@ -298,7 +298,7 @@ export const SmartScanPanel = () => {
                 checked={b.selected}
                 onChange={() => toggle(b.id)}
                 disabled={!b.enabled}
-                ariaLabel={b.title}
+                ariaLabel={b.label}
               />
             </span>
             <div

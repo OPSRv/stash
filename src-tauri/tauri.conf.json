@@ -29,7 +29,7 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost ipc: http://ipc.localhost data: blob: https:; media-src 'self' asset: https://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https: wss: data: blob:; frame-src 'self' https:;",
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$HOME/Movies/Stash/**", "$HOME/Movies/Stash/.thumbs/**", "$VIDEO/**"]

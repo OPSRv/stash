@@ -253,6 +253,12 @@ pub fn webchat_embed(
     }
 
     let parsed = url.parse::<url::Url>().map_err(|e| e.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "webchat: scheme '{}' not allowed (only http/https)",
+            parsed.scheme()
+        ));
+    }
     let ua = user_agent
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| SAFARI_UA.to_string());

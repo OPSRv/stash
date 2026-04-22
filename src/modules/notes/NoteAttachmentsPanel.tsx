@@ -100,8 +100,12 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
     void getCurrentWebview()
       .onDragDropEvent(async (event) => {
         const p = event.payload;
-        if (p.type === 'enter' || p.type === 'over') {
+        if (p.type === 'enter') {
           if ((p.paths?.length ?? 0) > 0) setDropActive(true);
+          return;
+        }
+        if (p.type === 'over') {
+          setDropActive(true);
           return;
         }
         if (p.type === 'leave') {
@@ -200,7 +204,7 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
           </span>
         </div>
         {error && (
-          <p role="alert" className="mt-2 text-[12px] text-rose-300/90">
+          <p role="alert" className="mt-2 text-meta text-rose-300/90">
             {error}
           </p>
         )}
@@ -224,7 +228,7 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
         </Button>
       </div>
       {error && (
-        <p role="alert" className="text-[12px] text-rose-300/90">
+        <p role="alert" className="text-meta text-rose-300/90">
           {error}
         </p>
       )}

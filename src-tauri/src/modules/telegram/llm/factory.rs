@@ -82,12 +82,19 @@ pub fn read_config(settings_path: &Path) -> Result<AiConfig, LlmError> {
         .get("aiBaseUrl")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let api_key_fallback = value
-        .get("aiApiKeys")
-        .and_then(|m| m.get(provider.key_account()))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
+    // Security: plaintext `aiApiKeys` fallback from the settings store is only
+    // honoured in debug builds (unsigned dev binaries can lose the Keychain
+    // ACL after re-signing). In release the Keychain is the sole source.
+    let api_key_fallback = if cfg!(debug_assertions) {
+        value
+            .get("aiApiKeys")
+            .and_then(|m| m.get(provider.key_account()))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    } else {
+        None
+    };
     Ok(AiConfig {
         provider,
         model,

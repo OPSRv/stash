@@ -25,11 +25,23 @@ pub struct QuickDetect {
     pub preview: QuickPreview,
 }
 
+fn ensure_http_scheme(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("invalid url: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "scheme '{}' not allowed (only http/https)",
+            parsed.scheme()
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn dl_detect_quick(url: String) -> Result<Option<QuickDetect>, String> {
     // Runs a short oEmbed fetch (~500ms for YouTube/Vimeo) so the UI can
     // render a preview card immediately while full yt-dlp extraction
     // continues in the background. Returns None for unsupported providers.
+    ensure_http_scheme(&url)?;
     let url_clone = url.clone();
     let preview = tauri::async_runtime::spawn_blocking(move || fetch_oembed(&url_clone))
         .await
@@ -66,6 +78,7 @@ pub async fn dl_detect(
     state: State<'_, Arc<RunnerState>>,
     url: String,
 ) -> Result<DetectedVideo, String> {
+    ensure_http_scheme(&url)?;
     // Fast path: cached result within TTL.
     if let Some(hit) = state.detect_cache.lock().unwrap().get(&url) {
         if hit.fetched_at.elapsed() < DETECT_CACHE_TTL {
@@ -114,6 +127,7 @@ pub fn dl_start(
     height: Option<u32>,
     kind: String,
 ) -> Result<i64, String> {
+    ensure_http_scheme(&url)?;
     let yt_dlp = resolve_yt_dlp(&state)?;
     let platform = Platform::from_url(&url);
     let now = std::time::SystemTime::now()

@@ -30,12 +30,14 @@ describe('<ConnectionPanel />', () => {
     });
     render(<ConnectionPanel />);
     const input = await screen.findByPlaceholderText(/bot token/i);
-    await user.type(input, '123:abc');
+    // Realistic BotFather shape: `<numeric id>:<~35-char secret>`. The
+    // client-side shape check rejects anything shorter so typos never
+    // reach the backend.
+    const token = '123456789:AAE6Kq5mLZs4V8BqZxG-0123456789xYZ';
+    await user.type(input, token);
     await user.click(screen.getByRole('button', { name: /save token/i }));
     await waitFor(() =>
-      expect(invoke).toHaveBeenCalledWith('telegram_set_token', {
-        token: '123:abc',
-      }),
+      expect(invoke).toHaveBeenCalledWith('telegram_set_token', { token }),
     );
   });
 
@@ -107,7 +109,8 @@ describe('<ConnectionPanel />', () => {
     });
     render(<ConnectionPanel />);
     const input = await screen.findByPlaceholderText(/bot token/i);
-    await user.type(input, 'bogus');
+    const token = '123456789:AAE6Kq5mLZs4V8BqZxG-0123456789xYZ';
+    await user.type(input, token);
     await user.click(screen.getByRole('button', { name: /save token/i }));
     expect(
       await screen.findByText(/Telegram rejected the token/i),

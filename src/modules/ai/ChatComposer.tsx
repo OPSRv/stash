@@ -76,6 +76,7 @@ export const ChatComposer = ({
         onChange={(e) => onChange(e.currentTarget.value)}
         onKeyDown={handleKey}
         rows={MIN_ROWS}
+        maxLength={16000}
         className="flex-1 resize-none nice-scroll"
         style={{
           lineHeight: `${LINE_HEIGHT}px`,

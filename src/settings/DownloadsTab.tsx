@@ -3,6 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { Button } from '../shared/ui/Button';
 import { ConfirmDialog } from '../shared/ui/ConfirmDialog';
+import { Input } from '../shared/ui/Input';
+import { NumberInput } from '../shared/ui/NumberInput';
 import { Select } from '../shared/ui/Select';
 import { Toggle } from '../shared/ui/Toggle';
 import { useToast } from '../shared/ui/Toast';
@@ -11,6 +13,16 @@ import { SettingRow } from './SettingRow';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
 import { YtDlpUpdateRow } from './YtDlpUpdateRow';
 import type { Settings } from './store';
+
+/// yt-dlp `-r` accepts a bare byte-count, optionally suffixed with
+/// `K`/`M`/`G` (binary units). Empty/null = unlimited. We reject anything
+/// else up front so the download doesn't silently fail with a cryptic
+/// yt-dlp error at runtime.
+const RATE_LIMIT_RE = /^\d+(\.\d+)?[KMG]?$/;
+const isInvalidRateLimit = (raw: string | null): boolean => {
+  if (!raw) return false;
+  return !RATE_LIMIT_RE.test(raw);
+};
 
 interface DownloadsTabProps {
   settings: Settings;
@@ -86,19 +98,18 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
         title="Max parallel downloads"
         description="Extra jobs wait in a queue and start as slots free up."
         control={
-          <input
-            aria-label="Max parallel downloads"
-            type="number"
+          <NumberInput
+            ariaLabel="Max parallel downloads"
             min={1}
             max={10}
             value={settings.maxParallelDownloads}
-            onChange={(e) =>
+            onChange={(v) =>
               onChange(
                 'maxParallelDownloads',
-                Math.max(1, Math.min(10, Number(e.currentTarget.value) || 1)),
+                Math.max(1, Math.min(10, v ?? 1)),
               )
             }
-            className="input-field rounded-md px-2 py-1 w-20 text-body"
+            className="w-24"
           />
         }
       />
@@ -106,9 +117,8 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
         title="Bandwidth limit"
         description='yt-dlp rate syntax: "500K", "2M", "1.5M". Empty = unlimited.'
         control={
-          <input
+          <Input
             aria-label="Bandwidth limit"
-            type="text"
             placeholder="unlimited"
             value={settings.downloadRateLimit ?? ''}
             onChange={(e) =>
@@ -117,7 +127,11 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
                 (e.currentTarget.value.trim() || null) as string | null,
               )
             }
-            className="input-field rounded-md px-2 py-1 w-24 text-body"
+            invalid={isInvalidRateLimit(settings.downloadRateLimit)}
+            maxLength={16}
+            spellCheck={false}
+            autoCapitalize="off"
+            className="w-24"
           />
         }
       />
@@ -125,19 +139,19 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
         title="History retention"
         description="Days before completed/failed jobs vanish from the Downloads list (files are not removed)."
         control={
-          <input
-            aria-label="History retention days"
-            type="number"
+          <NumberInput
+            ariaLabel="History retention days"
             min={1}
             max={365}
             value={settings.historyRetentionDays}
-            onChange={(e) =>
+            onChange={(v) =>
               onChange(
                 'historyRetentionDays',
-                Math.max(1, Math.min(365, Number(e.currentTarget.value) || 60)),
+                Math.max(1, Math.min(365, v ?? 60)),
               )
             }
-            className="input-field rounded-md px-2 py-1 w-20 text-body"
+            suffix="d"
+            className="w-28"
           />
         }
       />

@@ -16,6 +16,19 @@ interface AiTabProps {
   onChange: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
 }
 
+/// `null`/empty base URLs are fine (providers bring their own default).
+/// Otherwise we parse and require http(s) — `new URL()` throws on garbage,
+/// so `try/catch` doubles as the shape check.
+const isInvalidBaseUrl = (raw: string | null | undefined): boolean => {
+  if (!raw) return false;
+  try {
+    const u = new URL(raw);
+    return !(u.protocol === 'http:' || u.protocol === 'https:');
+  } catch {
+    return true;
+  }
+};
+
 const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
@@ -149,6 +162,9 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
                 placeholder={keyStored ? '••••••••' : 'sk-…'}
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.currentTarget.value)}
+                maxLength={512}
+                spellCheck={false}
+                autoComplete="off"
                 className="w-[240px]"
               />
               <Button
@@ -180,9 +196,12 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
                 aria-label="Base URL"
                 placeholder="https://…"
                 value={settings.aiBaseUrl ?? ''}
-                onChange={(e) =>
-                  onChange('aiBaseUrl', (e.currentTarget.value.trim() || null) as string | null)
-                }
+                onChange={(e) => {
+                  const raw = e.currentTarget.value.trim();
+                  onChange('aiBaseUrl', (raw || null) as string | null);
+                }}
+                invalid={isInvalidBaseUrl(settings.aiBaseUrl)}
+                maxLength={2000}
                 className="w-[320px]"
               />
             }
@@ -198,6 +217,7 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
               value={settings.aiSystemPrompt}
               onChange={(e) => onChange('aiSystemPrompt', e.currentTarget.value)}
               rows={3}
+              maxLength={4000}
               className="w-[420px]"
             />
           }

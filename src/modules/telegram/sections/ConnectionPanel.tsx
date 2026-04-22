@@ -6,6 +6,14 @@ import { SettingRow } from '../../../settings/SettingRow';
 import * as api from '../api';
 import type { ConnectionStatus } from '../types';
 
+/// Telegram bot token shape: `<numeric bot id>:<35-char secret>`. Matches
+/// what BotFather hands out. We keep the check permissive (secret length
+/// and alphabet can drift) but strict enough to catch typos and stray
+/// strings pasted by accident.
+const BOT_TOKEN_RE = /^\d+:[A-Za-z0-9_-]{30,}$/;
+const isValidBotToken = (raw: string): boolean =>
+  raw.length > 0 && raw.length <= 100 && BOT_TOKEN_RE.test(raw);
+
 export function ConnectionPanel() {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
   const [token, setToken] = useState('');
@@ -58,10 +66,14 @@ export function ConnectionPanel() {
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 disabled={busy}
+                maxLength={100}
+                spellCheck={false}
+                autoComplete="off"
+                invalid={token.length > 0 && !isValidBotToken(token.trim())}
                 className="w-56"
               />
               <Button
-                disabled={busy || token.trim().length === 0}
+                disabled={busy || !isValidBotToken(token.trim())}
                 onClick={() => run(() => api.setToken(token.trim()))}
               >
                 Save token

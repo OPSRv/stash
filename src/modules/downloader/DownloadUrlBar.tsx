@@ -71,13 +71,17 @@ export const DownloadUrlBar = ({
         <LinkIcon />
       </span>
       <input
-        type="text"
+        type="url"
         value={url}
         onChange={(e) => onUrlChange(e.currentTarget.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter') onDetect();
         }}
         placeholder="Paste a YouTube / TikTok / Instagram / X / Reddit URL"
+        maxLength={2048}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
         aria-invalid={invalid || undefined}
         // Tooltip mirrors the field so a long URL that's clipped visually
         // is still fully inspectable on hover.

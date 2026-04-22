@@ -1,3 +1,4 @@
+import { NumberInput } from '../shared/ui/NumberInput';
 import { Select } from '../shared/ui/Select';
 import { Toggle } from '../shared/ui/Toggle';
 import { TARGET_LANGUAGES } from '../modules/translator/languages';
@@ -20,16 +21,18 @@ export const ClipboardTab = ({ settings, onChange }: ClipboardTabProps) => (
           title="Max history items"
           description="Older unpinned items are trimmed automatically."
           control={
-            <input
-              aria-label="Max history items"
-              type="number"
+            <NumberInput
+              ariaLabel="Max history items"
               min={10}
               max={10000}
               value={settings.maxHistoryItems}
-              onChange={(e) =>
-                onChange('maxHistoryItems', Math.max(10, Number(e.currentTarget.value) || 0))
+              onChange={(v) =>
+                onChange(
+                  'maxHistoryItems',
+                  Math.max(10, Math.min(10000, v ?? 10)),
+                )
               }
-              className="input-field rounded-md px-2 py-1 w-24 text-body"
+              className="w-24"
             />
           }
         />
@@ -68,19 +71,18 @@ export const ClipboardTab = ({ settings, onChange }: ClipboardTabProps) => (
               title="Minimum length"
               description="Skip very short clips so single words don't spam the banner."
               control={
-                <input
-                  aria-label="Minimum translate length"
-                  type="number"
+                <NumberInput
+                  ariaLabel="Minimum translate length"
                   min={1}
                   max={200}
                   value={settings.translateMinChars}
-                  onChange={(e) =>
+                  onChange={(v) =>
                     onChange(
                       'translateMinChars',
-                      Math.max(1, Math.min(200, Number(e.currentTarget.value) || 1)),
+                      Math.max(1, Math.min(200, v ?? 1)),
                     )
                   }
-                  className="input-field rounded-md px-2 py-1 w-20 text-body"
+                  className="w-20"
                 />
               }
             />

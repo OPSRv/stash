@@ -314,7 +314,7 @@ export function InboxPanel() {
             </div>
           ) : (
             <div className="flex items-center gap-2 px-3 py-2 flex-1">
-              <span className="text-[12px] text-white/70 font-medium">
+              <span className="text-meta text-white/70 font-medium">
                 {selCount} selected
               </span>
               <div className="ml-auto flex items-center gap-1">
@@ -345,7 +345,7 @@ export function InboxPanel() {
       {error && (
         <p
           role="alert"
-          className="mx-4 mt-3 text-[12px] text-rose-300/90 bg-rose-500/10 border border-rose-500/20 rounded-md px-3 py-2"
+          className="mx-4 mt-3 text-meta text-rose-300/90 bg-rose-500/10 border border-rose-500/20 rounded-md px-3 py-2"
         >
           {error}
         </p>
@@ -354,7 +354,7 @@ export function InboxPanel() {
         {!hasItems ? (
           <EmptyState connection={connection} />
         ) : noMatches ? (
-          <div className="px-8 py-12 text-center text-[12px] text-white/45">
+          <div className="px-8 py-12 text-center text-meta text-white/45">
             Nothing matches “{query}”.
           </div>
         ) : (
@@ -615,7 +615,7 @@ const EmptyState = ({ connection }: { connection: ConnectionStatus | null }) => 
       <h3 className="text-title font-medium text-white/90">
         {paired ? 'Inbox is empty' : 'Connect Telegram first'}
       </h3>
-      <p className="text-[12px] text-white/50 max-w-xs">
+      <p className="text-meta text-white/50 max-w-xs">
         {paired
           ? 'Send the bot a message, voice note, photo, video, or document and it will land here.'
           : 'Pair a Telegram bot in Settings to start receiving messages in Stash.'}
