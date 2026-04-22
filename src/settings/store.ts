@@ -104,6 +104,11 @@ export type WebChatService = {
    * chat UIs and defeat the point of a narrow popup.
    */
   zoom?: number;
+  /**
+   * Pinned tabs live in their own section at the top of the sidebar and
+   * are exempt from the stale-tab fade. Absent = unpinned.
+   */
+  pinned?: boolean;
 };
 
 export const DEFAULT_WEB_SERVICES: WebChatService[] = [

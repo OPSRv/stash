@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 import { saveSetting, type WebChatService } from '../../settings/store';
 import { Input } from '../../shared/ui/Input';
@@ -26,10 +27,38 @@ export type WebShortcutDetail = {
 };
 
 const LAST_TAB_KEY = 'stash.web.lastTab';
+const COLLAPSED_KEY = 'stash.web.collapsed';
+const LAST_USED_KEY = 'stash.web.lastUsed';
 
-/// Host for the web-tab feature. Tabs along the top, tile picker when nothing
-/// is selected, embedded native webview when a service is active. Mirrors the
-/// pre-split AI tab's web mode one-for-one so muscle memory survives.
+/// Tabs that haven't been opened in this many ms fade out (pinned excluded).
+/// 24h matches Arc's default "archive" threshold feel without being so
+/// aggressive that a tab used yesterday morning looks abandoned tonight.
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+const readLastUsed = (): Record<string, number> => {
+  try {
+    const raw = localStorage.getItem(LAST_USED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, number>) : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeLastUsed = (map: Record<string, number>) => {
+  try {
+    localStorage.setItem(LAST_USED_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+};
+
+type ContextMenuState = { id: string; x: number; y: number } | null;
+
+/// Arc-style host: collapsible left sidebar with Pinned/Tabs sections, slim
+/// toolbar in the main area. Tabs are favicon+label rows; drag to reorder
+/// within a section, right-click for actions, double-click to rename.
 export const WebShell = () => {
   const services = useWebServices();
   const { toast } = useToast();
@@ -42,12 +71,41 @@ export const WebShell = () => {
     }
   });
 
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COLLAPSED_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const [lastUsed, setLastUsed] = useState<Record<string, number>>(() => readLastUsed());
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
   const setActive = useCallback((next: string) => {
     setStoredActive(next);
     try {
       localStorage.setItem(LAST_TAB_KEY, next);
     } catch {
       // ignore
+    }
+    if (next) {
+      setLastUsed((prev) => {
+        const merged = { ...prev, [next]: Date.now() };
+        writeLastUsed(merged);
+        return merged;
+      });
     }
   }, []);
 
@@ -127,6 +185,75 @@ export const WebShell = () => {
     [persistServices, services, toast],
   );
 
+  const togglePin = useCallback(
+    async (id: string) => {
+      const next = services.map((s) => (s.id === id ? { ...s, pinned: !s.pinned } : s));
+      await persistServices(next, 'toggle pin');
+    },
+    [persistServices, services],
+  );
+
+  const duplicateService = useCallback(
+    async (id: string) => {
+      const idx = services.findIndex((s) => s.id === id);
+      if (idx < 0) return;
+      const src = services[idx];
+      // Collision-free id: base + counter. Keeps things deterministic for
+      // repeated duplicates of the same source.
+      const existing = new Set(services.map((s) => s.id));
+      let n = 2;
+      let newId = `${src.id}-${n}`;
+      while (existing.has(newId)) {
+        n += 1;
+        newId = `${src.id}-${n}`;
+      }
+      const clone: WebChatService = { ...src, id: newId, label: `${src.label} copy` };
+      const next = [...services.slice(0, idx + 1), clone, ...services.slice(idx + 1)];
+      await persistServices(next, 'duplicate tab');
+    },
+    [persistServices, services],
+  );
+
+  const deleteService = useCallback(
+    async (id: string) => {
+      const next = services.filter((s) => s.id !== id);
+      await persistServices(next, 'delete tab');
+      if (storedActive === id) setActive('');
+      await webchatClose(id).catch(() => {});
+    },
+    [persistServices, services, setActive, storedActive],
+  );
+
+  const closeOthers = useCallback(
+    async (keepId: string) => {
+      // "Close" here mirrors the × button: unembed (free RAM) but keep
+      // the service rows in the sidebar.
+      await Promise.all(
+        services
+          .filter((s) => s.id !== keepId)
+          .map((s) => webchatClose(s.id).catch(() => {})),
+      );
+      if (storedActive !== keepId) setActive(keepId);
+    },
+    [services, setActive, storedActive],
+  );
+
+  const copyServiceUrl = useCallback(
+    async (svc: WebChatService) => {
+      try {
+        await writeText(svc.url);
+        toast({ title: 'URL copied', description: svc.url, variant: 'success' });
+      } catch (e) {
+        toast({
+          title: 'Could not copy URL',
+          description: e instanceof Error ? e.message : String(e),
+          variant: 'error',
+        });
+      }
+    },
+    [toast],
+  );
+
   // External nudge (e.g. clicking the webchat Now Playing bar in the popup
   // shell) to surface a specific service.
   useEffect(() => {
@@ -165,23 +292,54 @@ export const WebShell = () => {
     };
   }, [closeService]);
 
-  // Host-side ⌘W when the React tree has focus (URL bar, toolbar buttons).
-  // The injected script covers the case where the native webview is focused
-  // instead — this branch is the complement, not a duplicate.
+  // Host-side shortcuts:
+  //   ⌘W — close the active tab's webview
+  //   ⌘S — toggle the sidebar
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.key.toLowerCase() !== 'w' || !storedActive) return;
-      e.preventDefault();
-      closeService(storedActive).catch(() => {});
+      if (!e.metaKey) return;
+      const k = e.key.toLowerCase();
+      if (k === 'w' && storedActive) {
+        e.preventDefault();
+        closeService(storedActive).catch(() => {});
+      } else if (k === 's') {
+        e.preventDefault();
+        toggleCollapsed();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [closeService, storedActive]);
+  }, [closeService, storedActive, toggleCollapsed]);
+
+  // Per-service loading state → drives the favicon pulse. Mirrors the
+  // subscription inside `EmbeddedWebChat`; two subscribers to the same
+  // Tauri event is fine and keeps the sidebar decoupled from the main view.
+  const [loadingMap, setLoadingMap] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    listen<{ service: string; state: string }>('webchat:loading', (evt) => {
+      const { service, state } = evt.payload;
+      setLoadingMap((prev) => ({ ...prev, [service]: state === 'start' }));
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const [dragId, setDragId] = useState<string | null>(null);
 
   const handleReorder = useCallback(
     async (fromId: string, toId: string) => {
+      // Only reorder within the same section — cross-section drops are a
+      // no-op; users should toggle pin to move a tab between sections.
+      const from = services.find((s) => s.id === fromId);
+      const to = services.find((s) => s.id === toId);
+      if (!from || !to) return;
+      if (!!from.pinned !== !!to.pinned) return;
       const next = reorderServices(services, fromId, toId);
       if (next === services) return;
       await persistServices(next, 'reorder tabs');
@@ -210,7 +368,7 @@ export const WebShell = () => {
     setRenameDraft('');
   }, [handleRenameService, renameDraft, renaming, services]);
 
-  // Drag-n-drop URL onto the tab bar → opens add dialog prefilled.
+  // Drag-n-drop URL onto the sidebar → opens add dialog prefilled.
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
@@ -227,229 +385,467 @@ export const WebShell = () => {
     [openAddDialog],
   );
 
-  const tabBarRef = useRef<HTMLDivElement | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [contextMenu]);
+
+  const pinnedServices = useMemo(() => services.filter((s) => s.pinned), [services]);
+  const unpinnedServices = useMemo(() => services.filter((s) => !s.pinned), [services]);
+
+  const sidebarWidth = collapsed ? 44 : 168;
+
+  const isStale = useCallback(
+    (svc: WebChatService): boolean => {
+      if (svc.pinned) return false;
+      if (storedActive === svc.id) return false;
+      const last = lastUsed[svc.id];
+      if (!last) return false;
+      return Date.now() - last > STALE_AFTER_MS;
+    },
+    [lastUsed, storedActive],
+  );
+
+  const renderTab = (s: WebChatService) => {
+    const active = storedActive === s.id;
+    const favicon = faviconUrlFor(s.url, 16);
+    const isRenaming = renaming === s.id;
+    const beingDragged = dragId === s.id;
+    const loading = !!loadingMap[s.id];
+    const stale = isStale(s);
+    const labelTitle = collapsed ? `${s.label} — double-click to rename` : 'Double-click to rename';
+
+    return (
+      <div
+        key={s.id}
+        draggable={!isRenaming}
+        onDragStart={(e) => {
+          setDragId(s.id);
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData(TAB_DRAG_MIME, s.id);
+          e.dataTransfer.setData('text/plain', s.id);
+        }}
+        onDragEnd={() => setDragId(null)}
+        onDragOver={(e) => {
+          if (Array.from(e.dataTransfer.types).includes(TAB_DRAG_MIME)) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = 'move';
+          }
+        }}
+        onDrop={(e) => {
+          const from = e.dataTransfer.getData(TAB_DRAG_MIME);
+          if (!from || from === s.id) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setDragId(null);
+          handleReorder(from, s.id).catch(() => {});
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setContextMenu({ id: s.id, x: e.clientX, y: e.clientY });
+        }}
+        className={`group flex items-center rounded-md transition-all ${
+          active ? 'bg-white/[0.10]' : 'hover:bg-white/[0.04]'
+        } ${beingDragged ? 'opacity-50' : ''} ${stale && !active ? 'opacity-60' : ''}`}
+      >
+        {isRenaming && !collapsed ? (
+          <Input
+            aria-label="Rename tab"
+            autoFocus
+            value={renameDraft}
+            onChange={(e) => setRenameDraft(e.currentTarget.value)}
+            onBlur={() => {
+              commitRename().catch(() => {});
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitRename().catch(() => {});
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setRenaming(null);
+              }
+            }}
+            className="h-7 flex-1 mx-1 text-meta"
+          />
+        ) : (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => setActive(s.id)}
+            onDoubleClick={() => {
+              if (!collapsed) startRename(s);
+            }}
+            className={`flex items-center min-w-0 flex-1 rounded-md text-meta ${
+              collapsed ? 'justify-center py-2' : 'gap-2 pl-2 pr-1 py-1.5'
+            } ${active ? 't-primary' : 't-secondary'}`}
+            title={labelTitle}
+            aria-label={collapsed ? s.label : undefined}
+          >
+            <span className="relative shrink-0 inline-flex items-center justify-center w-[14px] h-[14px]">
+              {favicon ? (
+                <img
+                  src={favicon}
+                  alt=""
+                  width={14}
+                  height={14}
+                  className="rounded-sm"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="w-full h-full rounded-sm flex items-center justify-center text-[9px] font-semibold t-primary"
+                  style={{ background: 'rgba(var(--stash-accent-rgb), 0.25)' }}
+                >
+                  {s.label.slice(0, 1).toUpperCase()}
+                </span>
+              )}
+              {loading && (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-[-3px] rounded-full pointer-events-none"
+                  style={{
+                    boxShadow: '0 0 0 1.5px rgba(var(--stash-accent-rgb), 0.9)',
+                    animation: 'stash-web-pulse 1.1s ease-in-out infinite',
+                  }}
+                />
+              )}
+            </span>
+            {!collapsed && <span className="truncate">{s.label}</span>}
+          </button>
+        )}
+        {!isRenaming && !collapsed && (
+          <button
+            type="button"
+            aria-label={`Close ${s.label}`}
+            title={`Close ${s.label} (free RAM; reopens on click)`}
+            onClick={(e) => {
+              e.stopPropagation();
+              closeService(s.id).catch(() => {});
+            }}
+            className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:text-red-400 px-1.5 py-1 mr-0.5 rounded-md text-meta transition-opacity"
+          >
+            ×
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const contextService = contextMenu
+    ? services.find((s) => s.id === contextMenu.id) ?? null
+    : null;
 
   return (
-    <div className="flex flex-col h-full w-full" style={{ background: 'var(--color-bg)' }}>
-      <div
-        ref={tabBarRef}
-        className={`px-3 py-2 border-b hair flex items-center gap-2 transition-colors ${
-          dragOver ? 'bg-white/[0.06]' : ''
-        }`}
+    <div className="flex flex-row h-full w-full" style={{ background: 'var(--color-scrim)' }}>
+      <aside
+        aria-label="Web services"
+        className={`relative flex flex-col shrink-0 py-2 gap-0.5 border-r hair transition-[width,background] ${
+          collapsed ? 'px-1' : 'px-1.5'
+        } ${dragOver ? 'bg-white/[0.04]' : ''}`}
+        style={{ width: sidebarWidth, background: 'var(--color-bg)' }}
         onDragOver={(e) => {
           const types = Array.from(e.dataTransfer.types);
-          // A tab-reorder drag carries our own MIME — treat it as a move
-          // inside the bar, not a URL drop that would spawn the add modal.
           if (types.includes(TAB_DRAG_MIME)) return;
           if (types.some((t) => t === 'text/uri-list' || t === 'text/plain')) {
             e.preventDefault();
             setDragOver(true);
           }
         }}
-        onDragLeave={() => setDragOver(false)}
+        onDragLeave={(e) => {
+          // Only clear when the drag actually leaves the sidebar (not on
+          // children) — otherwise the overlay flickers as we cross rows.
+          if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+          setDragOver(false);
+        }}
         onDrop={onDrop}
       >
-        <div role="tablist" aria-label="Web services" className="flex items-center gap-1 flex-wrap">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={storedActive === ''}
-            onClick={() => setActive('')}
-            className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
-              storedActive === ''
-                ? 't-primary bg-white/[0.08]'
-                : 't-secondary hover:bg-white/[0.04]'
-            }`}
-            title="Show all services"
-            aria-label="Show all services"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-              <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
-              <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
-              <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
-              <rect x="8" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
-            </svg>
-          </button>
-          {services.map((s) => {
-            const active = storedActive === s.id;
-            const favicon = faviconUrlFor(s.url, 16);
-            const isRenaming = renaming === s.id;
-            const beingDragged = dragId === s.id;
-            return (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={storedActive === ''}
+          onClick={() => setActive('')}
+          className={`flex items-center rounded-md text-meta transition-colors ${
+            collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
+          } ${
+            storedActive === ''
+              ? 't-primary bg-white/[0.08]'
+              : 't-secondary hover:t-primary hover:bg-white/[0.04]'
+          }`}
+          title={collapsed ? 'Home — all services' : 'Home — all services'}
+          aria-label="Home"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" className="shrink-0">
+            <rect x="1.5" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <rect x="8" y="1.5" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <rect x="1.5" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <rect x="8" y="8" width="4.5" height="4.5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          </svg>
+          {!collapsed && <span className="truncate">Home</span>}
+        </button>
+
+        {pinnedServices.length > 0 && (
+          <>
+            {!collapsed && (
+              <div className="mt-2 mb-1 px-2 text-[10px] uppercase tracking-wider t-tertiary">
+                Pinned
+              </div>
+            )}
+            {collapsed && (
               <div
-                key={s.id}
-                draggable={!isRenaming}
-                onDragStart={(e) => {
-                  setDragId(s.id);
-                  e.dataTransfer.effectAllowed = 'move';
-                  e.dataTransfer.setData(TAB_DRAG_MIME, s.id);
-                  // Also fill text/plain so external consumers get a
-                  // useful fallback, but with the id — not the URL — so
-                  // we don't accidentally look like a URL drop.
-                  e.dataTransfer.setData('text/plain', s.id);
-                }}
-                onDragEnd={() => setDragId(null)}
-                onDragOver={(e) => {
-                  if (Array.from(e.dataTransfer.types).includes(TAB_DRAG_MIME)) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.dataTransfer.dropEffect = 'move';
-                  }
-                }}
-                onDrop={(e) => {
-                  const from = e.dataTransfer.getData(TAB_DRAG_MIME);
-                  if (!from || from === s.id) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setDragId(null);
-                  handleReorder(from, s.id).catch(() => {});
-                }}
-                className={`group flex items-center rounded-md transition-colors ${
-                  active ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
-                } ${beingDragged ? 'opacity-50' : ''}`}
+                aria-hidden="true"
+                className="h-px mx-2 mt-2 mb-1"
+                style={{ background: 'var(--color-hairline)' }}
+              />
+            )}
+            <div role="tablist" aria-label="Pinned tabs" className="flex flex-col gap-0.5">
+              {pinnedServices.map(renderTab)}
+            </div>
+          </>
+        )}
+
+        {unpinnedServices.length > 0 && (
+          <>
+            {!collapsed && (
+              <div
+                className={`${pinnedServices.length > 0 ? 'mt-2' : 'mt-2'} mb-1 px-2 text-[10px] uppercase tracking-wider t-tertiary`}
               >
-                {isRenaming ? (
-                  <Input
-                    aria-label="Rename tab"
-                    autoFocus
-                    value={renameDraft}
-                    onChange={(e) => setRenameDraft(e.currentTarget.value)}
-                    onBlur={() => {
-                      commitRename().catch(() => {});
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        commitRename().catch(() => {});
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault();
-                        setRenaming(null);
-                      }
-                    }}
-                    className="h-6 w-[120px] text-meta"
-                  />
-                ) : (
+                Tabs
+              </div>
+            )}
+            {collapsed && pinnedServices.length === 0 && (
+              <div
+                aria-hidden="true"
+                className="h-px mx-2 mt-2 mb-1"
+                style={{ background: 'var(--color-hairline)' }}
+              />
+            )}
+            <div role="tablist" aria-label="Unpinned tabs" className="flex flex-col gap-0.5">
+              {unpinnedServices.map(renderTab)}
+            </div>
+          </>
+        )}
+
+        <div className="flex-1" />
+
+        <button
+          type="button"
+          onClick={() => openAddDialog('')}
+          className={`flex items-center rounded-md text-meta t-secondary hover:t-primary hover:bg-white/[0.04] transition-colors ${
+            collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
+          }`}
+          title="Add web tab (or drop a URL onto the sidebar)"
+          aria-label="Add web tab"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" className="shrink-0">
+            <path d="M7 2.5 V11.5 M2.5 7 H11.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          {!collapsed && <span className="truncate">New tab</span>}
+        </button>
+
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className={`flex items-center rounded-md text-meta t-tertiary hover:t-primary hover:bg-white/[0.04] transition-colors ${
+            collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
+          }`}
+          title={collapsed ? 'Expand sidebar (⌘S)' : 'Collapse sidebar (⌘S)'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-pressed={collapsed}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" className="shrink-0">
+            <rect x="1.5" y="2" width="11" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <line x1="5" y1="2" x2="5" y2="12" stroke="currentColor" strokeWidth="1.2" />
+            <path
+              d={collapsed ? 'M8 5 L10.5 7 L8 9' : 'M10.5 5 L8 7 L10.5 9'}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          {!collapsed && <span className="truncate">Collapse</span>}
+        </button>
+
+        {dragOver && (
+          <div
+            aria-hidden="true"
+            className="absolute inset-1 rounded-lg pointer-events-none flex items-center justify-center text-meta font-medium text-center px-2"
+            style={{
+              border: '1.5px dashed rgba(var(--stash-accent-rgb), 0.9)',
+              background: 'rgba(var(--stash-accent-rgb), 0.12)',
+              color: 'rgb(var(--stash-accent-rgb))',
+            }}
+          >
+            {collapsed ? '+' : 'Drop URL to add tab'}
+          </div>
+        )}
+      </aside>
+
+      <main className="flex-1 min-w-0 flex flex-col" style={{ background: 'var(--color-bg)' }}>
+        {activeService ? (
+          <EmbeddedWebChat
+            key={activeService.id}
+            service={activeService}
+            onSaveAsTab={openAddDialog}
+            onPinCurrentAsHome={(url) => {
+              handlePinCurrentAsHome(activeService.id, url).catch(() => {});
+            }}
+            onZoomChange={(id, z) => {
+              handleZoomChange(id, z).catch(() => {});
+            }}
+            suspended={addOpen}
+          />
+        ) : (
+          <div className="flex-1 overflow-y-auto nice-scroll p-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-[720px] mx-auto">
+              {services.length === 0 && (
+                <div className="col-span-full t-tertiary text-meta text-center py-8">
+                  No web tabs yet. Click + or drop a URL onto the sidebar.
+                </div>
+              )}
+              {services.map((s) => {
+                const favicon = faviconUrlFor(s.url, 64);
+                let host = s.url;
+                try {
+                  host = new URL(s.url).hostname;
+                } catch {
+                  // keep raw URL on parse failure
+                }
+                return (
                   <button
+                    key={s.id}
                     type="button"
-                    role="tab"
-                    aria-selected={active}
                     onClick={() => setActive(s.id)}
-                    onDoubleClick={() => startRename(s)}
-                    className={`flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-md text-meta ${
-                      active ? 't-primary' : 't-secondary'
-                    }`}
-                    title="Double-click to rename"
+                    className="group flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:bg-white/[0.04] transition-colors text-center"
+                    style={{ background: 'var(--color-surface)' }}
                   >
-                    {favicon && (
+                    {favicon ? (
                       <img
                         src={favicon}
                         alt=""
-                        width={14}
-                        height={14}
-                        className="rounded-sm"
+                        width={40}
+                        height={40}
+                        className="rounded-md"
                         onError={(e) => {
                           e.currentTarget.style.display = 'none';
                         }}
                       />
+                    ) : (
+                      <div
+                        className="w-10 h-10 rounded-md flex items-center justify-center t-primary font-semibold"
+                        style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
+                      >
+                        {s.label.slice(0, 1).toUpperCase()}
+                      </div>
                     )}
-                    <span>{s.label}</span>
+                    <div className="t-primary text-body font-medium">{s.label}</div>
+                    <div className="t-tertiary text-meta truncate max-w-full">{host}</div>
                   </button>
-                )}
-                {!isRenaming && (
-                  <button
-                    type="button"
-                    aria-label={`Close ${s.label}`}
-                    title={`Close ${s.label} (free RAM; reopens on click)`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      closeService(s.id).catch(() => {});
-                    }}
-                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:text-red-400 px-1 py-0.5 rounded-md text-meta transition-opacity"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => openAddDialog('')}
-            className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.04] transition-colors"
-            title="Add web tab (or drop a URL here)"
-            aria-label="Add web tab"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-              <path d="M7 2.5 V11.5 M2.5 7 H11.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-        <div className="flex-1" />
-      </div>
-      {activeService ? (
-        <EmbeddedWebChat
-          key={activeService.id}
-          service={activeService}
-          onSaveAsTab={openAddDialog}
-          onPinCurrentAsHome={(url) => {
-            handlePinCurrentAsHome(activeService.id, url).catch(() => {});
-          }}
-          onZoomChange={(id, z) => {
-            handleZoomChange(id, z).catch(() => {});
-          }}
-          suspended={addOpen}
-        />
-      ) : (
-        <div className="flex-1 overflow-y-auto nice-scroll p-6">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-w-[720px] mx-auto">
-            {services.length === 0 && (
-              <div className="col-span-full t-tertiary text-meta text-center py-8">
-                No web tabs yet. Click + or drop a URL onto the tab bar.
-              </div>
-            )}
-            {services.map((s) => {
-              const favicon = faviconUrlFor(s.url, 64);
-              let host = s.url;
-              try {
-                host = new URL(s.url).hostname;
-              } catch {
-                // keep raw URL on parse failure
-              }
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setActive(s.id)}
-                  className="group flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:bg-white/[0.04] transition-colors text-center"
-                  style={{ background: 'var(--color-surface)' }}
-                >
-                  {favicon ? (
-                    <img
-                      src={favicon}
-                      alt=""
-                      width={40}
-                      height={40}
-                      className="rounded-md"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                      }}
-                    />
-                  ) : (
-                    <div
-                      className="w-10 h-10 rounded-md flex items-center justify-center t-primary font-semibold"
-                      style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
-                    >
-                      {s.label.slice(0, 1).toUpperCase()}
-                    </div>
-                  )}
-                  <div className="t-primary text-body font-medium">{s.label}</div>
-                  <div className="t-tertiary text-meta truncate max-w-full">{host}</div>
-                </button>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
+        )}
+      </main>
+
+      {contextMenu && contextService && (
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label={`Actions for ${contextService.label}`}
+          className="fixed z-30 min-w-[180px] rounded-md border hair py-1 shadow-lg"
+          style={{
+            left: Math.min(contextMenu.x, window.innerWidth - 200),
+            top: Math.min(contextMenu.y, window.innerHeight - 280),
+            background: 'var(--color-surface)',
+          }}
+        >
+          <ContextMenuItem
+            onClick={() => {
+              startRename(contextService);
+              setContextMenu(null);
+            }}
+          >
+            Rename
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              duplicateService(contextService.id).catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            Duplicate
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              togglePin(contextService.id).catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            {contextService.pinned ? 'Unpin' : 'Pin'}
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              copyServiceUrl(contextService).catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            Copy URL
+          </ContextMenuItem>
+          <div className="h-px my-1 mx-1" style={{ background: 'var(--color-hairline)' }} />
+          <ContextMenuItem
+            onClick={() => {
+              closeService(contextService.id).catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            Close (free RAM)
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={services.length < 2}
+            onClick={() => {
+              closeOthers(contextService.id).catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            Close others
+          </ContextMenuItem>
+          <div className="h-px my-1 mx-1" style={{ background: 'var(--color-hairline)' }} />
+          <ContextMenuItem
+            danger
+            onClick={() => {
+              deleteService(contextService.id).catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            Delete tab
+          </ContextMenuItem>
         </div>
       )}
+
       <AddWebServiceModal
         open={addOpen}
         onClose={() => setAddOpen(false)}
@@ -463,3 +859,29 @@ export const WebShell = () => {
     </div>
   );
 };
+
+const ContextMenuItem = ({
+  onClick,
+  danger,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) => (
+  <button
+    type="button"
+    role="menuitem"
+    disabled={disabled}
+    onClick={onClick}
+    className={`w-full text-left px-3 py-1.5 text-meta transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+      danger
+        ? 't-secondary hover:text-red-400 hover:bg-white/[0.04]'
+        : 't-secondary hover:t-primary hover:bg-white/[0.04]'
+    }`}
+  >
+    {children}
+  </button>
+);

@@ -2,3 +2,8 @@
   0% { background-position: -40% 0; }
   100% { background-position: 140% 0; }
 }
+
+@keyframes stash-web-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.95); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}

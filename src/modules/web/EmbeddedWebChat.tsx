@@ -6,7 +6,6 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { loadSettings, type WebChatService } from '../../settings/store';
 import './web-animations.css';
 import { userAgentFor } from '../../shared/browserUA';
-import { Button } from '../../shared/ui/Button';
 import { Input } from '../../shared/ui/Input';
 import { useToast } from '../../shared/ui/Toast';
 
@@ -26,12 +25,11 @@ import {
 
 type Props = {
   service: WebChatService;
-  /// When set, the toolbar shows a "Save as tab" button that reads the
+  /// When set, the overflow menu shows a "Save as tab" entry that reads the
   /// current URL from the embedded webview and forwards it to the parent
   /// so it can prompt the user to pin it as a new `WebChatService`.
   onSaveAsTab?: (currentUrl: string) => void;
-  /// Parent-side "pin the current URL as this tab's home URL" hook. Wired to
-  /// a toolbar menu item; the actual persistence happens in WebShell.
+  /// Parent-side "pin the current URL as this tab's home URL" hook.
   onPinCurrentAsHome?: (currentUrl: string) => void;
   /// Force the native child webview off-screen. Needed whenever HTML
   /// overlays (dialogs, popovers) must appear on top — the native webview
@@ -55,10 +53,10 @@ const pickCurrentUrl = async (serviceId: string, homeUrl: string): Promise<strin
   }
 };
 
-/// Shell for a single web service. Toolbar (nav + label + actions) over a
-/// sizer div; the native child webview rides the sizer's geometry. Lifecycle
-/// mirrors MusicShell — ResizeObserver/IntersectionObserver for geometry +
-/// visibility, cleanup on unmount.
+/// Arc-style slim toolbar over the native webview: icon-only nav, a URL
+/// pill (favicon + host, click to edit), zoom badge, and an overflow (⋯)
+/// menu. All prior actions (Copy URL / Open / Pin as home / Save as tab /
+/// Reset) moved into the overflow menu so the chrome stays minimal.
 export const EmbeddedWebChat = ({
   service,
   onSaveAsTab,
@@ -77,6 +75,8 @@ export const EmbeddedWebChat = ({
   // through a settings reload. Persistence still happens via `onZoomChange`.
   const [zoom, setZoom] = useState<number>(() => clampZoom(service.zoom ?? 1));
   const { toast } = useToast();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Reset zoom when switching services — each service keeps its own band.
   useEffect(() => {
@@ -351,6 +351,25 @@ export const EmbeddedWebChat = ({
     };
   }, [applyZoom, goBack, goForward, reload, service.id, startEditingUrl, zoom]);
 
+  // Close the overflow menu on outside-click or Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
   const zoomLabel = useMemo(() => `${Math.round(zoom * 100)}%`, [zoom]);
 
   const hardReset = useCallback(async () => {
@@ -372,149 +391,131 @@ export const EmbeddedWebChat = ({
     }
   })();
 
+  const runAndClose = (fn: () => void | Promise<unknown>) => () => {
+    setMenuOpen(false);
+    Promise.resolve(fn()).catch(() => {});
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div
-        className="px-2 py-1.5 flex items-center gap-1.5 border-b hair"
-        style={{ background: 'var(--color-scrim)' }}
+        className="px-2 py-1.5 flex items-center gap-1 border-b hair"
+        style={{ background: 'var(--color-bg)' }}
       >
-        <Button size="sm" variant="ghost" shape="square" onClick={goBack} aria-label="Back" title="Back">
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path d="M9 2 L4 7 L9 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </Button>
-        <Button size="sm" variant="ghost" shape="square" onClick={goForward} aria-label="Forward" title="Forward">
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path d="M5 2 L10 7 L5 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          shape="square"
+        <NavIconButton onClick={goBack} title="Back (⌘[)" ariaLabel="Back">
+          <path d="M9 2 L4 7 L9 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </NavIconButton>
+        <NavIconButton onClick={goForward} title="Forward (⌘])" ariaLabel="Forward">
+          <path d="M5 2 L10 7 L5 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </NavIconButton>
+        <NavIconButton
           onClick={() => {
             reload().catch(() => {});
           }}
-          aria-label="Home"
-          title="Go to home URL"
+          title="Reload (⌘R)"
+          ariaLabel="Reload"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path
-              d="M2 7 L7 2 L12 7 M3.5 6 V12 H10.5 V6"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          <path
+            d="M11.5 4.5 A4 4 0 1 0 12 8"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+          <path d="M11.5 2 V5 H8.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </NavIconButton>
+
+        <div
+          className="flex-1 min-w-0 mx-1 flex items-center rounded-md"
+          style={{ background: 'var(--color-scrim)' }}
+        >
+          {editingUrl ? (
+            <Input
+              ref={urlInputRef}
+              aria-label="Address bar"
+              className="h-7 text-meta flex-1 min-w-0 !bg-transparent border-none"
+              value={urlDraft}
+              onChange={(e) => setUrlDraft(e.currentTarget.value)}
+              onBlur={() => setEditingUrl(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  submitUrl().catch(() => {});
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setEditingUrl(false);
+                }
+              }}
             />
-          </svg>
-        </Button>
-        {favicon && (
-          <img
-            src={favicon}
-            alt=""
-            width={16}
-            height={16}
-            className="rounded-sm ml-1"
-            onError={(e) => {
-              e.currentTarget.style.display = 'none';
-            }}
-          />
-        )}
-        <span className="t-primary text-body font-medium shrink-0">{service.label}</span>
-        {editingUrl ? (
-          <Input
-            ref={urlInputRef}
-            aria-label="Address bar"
-            className="h-6 text-meta flex-1 min-w-0"
-            value={urlDraft}
-            onChange={(e) => setUrlDraft(e.currentTarget.value)}
-            onBlur={() => setEditingUrl(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                submitUrl().catch(() => {});
-              } else if (e.key === 'Escape') {
-                e.preventDefault();
-                setEditingUrl(false);
-              }
-            }}
-          />
-        ) : (
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                startEditingUrl().catch(() => {});
+              }}
+              className="flex items-center gap-2 flex-1 min-w-0 h-7 px-2 text-meta t-secondary hover:t-primary rounded-md text-left"
+              title="Edit URL (⌘L)"
+            >
+              {favicon && (
+                <img
+                  src={favicon}
+                  alt=""
+                  width={14}
+                  height={14}
+                  className="rounded-sm shrink-0"
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              )}
+              <span className="t-primary font-medium shrink-0">{service.label}</span>
+              <span className="t-tertiary truncate">{host}</span>
+              {zoom !== 1 && (
+                <span className="ml-auto pl-2 t-tertiary tabular-nums shrink-0" title="Zoom — ⌘0 to reset">
+                  {zoomLabel}
+                </span>
+              )}
+            </button>
+          )}
+        </div>
+
+        <div className="relative" ref={menuRef}>
           <button
             type="button"
-            onClick={() => {
-              startEditingUrl().catch(() => {});
-            }}
-            className="t-tertiary text-meta truncate text-left flex-1 min-w-0 hover:t-secondary"
-            title="Edit URL (⌘L)"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+            className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
+            title="More"
           >
-            {host}
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <circle cx="3" cy="7" r="1.2" fill="currentColor" />
+              <circle cx="7" cy="7" r="1.2" fill="currentColor" />
+              <circle cx="11" cy="7" r="1.2" fill="currentColor" />
+            </svg>
           </button>
-        )}
-        {zoom !== 1 && !editingUrl && (
-          <span
-            className="t-tertiary text-meta shrink-0 tabular-nums"
-            title="Zoom level — ⌘0 to reset"
-          >
-            {zoomLabel}
-          </span>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            copyUrl().catch(() => {});
-          }}
-          title="Copy current URL"
-        >
-          Copy URL
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            openCurrentInBrowser().catch(() => {});
-          }}
-          title="Open current URL in default browser"
-        >
-          Open
-        </Button>
-        {onPinCurrentAsHome && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              pinAsHome().catch(() => {});
-            }}
-            title="Make the current URL this tab's home"
-          >
-            Pin as home
-          </Button>
-        )}
-        {onSaveAsTab && (
-          <Button
-            size="sm"
-            variant="soft"
-            onClick={() => {
-              saveAsTab().catch(() => {});
-            }}
-            title="Pin the current URL as a new tab"
-          >
-            Save as tab
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          tone="danger"
-          onClick={() => {
-            hardReset().catch(() => {});
-          }}
-          title="Sign out & reset the session"
-        >
-          Reset
-        </Button>
+          {menuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full mt-1 min-w-[180px] rounded-md border hair py-1 z-20 shadow-lg"
+              style={{ background: 'var(--color-surface)' }}
+            >
+              <MenuItem onClick={runAndClose(copyUrl)}>Copy URL</MenuItem>
+              <MenuItem onClick={runAndClose(openCurrentInBrowser)}>Open in browser</MenuItem>
+              {onPinCurrentAsHome && (
+                <MenuItem onClick={runAndClose(pinAsHome)}>Pin as home</MenuItem>
+              )}
+              {onSaveAsTab && (
+                <MenuItem onClick={runAndClose(saveAsTab)}>Save as tab</MenuItem>
+              )}
+              <div className="h-px my-1 mx-1" style={{ background: 'var(--color-hairline)' }} />
+              <MenuItem onClick={runAndClose(hardReset)} danger>
+                Reset session
+              </MenuItem>
+            </div>
+          )}
+        </div>
       </div>
       <div
         ref={sizerRef}
@@ -554,3 +555,50 @@ export const EmbeddedWebChat = ({
     </div>
   );
 };
+
+const NavIconButton = ({
+  onClick,
+  title,
+  ariaLabel,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  ariaLabel: string;
+  children: React.ReactNode;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={ariaLabel}
+    title={title}
+    className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
+  >
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      {children}
+    </svg>
+  </button>
+);
+
+const MenuItem = ({
+  onClick,
+  danger,
+  children,
+}: {
+  onClick: () => void;
+  danger?: boolean;
+  children: React.ReactNode;
+}) => (
+  <button
+    type="button"
+    role="menuitem"
+    onClick={onClick}
+    className={`w-full text-left px-3 py-1.5 text-meta transition-colors ${
+      danger
+        ? 't-secondary hover:text-red-400 hover:bg-white/[0.04]'
+        : 't-secondary hover:t-primary hover:bg-white/[0.04]'
+    }`}
+  >
+    {children}
+  </button>
+);
