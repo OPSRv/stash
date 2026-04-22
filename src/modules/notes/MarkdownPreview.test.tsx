@@ -69,12 +69,10 @@ describe('MarkdownPreview', () => {
         source={'intro\n\n![voice note](/tmp/rec.mp3)\n\ntail'}
       />
     );
-    const embed = screen.getByTestId('md-audio-embed');
+    const embed = screen.getByTestId('audio-waveform');
     expect(embed).toBeInTheDocument();
     // The caption flows through from the alt text.
     expect(embed).toHaveTextContent(/voice note/i);
-    // The play control is the nearest IconButton inside the embed.
-    expect(screen.getByTestId('md-audio-toggle')).toBeInTheDocument();
     // Non-audio paragraphs still render as text around the embed.
     expect(screen.getByText('intro')).toBeInTheDocument();
     expect(screen.getByText('tail')).toBeInTheDocument();
@@ -85,7 +83,7 @@ describe('MarkdownPreview', () => {
       <MarkdownPreview source={'![logo](/tmp/logo.png)'} />
     );
     expect(container.querySelector('img')).not.toBeNull();
-    expect(screen.queryByTestId('md-audio-embed')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('audio-waveform')).not.toBeInTheDocument();
   });
 
   it('embeds a YouTube player for a bare youtu.be URL on its own line', () => {

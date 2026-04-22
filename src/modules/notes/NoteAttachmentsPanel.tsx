@@ -5,6 +5,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
+import { AudioPlayer } from '../../shared/ui/AudioPlayer';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
 import {
@@ -259,13 +260,10 @@ const AttachmentBody = ({ item }: { item: NoteAttachment }) => {
       );
     case 'audio':
       return (
-        <div className="px-3 py-2 flex items-center gap-2 min-w-[260px]">
-          <audio src={url} controls preload="metadata" className="h-8" />
-          <div className="text-[11px] text-white/60 truncate">
-            <div className="truncate max-w-[180px]">{item.original_name}</div>
-            <div className="font-mono tabular-nums opacity-70">
-              {formatBytes(item.size_bytes)}
-            </div>
+        <div className="px-3 py-2 min-w-[260px] flex flex-col gap-1">
+          <AudioPlayer src={item.file_path} caption={item.original_name} />
+          <div className="text-[10px] text-white/40 font-mono tabular-nums">
+            {formatBytes(item.size_bytes)}
           </div>
         </div>
       );
