@@ -1,4 +1,4 @@
-export type ContentType = 'link' | 'code' | 'image' | 'text';
+export type ContentType = 'link' | 'code' | 'image' | 'text' | 'file';
 
 const CODE_HINTS = /[{};]|=>|\bconst\b|\bfunction\b|\bimport\b|\bdef\b|\breturn\b/;
 

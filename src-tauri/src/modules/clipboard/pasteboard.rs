@@ -53,6 +53,64 @@ pub fn read_file_urls() -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// Replace the general pasteboard contents with the given file URLs.
+/// After this returns Ok, ⌘V in Finder (or any app that accepts file
+/// copies) will paste real files, not a text list. We `clearContents`
+/// first so stale text/image types from the previous clip don't leak
+/// through — otherwise Finder sees both and may choose the wrong
+/// representation.
+///
+/// Empty paths is a caller bug — we return Err rather than silently
+/// nuking the pasteboard.
+#[cfg(target_os = "macos")]
+pub fn write_file_urls(paths: &[PathBuf]) -> Result<(), String> {
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2_app_kit::{NSPasteboard, NSPasteboardWriting};
+    use objc2_foundation::{NSArray, NSString, NSURL};
+
+    if paths.is_empty() {
+        return Err("write_file_urls called with empty path list".into());
+    }
+
+    let mut urls: Vec<Retained<NSURL>> = Vec::with_capacity(paths.len());
+    for p in paths {
+        let ns = NSString::from_str(&p.to_string_lossy());
+        // `fileURLWithPath:` never returns nil for a valid NSString, but
+        // the objc2 binding models it as Option for safety.
+        let url = NSURL::fileURLWithPath(&ns);
+        urls.push(url);
+    }
+    if urls.is_empty() {
+        return Err("no paths could be converted to NSURL".into());
+    }
+
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+
+    // `writeObjects:` takes an NSArray of objects conforming to
+    // NSPasteboardWriting. NSURL conforms; wrap each as a
+    // ProtocolObject so the compile-time protocol check succeeds.
+    let protos: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = urls
+        .into_iter()
+        .map(|u| ProtocolObject::from_retained(u))
+        .collect();
+    let arr: Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
+        NSArray::from_retained_slice(&protos);
+
+    let ok = pb.writeObjects(&arr);
+    if ok {
+        Ok(())
+    } else {
+        Err("NSPasteboard.writeObjects returned false".into())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn write_file_urls(_paths: &[PathBuf]) -> Result<(), String> {
+    Err("write_file_urls is macOS-only".into())
+}
+
 /// Decode a `file://…` URL into a filesystem path. Handles the usual
 /// percent-encoding (spaces, Unicode) via the `url` crate. Returns None
 /// for any scheme other than `file:` — other schemes are someone else's

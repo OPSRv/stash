@@ -129,4 +129,87 @@ describe('ClipboardPopup', () => {
       expect(mockInvoke).toHaveBeenCalledWith('clipboard_delete', { id: 1 });
     });
   });
+
+  describe('kind=file rows', () => {
+    const fileItems = [
+      {
+        id: 10,
+        kind: 'file',
+        content: 'files:abc',
+        meta: JSON.stringify({
+          files: [
+            { path: '/tmp/hello.txt', name: 'hello.txt', size: 42, mime: 'text/plain' },
+          ],
+        }),
+        created_at: 300,
+        pinned: false,
+      },
+      {
+        id: 11,
+        kind: 'file',
+        content: 'files:def',
+        meta: JSON.stringify({
+          files: [
+            { path: '/tmp/a.png', name: 'a.png', size: 10, mime: 'image/png' },
+            { path: '/tmp/b.mp4', name: 'b.mp4', size: 20, mime: 'video/mp4' },
+            { path: '/tmp/c.txt', name: 'c.txt', size: 30, mime: 'text/plain' },
+          ],
+        }),
+        created_at: 350,
+        pinned: false,
+      },
+    ];
+
+    beforeEach(() => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'clipboard_list') return fileItems;
+        if (cmd === 'clipboard_search') return fileItems;
+        return undefined;
+      });
+    });
+
+    it('renders the single-file row with its filename as primary', async () => {
+      render(<ClipboardPopup />);
+      expect(await screen.findByText('hello.txt')).toBeInTheDocument();
+    });
+
+    it('summarises multi-file rows as "N files"', async () => {
+      render(<ClipboardPopup />);
+      expect(await screen.findByText(/^3 files · a\.png/)).toBeInTheDocument();
+    });
+
+    it('Reveal button calls the opener plugin', async () => {
+      const user = userEvent.setup();
+      render(<ClipboardPopup />);
+      await screen.findByText('hello.txt');
+      const revealBtn = screen.getAllByLabelText('Reveal in Finder')[0];
+      await user.click(revealBtn);
+      const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+      await waitFor(() => {
+        expect(revealItemInDir).toHaveBeenCalledWith('/tmp/hello.txt');
+      });
+    });
+
+    it('Open button calls openPath with the file path', async () => {
+      const user = userEvent.setup();
+      render(<ClipboardPopup />);
+      await screen.findByText('hello.txt');
+      const openBtn = screen.getAllByLabelText('Open with default app')[0];
+      await user.click(openBtn);
+      const { openPath } = await import('@tauri-apps/plugin-opener');
+      await waitFor(() => {
+        expect(openPath).toHaveBeenCalledWith('/tmp/hello.txt');
+      });
+    });
+
+    it('Enter on a file row triggers clipboard_paste (the Rust side writes NSPasteboard)', async () => {
+      const user = userEvent.setup();
+      render(<ClipboardPopup />);
+      await screen.findByText('hello.txt');
+      await user.keyboard('{Enter}');
+      await waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith('clipboard_paste', { id: 10 });
+      });
+    });
+  });
 });

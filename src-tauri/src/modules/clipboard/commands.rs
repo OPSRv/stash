@@ -1,4 +1,5 @@
 use crate::modules::clipboard::og::{self, LinkPreview};
+use crate::modules::clipboard::pasteboard;
 use crate::modules::clipboard::repo::{ClipboardItem, ClipboardRepo};
 use lru::LruCache;
 use rusqlite::Result;
@@ -152,10 +153,13 @@ pub fn clipboard_copy_only(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let item = to_string_err(paste_prepare(&state, id, now))?;
-    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     match item.kind.as_str() {
-        "text" => clipboard.set_text(item.content).map_err(|e| e.to_string())?,
+        "text" => {
+            let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+            clipboard.set_text(item.content).map_err(|e| e.to_string())?;
+        }
         "image" => {
+            let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
             let meta = item.meta.unwrap_or_default();
             let parsed: serde_json::Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
             let path = parsed
@@ -171,9 +175,33 @@ pub fn clipboard_copy_only(
             };
             clipboard.set_image(data).map_err(|e| e.to_string())?;
         }
+        "file" => {
+            let paths = file_paths_from_meta(item.meta.as_deref())?;
+            pasteboard::write_file_urls(&paths)?;
+        }
         _ => {}
     }
     Ok(())
+}
+
+/// Decode a `kind='file'` item's meta JSON into a flat Vec<PathBuf>.
+/// Kept as a free fn because both `clipboard_copy_only` and
+/// `clipboard_paste` need the same extraction and failure modes.
+fn file_paths_from_meta(meta: Option<&str>) -> std::result::Result<Vec<PathBuf>, String> {
+    let meta = meta.ok_or_else(|| "file meta missing".to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(meta).map_err(|e| e.to_string())?;
+    let arr = parsed
+        .get("files")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "file meta.files missing or not an array".to_string())?;
+    let paths: Vec<PathBuf> = arr
+        .iter()
+        .filter_map(|v| v.get("path").and_then(|p| p.as_str()).map(PathBuf::from))
+        .collect();
+    if paths.is_empty() {
+        return Err("file meta.files contained no usable paths".into());
+    }
+    Ok(paths)
 }
 
 /// Resolve and cache a link preview for the given URL. Returns None when
@@ -254,6 +282,15 @@ pub fn clipboard_paste(
                 bytes: std::borrow::Cow::Owned(img.into_raw()),
             };
             clipboard.set_image(data).map_err(|e| e.to_string())?;
+        }
+        "file" => {
+            // Drop the arboard clipboard first — it will re-open as
+            // soon as it's needed. Keeping it alive here is fine but
+            // unnecessary; the actual pasteboard write goes through
+            // our NSPasteboard helper which owns a different handle.
+            drop(clipboard);
+            let paths = file_paths_from_meta(item.meta.as_deref())?;
+            pasteboard::write_file_urls(&paths)?;
         }
         other => return Err(format!("unknown kind: {other}")),
     }

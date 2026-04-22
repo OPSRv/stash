@@ -22,11 +22,13 @@ import {
   copyOnly,
   deleteItem,
   listItems,
+  parseFileMeta,
   parseImageMeta,
   pasteItem,
   searchItems,
   togglePin,
 } from './api';
+import { detectFileKind } from '../../shared/util/fileKind';
 import { detectType, type ContentType } from './contentType';
 import { iconFor, typeTint } from './icons';
 import { ClipboardVirtualList } from './ClipboardVirtualList';
@@ -215,7 +217,11 @@ export const ClipboardPopup = () => {
     () =>
       rawItems.map((i) => ({
         ...i,
-        type: (i.kind === 'image' ? 'image' : detectType(i.content)) as ContentType,
+        type: (i.kind === 'image'
+          ? 'image'
+          : i.kind === 'file'
+            ? 'file'
+            : detectType(i.content)) as ContentType,
       })),
     [rawItems]
   );
@@ -404,6 +410,41 @@ export const ClipboardPopup = () => {
     [toast],
   );
 
+  /// Reveal a path in Finder. Route through the opener plugin — it
+  /// already has the macOS entitlement and picks the right selector
+  /// (`NSWorkspace -activateFileViewerSelectingURLs:`) for files +
+  /// folders alike.
+  const revealInFinder = useCallback(
+    async (path: string) => {
+      try {
+        const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+        await revealItemInDir(path);
+      } catch (e) {
+        console.error('reveal failed:', e);
+        toast({
+          title: 'Could not reveal in Finder',
+          description: String(e),
+          variant: 'error',
+        });
+      }
+    },
+    [toast],
+  );
+
+  /// Open a file with its default app (double-click equivalent).
+  const openFile = useCallback(
+    async (path: string) => {
+      try {
+        const { openPath } = await import('@tauri-apps/plugin-opener');
+        await openPath(path);
+      } catch (e) {
+        console.error('open file failed:', e);
+        toast({ title: 'Could not open file', description: String(e), variant: 'error' });
+      }
+    },
+    [toast],
+  );
+
   const handleRowSaveToNote = useCallback(
     (id: number) => {
       const item = rawItems.find((i) => i.id === id);
@@ -557,6 +598,88 @@ export const ClipboardPopup = () => {
 
   const renderRow = (item: (typeof typed)[number], flatIndex: number) => {
     const enterClass = item.id === newItemId ? 'clip-row-enter' : undefined;
+    if (item.kind === 'file') {
+      const fileMeta = parseFileMeta(item);
+      const files = fileMeta?.files ?? [];
+      const firstPath = files[0]?.path;
+      const firstName = files[0]?.name ?? 'file';
+      // Preview-worthy image? Reuse the thumbnail so an image copied
+      // from Finder looks the same as a screenshot copy (user asked:
+      // same format, same rendering — everywhere).
+      const firstKind = files[0]
+        ? detectFileKind({ name: files[0].name, mime: files[0].mime })
+        : { kind: 'unknown' as const };
+      const icon =
+        files.length === 1 && firstKind.kind === 'image' && firstPath ? (
+          <img
+            src={convertFileSrc(firstPath)}
+            alt=""
+            className="w-7 h-7 rounded-md object-cover"
+          />
+        ) : (
+          iconFor('file')
+        );
+      const primary =
+        files.length > 1
+          ? `${files.length} files · ${firstName}${files.length > 1 ? ` + ${files.length - 1} more` : ''}`
+          : firstName;
+      const tint = typeTint.file;
+      return (
+        <Row
+          key={item.id}
+          primary={primary}
+          icon={icon}
+          iconTint={files.length === 1 && firstKind.kind === 'image' ? 'transparent' : tint.bg}
+          iconColor={tint.fg}
+          actions={
+            <>
+              {firstPath && (
+                <>
+                  <IconButton
+                    onClick={() => revealInFinder(firstPath)}
+                    title="Reveal in Finder"
+                  >
+                    <EyeIcon size={12} />
+                  </IconButton>
+                  <IconButton
+                    onClick={() => openFile(firstPath)}
+                    title="Open with default app"
+                  >
+                    <ExternalIcon size={12} />
+                  </IconButton>
+                </>
+              )}
+              <IconButton
+                onClick={() => handleTogglePin(item.id)}
+                title={item.pinned ? 'Unpin' : 'Pin'}
+              >
+                <PinIcon size={12} filled={item.pinned} />
+              </IconButton>
+              <IconButton
+                onClick={() => handleDelete(item.id)}
+                title="Delete"
+                tone="danger"
+              >
+                <TrashIcon size={12} />
+              </IconButton>
+            </>
+          }
+          meta={
+            <>
+              <span className="t-tertiary text-meta font-mono">
+                {iso(item.created_at)}
+              </span>
+              {index === flatIndex && <Kbd>↵</Kbd>}
+            </>
+          }
+          pinned={item.pinned}
+          active={index === flatIndex}
+          selected={selectedIds.has(item.id)}
+          onSelect={(e) => handleRowClick(flatIndex, e)}
+          className={enterClass}
+        />
+      );
+    }
     if (item.type === 'link') {
       return (
         <LinkRow
