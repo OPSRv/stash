@@ -40,7 +40,7 @@ export function MemoryPanel() {
 
   if (rows === null) {
     return (
-      <div className="p-4 flex items-center gap-2 t-tertiary text-meta">
+      <div className="py-3 flex items-center gap-2 t-tertiary text-meta">
         <Spinner size={14} /> Loading facts…
       </div>
     );
@@ -48,7 +48,7 @@ export function MemoryPanel() {
 
   if (rows.length === 0) {
     return (
-      <div className="p-4 t-tertiary text-meta">
+      <div className="py-3 t-tertiary text-meta">
         No facts yet. Tell the bot
         {' '}
         <code className="t-primary">/remember &lt;fact&gt;</code>
@@ -59,34 +59,42 @@ export function MemoryPanel() {
   }
 
   return (
-    <div className="p-3 flex flex-col gap-1">
+    <>
       {error && (
-        <div role="alert" className="text-meta t-danger px-2 pb-2">
+        <div role="alert" className="py-3 t-danger text-meta">
           {error}
         </div>
       )}
-      <ul className="flex flex-col divide-y divide-white/5">
-        {rows.map((row) => (
-          <li
-            key={row.id}
-            className="flex items-start justify-between gap-3 py-2"
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          className="flex items-start justify-between gap-3 py-3"
+        >
+          <span className="flex-1 min-w-0 t-primary text-body break-words">
+            {row.fact}
+          </span>
+          <IconButton
+            title={`Delete fact ${row.id}`}
+            tone="danger"
+            disabled={busyId === row.id}
+            onClick={() => onDelete(row.id)}
           >
-            <span className="flex-1 min-w-0 t-primary text-body break-words">
-              {row.fact}
-            </span>
-            <IconButton
-              title={`Delete fact ${row.id}`}
-              tone="danger"
-              disabled={busyId === row.id}
-              onClick={() => onDelete(row.id)}
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m-9 0v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7" />
-              </svg>
-            </IconButton>
-          </li>
-        ))}
-      </ul>
-    </div>
+              <path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m-9 0v12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V7" />
+            </svg>
+          </IconButton>
+        </div>
+      ))}
+    </>
   );
 }

@@ -1,10 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { appDataDir, join } from '@tauri-apps/api/path';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { invoke } from '@tauri-apps/api/core';
 
 import { IconButton } from '../../../shared/ui/IconButton';
+import { SearchInput } from '../../../shared/ui/SearchInput';
+import { Button } from '../../../shared/ui/Button';
 import * as api from '../api';
-import type { InboxItem } from '../types';
+import type { ConnectionStatus, InboxItem } from '../types';
 import {
   DocumentItem,
   PhotoItem,
@@ -26,9 +30,24 @@ const startOfDay = (unix: number) => {
   return Math.floor(d.getTime() / 1000);
 };
 
-/// Bucket items by received_at into `Today`, `Yesterday`, then one
-/// bucket per older day. Keeps insertion order (which is already
-/// descending by received_at from the backend).
+const basenameFromPath = (p: string | null): string =>
+  p ? p.replace(/^.*[\\/]/, '') : '';
+
+/// Text haystack for the in-inbox search field. Hits on message body,
+/// transcript, caption and attached filename — everything a user
+/// would type to find an item.
+const haystack = (item: InboxItem): string =>
+  [
+    item.text_content ?? '',
+    item.transcript ?? '',
+    item.caption ?? '',
+    basenameFromPath(item.file_path),
+    item.kind,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
 const groupByDay = (items: InboxItem[]): Group[] => {
   if (items.length === 0) return [];
   const today = startOfDay(Math.floor(Date.now() / 1000));
@@ -64,12 +83,31 @@ const formatTime = (unix: number) =>
     minute: '2-digit',
   });
 
+const navigateTo = (tab: string) => {
+  window.dispatchEvent(new CustomEvent('stash:navigate', { detail: tab }));
+};
+
+const openSettingsTelegram = () => {
+  navigateTo('settings');
+  queueMicrotask(() =>
+    window.dispatchEvent(
+      new CustomEvent('stash:settings-section', { detail: 'telegram' }),
+    ),
+  );
+};
+
+const isPaired = (s: ConnectionStatus | null) => s?.kind === 'paired';
+
 export function InboxPanel() {
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [transcribing, setTranscribing] = useState<Set<number>>(new Set());
   const [failed, setFailed] = useState<Set<number>>(new Set());
+  const [query, setQuery] = useState('');
+  const [selection, setSelection] = useState<Set<number>>(new Set());
+  const [connection, setConnection] = useState<ConnectionStatus | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -82,15 +120,19 @@ export function InboxPanel() {
       const resolved = await Promise.all(
         rows.map(async (row): Promise<InboxItem> => {
           if (!row.file_path) return row;
-          // `appDataDir()` in tests is mocked to a literal path; treat
-          // anything already absolute as passthrough so we don't
-          // double-prefix. On macOS that's "starts with /".
           if (row.file_path.startsWith('/')) return row;
           const abs = await join(base, row.file_path);
           return { ...row, file_path: abs };
         }),
       );
       setItems(resolved);
+      // Prune selections that no longer refer to existing rows —
+      // happens after a bulk-delete round-trip.
+      setSelection((prev) => {
+        const next = new Set<number>();
+        for (const r of resolved) if (prev.has(r.id)) next.add(r.id);
+        return next;
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -98,11 +140,16 @@ export function InboxPanel() {
 
   useEffect(() => {
     void refresh();
+    // Pull connection status once so the empty-state can steer the user
+    // to Settings when the bot isn't paired yet.
+    void api
+      .status()
+      .then(setConnection)
+      .catch(() => setConnection(null));
     let unlisten: (() => void) | undefined;
     Promise.all([
       listen<number>('telegram:inbox_added', () => refresh()),
       listen<number>('telegram:inbox_updated', (e) => {
-        // Transcript landed — clear the in-flight marker for this id.
         setTranscribing((prev) => {
           if (!prev.has(e.payload)) return prev;
           const next = new Set(prev);
@@ -136,7 +183,56 @@ export function InboxPanel() {
     };
   }, [refresh]);
 
-  const groups = useMemo(() => (items ? groupByDay(items) : []), [items]);
+  // Drag-and-drop: dropping a file onto the panel creates a fresh
+  // note with that file attached. Telegram inbox is the right surface
+  // for this because the whole point of the panel is "things coming in
+  // from outside".
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    getCurrentWebview()
+      .onDragDropEvent(async (event) => {
+        if (!active || event.payload.type !== 'drop') return;
+        const paths = event.payload.paths;
+        if (!paths || paths.length === 0) return;
+        setError(null);
+        try {
+          // Create a lightweight note per file, attach the file. We
+          // route through the Notes commands directly — the same
+          // backend logic that Telegram inbox → note uses.
+          for (const p of paths) {
+            const filename = p.replace(/^.*[\\/]/, '');
+            const noteId = await invoke<number>('notes_create', {
+              title: filename || 'Dropped file',
+              body: '',
+            });
+            await invoke('notes_add_attachment', {
+              noteId,
+              sourcePath: p,
+            });
+          }
+          navigateTo('notes');
+        } catch (e) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      })
+      .then((u) => {
+        unlisten = u;
+      });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  const visibleItems = useMemo(() => {
+    if (!items) return [];
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((it) => haystack(it).includes(q));
+  }, [items, query]);
+
+  const groups = useMemo(() => groupByDay(visibleItems), [visibleItems]);
 
   const runOn = async (id: number, fn: () => Promise<unknown>) => {
     setBusyId(id);
@@ -151,10 +247,99 @@ export function InboxPanel() {
     }
   };
 
+  const toggleSelect = (id: number) => {
+    setSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelection(new Set());
+
+  const bulkDelete = async () => {
+    setError(null);
+    const ids = Array.from(selection);
+    for (const id of ids) {
+      try {
+        await api.deleteInboxItem(id);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }
+    clearSelection();
+    await refresh();
+  };
+
+  const bulkSaveToNotes = async () => {
+    setError(null);
+    const ids = Array.from(selection);
+    for (const id of ids) {
+      try {
+        await api.sendInboxToNotes(id);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    }
+    clearSelection();
+    await refresh();
+    navigateTo('notes');
+  };
+
   if (!items) return null;
 
+  const hasItems = items.length > 0;
+  const noMatches = hasItems && visibleItems.length === 0;
+  const selCount = selection.size;
+
   return (
-    <section className="h-full overflow-y-auto nice-scroll">
+    <section
+      ref={panelRef}
+      className="h-full flex flex-col"
+      aria-label="Telegram inbox"
+    >
+      {hasItems && (
+        <div className="border-b border-white/5 flex items-center gap-2">
+          {selCount === 0 ? (
+            <div className="flex-1">
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                placeholder="Search inbox"
+                compact
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2 flex-1">
+              <span className="text-[12px] text-white/70 font-medium">
+                {selCount} selected
+              </span>
+              <div className="ml-auto flex items-center gap-1">
+                <Button size="xs" variant="ghost" onClick={clearSelection}>
+                  Clear
+                </Button>
+                <Button
+                  size="xs"
+                  variant="soft"
+                  tone="accent"
+                  onClick={() => void bulkSaveToNotes()}
+                >
+                  Save to Notes
+                </Button>
+                <Button
+                  size="xs"
+                  variant="soft"
+                  tone="danger"
+                  onClick={() => void bulkDelete()}
+                >
+                  Delete
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       {error && (
         <p
           role="alert"
@@ -163,155 +348,190 @@ export function InboxPanel() {
           {error}
         </p>
       )}
-      {items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 px-8 text-center gap-2">
-          <div
-            className="w-12 h-12 rounded-full flex items-center justify-center"
-            style={{ backgroundColor: 'rgba(var(--stash-accent-rgb), 0.10)' }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-              style={{ color: 'rgb(var(--stash-accent-rgb))' }}
-            >
-              <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
-            </svg>
+      <div className="flex-1 overflow-y-auto nice-scroll">
+        {!hasItems ? (
+          <EmptyState connection={connection} />
+        ) : noMatches ? (
+          <div className="px-8 py-12 text-center text-[12px] text-white/45">
+            Nothing matches “{query}”.
           </div>
-          <h3 className="text-[15px] font-medium text-white/90">Inbox is empty</h3>
-          <p className="text-[12px] text-white/50 max-w-xs">
-            Send the bot a message, voice note, photo, video, or document and it
-            will land here.
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col">
-          {groups.map((group) => (
-            <div key={group.label} className="flex flex-col">
-              <div className="px-4 pt-4 pb-1.5 flex items-center gap-2">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-white/35">
-                  {group.label}
-                </span>
-                <span className="h-px flex-1 bg-white/5" />
-              </div>
-              <ul className="flex flex-col" aria-label={`Inbox — ${group.label}`}>
-                {group.items.map((item) => (
-                  <li
-                    key={item.id}
-                    data-testid={`inbox-item-${item.id}`}
-                    className="mx-2 my-0.5 px-3 py-2.5 rounded-lg hover:bg-white/3 transition-colors flex flex-col gap-2 group"
-                  >
-                    <div className="flex items-center gap-2 text-[11px] text-white/40">
-                      <KindBadge kind={item.kind} />
-                      <span className="font-mono tabular-nums">
-                        {formatTime(item.received_at)}
-                      </span>
-                      {item.routed_to && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/60">
-                          → {item.routed_to}
-                        </span>
-                      )}
-                      <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                        <RowAction
-                          label="Save to Notes"
-                          disabled={busyId === item.id || item.routed_to === 'notes'}
-                          onClick={() =>
-                            runOn(item.id, async () => {
-                              await api.sendInboxToNotes(item.id);
-                              // Hop to the Notes tab so the user sees
-                              // the freshly-created entry + attachment
-                              // right away — without this the save
-                              // looks silent.
-                              window.dispatchEvent(
-                                new CustomEvent('stash:navigate', {
-                                  detail: 'notes',
-                                }),
-                              );
-                            })
-                          }
-                          icon={
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                              <path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4z" />
-                              <path d="M16 4v4h4" />
-                              <path d="M8 12h8M8 16h6" />
-                            </svg>
-                          }
-                        />
-                        {item.kind === 'text' && (
-                          <RowAction
-                            label="Route to Clipboard"
-                            disabled={busyId === item.id || !!item.routed_to}
-                            onClick={() =>
-                              runOn(item.id, () =>
-                                api.markInboxRouted(item.id, 'clipboard'),
-                              )
-                            }
-                            icon={
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                <rect x="8" y="2" width="8" height="4" rx="1" />
-                                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                              </svg>
-                            }
-                          />
-                        )}
-                        {item.file_path && (
-                          <RowAction
-                            label="Reveal in Finder"
-                            disabled={busyId === item.id}
-                            onClick={() =>
-                              runOn(item.id, () => api.revealInboxFile(item.id))
-                            }
-                            icon={
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                                <path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
-                              </svg>
-                            }
-                          />
-                        )}
-                        <RowAction
-                          label="Delete"
-                          tone="danger"
-                          disabled={busyId === item.id}
-                          onClick={() =>
-                            runOn(item.id, () => api.deleteInboxItem(item.id))
-                          }
-                          icon={
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6" />
-                            </svg>
-                          }
-                        />
-                      </div>
-                    </div>
-                    <InboxBody
+        ) : (
+          <div className="flex flex-col">
+            {groups.map((group) => (
+              <div key={group.label} className="flex flex-col">
+                <div className="px-4 pt-4 pb-1.5 flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-white/35">
+                    {group.label}
+                  </span>
+                  <span className="h-px flex-1 bg-white/5" />
+                </div>
+                <ul
+                  className="flex flex-col"
+                  aria-label={`Inbox — ${group.label}`}
+                >
+                  {group.items.map((item) => (
+                    <InboxRow
+                      key={item.id}
                       item={item}
+                      selected={selection.has(item.id)}
+                      selectionActive={selCount > 0}
+                      busy={busyId === item.id}
                       transcribing={transcribing.has(item.id)}
                       failed={failed.has(item.id)}
+                      onToggleSelect={() => toggleSelect(item.id)}
+                      onAction={(fn) => runOn(item.id, fn)}
+                      onEditTranscript={async (next) => {
+                        await api.setInboxTranscript(item.id, next);
+                      }}
                     />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
+
+type InboxRowProps = {
+  item: InboxItem;
+  selected: boolean;
+  /// At least one row is selected — drives the checkbox-always-visible
+  /// mode. Avoids the "checkbox appears on hover only" awkwardness
+  /// once the user has started a multi-select.
+  selectionActive: boolean;
+  busy: boolean;
+  transcribing: boolean;
+  failed: boolean;
+  onToggleSelect: () => void;
+  onAction: (fn: () => Promise<unknown>) => void;
+  onEditTranscript: (next: string) => Promise<void>;
+};
+
+const InboxRow = ({
+  item,
+  selected,
+  selectionActive,
+  busy,
+  transcribing,
+  failed,
+  onToggleSelect,
+  onAction,
+  onEditTranscript,
+}: InboxRowProps) => (
+  <li
+    data-testid={`inbox-item-${item.id}`}
+    className={`mx-2 my-0.5 px-3 py-2.5 rounded-lg transition-colors flex flex-col gap-2 group ${
+      selected ? 'bg-[rgba(var(--stash-accent-rgb),0.12)]' : 'hover:bg-white/3'
+    }`}
+  >
+    <div className="flex items-center gap-2 text-[11px] text-white/40">
+      <label
+        className={`cursor-pointer ${
+          selectionActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+        } transition-opacity`}
+        title={selected ? 'Deselect' : 'Select'}
+      >
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggleSelect}
+          className="accent-[rgb(var(--stash-accent-rgb))] w-3.5 h-3.5 rounded"
+          aria-label={`Select item ${item.id}`}
+        />
+      </label>
+      <KindBadge kind={item.kind} />
+      <span className="font-mono tabular-nums">{formatTime(item.received_at)}</span>
+      {item.routed_to && (
+        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/60">
+          → {item.routed_to}
+        </span>
+      )}
+      <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+        <RowAction
+          label="Save to Notes"
+          disabled={busy || item.routed_to === 'notes'}
+          onClick={() =>
+            onAction(async () => {
+              await api.sendInboxToNotes(item.id);
+              navigateTo('notes');
+            })
+          }
+          icon={
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 4h12l4 4v12a2 2 0 0 1-2 2H4z" />
+              <path d="M16 4v4h4" />
+              <path d="M8 12h8M8 16h6" />
+            </svg>
+          }
+        />
+        {item.kind === 'text' && (
+          <RowAction
+            label="Route to Clipboard"
+            disabled={busy || !!item.routed_to}
+            onClick={() => onAction(() => api.markInboxRouted(item.id, 'clipboard'))}
+            icon={
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="8" y="2" width="8" height="4" rx="1" />
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+              </svg>
+            }
+          />
+        )}
+        {item.file_path && (
+          <RowAction
+            label="Reveal in Finder"
+            disabled={busy}
+            onClick={() => onAction(() => api.revealInboxFile(item.id))}
+            icon={
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
+              </svg>
+            }
+          />
+        )}
+        <RowAction
+          label="Delete"
+          tone="danger"
+          disabled={busy}
+          onClick={() => onAction(() => api.deleteInboxItem(item.id))}
+          icon={
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6" />
+            </svg>
+          }
+        />
+      </div>
+    </div>
+    <InboxBody
+      item={item}
+      transcribing={transcribing}
+      failed={failed}
+      onRetryTranscribe={async () => {
+        await api.retryTranscribe(item.id);
+      }}
+      onEditTranscript={onEditTranscript}
+    />
+  </li>
+);
 
 type InboxBodyProps = {
   item: InboxItem;
   transcribing: boolean;
   failed: boolean;
+  onRetryTranscribe: () => Promise<void>;
+  onEditTranscript: (next: string) => Promise<void>;
 };
 
-const InboxBody = ({ item, transcribing, failed }: InboxBodyProps) => {
+const InboxBody = ({
+  item,
+  transcribing,
+  failed,
+  onRetryTranscribe,
+  onEditTranscript,
+}: InboxBodyProps) => {
   switch (item.kind) {
     case 'text':
       return <TextItem content={item.text_content ?? ''} />;
@@ -323,6 +543,8 @@ const InboxBody = ({ item, transcribing, failed }: InboxBodyProps) => {
           transcript={item.transcript}
           transcribing={transcribing}
           failed={failed}
+          onRetry={() => void onRetryTranscribe()}
+          onEditTranscript={onEditTranscript}
         />
       ) : (
         <TextItem content="[voice file missing]" />
@@ -357,6 +579,46 @@ const InboxBody = ({ item, transcribing, failed }: InboxBodyProps) => {
     default:
       return <TextItem content={item.text_content ?? `[${item.kind}]`} />;
   }
+};
+
+const EmptyState = ({ connection }: { connection: ConnectionStatus | null }) => {
+  const paired = isPaired(connection);
+  return (
+    <div className="flex flex-col items-center justify-center py-16 px-8 text-center gap-3">
+      <div
+        className="w-12 h-12 rounded-full flex items-center justify-center"
+        style={{ backgroundColor: 'rgba(var(--stash-accent-rgb), 0.10)' }}
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+          style={{ color: 'rgb(var(--stash-accent-rgb))' }}
+        >
+          <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
+        </svg>
+      </div>
+      <h3 className="text-[15px] font-medium text-white/90">
+        {paired ? 'Inbox is empty' : 'Connect Telegram first'}
+      </h3>
+      <p className="text-[12px] text-white/50 max-w-xs">
+        {paired
+          ? 'Send the bot a message, voice note, photo, video, or document and it will land here.'
+          : 'Pair a Telegram bot in Settings to start receiving messages in Stash.'}
+      </p>
+      {!paired && (
+        <Button size="sm" variant="soft" tone="accent" onClick={openSettingsTelegram}>
+          Open Telegram settings
+        </Button>
+      )}
+    </div>
+  );
 };
 
 const KIND_META: Record<

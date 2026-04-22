@@ -31,13 +31,29 @@ describe('<InboxPanel />', () => {
     vi.mocked(invoke).mockReset();
   });
 
-  it('shows empty-state when list is empty', async () => {
+  it('shows paired empty-state when list is empty', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd) => {
       if (cmd === 'telegram_list_inbox') return [];
+      if (cmd === 'telegram_status') return { kind: 'paired', chat_id: 123 };
       return undefined;
     });
     render(<InboxPanel />);
     expect(await screen.findByText(/inbox is empty/i)).toBeInTheDocument();
+  });
+
+  it('surfaces pair-me empty-state when bot is not paired', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox') return [];
+      if (cmd === 'telegram_status') return { kind: 'no_token' };
+      return undefined;
+    });
+    render(<InboxPanel />);
+    expect(
+      await screen.findByText(/connect telegram first/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /open telegram settings/i }),
+    ).toBeEnabled();
   });
 
   it('renders a text item with body and per-row actions', async () => {
@@ -129,6 +145,85 @@ describe('<InboxPanel />', () => {
     });
     render(<InboxPanel />);
     expect(await screen.findByText(/→ notes/)).toBeInTheDocument();
+  });
+
+  it('search filters the list client-side', async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox')
+        return [
+          mkItem({ id: 1, text_content: 'alpha report' }),
+          mkItem({ id: 2, text_content: 'beta note' }),
+        ];
+      if (cmd === 'telegram_status') return { kind: 'paired', chat_id: 1 };
+      return undefined;
+    });
+    render(<InboxPanel />);
+    await screen.findByText('alpha report');
+    await screen.findByText('beta note');
+    const search = screen.getByPlaceholderText(/search inbox/i);
+    await user.type(search, 'alpha');
+    expect(screen.queryByText('beta note')).toBeNull();
+    expect(screen.getByText('alpha report')).toBeInTheDocument();
+  });
+
+  it('multi-select exposes bulk delete', async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox')
+        return [
+          mkItem({ id: 1, text_content: 'one' }),
+          mkItem({ id: 2, text_content: 'two' }),
+        ];
+      if (cmd === 'telegram_status') return { kind: 'paired', chat_id: 1 };
+      if (cmd === 'telegram_delete_inbox_item') return undefined;
+      return undefined;
+    });
+    render(<InboxPanel />);
+    await screen.findByText('one');
+    await user.click(screen.getByLabelText('Select item 1'));
+    await user.click(screen.getByLabelText('Select item 2'));
+    expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
+    await user.click(
+      screen.getAllByRole('button', { name: /^delete$/i })[0]!,
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('telegram_delete_inbox_item', { id: 1 }),
+    );
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('telegram_delete_inbox_item', { id: 2 }),
+    );
+  });
+
+  it('retry button appears when transcription failed and calls the backend', async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox')
+        return [
+          mkItem({
+            id: 21,
+            kind: 'voice',
+            text_content: null,
+            file_path: '/tmp/v.ogg',
+            duration_sec: 2,
+          }),
+        ];
+      if (cmd === 'telegram_retry_transcribe') return undefined;
+      if (cmd === 'telegram_status') return { kind: 'paired', chat_id: 1 };
+      return undefined;
+    });
+    render(<InboxPanel />);
+    await screen.findByTestId('inbox-item-21');
+    await act(async () => {
+      __emit('telegram:transcribe_failed', 21);
+    });
+    const retry = await screen.findByRole('button', { name: /спробувати/i });
+    await user.click(retry);
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('telegram_retry_transcribe', {
+        id: 21,
+      }),
+    );
   });
 
   it('surfaces a "транскрибую" banner when transcribing event fires', async () => {

@@ -39,6 +39,16 @@ export const markInboxRouted = (id: number, target: RouteTarget): Promise<void> 
 export const sendInboxToNotes = (id: number): Promise<number> =>
   invoke('telegram_send_inbox_to_notes', { id });
 
+/** Replace the stored transcript for a voice inbox row (manual edit). */
+export const setInboxTranscript = (id: number, transcript: string): Promise<void> =>
+  invoke('telegram_set_inbox_transcript', { id, transcript });
+
+/** Ask the backend to re-run Whisper on an existing voice item. Fires
+ *  `telegram:transcribing` / `telegram:inbox_updated` / `transcribe_failed`
+ *  events exactly like the first-pass flow — no return value. */
+export const retryTranscribe = (id: number): Promise<void> =>
+  invoke('telegram_retry_transcribe', { id });
+
 export const revealInboxFile = (id: number): Promise<void> =>
   invoke('telegram_reveal_inbox_file', { id });
 

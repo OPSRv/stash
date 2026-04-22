@@ -69,23 +69,31 @@ export function AiPromptPanel() {
   };
 
   if (!settings) {
-    return <div className="p-4 t-tertiary text-meta">Loading…</div>;
+    return <div className="py-3 t-tertiary text-meta">Loading…</div>;
   }
 
   return (
-    <div className="p-3 flex flex-col gap-4">
+    <>
       {error && (
-        <div role="alert" className="text-meta t-danger">
+        <div role="alert" className="py-3 t-danger text-meta">
           {error}
         </div>
       )}
 
-      <div>
+      <div className="py-3">
         <div className="flex items-baseline justify-between mb-1.5">
-          <label htmlFor="tg-ai-prompt" className="t-primary text-body font-medium">
+          <label
+            htmlFor="tg-ai-prompt"
+            className="t-primary text-body font-medium"
+          >
             System prompt
           </label>
-          {savedNote && <span className="t-tertiary text-meta">{savedNote}</span>}
+          {savedNote && (
+            <span className="t-tertiary text-meta">{savedNote}</span>
+          )}
+        </div>
+        <div className="t-tertiary text-meta mb-2">
+          Instructions the assistant sees on every reply.
         </div>
         <Textarea
           id="tg-ai-prompt"
@@ -101,16 +109,18 @@ export function AiPromptPanel() {
         </div>
       </div>
 
-      <SliderField
-        label="Context window"
-        description="Messages the assistant re-reads on every reply."
-        value={settings.context_window}
-        min={10}
-        max={200}
-        step={10}
-        onChange={onWindow}
-        display={`${settings.context_window} msg`}
-      />
-    </div>
+      <div className="py-3">
+        <SliderField
+          label="Context window"
+          description="Messages the assistant re-reads on every reply."
+          value={settings.context_window}
+          min={10}
+          max={200}
+          step={10}
+          onChange={onWindow}
+          display={`${settings.context_window} msg`}
+        />
+      </div>
+    </>
   );
 }

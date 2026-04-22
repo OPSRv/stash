@@ -422,6 +422,89 @@ fn pick_note_title(
     format!("[{}]", item.kind)
 }
 
+/// Overwrite the stored transcript for a voice inbox row. Used by the
+/// UI "edit transcript" affordance so typos can be fixed before the
+/// text ends up in a note or AI context.
+#[tauri::command]
+pub fn telegram_set_inbox_transcript(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+    id: i64,
+    transcript: String,
+) -> Result<(), String> {
+    state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .set_inbox_transcript(id, transcript.trim())
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("telegram:inbox_updated", id);
+    Ok(())
+}
+
+/// Re-run Whisper on an existing voice inbox row. Fires the same
+/// `telegram:transcribing` / `telegram:inbox_updated` /
+/// `telegram:transcribe_failed` events as the first-pass flow so the
+/// Inbox UI shows the same spinner / states without a second code path.
+/// Does NOT re-run the assistant afterwards — retry is a "fix the
+/// transcription" action, the user can trigger a new AI turn manually.
+#[tauri::command]
+pub async fn telegram_retry_transcribe(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+    id: i64,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let rel = {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.list_inbox(500)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|i| i.id == id && i.kind == "voice")
+            .ok_or_else(|| format!("voice inbox item {id} not found"))?
+            .file_path
+            .ok_or_else(|| "voice item has no file on disk".to_string())?
+    };
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    let abs = data_dir.join(&rel);
+    if !abs.is_file() {
+        return Err(format!("audio file missing: {}", abs.display()));
+    }
+
+    let _ = app.emit("telegram:transcribing", id);
+    let state_clone = Arc::clone(&state);
+    let app_clone = app.clone();
+    // Detach — same pattern as first-pass transcription so the IPC call
+    // returns immediately and the UI stays responsive.
+    tauri::async_runtime::spawn(async move {
+        match crate::modules::whisper::commands::transcribe_with_active_model(
+            &app_clone, abs, None,
+        )
+        .await
+        {
+            Ok(text) => {
+                let trimmed = text.trim().to_string();
+                if trimmed.is_empty() {
+                    let _ = app_clone.emit("telegram:transcribe_failed", id);
+                    return;
+                }
+                if let Ok(mut repo) = state_clone.repo.lock() {
+                    let _ = repo.set_inbox_transcript(id, &trimmed);
+                }
+                let _ = app_clone.emit("telegram:inbox_updated", id);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "retry whisper failed");
+                let _ = app_clone.emit("telegram:transcribe_failed", id);
+            }
+        }
+    });
+    Ok(())
+}
+
 #[tauri::command]
 pub fn telegram_reveal_inbox_file(
     app: AppHandle,

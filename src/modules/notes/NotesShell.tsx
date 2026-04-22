@@ -714,7 +714,7 @@ export const NotesShell = () => {
           }
         }}
         className={`group w-full text-left px-3 py-2 cursor-pointer transition-colors ring-focus ${
-          n.id === activeId ? 'row-active' : 'hover:bg-white/[0.03]'
+          n.id === activeId ? 'row-active row-active-strong' : 'hover:bg-white/[0.03]'
         }`}
       >
         <div className="flex items-baseline gap-2">

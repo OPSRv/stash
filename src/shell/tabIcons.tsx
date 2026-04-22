@@ -20,6 +20,27 @@ const Stroke = ({ d }: { d: string }) => (
   </svg>
 );
 
+/// Per-tab accent colour for the popup tab-bar icons. Kept separate from the
+/// icon SVGs (which stay `currentColor` so the tray can re-tint them to a
+/// neutral grey — see `trayMenu.ts`). `PopupShell` wraps each icon in a span
+/// with `color: TAB_ICON_COLORS[id]` so the glyphs inherit a vivid tint while
+/// the tab label text continues to follow the theme's foreground colour.
+export const TAB_ICON_COLORS: Record<string, string> = {
+  clipboard: '#a78bfa',
+  downloads: '#38bdf8',
+  notes: '#fbbf24',
+  translator: '#34d399',
+  ai: '#f472b6',
+  web: '#818cf8',
+  telegram: '#3ba9ee',
+  music: '#fb7185',
+  metronome: '#fb923c',
+  pomodoro: '#ef4444',
+  terminal: '#84cc16',
+  system: '#94a3b8',
+  settings: '#a1a1aa',
+};
+
 export const TAB_ICONS: Record<string, ReactNode> = {
   clipboard: (
     <svg
@@ -166,6 +187,38 @@ export const TAB_ICONS: Record<string, ReactNode> = {
     >
       <rect x="3" y="4" width="18" height="12" rx="2" />
       <path d="M8 20h8M12 16v4" />
+    </svg>
+  ),
+  telegram: (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 4 3 11l6 2 2 6 3-4 5 4z" />
+      <path d="m9 13 8-6-6 8" />
+    </svg>
+  ),
+  web: (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 9h18M7 6.5h.01M10 6.5h.01" />
     </svg>
   ),
   settings: (

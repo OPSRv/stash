@@ -15,7 +15,7 @@ import { loadSettings, saveSetting } from '../settings/store';
 const MIN_WIDTH = 920;
 const MIN_HEIGHT = 520;
 
-import { TAB_ICONS } from './tabIcons';
+import { TAB_ICONS, TAB_ICON_COLORS } from './tabIcons';
 import { pushPlayerArtwork, pushPlayerIcons, pushTrayMenu } from './trayMenu';
 import {
   pruneHistory,
@@ -462,7 +462,16 @@ export const PopupShell = () => {
               else tabRefs.current.delete(m.id);
             }}
             label={m.title}
-            icon={TAB_ICONS[m.id]}
+            icon={
+              TAB_ICONS[m.id] ? (
+                <span
+                  className="inline-flex"
+                  style={{ color: TAB_ICON_COLORS[m.id] ?? 'currentColor' }}
+                >
+                  {TAB_ICONS[m.id]}
+                </span>
+              ) : undefined
+            }
             shortcutHint={`⌘⌥${i + 1}`}
             active={m.id === activeId}
             onClick={() => openTab(m.id)}
