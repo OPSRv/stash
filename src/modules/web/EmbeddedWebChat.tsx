@@ -85,32 +85,43 @@ export const EmbeddedWebChat = ({
     setZoom(clampZoom(service.zoom ?? 1));
   }, [service.id, service.zoom]);
 
-  const syncBounds = useCallback(async () => {
-    const el = sizerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (rect.width < 10 || rect.height < 10) return;
-    try {
-      const settings = await loadSettings();
-      const userAgent =
-        (service.userAgent && service.userAgent.trim()) ||
-        userAgentFor(settings.cookiesFromBrowser);
-      await webchatEmbed({
-        service: service.id,
-        url: service.url,
-        x: Math.round(rect.left),
-        y: Math.round(rect.top),
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-        userAgent,
-        initialZoom: clampZoom(service.zoom ?? 1),
-      });
-      setAttached(true);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [service.id, service.url, service.zoom]);
+  /// Push/restore the native webview. `topInset` lets the caller
+  /// temporarily shrink the surface from the top so an HTML dropdown
+  /// has somewhere visible to land — without that shrink the native
+  /// surface sits on top of HTML and occludes the menu. Called with
+  /// 0 on normal sync, ~160 when the overflow menu opens.
+  const embedWithInset = useCallback(
+    async (topInset: number) => {
+      const el = sizerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return;
+      const inset = Math.max(0, Math.min(topInset, Math.round(rect.height) - 40));
+      try {
+        const settings = await loadSettings();
+        const userAgent =
+          (service.userAgent && service.userAgent.trim()) ||
+          userAgentFor(settings.cookiesFromBrowser);
+        await webchatEmbed({
+          service: service.id,
+          url: service.url,
+          x: Math.round(rect.left),
+          y: Math.round(rect.top) + inset,
+          width: Math.round(rect.width),
+          height: Math.round(rect.height) - inset,
+          userAgent,
+          initialZoom: clampZoom(service.zoom ?? 1),
+        });
+        setAttached(true);
+        setError(null);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [service.id, service.url, service.zoom, service.userAgent],
+  );
+
+  const syncBounds = useCallback(() => embedWithInset(0), [embedWithInset]);
 
   useEffect(() => {
     let raf = requestAnimationFrame(() => {
@@ -488,13 +499,14 @@ export const EmbeddedWebChat = ({
             onClick={() => {
               const next = !menuOpen;
               setMenuOpen(next);
-              // The embedded native webview sits on top of HTML content
-              // within its bounds, so this dropdown (which drops into
-              // the webview area) would otherwise be invisible. Hide
-              // the webview while the menu is open; re-attach on close
-              // via syncBounds so page state is preserved.
+              // The embedded native webview sits on top of HTML within
+              // its bounds, so this dropdown (which drops into the
+              // webview area) would be occluded. Instead of hiding the
+              // whole webview (leaves a black void) we shrink it from
+              // the top just enough for the menu to fit, so the user
+              // still sees their page below.
               if (next) {
-                void webchatHide(service.id).catch(() => {});
+                void embedWithInset(160);
               } else {
                 void syncBounds();
               }
