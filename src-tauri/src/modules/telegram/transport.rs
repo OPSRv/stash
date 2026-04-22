@@ -485,11 +485,16 @@ async fn handle_media(
         .filter(|s| *s > 0)
         .map(|s| format!(" · {s}s"))
         .unwrap_or_default();
-    let reply = format!(
-        "📥 Saved {} ({}{}). See it in Stash → Telegram → Inbox.",
-        intent.kind, human_size, duration_tag
-    );
-    state.sender.enqueue(chat_id, reply);
+    // Voice messages go silent on ingest — the user gets a transcript
+    // *and* an AI reply once Whisper finishes, which is already two
+    // messages per recording. Adding an inbox-save ack on top is noise.
+    if intent.kind != "voice" {
+        let reply = format!(
+            "📥 Saved {} ({}{}). See it in Stash → Telegram → Inbox.",
+            intent.kind, human_size, duration_tag
+        );
+        state.sender.enqueue(chat_id, reply);
+    }
 
     // Voice messages trigger Whisper transcription in the background.
     // Keeping this off the request path means a bad model config never
@@ -522,13 +527,41 @@ async fn handle_media(
                         let _ = repo.set_inbox_transcript(inbox_id, &trimmed);
                     }
                     let _ = app_for_task.emit("telegram:inbox_updated", inbox_id);
-                    let preview = trimmed.chars().take(200).collect::<String>();
-                    let reply = if trimmed.chars().count() > 200 {
-                        format!("🎤 {preview}…")
-                    } else {
-                        format!("🎤 {preview}")
-                    };
-                    state_for_task.sender.enqueue(chat_for_task, reply);
+
+                    // Send the transcript first as its own message so
+                    // the user can confirm Whisper heard them right
+                    // before the AI builds on it.
+                    state_for_task
+                        .sender
+                        .enqueue(chat_for_task, format!("📝 {trimmed}"));
+
+                    // Then pipe the transcript through the assistant.
+                    // Any AI failure (missing key, rate limit, bad model)
+                    // is surfaced inline — the user still has the
+                    // transcript above, so the flow degrades gracefully.
+                    match super::assistant::handle_user_text(
+                        &app_for_task,
+                        &state_for_task,
+                        &trimmed,
+                    )
+                    .await
+                    {
+                        Ok(reply) => {
+                            let body = reply.text.trim();
+                            if !body.is_empty() {
+                                state_for_task
+                                    .sender
+                                    .enqueue(chat_for_task, format!("🤖 {body}"));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "assistant on transcript failed");
+                            state_for_task.sender.enqueue(
+                                chat_for_task,
+                                format!("🤖 ⚠️ не вдалося опрацювати: {e}"),
+                            );
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "whisper transcription failed");
