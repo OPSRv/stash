@@ -867,6 +867,58 @@ code,
   user-select: text;
 }
 
+  /* GlobeLoader — hero bootstrap loader. Six animation channels layered so
+     no single one dominates. Class names are namespaced `globe-*` to avoid
+     colliding with the generic `.spin` / `.dot` keyframes the design used. */
+  @keyframes globe-spin360 { to { transform: rotate(360deg); } }
+  @keyframes globe-spin-rev { to { transform: rotate(-360deg); } }
+  @keyframes globe-pulse-op {
+    0%, 100% { opacity: 0.22; }
+    50%      { opacity: 0.55; }
+  }
+  @keyframes globe-dash-run { to { stroke-dashoffset: -400; } }
+  @keyframes globe-ping {
+    0%   { r: 2; opacity: 0.85; }
+    100% { r: 18; opacity: 0; }
+  }
+  @keyframes globe-glow {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+  }
+  @keyframes globe-indet {
+    0%   { left: -30%; width: 30%; }
+    60%  { left: 60%;  width: 40%; }
+    100% { left: 110%; width: 20%; }
+  }
+  .globe-spin      { animation: globe-spin360 18s linear infinite; transform-origin: 200px 200px; }
+  .globe-spin-slow { animation: globe-spin360 32s linear infinite; transform-origin: 200px 200px; }
+  .globe-spin-rev  { animation: globe-spin-rev 22s linear infinite; transform-origin: 200px 200px; }
+  .globe-meridian-pulse { animation: globe-pulse-op 4s ease-in-out infinite; }
+  .globe-orbit-sweep   { stroke-dasharray: 6 400; animation: globe-dash-run 3.5s linear infinite; }
+  .globe-orbit-sweep-2 { stroke-dasharray: 3 400; animation: globe-dash-run 2.6s linear infinite; animation-delay: -1.3s; }
+  .globe-ping { animation: globe-ping 2.2s ease-out infinite; }
+  .globe-node-glow { animation: globe-glow 2.2s ease-in-out infinite; }
+  .globe-indet {
+    position: absolute; top: 0; bottom: 0;
+    border-radius: 99px;
+    background: var(--stash-accent);
+    animation: globe-indet 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+  .globe-ring-dot { fill: rgba(255, 255, 255, 0.12); }
+  .light .globe-ring-dot { fill: rgba(20, 22, 28, 0.15); }
+  .globe-meridians {
+    color: rgba(255, 255, 255, 0.35);
+  }
+  .light .globe-meridians {
+    color: rgba(20, 22, 28, 0.35);
+  }
+  .globe-track {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .light .globe-track {
+    background: rgba(20, 22, 28, 0.08);
+  }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
