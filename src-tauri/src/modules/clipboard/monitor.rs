@@ -82,22 +82,26 @@ impl<R: ClipboardReader> Monitor<R> {
         // we'd store the Finder icon PNG and mis-classify the clip as
         // an image. Checking files first and returning early when they
         // exist keeps folder/file copies as real file rows.
-        // Two-stage check: first ask "does the pasteboard hold file
-        // URLs AT ALL" (cheap, no filtering). If yes, we own this
-        // tick — either insert a file row, or bail out — but under
-        // no circumstance read the image, because Finder co-seeds
-        // the drag icon as `public.tiff` and we'd store it as a
-        // phantom screenshot (the `Image · 1024×1024` bug).
+        // Pasteboard-source priority:
+        //   1. Actionable files (`public.file-url` + the path passes
+        //      the user-visible filter) → `kind='file'` row.
+        //   2. Text → `kind='text'` row. Text runs regardless of
+        //      whether file-urls are present, because browsers
+        //      routinely co-seed `text/plain` with a `public.file-url`
+        //      for their own drag source — and we want the user's
+        //      copied URL to land as a normal text clip.
+        //   3. Image → `kind='image'` row, but ONLY when no
+        //      file-url is on the pasteboard. Finder folder copies
+        //      write both a file-url AND a `public.tiff` drag icon;
+        //      skipping the image in that case avoids the phantom
+        //      `Image · 1024×1024` clip the user kept seeing.
         let has_files_on_pb = self.reader.has_files();
-        if has_files_on_pb {
-            let files = self.reader.read_files();
-            if files.is_empty() {
-                // Pasteboard had file-urls but every single one was
-                // filtered out (WebKit promise IDs, non-existent
-                // paths). We still OWN this poll — don't fall
-                // through to image and store a drag icon.
-                return Ok(None);
-            }
+        let files = if has_files_on_pb {
+            self.reader.read_files()
+        } else {
+            Vec::new()
+        };
+        if !files.is_empty() {
             let key = Self::files_key(&files);
             if self.last_files_key.as_deref() == Some(key.as_str()) {
                 return Ok(None);
@@ -111,9 +115,6 @@ impl<R: ClipboardReader> Monitor<R> {
                 .unwrap_or_else(|_| "{\"files\":[]}".to_string());
             let id = repo.insert_files(&key, &meta, now)?;
             self.last_files_key = Some(key);
-            // A new file copy invalidates the text/image dedupe
-            // state — the same Finder copy's stale image must not
-            // fire as a fresh row on a later tick.
             self.last_image_hash = None;
             self.last_text = None;
             return Ok(Some(id));
@@ -127,6 +128,13 @@ impl<R: ClipboardReader> Monitor<R> {
                 self.last_files_key = None;
                 return Ok(Some(id));
             }
+        }
+        if has_files_on_pb {
+            // A file-url is on the pasteboard but no path survived
+            // the user-visible filter, AND there's no new text.
+            // Whatever image is there is the Finder drag icon —
+            // don't store it.
+            return Ok(None);
         }
         if let Some(image) = self.reader.read_image() {
             let hash = Self::hash_image(&image);
@@ -532,6 +540,28 @@ mod tests {
         assert_eq!(result, None, "must not insert the Finder drag icon");
         assert_eq!(repo.list(10).unwrap().len(), 0);
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn text_still_captured_when_pasteboard_has_both_text_and_file_url() {
+        // Browsers dragging a link commonly seed BOTH `text/plain`
+        // and `public.file-url`. The user expects the URL to land
+        // as a normal text clip — we must not let the file-url
+        // presence swallow the text tick.
+        let mut repo = setup();
+        let reader = FakeReader {
+            text_queue: vec![Some("https://example.com/page".to_string())],
+            image_queue: vec![None],
+            files_queue: vec![vec![]], // filter stripped all (promise-id)
+            has_files_queue: vec![true],
+        };
+        let mut monitor = Monitor::new(reader);
+
+        let id = monitor.poll_once(&mut repo, 100).unwrap().unwrap();
+
+        let item = repo.get(id).unwrap().unwrap();
+        assert_eq!(item.kind, "text");
+        assert_eq!(item.content, "https://example.com/page");
     }
 
     #[test]
