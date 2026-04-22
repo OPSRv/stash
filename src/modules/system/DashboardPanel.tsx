@@ -4,6 +4,7 @@ import {
   requestPermission,
   sendNotification,
 } from '@tauri-apps/plugin-notification';
+import { Badge } from '../../shared/ui/Badge';
 import { RadialGauge } from './RadialGauge';
 import { Sparkline } from './Sparkline';
 import { dashboardMetrics, type DashboardMetrics, type NetIface } from './api';
@@ -105,9 +106,7 @@ const IfaceCard = ({
               {IFACE_LABEL[iface.kind]}
             </span>
             {iface.is_primary && (
-              <span className="text-[9px] uppercase tracking-wider px-1 py-px rounded bg-white/10 t-secondary">
-                primary
-              </span>
+              <Badge tone="neutral" className="uppercase tracking-wider">primary</Badge>
             )}
             <span className="text-[10px] t-tertiary">{iface.name}</span>
           </div>

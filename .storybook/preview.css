@@ -1,0 +1,40 @@
+/* Storybook stage. Stash renders inside a translucent popup over whatever
+ * the user has behind the menubar, so `layout: 'centered'` with a dim
+ * canvas background only shows half the story. This stage gives the
+ * `.pane` decorator a realistic wallpaper so glass, shadow and accent
+ * tints read the way they do in the real popup. */
+.sb-stage {
+  min-width: 320px;
+  padding: 24px;
+  border-radius: 20px;
+  background:
+    radial-gradient(1200px 600px at 20% 10%, rgba(120, 90, 240, 0.25), transparent 60%),
+    radial-gradient(900px 500px at 90% 80%, rgba(40, 160, 200, 0.22), transparent 60%),
+    linear-gradient(135deg, #1a1a22 0%, #0b0b0e 100%);
+}
+html.light .sb-stage {
+  background:
+    radial-gradient(1200px 600px at 20% 10%, rgba(120, 90, 240, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 90% 80%, rgba(40, 160, 200, 0.18), transparent 60%),
+    linear-gradient(135deg, #dfe4ec 0%, #eceef2 100%);
+}
+
+/* Storybook renders stories inside an iframe whose body is transparent
+ * by default; tokens.css keeps it transparent. Paint the canvas so the
+ * "canvas-*" background addon values actually take effect. */
+html, body, #storybook-root {
+  height: auto;
+  min-height: 100%;
+}
+
+/* Demo helper used across stories. */
+.sb-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.sb-col { display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.sb-label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 4px;
+}
+html.light .sb-label { color: rgba(20, 22, 28, 0.45); }

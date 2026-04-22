@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { Button } from '../../../shared/ui/Button';
-import { Input } from '../../../shared/ui/Input';
+import { NumberInput } from '../../../shared/ui/NumberInput';
 import { Toggle } from '../../../shared/ui/Toggle';
 import { SettingRow } from '../../../settings/SettingRow';
 import * as api from '../api';
@@ -102,18 +102,18 @@ export function NotificationsPanel() {
         title="Calendar lead time"
         description="Minutes before an event to ping."
         control={
-          <Input
-            type="number"
-            aria-label="Calendar lead minutes"
+          <NumberInput
+            ariaLabel="Calendar lead minutes"
             min={1}
             max={120}
             value={settings.calendar_lead_minutes}
             disabled={busy}
-            onChange={(e) => {
-              const n = Math.max(1, Math.min(120, Number(e.target.value) || 1));
+            onChange={(v) => {
+              const n = Math.max(1, Math.min(120, v ?? 1));
               void mutate({ ...settings, calendar_lead_minutes: n });
             }}
-            className="w-20"
+            suffix="min"
+            className="w-[118px]"
           />
         }
       />
@@ -122,18 +122,18 @@ export function NotificationsPanel() {
         title="Battery-low threshold"
         description="Charge percentage below which to ping."
         control={
-          <Input
-            type="number"
-            aria-label="Battery threshold"
+          <NumberInput
+            ariaLabel="Battery threshold"
             min={1}
             max={99}
             value={settings.battery_threshold_pct}
             disabled={busy}
-            onChange={(e) => {
-              const n = Math.max(1, Math.min(99, Number(e.target.value) || 1));
+            onChange={(v) => {
+              const n = Math.max(1, Math.min(99, v ?? 1));
               void mutate({ ...settings, battery_threshold_pct: n });
             }}
-            className="w-20"
+            suffix="%"
+            className="w-[104px]"
           />
         }
       />

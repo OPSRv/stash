@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { Button } from '../shared/ui/Button';
+import { Checkbox } from '../shared/ui/Checkbox';
 import { ConfirmDialog } from '../shared/ui/ConfirmDialog';
 import { Toggle } from '../shared/ui/Toggle';
 import { useToast } from '../shared/ui/Toast';
@@ -162,13 +163,12 @@ export const BackupSection = () => {
           <ul className="space-y-1.5">
             {modules.map((m) => (
               <li key={m.id} className="flex items-center gap-3">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id={`backup-${m.id}`}
                   checked={selected.has(m.id)}
                   disabled={!m.available}
                   onChange={() => toggle(m.id)}
-                  className="accent-[rgba(var(--stash-accent-rgb),1)]"
+                  ariaLabel={m.label}
                 />
                 <label htmlFor={`backup-${m.id}`} className="flex-1 min-w-0 cursor-pointer">
                   <div className="t-primary text-body">{m.label}</div>

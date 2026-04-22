@@ -1,4 +1,5 @@
 import { Input } from '../../shared/ui/Input';
+import { NumberInput } from '../../shared/ui/NumberInput';
 import { IconButton } from '../../shared/ui/IconButton';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { Toggle } from '../../shared/ui/Toggle';
@@ -20,9 +21,8 @@ const POSTURE_OPTIONS: { value: Posture; label: string }[] = [
   { value: 'walk', label: '🚶 Walk' },
 ];
 
-const clampMinutes = (raw: string) => {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return 1;
+const clampMinutes = (n: number | null) => {
+  if (n == null || !Number.isFinite(n) || n <= 0) return 1;
   return Math.min(240, Math.round(n));
 };
 
@@ -53,18 +53,17 @@ export const BlockRow = ({ block, onChange, onDelete, readOnly = false }: BlockR
           className="flex-1"
           aria-label="Block name"
         />
-        <Input
+        <NumberInput
           size="sm"
-          type="number"
           min={1}
           max={240}
           value={Math.max(1, Math.round(block.duration_sec / 60))}
-          onChange={(e) =>
-            onChange({ ...block, duration_sec: clampMinutes(e.target.value) * 60 })
+          onChange={(v) =>
+            onChange({ ...block, duration_sec: clampMinutes(v) * 60 })
           }
-          className="w-16"
-          aria-label="Duration in minutes"
-          trailing={<span className="t-tertiary text-[11px] pr-1">m</span>}
+          className="w-[92px]"
+          ariaLabel="Duration in minutes"
+          suffix="m"
         />
         <IconButton onClick={onDelete} title="Remove block" tone="danger">
           <TrashIcon size={12} />
@@ -90,22 +89,21 @@ export const BlockRow = ({ block, onChange, onDelete, readOnly = false }: BlockR
             label="Mid-block nudge"
           />
           Nudge at
-          <Input
+          <NumberInput
             size="sm"
-            type="number"
             min={1}
             max={240}
             disabled={!nudgeEnabled}
             value={nudgeMinutes}
-            onChange={(e) =>
+            onChange={(v) =>
               onChange({
                 ...block,
-                mid_nudge_sec: clampMinutes(e.target.value) * 60,
+                mid_nudge_sec: clampMinutes(v) * 60,
               })
             }
-            className="w-14"
-            aria-label="Nudge threshold in minutes"
-            trailing={<span className="t-tertiary text-[11px] pr-1">m</span>}
+            className="w-[88px]"
+            ariaLabel="Nudge threshold in minutes"
+            suffix="m"
           />
         </label>
       </div>

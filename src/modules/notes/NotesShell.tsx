@@ -945,7 +945,7 @@ export const NotesShell = () => {
       <main className="flex-1 flex flex-col min-w-0">
         {isEditing ? (
           <>
-            <div className="px-4 pt-3 pb-2 border-b hair">
+            <div className="px-5 pt-4 pb-3 border-b hair">
               <div className="flex items-center gap-3">
                 <input
                   value={title}
@@ -1064,7 +1064,7 @@ export const NotesShell = () => {
                   )}
                 </div>
               </div>
-              <div className="mt-1 flex items-center gap-3 t-tertiary text-meta tabular-nums">
+              <div className="mt-2 flex items-center gap-3 t-tertiary text-meta tabular-nums">
                 {active && <span>Updated {iso(active.updated_at)} ago</span>}
                 {body.trim() && (
                   <>

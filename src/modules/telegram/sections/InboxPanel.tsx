@@ -5,6 +5,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { invoke } from '@tauri-apps/api/core';
 
 import { accent } from '../../../shared/theme/accent';
+import { Badge } from '../../../shared/ui/Badge';
 import { IconButton } from '../../../shared/ui/IconButton';
 import { SearchInput } from '../../../shared/ui/SearchInput';
 import { Button } from '../../../shared/ui/Button';
@@ -375,7 +376,6 @@ export function InboxPanel() {
                       key={item.id}
                       item={item}
                       selected={selection.has(item.id)}
-                      selectionActive={selCount > 0}
                       busy={busyId === item.id}
                       transcribing={transcribing.has(item.id)}
                       failed={failed.has(item.id)}
@@ -399,10 +399,6 @@ export function InboxPanel() {
 type InboxRowProps = {
   item: InboxItem;
   selected: boolean;
-  /// At least one row is selected — drives the checkbox-always-visible
-  /// mode. Avoids the "checkbox appears on hover only" awkwardness
-  /// once the user has started a multi-select.
-  selectionActive: boolean;
   busy: boolean;
   transcribing: boolean;
   failed: boolean;
@@ -414,7 +410,6 @@ type InboxRowProps = {
 const InboxRow = ({
   item,
   selected,
-  selectionActive,
   busy,
   transcribing,
   failed,
@@ -424,25 +419,41 @@ const InboxRow = ({
 }: InboxRowProps) => (
   <li
     data-testid={`inbox-item-${item.id}`}
-    className={`mx-2 my-0.5 px-3 py-2.5 rounded-lg transition-colors flex flex-col gap-2 group ${
-      selected ? 'bg-[rgba(var(--stash-accent-rgb),0.12)]' : 'hover:bg-white/3'
+    role="option"
+    aria-selected={selected}
+    tabIndex={0}
+    onClick={(e) => {
+      // Clicks on interactive children (RowAction buttons, voice
+      // player, transcript editor, links) must not double as a select
+      // toggle. Anything inside an explicit control element is ignored.
+      const t = e.target as HTMLElement;
+      if (t.closest('button, input, textarea, audio, a, [data-no-select]')) return;
+      onToggleSelect();
+    }}
+    onKeyDown={(e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        const t = e.target as HTMLElement;
+        if (t.closest('button, input, textarea, audio, a, [data-no-select]')) return;
+        e.preventDefault();
+        onToggleSelect();
+      }
+    }}
+    className={`mx-2 my-0.5 px-3 py-2.5 rounded-lg transition-colors flex flex-col gap-2 group cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[rgb(var(--stash-accent-rgb))] ${
+      selected ? 'bg-[rgba(var(--stash-accent-rgb),0.18)]' : 'hover:bg-white/3'
     }`}
   >
     <div className="flex items-center gap-2 text-[11px] text-white/40">
-      <label
-        className={`cursor-pointer ${
-          selectionActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
-        } transition-opacity`}
-        title={selected ? 'Deselect' : 'Select'}
-      >
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          className="accent-[rgb(var(--stash-accent-rgb))] w-3.5 h-3.5 rounded"
-          aria-label={`Select item ${item.id}`}
-        />
-      </label>
+      {/* Hidden checkbox kept purely for assistive tech + form
+          semantics — the visible "click anywhere on the row" affordance
+          is the li itself. `sr-only` removes it from the layout while
+          keeping it in the accessibility tree. */}
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggleSelect}
+        className="sr-only"
+        aria-label={`Select item ${item.id}`}
+      />
       <KindBadge kind={item.kind} />
       <span className="font-mono tabular-nums">{formatTime(item.received_at)}</span>
       {item.routed_to && (
@@ -637,15 +648,9 @@ const KIND_META: Record<
 const KindBadge = ({ kind }: { kind: string }) => {
   const meta = KIND_META[kind] ?? { label: kind, color: 'rgba(255,255,255,0.45)' };
   return (
-    <span
-      className="text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 rounded"
-      style={{
-        color: meta.color,
-        backgroundColor: `${meta.color}1a`,
-      }}
-    >
+    <Badge color={meta.color} bg={`${meta.color}1a`} className="uppercase tracking-wider">
       {meta.label}
-    </span>
+    </Badge>
   );
 };
 

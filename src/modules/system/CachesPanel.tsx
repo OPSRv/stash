@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
 import { CenterSpinner } from '../../shared/ui/CenterSpinner';
+import { Checkbox } from '../../shared/ui/Checkbox';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { ListItemRow } from '../../shared/ui/ListItemRow';
 import { PanelHeader } from '../../shared/ui/PanelHeader';
+import { SelectionHeader } from '../../shared/ui/SelectionHeader';
 import { useToast } from '../../shared/ui/Toast';
 import { useSetSelection } from '../../shared/hooks/useSetSelection';
 import { listCaches, trashPath, type CacheEntry, type CacheKind } from './api';
@@ -47,10 +49,14 @@ export const CachesPanel = () => {
     refresh();
   }, [refresh]);
 
-  const onToggleAll = useCallback(() => {
-    if (!caches) return;
-    toggleAll(caches.map((c) => c.path));
-  }, [caches, toggleAll]);
+  const onToggleAll = useCallback(
+    (next: boolean) => {
+      if (!caches) return;
+      if (next) toggleAll(caches.map((c) => c.path));
+      else clear();
+    },
+    [caches, toggleAll, clear],
+  );
 
   const totalSelected = useMemo(() => {
     if (!caches) return 0;
@@ -129,34 +135,31 @@ export const CachesPanel = () => {
       />
 
       {caches && caches.length > 0 && (
-        <div className="px-4 py-1.5 border-b hair flex items-center justify-between t-secondary text-meta">
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={selectedSize === caches.length}
-              onChange={onToggleAll}
-              className="ring-focus"
-            />
-            Обрати все
-          </label>
-          <div className="flex items-center gap-3">
-            <span>
-              Обрано{' '}
-              <span className="t-primary font-medium">
-                {formatBytes(totalSelected)}
+        <SelectionHeader
+          total={caches.length}
+          selected={selectedSize}
+          onToggleAll={onToggleAll}
+          separated
+          trailing={
+            <div className="flex items-center gap-3 t-secondary text-meta">
+              <span>
+                Обрано{' '}
+                <span className="t-primary font-medium tabular-nums">
+                  {formatBytes(totalSelected)}
+                </span>
               </span>
-            </span>
-            <Button
-              size="sm"
-              variant="soft"
-              tone="danger"
-              disabled={selectedSize === 0}
-              onClick={() => setConfirmOpen(true)}
-            >
-              У кошик
-            </Button>
-          </div>
-        </div>
+              <Button
+                size="sm"
+                variant="soft"
+                tone="danger"
+                disabled={selectedSize === 0}
+                onClick={() => setConfirmOpen(true)}
+              >
+                У кошик
+              </Button>
+            </div>
+          }
+        />
       )}
 
       <div className="flex-1 min-h-0 overflow-auto">
@@ -179,13 +182,14 @@ export const CachesPanel = () => {
                   selected={checked}
                   onClick={() => toggleOne(c.path)}
                   leading={
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleOne(c.path)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="ring-focus"
-                    />
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        size="sm"
+                        checked={checked}
+                        onChange={() => toggleOne(c.path)}
+                        ariaLabel={c.label}
+                      />
+                    </span>
                   }
                   title={
                     <span className="flex items-center gap-2">

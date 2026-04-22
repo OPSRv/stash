@@ -4,6 +4,16 @@
 export const SUPPORTED_VIDEO_URL =
   /https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|reddit\.com|vimeo\.com|twitch\.tv|facebook\.com|fb\.watch)/i;
 
+/// Weaker check used to validate *manual* input: yt-dlp supports 1000+ sites,
+/// so we only want to reject things that clearly aren't URLs (e.g. someone
+/// pasted a plain word). `new URL()` is overly strict about protocol-less
+/// hosts, so a regex for `http(s)://` is the right middle ground.
+export const LIKELY_DOWNLOAD_URL = /^https?:\/\/\S+$/i;
+
+export function isLikelyDownloadUrl(value: string): boolean {
+  return LIKELY_DOWNLOAD_URL.test(value.trim());
+}
+
 export const STATUS_LABELS = {
   pending: 'Queued',
   active: 'Downloading',

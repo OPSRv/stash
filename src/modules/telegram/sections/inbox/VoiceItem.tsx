@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { AudioPlayer } from '../../../../shared/ui/AudioPlayer';
+import { Spinner } from '../../../../shared/ui/Spinner';
 
 type VoiceItemProps = {
   filePath: string;
@@ -48,10 +49,7 @@ export const VoiceItem = ({
           role="status"
           aria-live="polite"
         >
-          <span
-            className="w-3 h-3 rounded-full border border-white/30 border-t-transparent animate-spin"
-            aria-hidden
-          />
+          <Spinner size={12} />
           Транскрибую…
         </div>
       )}

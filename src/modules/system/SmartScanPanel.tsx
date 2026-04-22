@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
+import { Checkbox } from '../../shared/ui/Checkbox';
 import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
@@ -291,14 +292,15 @@ export const SmartScanPanel = () => {
                 : `linear-gradient(135deg, ${b.gradient[0]}10, ${b.gradient[1]}18)`,
             }}
           >
-            <input
-              type="checkbox"
-              checked={b.selected}
-              onChange={() => toggle(b.id)}
-              onClick={(e) => e.stopPropagation()}
-              disabled={!b.enabled}
-              className="ring-focus shrink-0"
-            />
+            <span onClick={(e) => e.stopPropagation()} className="shrink-0">
+              <Checkbox
+                size="sm"
+                checked={b.selected}
+                onChange={() => toggle(b.id)}
+                disabled={!b.enabled}
+                ariaLabel={b.title}
+              />
+            </span>
             <div
               aria-hidden
               className="w-10 h-10 rounded-xl shrink-0 inline-flex items-center justify-center"

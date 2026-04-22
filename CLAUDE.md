@@ -33,6 +33,11 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
 - Prefer role-based queries. When a button is a tab/toggle, use proper ARIA (`role="tab"`, `aria-pressed`, `aria-checked`).
 - Rust repos tested with `Connection::open_in_memory()`.
 - E2E (`tests/e2e/`) runs Playwright against Vite dev — **no Tauri IPC in e2e**.
+- **Storybook**: кожен новий примітив у `src/shared/ui/` мусить мати поруч `*.stories.tsx` — з `tags: ['autodocs']`, argTypes на всі enum-пропси і принаймні однією сторі на кожен стан (tones/sizes/disabled/invalid тощо). Перевірити: `npm run storybook` (або `npm run build-storybook`). Сторі виключені з `tsc`/`vitest` — вони не замінюють юніт-тести, а доповнюють їх.
+  - **Тримати синхронним.** Будь-яка зміна в компоненті з наявним `*.stories.tsx` зобов’язує оновити сторі тим самим коммітом. Зокрема:
+    - **додав/видалив/перейменував проп** → оновити `argTypes`, `args`, і сторі-кейси, які його демонструють (нова сторі для нового стану; видалити мертві кейси для прибраного пропу). Зміна дефолту — оновити `args`.
+    - **зміна дизайну** (паддінги, кольори, іконки, розміри, emerging варіанти) → пройтись по всіх існуючих сторі цього компонента в Storybook візуально (`npm run storybook`) і переконатися, що жоден кейс не зламаний і покриває нові стани.
+    - **перевірка перед комітом**: `npm run build-storybook` не мусить додавати нових помилок — якщо сторі посилається на прибраний проп, білд покаже це раніше за ревʼю.
 
 ## Conventions easy to get wrong
 
@@ -40,4 +45,4 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
 - **Accent colour**: use `accent(α)` from `src/shared/theme/accent.ts` — never inline the `rgba(var(--stash-accent-rgb), α)` template. Tailwind arbitrary classes (`bg-[rgba(…)]`) are the one exception.
 - **DRY the second copy**: before hand-rolling a formatter, hook, or layout block, grep `src/shared/` (`format/`, `hooks/`, `util/`, `ui/`, `theme/`). Canonical helpers already exist for bytes / duration, set-selection, async-load, reveal-in-Finder, copy-to-clipboard, panel headers, list rows, centered spinner. Extending one beats adding a fourth.
 - **Language**: never add Russian (`ru`) to locale/translator lists.
-- **No ad-hoc buttons/inputs**: route through `src/shared/ui/` primitives (`Button`, `Input`, `SearchInput`, `Select`, `SegmentedControl`, `Toggle`, `TabButton`, `IconButton`, `ConfirmDialog`, `Toast`, `Cheatsheet`, `GlobalSearch`). No inline RGBA hex.
+- **No ad-hoc buttons/inputs**: route through `src/shared/ui/` primitives (`Button`, `Input`, `NumberInput`, `SearchInput`, `Select`, `SegmentedControl`, `Checkbox`, `SelectionHeader`, `Toggle`, `TabButton`, `IconButton`, `ConfirmDialog`, `Modal`, `Toast`, `Cheatsheet`, `GlobalSearch`). No inline RGBA hex.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -80,45 +80,81 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
     };
   }, [refresh]);
 
-  // Native drag-and-drop. Tauri's webview event fires when the user
-  // drops a file over the window; we intercept only while this panel is
-  // mounted (i.e. a note is active).
+  // Native drag-and-drop. Subscribe exactly once on mount — repeatedly
+  // re-subscribing when noteId/refresh change causes rapid sub/unsub
+  // churn that races Tauri's event bookkeeping and surfaces as silent
+  // drops. We read the current noteId via a ref so the single long-
+  // lived handler always attaches to whatever note is active now.
+  const noteIdRef = useRef(noteId);
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    getCurrentWebview()
+    noteIdRef.current = noteId;
+  }, [noteId]);
+  const refreshRef = useRef(refresh);
+  useEffect(() => {
+    refreshRef.current = refresh;
+  }, [refresh]);
+  const [dropActive, setDropActive] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    void getCurrentWebview()
       .onDragDropEvent(async (event) => {
-        if (event.payload.type !== 'drop') return;
-        const paths = event.payload.paths;
+        const p = event.payload;
+        if (p.type === 'enter' || p.type === 'over') {
+          if ((p.paths?.length ?? 0) > 0) setDropActive(true);
+          return;
+        }
+        if (p.type === 'leave') {
+          setDropActive(false);
+          return;
+        }
+        if (p.type !== 'drop') return;
+        setDropActive(false);
+        const paths = p.paths;
         if (!paths || paths.length === 0) return;
+        const currentNote = noteIdRef.current;
+        if (currentNote == null) return;
         setBusy(true);
         setError(null);
         try {
-          for (const p of paths) {
-            await notesAddAttachment(noteId, p);
+          for (const path of paths) {
+            await notesAddAttachment(currentNote, path);
           }
-          await refresh();
+          await refreshRef.current();
         } catch (e) {
           setError(e instanceof Error ? e.message : String(e));
         } finally {
           setBusy(false);
         }
       })
-      .then((u) => {
-        unlisten = u;
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* Outside Tauri (tests, Vite preview) — no-op. */
       });
     return () => {
+      disposed = true;
       unlisten?.();
     };
-  }, [noteId, refresh]);
+  }, []);
 
   const addFromPicker = async () => {
     setError(null);
+    // Suspend popup auto-hide while the native picker is up — per
+    // CLAUDE.md convention, otherwise focusing the dialog blurs the
+    // popup and the blur handler hides us, which in turn dismisses the
+    // dialog before the user can pick anything.
+    await invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
     let selected: string | string[] | null = null;
     try {
       selected = await openDialog({ multiple: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return;
+    } finally {
+      await invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
     }
     if (!selected) return;
     const paths = Array.isArray(selected) ? selected : [selected];
@@ -148,21 +184,36 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
     }
   };
 
-  if (items.length === 0 && !busy && !error) {
+  if (items.length === 0 && !busy) {
     return (
-      <div className="px-4 pb-3">
-        <Button size="xs" variant="ghost" onClick={addFromPicker}>
-          + Attach file
-        </Button>
-        <span className="ml-3 text-[11px] text-white/35">
-          or drag a file onto this window
-        </span>
+      <div
+        className={`px-5 pt-3 pb-4 transition-colors ${
+          dropActive ? 'bg-[rgba(var(--stash-accent-rgb),0.08)]' : ''
+        }`}
+      >
+        <div className="flex items-center gap-2.5 text-[11px] t-tertiary">
+          <Button size="xs" variant="ghost" onClick={addFromPicker}>
+            + Attach file
+          </Button>
+          <span className="t-tertiary/80">
+            {dropActive ? 'Release to attach' : 'or drop a file onto this window'}
+          </span>
+        </div>
+        {error && (
+          <p role="alert" className="mt-2 text-[12px] text-rose-300/90">
+            {error}
+          </p>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="px-4 pb-3 flex flex-col gap-2">
+    <div
+      className={`px-5 pt-3 pb-4 flex flex-col gap-2 transition-colors ${
+        dropActive ? 'bg-[rgba(var(--stash-accent-rgb),0.08)]' : ''
+      }`}
+    >
       <div className="flex items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-white/40">
           Attachments · {items.length}

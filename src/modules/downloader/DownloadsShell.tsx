@@ -15,7 +15,7 @@ import { EmptyState } from '../../shared/ui/EmptyState';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
-import { SUPPORTED_VIDEO_URL } from './downloads.constants';
+import { SUPPORTED_VIDEO_URL, isLikelyDownloadUrl } from './downloads.constants';
 import { useDownloadJobs } from './useDownloadJobs';
 import { useUrlDropTarget } from './useUrlDropTarget';
 import { useVideoDetect } from './useVideoDetect';
@@ -52,9 +52,20 @@ export const DownloadsShell = () => {
 
   const runDetect = useCallback(
     (value: string) => {
-      run(value);
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      if (!isLikelyDownloadUrl(trimmed)) {
+        toast({
+          title: 'Not a valid URL',
+          description: 'Paste a link starting with http:// or https://.',
+          variant: 'error',
+          durationMs: 2000,
+        });
+        return;
+      }
+      run(trimmed);
     },
-    [run]
+    [run, toast]
   );
 
   // On mount: if the shell stashed a URL for us while we were still lazy-
@@ -279,6 +290,7 @@ export const DownloadsShell = () => {
     >
       <DownloadUrlBar
         url={url}
+        invalid={url.trim().length > 0 && !isLikelyDownloadUrl(url)}
         detecting={detecting}
         elapsedSec={elapsedSec}
         onUrlChange={setUrl}

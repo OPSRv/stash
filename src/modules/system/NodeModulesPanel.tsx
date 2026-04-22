@@ -1,10 +1,12 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
+import { Checkbox } from '../../shared/ui/Checkbox';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { ListItemRow } from '../../shared/ui/ListItemRow';
 import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { RevealButton } from '../../shared/ui/RevealButton';
+import { SelectionHeader } from '../../shared/ui/SelectionHeader';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
 import { useSetSelection } from '../../shared/hooks/useSetSelection';
@@ -45,10 +47,14 @@ export const NodeModulesPanel = () => {
     }
   }, [clear]);
 
-  const onToggleAll = useCallback(() => {
-    if (!entries) return;
-    toggleAll(entries.map((e) => e.path));
-  }, [entries, toggleAll]);
+  const onToggleAll = useCallback(
+    (next: boolean) => {
+      if (!entries) return;
+      if (next) toggleAll(entries.map((e) => e.path));
+      else clear();
+    },
+    [entries, toggleAll, clear],
+  );
 
   const totalAll = useMemo(
     () => (entries ?? []).reduce((acc, e) => acc + e.size_bytes, 0),
@@ -152,37 +158,37 @@ export const NodeModulesPanel = () => {
       />
 
       {entries && entries.length > 0 && (
-        <div className="px-4 py-1.5 border-b hair flex items-center justify-between t-secondary text-meta">
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={selectedSize === entries.length}
-              onChange={onToggleAll}
-              className="ring-focus"
-            />
-            Обрати все ({entries.length})
-          </label>
-          <div className="flex items-center gap-3">
-            <span>
-              Обрано <span className="t-primary font-medium">{formatBytes(totalSelected)}</span>
-            </span>
-            {progress ? (
-              <span className="t-tertiary text-meta tabular-nums">
-                {progress.done} з {progress.total}…
+        <SelectionHeader
+          total={entries.length}
+          selected={selectedSize}
+          onToggleAll={onToggleAll}
+          separated
+          trailing={
+            <div className="flex items-center gap-3 t-secondary text-meta">
+              <span>
+                Обрано{' '}
+                <span className="t-primary font-medium tabular-nums">
+                  {formatBytes(totalSelected)}
+                </span>
               </span>
-            ) : (
-              <Button
-                size="sm"
-                variant="soft"
-                tone="danger"
-                disabled={selectedSize === 0}
-                onClick={() => setConfirmOpen(true)}
-              >
-                У кошик
-              </Button>
-            )}
-          </div>
-        </div>
+              {progress ? (
+                <span className="t-tertiary text-meta tabular-nums">
+                  {progress.done} з {progress.total}…
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="soft"
+                  tone="danger"
+                  disabled={selectedSize === 0}
+                  onClick={() => setConfirmOpen(true)}
+                >
+                  У кошик
+                </Button>
+              )}
+            </div>
+          }
+        />
       )}
 
       <div className="flex-1 min-h-0 overflow-auto">
@@ -212,13 +218,14 @@ export const NodeModulesPanel = () => {
                   selected={checked}
                   onClick={() => toggleOne(e.path)}
                   leading={
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleOne(e.path)}
-                      onClick={(ev) => ev.stopPropagation()}
-                      className="ring-focus"
-                    />
+                    <span onClick={(ev) => ev.stopPropagation()}>
+                      <Checkbox
+                        size="sm"
+                        checked={checked}
+                        onChange={() => toggleOne(e.path)}
+                        ariaLabel={e.path}
+                      />
+                    </span>
                   }
                   title={
                     <span title={e.path}>

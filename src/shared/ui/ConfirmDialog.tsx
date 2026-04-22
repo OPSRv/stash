@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from './Button';
+import { Checkbox } from './Checkbox';
 import { useFocusTrap } from './useFocusTrap';
 
 type Props = {
@@ -75,15 +76,14 @@ export const ConfirmDialog = ({
           <div className="mb-2" />
         )}
         {suppressibleLabel && (
-          <label className="flex items-center gap-1.5 t-secondary text-meta select-none cursor-pointer mt-2">
-            <input
-              type="checkbox"
+          <div className="mt-2">
+            <Checkbox
+              size="sm"
               checked={suppress}
-              onChange={(e) => setSuppress(e.target.checked)}
-              className="ring-focus shrink-0"
+              onChange={setSuppress}
+              label={<span className="t-secondary text-meta">{suppressibleLabel}</span>}
             />
-            <span>{suppressibleLabel}</span>
-          </label>
+          </div>
         )}
         <div className="flex items-center justify-end gap-2 mt-3">
           <Button onClick={onCancel} variant="ghost" data-role="confirm-cancel">

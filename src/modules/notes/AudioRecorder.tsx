@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { accent } from '../../shared/theme/accent';
 import { Button } from '../../shared/ui/Button';
+import { Modal } from '../../shared/ui/Modal';
 import { Select } from '../../shared/ui/Select';
 import { MicIcon, StopCircleIcon } from '../../shared/ui/icons';
 
@@ -320,27 +321,14 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
     onComplete({ bytes, ext: formatRef.current.ext, durationMs });
   }, [onComplete, onCancel, cleanup]);
 
-  if (!open) return null;
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Record a voice note"
-      style={{
-        background: 'rgba(0,0,0,0.65)',
-        backdropFilter: 'blur(14px)',
-        WebkitBackdropFilter: 'blur(14px)',
-      }}
+    <Modal
+      open={open}
+      onClose={onCancel}
+      ariaLabel="Record a voice note"
+      dismissOnBackdropClick={false}
+      panelClassName="modal-surface rounded-xl p-6 w-[380px] flex flex-col items-center gap-4"
     >
-      <div
-        className="modal-surface rounded-xl p-6 w-[380px] flex flex-col items-center gap-4"
-        style={{
-          boxShadow: '0 20px 60px -10px rgba(0,0,0,0.55)',
-          border: '1px solid rgba(255,255,255,0.08)',
-        }}
-      >
         {state === 'recording' && (
           <>
             <div className="flex items-center gap-2 t-secondary text-meta uppercase tracking-wider">
@@ -438,7 +426,6 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
             </Button>
           </>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 };

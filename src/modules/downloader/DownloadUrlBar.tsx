@@ -7,6 +7,10 @@ import { useToast } from '../../shared/ui/Toast';
 
 interface DownloadUrlBarProps {
   url: string;
+  /** URL is non-empty but doesn't look like `http(s)://…`. Drives the
+   *  red border + Detect-disabled state; the detect path itself still
+   *  re-validates so programmatic entry points can't slip past. */
+  invalid?: boolean;
   detecting: boolean;
   elapsedSec: number;
   onUrlChange: (next: string) => void;
@@ -21,6 +25,7 @@ interface DownloadUrlBarProps {
 
 export const DownloadUrlBar = ({
   url,
+  invalid = false,
   detecting,
   elapsedSec,
   onUrlChange,
@@ -55,8 +60,14 @@ export const DownloadUrlBar = ({
   };
 
   return (
-    <div className="flex items-center gap-2.5 px-3 py-2.5 border-b hair">
-      <span className="t-tertiary shrink-0 inline-flex">
+    <div
+      className={`flex items-center gap-2.5 px-3 py-2.5 border-b hair transition-colors ${
+        invalid ? 'bg-[rgba(220,60,60,0.06)]' : ''
+      }`}
+    >
+      <span
+        className={`shrink-0 inline-flex ${invalid ? 'text-[rgb(220,80,80)]' : 't-tertiary'}`}
+      >
         <LinkIcon />
       </span>
       <input
@@ -67,10 +78,13 @@ export const DownloadUrlBar = ({
           if (e.key === 'Enter') onDetect();
         }}
         placeholder="Paste a YouTube / TikTok / Instagram / X / Reddit URL"
+        aria-invalid={invalid || undefined}
         // Tooltip mirrors the field so a long URL that's clipped visually
         // is still fully inspectable on hover.
-        title={url || undefined}
-        className="flex-1 bg-transparent outline-none text-body t-primary min-w-0"
+        title={invalid ? 'Link must start with http:// or https://' : url || undefined}
+        className={`flex-1 bg-transparent outline-none text-body min-w-0 ${
+          invalid ? 'text-[rgb(220,80,80)]' : 't-primary'
+        }`}
       />
       {canClear && onClear && (
         <IconButton
@@ -101,7 +115,8 @@ export const DownloadUrlBar = ({
           variant="ghost"
           tone="accent"
           onClick={onDetect}
-          disabled={!url.trim()}
+          disabled={!url.trim() || invalid}
+          title={invalid ? 'Link must start with http:// or https://' : undefined}
         >
           Detect
         </Button>

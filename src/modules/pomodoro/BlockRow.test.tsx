@@ -30,6 +30,7 @@ describe('BlockRow', () => {
     render(<BlockRow block={mk({ duration_sec: 1500 })} onChange={onChange} onDelete={() => {}} />);
     const dur = screen.getByLabelText('Duration in minutes') as HTMLInputElement;
     fireEvent.change(dur, { target: { value: '10' } });
+    fireEvent.blur(dur);
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ duration_sec: 600 }),
     );

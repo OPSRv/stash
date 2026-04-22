@@ -709,6 +709,16 @@ export const ClipboardPopup = () => {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Compute up-front: any shortcut that collides with native
+      // textarea/input keystrokes (plain Enter, Shift+Enter, Backspace,
+      // Space) MUST bail when focus lives in a composer — otherwise
+      // typing a newline in Notes secretly copies the last-selected
+      // clipboard row into the system clipboard.
+      const target = e.target as HTMLElement | null;
+      const typingInInput =
+        target?.tagName === 'INPUT' ||
+        target?.tagName === 'TEXTAREA' ||
+        target?.isContentEditable === true;
       if (e.metaKey && ['1', '2', '3', '4', '5'].includes(e.key)) {
         e.preventDefault();
         setFilter(filters[Number(e.key) - 1].id);
@@ -731,21 +741,13 @@ export const ClipboardPopup = () => {
           return;
         }
       }
-      if (e.shiftKey && e.key === 'Enter') {
+      if (e.shiftKey && e.key === 'Enter' && !typingInInput) {
         e.preventDefault();
         copyAt(index);
         return;
       }
       const item = flat[index];
       if (!item) return;
-      // Include TEXTAREA and contentEditable hosts so keystrokes meant for
-      // composers in other tabs (chat, notes) don't trigger clipboard
-      // list commands via this window-level listener.
-      const target = e.target as HTMLElement | null;
-      const typingInInput =
-        target?.tagName === 'INPUT' ||
-        target?.tagName === 'TEXTAREA' ||
-        target?.isContentEditable === true;
       if (e.metaKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         handleTogglePin(item.id);

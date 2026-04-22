@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ProcessesPanel } from './ProcessesPanel';
+import { Badge } from '../../shared/ui/Badge';
 import { Input } from '../../shared/ui/Input';
 import { SmartScanPanel } from './SmartScanPanel';
 import { DockerPanel } from './DockerPanel';
@@ -255,9 +256,7 @@ const NavTile = ({
       <span className="flex items-center gap-1.5">
         <span className="t-primary text-body font-medium truncate">{item.label}</span>
         {!item.implemented && (
-          <span className="t-tertiary text-[9px] uppercase tracking-wider px-1 py-px rounded bg-white/5">
-            soon
-          </span>
+          <Badge tone="neutral" className="uppercase tracking-wider">soon</Badge>
         )}
       </span>
       <span className="block t-tertiary text-[11px] truncate">{item.hint}</span>

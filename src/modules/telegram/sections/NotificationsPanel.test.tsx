@@ -67,7 +67,9 @@ describe('<NotificationsPanel />', () => {
     });
     render(<NotificationsPanel />);
     const leadInput = await screen.findByDisplayValue('10');
-    await user.type(leadInput, '5'); // "105" → clamped to 105? nope, max 120 → 105 survives. Either way set is called.
+    await user.type(leadInput, '5'); // "105" — stays below max (120).
+    // NumberInput commits on blur, not on every keystroke, so advance focus.
+    await user.tab();
     await waitFor(() =>
       expect(called).toBeGreaterThan(0),
     );
