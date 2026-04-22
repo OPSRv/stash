@@ -14,8 +14,6 @@ interface DetectedPreviewCardProps {
   muted?: boolean;
 }
 
-const thumbStyle = { background: 'rgba(0,0,0,0.6)' } as const;
-
 /// Shared visual for the "we know what this video is" row. Used both for the
 /// instant oEmbed preview (muted, footer = spinner) and the full yt-dlp
 /// preview (trailing = quality tabs + Download button). Trailing wraps onto
@@ -36,10 +34,7 @@ export const DetectedPreviewCard = ({
     rounded="xl"
     className={`mx-4 mt-3 flex flex-wrap gap-3 items-center${muted ? ' opacity-85' : ''}`}
   >
-    <div
-      className="w-27.5 h-15.5 rounded-md overflow-hidden relative shrink-0"
-      style={thumbStyle}
-    >
+    <div className="w-27.5 h-15.5 rounded-md overflow-hidden relative shrink-0 bg-black/60">
       {thumbnail && (
         <img src={thumbnail} alt="" className="w-full h-full object-cover" />
       )}

@@ -12,10 +12,6 @@ interface ActiveDownloadRowProps {
   onResume: () => void;
 }
 
-const thumbStyle = { background: 'rgba(0,0,0,0.4)' } as const;
-const trackStyle = { background: 'rgba(255,255,255,0.08)' } as const;
-const inactiveFillStyle = { background: 'rgba(255,255,255,0.35)' } as const;
-
 export const ActiveDownloadRow = ({
   job,
   onCancel,
@@ -36,10 +32,7 @@ export const ActiveDownloadRow = ({
       rounded="xl"
       className="mx-3 my-1 flex items-center gap-3"
     >
-      <div
-        className="w-13 h-8 rounded-md shrink-0 overflow-hidden"
-        style={thumbStyle}
-      >
+      <div className="w-13 h-8 rounded-md shrink-0 overflow-hidden bg-black/40">
         {job.thumbnail_url && (
           <img
             src={job.thumbnail_url}
@@ -55,14 +48,12 @@ export const ActiveDownloadRow = ({
             {job.title ?? job.url}
           </span>
         </div>
-        <div className="h-1 rounded-full overflow-hidden" style={trackStyle}>
+        <div className="h-1 rounded-full overflow-hidden bg-white/[0.08]">
           <div
-            className={`h-full rounded-full ${job.status === 'active' ? 'prog-fill' : ''}`}
-            style={
-              job.status === 'active'
-                ? { width: `${progressPct}%` }
-                : { width: `${progressPct}%`, ...inactiveFillStyle }
-            }
+            className={`h-full rounded-full ${
+              job.status === 'active' ? 'prog-fill' : 'bg-white/[0.35]'
+            }`}
+            style={{ width: `${progressPct}%` }}
           />
         </div>
         <div className="flex items-center justify-between mt-1.5">

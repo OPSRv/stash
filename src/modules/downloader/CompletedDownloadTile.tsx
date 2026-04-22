@@ -17,13 +17,6 @@ interface CompletedDownloadTileProps {
   onRetry?: (id: number) => void;
 }
 
-const tileStyle = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.05)',
-} as const;
-const thumbStyle = { background: 'rgba(0,0,0,0.5)' } as const;
-const hoverOverlayStyle = { background: 'rgba(0,0,0,0.4)' } as const;
-const deleteButtonStyle = { background: 'rgba(0,0,0,0.55)' } as const;
 
 const isFailure = (status: DownloadJob['status']) =>
   status === 'failed' || status === 'cancelled';
@@ -50,13 +43,11 @@ const CompletedDownloadTileImpl = ({
 
   return (
     <div
-      className={`group relative rounded-lg overflow-hidden ${failed ? 'cursor-default' : 'cursor-pointer'}`}
-      style={tileStyle}
+      className={`group relative rounded-lg overflow-hidden bg-white/[0.03] border border-white/[0.05] ${failed ? 'cursor-default' : 'cursor-pointer'}`}
       onClick={onTileClick}
     >
       <div
-        className="aspect-video relative"
-        style={thumbStyle}
+        className="aspect-video relative bg-black/50"
         title={failed ? job.error ?? 'Download failed' : undefined}
       >
         {job.thumbnail_url ? (
@@ -72,8 +63,7 @@ const CompletedDownloadTileImpl = ({
         )}
         {!failed && (
           <div
-            className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-            style={hoverOverlayStyle}
+            className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40"
           >
             <PlayIcon size={36} className="text-white" />
           </div>
@@ -84,8 +74,7 @@ const CompletedDownloadTileImpl = ({
               e.stopPropagation();
               onRetry(job.id);
             }}
-            className="absolute inset-0 flex items-center justify-center gap-1.5 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-            style={hoverOverlayStyle}
+            className="absolute inset-0 flex items-center justify-center gap-1.5 text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/40"
             aria-label="Retry download"
             title={job.error ? `Retry — ${job.error}` : 'Retry download'}
           >
@@ -95,8 +84,7 @@ const CompletedDownloadTileImpl = ({
         )}
         <button
           onClick={openDelete}
-          className="absolute top-1 right-1 w-6 h-6 rounded-md items-center justify-center hidden group-hover:flex"
-          style={deleteButtonStyle}
+          className="absolute top-1 right-1 w-6 h-6 rounded-md items-center justify-center hidden group-hover:flex bg-black/[0.55]"
           aria-label="Delete"
         >
           <CloseIcon className="text-white" size={12} />

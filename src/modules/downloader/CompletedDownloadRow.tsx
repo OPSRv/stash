@@ -25,7 +25,6 @@ interface CompletedDownloadRowProps {
   extractingSubtitlesReason?: string;
 }
 
-const zebraStyle = { background: 'rgba(255,255,255,0.02)' } as const;
 const successBadgeStyle = {
   background: 'rgba(40,200,64,0.14)',
   color: '#43D66B',
@@ -77,7 +76,7 @@ const CompletedDownloadRowImpl = ({
   const canPurge = Boolean(job.target_path) && !failed;
 
   return (
-    <div className="flex items-center gap-3 px-3 py-2" style={zebra ? zebraStyle : undefined}>
+    <div className={`flex items-center gap-3 px-3 py-2 ${zebra ? 'bg-white/[0.02]' : ''}`}>
       <div
         className="w-6 h-6 rounded flex items-center justify-center shrink-0"
         style={failed ? failBadgeStyle : successBadgeStyle}
@@ -91,9 +90,8 @@ const CompletedDownloadRowImpl = ({
         </div>
         {failed && job.error && (
           <div
-            className="t-tertiary text-meta truncate"
+            className="text-meta truncate text-red-300/85"
             title={job.error}
-            style={{ color: 'rgba(255, 107, 107, 0.85)' }}
           >
             {job.error}
           </div>

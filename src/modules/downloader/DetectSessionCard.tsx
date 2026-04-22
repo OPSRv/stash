@@ -10,14 +10,6 @@ import type { DetectSession } from './useVideoDetect';
 import type { QualityOption } from './api';
 import { DEFAULT_QUALITY_OPTIONS, DETECT_SLOW_HINT_THRESHOLD_SEC } from './downloads.constants';
 
-const durationBadgeStyle = { background: 'rgba(0,0,0,0.6)' } as const;
-const slowHintStyle = { background: 'rgba(255,255,255,0.04)' } as const;
-const errorBannerStyle = {
-  background: 'rgba(255, 80, 80, 0.08)',
-  border: '1px solid rgba(255, 80, 80, 0.22)',
-  color: 'rgba(255, 170, 170, 0.9)',
-} as const;
-
 const formatDuration = (sec: number | null): string => {
   if (!sec || sec <= 0) return '';
   const h = Math.floor(sec / 3600);
@@ -46,7 +38,7 @@ interface Props {
 /** Wraps the detect-skeleton → preview → error lifecycle of a single paste.
  *  Each card owns its own chosen quality so a shell with three queued
  *  detects doesn't leak the picker state between cards. */
-export const DetectSessionCard = ({ session, onDismiss, onCancel, onDownload }: Props) => {
+export const DetectSessionCard = ({ session, onDismiss, onCancel: _onCancel, onDownload }: Props) => {
   const { detecting, elapsedSec, quick, detected, error } = session;
   const [pickedFormat, setPickedFormat] = useState<QualityOption | null>(null);
 
@@ -86,10 +78,7 @@ export const DetectSessionCard = ({ session, onDismiss, onCancel, onDownload }: 
   if (error && !detected && !quick) {
     return (
       <div className="mx-4 mt-3">
-        <div
-          className="flex items-start gap-2 t-tertiary text-meta px-3 py-2 rounded-md"
-          style={errorBannerStyle}
-        >
+        <div className="flex items-start gap-2 text-meta px-3 py-2 rounded-md bg-red-500/[0.08] border border-red-500/[0.22] text-red-200/90">
           <span className="flex-1 min-w-0 truncate" title={session.url}>
             {session.url}
           </span>
@@ -116,10 +105,7 @@ export const DetectSessionCard = ({ session, onDismiss, onCancel, onDownload }: 
   return (
     <>
       {detecting && elapsedSec > DETECT_SLOW_HINT_THRESHOLD_SEC && (
-        <div
-          className="mx-4 mt-2 mb-0 t-tertiary text-meta rounded-md px-3 py-1.5"
-          style={slowHintStyle}
-        >
+        <div className="mx-4 mt-2 mb-0 t-tertiary text-meta rounded-md px-3 py-1.5 bg-white/[0.04]">
           YouTube and a few other sites can take 20–40 seconds on the first
           fetch; subsequent detects of the same URL are instant.
         </div>
@@ -131,10 +117,7 @@ export const DetectSessionCard = ({ session, onDismiss, onCancel, onDownload }: 
         thumbnail={detected?.info.thumbnail ?? quick!.preview.thumbnail}
         overlayBadge={
           detected?.info.duration ? (
-            <div
-              className="absolute bottom-1 right-1 text-[10px] font-mono text-white/90 px-1 rounded"
-              style={durationBadgeStyle}
-            >
+            <div className="absolute bottom-1 right-1 text-[10px] font-mono text-white/90 px-1 rounded bg-black/60">
               {formatDuration(detected.info.duration)}
             </div>
           ) : undefined
@@ -168,9 +151,6 @@ export const DetectSessionCard = ({ session, onDismiss, onCancel, onDownload }: 
           </>
         }
       />
-      {/* Silence the unused-variable warning: onCancel is exposed on the
-          component's surface for future retry-style flows. */}
-      {false && <button onClick={onCancel} hidden />}
     </>
   );
 };
