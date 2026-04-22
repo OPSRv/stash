@@ -178,6 +178,21 @@ impl ClipboardRepo {
         Ok(removed)
     }
 
+    /// Return `(id, meta)` pairs for every `kind='file'` row. Used by
+    /// the cleanup command to drop rows whose paths no longer exist
+    /// on disk or were never-actionable WebKit promise-IDs to begin
+    /// with (those snuck in before we added the pasteboard filter).
+    pub fn file_rows_with_meta(&self) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, meta FROM clipboard_items
+             WHERE kind = 'file' AND meta IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect()
+    }
+
     /// Return the raw `meta` JSON strings for every unpinned image row, so a
     /// caller can parse out file paths and delete the backing files before
     /// `clear_all` drops the rows that point at them.

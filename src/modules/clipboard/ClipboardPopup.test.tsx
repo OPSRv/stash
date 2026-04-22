@@ -4,7 +4,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
 import { ClipboardPopup } from './ClipboardPopup';
 
-vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+  convertFileSrc: (p: string) => `asset://localhost/${p}`,
+}));
 const mockInvoke = vi.mocked(invoke);
 
 const items = [
@@ -173,9 +176,30 @@ describe('ClipboardPopup', () => {
       expect(await screen.findByText('hello.txt')).toBeInTheDocument();
     });
 
-    it('summarises multi-file rows as "N files"', async () => {
+    it('multi-file rows show the first filename plus a "+N more" badge', async () => {
       render(<ClipboardPopup />);
-      expect(await screen.findByText(/^3 files · a\.png/)).toBeInTheDocument();
+      expect(await screen.findByText('a.png')).toBeInTheDocument();
+      // The badge lives in the meta column as plain "+2".
+      expect(screen.getByText('+2')).toBeInTheDocument();
+    });
+
+    it('renders a recoverable "Unreadable file clip" row for broken meta', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'clipboard_list')
+          return [
+            {
+              id: 50,
+              kind: 'file',
+              content: 'files:bad',
+              meta: '{"not a files array":true}',
+              created_at: 400,
+              pinned: false,
+            },
+          ];
+        return undefined;
+      });
+      render(<ClipboardPopup />);
+      expect(await screen.findByText('Unreadable file clip')).toBeInTheDocument();
     });
 
     it('Reveal button calls the opener plugin', async () => {

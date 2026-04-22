@@ -25,6 +25,7 @@ import {
   parseFileMeta,
   parseImageMeta,
   pasteItem,
+  pruneFiles,
   searchItems,
   togglePin,
 } from './api';
@@ -85,6 +86,17 @@ export const ClipboardPopup = () => {
   const { announce } = useAnnounce();
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
+
+  // One-shot sweep on mount — in case the background startup prune
+  // hasn't run yet (app relaunched, migration window) the popup still
+  // shows a clean list on open. Fire-and-forget; the list reload is
+  // driven by the `clipboard:changed` event the backend emits when
+  // any rows are removed.
+  useEffect(() => {
+    pruneFiles().catch(() => {
+      /* harmless — startup prune will have covered it */
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -602,54 +614,70 @@ export const ClipboardPopup = () => {
     if (item.kind === 'file') {
       const fileMeta = parseFileMeta(item);
       const files = fileMeta?.files ?? [];
-      const firstPath = files[0]?.path;
-      const firstName = files[0]?.name ?? 'file';
-      // Preview-worthy image? Reuse the thumbnail so an image copied
-      // from Finder looks the same as a screenshot copy (user asked:
-      // same format, same rendering — everywhere).
-      const firstKind = files[0]
-        ? detectFileKind({ name: files[0].name, mime: files[0].mime })
-        : { kind: 'unknown' as const };
+      if (files.length === 0) {
+        // Malformed meta — render a compact "broken clip" row with
+        // only a delete action, so the user can get it out of their
+        // history without having to understand why.
+        return (
+          <Row
+            key={item.id}
+            primary="Unreadable file clip"
+            icon={iconFor('file')}
+            iconTint={typeTint.file.bg}
+            iconColor={typeTint.file.fg}
+            actions={
+              <IconButton onClick={() => handleDelete(item.id)} title="Delete" tone="danger">
+                <TrashIcon size={12} />
+              </IconButton>
+            }
+            meta={
+              <span className="t-tertiary text-meta font-mono">{iso(item.created_at)}</span>
+            }
+            pinned={item.pinned}
+            active={index === flatIndex}
+            selected={selectedIds.has(item.id)}
+            onSelect={(e) => handleRowClick(flatIndex, e)}
+            className={enterClass}
+          />
+        );
+      }
+      const first = files[0];
+      const firstKind = detectFileKind({ name: first.name, mime: first.mime });
+      const extraCount = files.length - 1;
+      // Reuse image thumbnail for single-file image copies so they
+      // look identical to `kind='image'` screenshots.
       const icon =
-        files.length === 1 && firstKind.kind === 'image' && firstPath ? (
+        firstKind.kind === 'image' ? (
           <img
-            src={convertFileSrc(firstPath)}
+            src={convertFileSrc(first.path)}
             alt=""
             className="w-7 h-7 rounded-md object-cover"
           />
         ) : (
           iconFor('file')
         );
-      const primary =
-        files.length > 1
-          ? `${files.length} files · ${firstName}${files.length > 1 ? ` + ${files.length - 1} more` : ''}`
-          : firstName;
       const tint = typeTint.file;
       return (
         <Row
           key={item.id}
-          primary={primary}
+          primary={first.name}
           icon={icon}
-          iconTint={files.length === 1 && firstKind.kind === 'image' ? 'transparent' : tint.bg}
+          iconTint={firstKind.kind === 'image' ? 'transparent' : tint.bg}
           iconColor={tint.fg}
           actions={
             <>
-              {firstPath && (
-                <>
-                  <IconButton
-                    onClick={() => revealInFinder(firstPath)}
-                    title="Reveal in Finder"
-                  >
-                    <EyeIcon size={12} />
-                  </IconButton>
-                  <IconButton
-                    onClick={() => openFile(firstPath)}
-                    title="Open with default app"
-                  >
-                    <ExternalIcon size={12} />
-                  </IconButton>
-                </>
-              )}
+              <IconButton
+                onClick={() => revealInFinder(first.path)}
+                title="Reveal in Finder"
+              >
+                <EyeIcon size={12} />
+              </IconButton>
+              <IconButton
+                onClick={() => openFile(first.path)}
+                title="Open with default app"
+              >
+                <ExternalIcon size={12} />
+              </IconButton>
               <IconButton
                 onClick={() => handleTogglePin(item.id)}
                 title={item.pinned ? 'Unpin' : 'Pin'}
@@ -667,6 +695,15 @@ export const ClipboardPopup = () => {
           }
           meta={
             <>
+              {extraCount > 0 && (
+                <span
+                  className="text-[10px] font-mono font-medium tabular-nums px-1.5 py-px rounded"
+                  style={{ background: tint.bg, color: tint.fg }}
+                  title={`${files.length} files copied together`}
+                >
+                  +{extraCount}
+                </span>
+              )}
               <span className="t-tertiary text-meta font-mono">
                 {iso(item.created_at)}
               </span>

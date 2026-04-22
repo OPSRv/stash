@@ -130,8 +130,8 @@ use modules::telegram::commands::{
 use modules::clipboard::{
     commands::{
         clipboard_clear, clipboard_copy_only, clipboard_delete, clipboard_link_preview,
-        clipboard_list, clipboard_paste, clipboard_search, clipboard_toggle_pin, ClipboardState,
-        LinkPreviewState,
+        clipboard_list, clipboard_paste, clipboard_prune_files, clipboard_search,
+        clipboard_toggle_pin, prune_orphan_file_rows, ClipboardState, LinkPreviewState,
     },
     monitor::{ArboardReader, Monitor},
     repo::ClipboardRepo,
@@ -379,6 +379,7 @@ pub fn run() {
             clipboard_paste,
             clipboard_copy_only,
             clipboard_clear,
+            clipboard_prune_files,
             clipboard_link_preview,
             dl_detect,
             dl_detect_quick,
@@ -599,6 +600,14 @@ pub fn run() {
             };
             let shared_repo = Arc::new(state);
             app.manage(Arc::clone(&shared_repo));
+
+            // Prune any leftover `kind='file'` rows that predate the
+            // pasteboard promise-ID filter — WebKit drops like
+            // `id=6571367.14836106` don't exist on disk and can't be
+            // pasted anyway. Best-effort; errors don't abort startup.
+            if let Err(e) = prune_orphan_file_rows(&shared_repo) {
+                tracing::warn!("clipboard: prune_orphan_file_rows failed: {e}");
+            }
 
             // Link-preview cache for clipboard URLs (og:image / og:title).
             app.manage(Arc::new(LinkPreviewState::new()));

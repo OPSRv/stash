@@ -74,6 +74,13 @@ export const copyOnly = (id: number): Promise<void> =>
 
 export const clearAll = (): Promise<number> => invoke('clipboard_clear');
 
+/// Ask the backend to drop any `kind='file'` rows whose paths no
+/// longer exist or were never user-visible (WebKit promise drops,
+/// already-purged caches, etc.). Resolves to the number of rows that
+/// were removed. Safe to call any time — backend treats it as a
+/// best-effort sweep.
+export const pruneFiles = (): Promise<number> => invoke('clipboard_prune_files');
+
 export type LinkPreview = {
   url: string;
   image: string | null;

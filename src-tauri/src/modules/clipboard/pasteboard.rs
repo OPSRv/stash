@@ -23,6 +23,13 @@ use std::path::PathBuf;
 /// Ordering follows `pasteboardItems` (i.e. the order Finder placed the
 /// files on the pasteboard). Returns an empty vec if the pasteboard
 /// holds no files or on any AppKit failure.
+///
+/// Only paths that survive `is_user_visible_path` end up in the result
+/// — WebKit drag-and-drop, browsers, Figma etc. often write synthetic
+/// `file://…/id=123.456` "promise" URLs that don't point at real files
+/// the user copied. Without this filter the clipboard history fills
+/// with `id=6571367.14836106`-style entries the user has no way to
+/// interact with.
 #[cfg(target_os = "macos")]
 pub fn read_file_urls() -> Vec<PathBuf> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
@@ -41,11 +48,88 @@ pub fn read_file_urls() -> Vec<PathBuf> {
         let Some(raw) = item.stringForType(ftype) else {
             continue;
         };
-        if let Some(path) = file_url_to_path(&raw.to_string()) {
+        let Some(path) = file_url_to_path(&raw.to_string()) else {
+            continue;
+        };
+        if is_user_visible_path(&path) {
             out.push(path);
         }
     }
     out
+}
+
+/// Heuristic: does this path point at something the user would
+/// recognise as "a file I copied"? Filters out three common sources
+/// of junk file-url entries that aren't actionable:
+///
+///   1. Paths that don't exist on disk (WebKit promise drops — the
+///      browser advertises a file URL it never actually materialises).
+///   2. Basenames that look like opaque promise IDs (`id=123.456`,
+///      `Promise-123`, etc.) — even if the file briefly exists, the
+///      name is useless to the user.
+///   3. Paths inside well-known browser WebKit drop caches — those are
+///      transient and vanish within seconds of the copy.
+///
+/// Keep this list conservative: a false positive here deletes a
+/// legitimate clip, while a false negative just lets a slightly-ugly
+/// entry through. Finder copies always pass.
+pub fn is_user_visible_path(path: &std::path::Path) -> bool {
+    // (1) must exist on disk
+    if !path.exists() {
+        return false;
+    }
+    // (2) basename cannot look like a promise ID
+    let name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if name.is_empty() || looks_like_promise_id(name) {
+        return false;
+    }
+    // (3) avoid known WebKit / app-sandbox drag-drop scratch dirs
+    let s = path.to_string_lossy();
+    const SCRATCH_MARKERS: &[&str] = &[
+        "/WebKit Drop/",
+        "/WebKitDrag",
+        "/.WebKitDropDestination",
+        "/com.apple.WebKit.Drag",
+        "/DerivedData/",
+    ];
+    if SCRATCH_MARKERS.iter().any(|m| s.contains(m)) {
+        return false;
+    }
+    true
+}
+
+/// Pattern check for "this looks like a dragged-promise ID rather than
+/// a real filename". Matches the shapes Stash has seen in the wild:
+///   - `id=6571367.14836106`      (WebKit drag promise)
+///   - `id=6571367`               (bare numeric variant)
+///   - `Promise-123abc`           (some Electron apps)
+///   - `\d+\.\d+` with no extension (purely numeric with a decimal)
+fn looks_like_promise_id(name: &str) -> bool {
+    if name.starts_with("id=") {
+        return true;
+    }
+    if let Some(rest) = name.strip_prefix("Promise-") {
+        if rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return true;
+        }
+    }
+    // Pure number[.number] with no extension / alpha chars — very
+    // unlikely to be a user file, very likely to be a timestamp ID.
+    if !name.contains('.') {
+        return name.chars().all(|c| c.is_ascii_digit()) && !name.is_empty();
+    }
+    let parts: Vec<&str> = name.split('.').collect();
+    if parts.len() == 2
+        && !parts[0].is_empty()
+        && !parts[1].is_empty()
+        && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
+    {
+        return true;
+    }
+    false
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -155,5 +239,39 @@ mod tests {
     fn trims_surrounding_whitespace() {
         let p = file_url_to_path("  file:///etc/hosts  \n").unwrap();
         assert_eq!(p, PathBuf::from("/etc/hosts"));
+    }
+
+    // ---- promise-ID filtering ----
+
+    #[test]
+    fn promise_id_detector_catches_common_shapes() {
+        assert!(looks_like_promise_id("id=6571367.14836106"));
+        assert!(looks_like_promise_id("id=6571367"));
+        assert!(looks_like_promise_id("Promise-abc123"));
+        assert!(looks_like_promise_id("1234567"));
+        assert!(looks_like_promise_id("6571367.14836106"));
+    }
+
+    #[test]
+    fn promise_id_detector_allows_real_filenames() {
+        assert!(!looks_like_promise_id("photo.jpg"));
+        assert!(!looks_like_promise_id("report.pdf"));
+        assert!(!looks_like_promise_id("src/App.tsx"));
+        assert!(!looks_like_promise_id("Notes 2025.md"));
+        // numeric-only but with a real extension is fine — user might
+        // be copying an exported `20250102.csv` from a spreadsheet.
+        assert!(!looks_like_promise_id("20250102.csv"));
+    }
+
+    #[test]
+    fn user_visible_path_rejects_nonexistent_files() {
+        let junk = PathBuf::from("/var/tmp/definitely-not-a-real-file-xyz");
+        assert!(!is_user_visible_path(&junk));
+    }
+
+    #[test]
+    fn user_visible_path_accepts_a_real_existing_file() {
+        // `/etc/hosts` exists on every macOS install and has a real name
+        assert!(is_user_visible_path(std::path::Path::new("/etc/hosts")));
     }
 }

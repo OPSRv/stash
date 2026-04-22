@@ -130,6 +130,50 @@ pub fn clipboard_toggle_pin(
     to_string_err(toggle_pin(&state, id))
 }
 
+/// Sweep `kind='file'` rows whose files no longer exist or never
+/// pointed at user-visible content. Called once at startup to clean
+/// up rows inserted before we added the pasteboard promise-ID filter
+/// (`id=6571367.14836106`-style entries are the canonical offender).
+/// Returns how many rows were dropped.
+pub fn prune_orphan_file_rows(state: &ClipboardState) -> Result<usize> {
+    let pairs = {
+        let repo = state.repo.lock().unwrap();
+        repo.file_rows_with_meta()?
+    };
+    let mut removed = 0usize;
+    for (id, meta) in pairs {
+        let parsed: serde_json::Value = match serde_json::from_str(&meta) {
+            Ok(v) => v,
+            Err(_) => {
+                let _ = state.repo.lock().unwrap().delete(id);
+                removed += 1;
+                continue;
+            }
+        };
+        let files = parsed.get("files").and_then(|v| v.as_array());
+        let any_actionable = files.map_or(false, |arr| {
+            arr.iter().any(|f| {
+                f.get("path")
+                    .and_then(|p| p.as_str())
+                    .map(std::path::Path::new)
+                    .map_or(false, crate::modules::clipboard::pasteboard::is_user_visible_path)
+            })
+        });
+        if !any_actionable {
+            let _ = state.repo.lock().unwrap().delete(id);
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+#[tauri::command]
+pub fn clipboard_prune_files(
+    state: State<'_, Arc<ClipboardState>>,
+) -> std::result::Result<usize, String> {
+    to_string_err(prune_orphan_file_rows(&state))
+}
+
 #[tauri::command]
 pub fn clipboard_clear(
     state: State<'_, Arc<ClipboardState>>,

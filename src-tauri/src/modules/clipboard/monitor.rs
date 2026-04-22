@@ -80,6 +80,13 @@ impl<R: ClipboardReader> Monitor<R> {
                 return Ok(None);
             }
             let entries = Self::file_entries(&files);
+            // All entries filtered out at this point (pasteboard had
+            // only promise-IDs / ephemeral WebKit drops) — bail out
+            // rather than inserting a blank `kind='file'` row.
+            if entries.is_empty() {
+                self.last_files_key = Some(key);
+                return Ok(None);
+            }
             let meta = serde_json::to_string(&serde_json::json!({ "files": entries }))
                 .unwrap_or_else(|_| "{\"files\":[]}".to_string());
             let id = repo.insert_files(&key, &meta, now)?;
