@@ -321,13 +321,13 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
                 } block: ${b.name}`}
                 aria-current={isCurrent ? 'true' : undefined}
               >
-                <span aria-hidden className="text-[13px]">
+                <span aria-hidden className="text-body">
                   {POSTURE_EMOJI[b.posture]}
                 </span>
                 <span className="t-primary text-meta font-medium truncate max-w-[12ch]">
                   {b.name}
                 </span>
-                <span className="t-tertiary text-[11px] font-mono tabular-nums">
+                <span className="t-tertiary text-meta font-mono tabular-nums">
                   {Math.round(b.duration_sec / 60)}m
                 </span>
                 {isDone && (

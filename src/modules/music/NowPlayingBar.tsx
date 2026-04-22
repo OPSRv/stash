@@ -58,7 +58,7 @@ export const NowPlayingBar = memo(({ state, onOpen, onClose, onOptimistic }: Now
       </div>
       <div className="flex-1 min-w-0">
         <div className="t-primary text-meta font-medium truncate">{title}</div>
-        <div className="t-tertiary text-[11px] truncate">{subtitle}</div>
+        <div className="t-tertiary text-meta truncate">{subtitle}</div>
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
         <IconButton onClick={wrap(musicPrev, { playing: true })} title="Previous">

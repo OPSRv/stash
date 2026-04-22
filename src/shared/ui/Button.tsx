@@ -40,11 +40,11 @@ const toneSolid: Record<ButtonTone, string> = {
     'bg-white/10 hover:bg-white/15 text-[rgba(255,255,255,0.92)] border border-white/5',
   accent: 'btn-primary',
   success:
-    'text-white border border-black/20 [background:#22c55e] hover:brightness-110',
+    'text-white border border-black/20 [background:rgb(var(--color-success-rgb))] hover:brightness-110',
   warning:
-    'text-white border border-black/20 [background:#f59e0b] hover:brightness-110',
+    'text-white border border-black/20 [background:rgb(var(--color-warning-rgb))] hover:brightness-110',
   danger:
-    'text-white border border-black/20 [background:#ef4444] hover:brightness-110',
+    'text-white border border-black/20 [background:rgb(var(--color-danger-rgb))] hover:brightness-110',
 };
 
 const toneSoft: Record<ButtonTone, string> = {
@@ -53,18 +53,18 @@ const toneSoft: Record<ButtonTone, string> = {
   accent:
     'text-[#4A8BEA] border [background:rgba(var(--stash-accent-rgb),0.16)] [border-color:rgba(var(--stash-accent-rgb),0.28)] hover:[background:rgba(var(--stash-accent-rgb),0.24)]',
   success:
-    'text-[#43D66B] border border-[rgba(34,197,94,0.28)] [background:rgba(34,197,94,0.16)] hover:[background:rgba(34,197,94,0.24)]',
+    'text-[color:var(--color-success-fg)] border border-[rgba(var(--color-success-rgb),0.28)] [background:rgba(var(--color-success-rgb),0.16)] hover:[background:rgba(var(--color-success-rgb),0.24)]',
   warning:
-    'text-[#fbbf24] border border-[rgba(245,158,11,0.28)] [background:rgba(245,158,11,0.16)] hover:[background:rgba(245,158,11,0.24)]',
+    'text-[color:var(--color-warning-fg)] border border-[rgba(var(--color-warning-rgb),0.28)] [background:rgba(var(--color-warning-rgb),0.16)] hover:[background:rgba(var(--color-warning-rgb),0.24)]',
   danger: 'btn-danger',
 };
 
 const toneGhost: Record<ButtonTone, string> = {
   neutral: 'btn-ghost t-primary',
   accent: 'text-[#4A8BEA] hover:bg-white/5',
-  success: 'text-[#43D66B] hover:bg-white/5',
-  warning: 'text-[#fbbf24] hover:bg-white/5',
-  danger: 'text-[#f87171] hover:bg-white/5',
+  success: 'text-[color:var(--color-success-fg)] hover:bg-white/5',
+  warning: 'text-[color:var(--color-warning-fg)] hover:bg-white/5',
+  danger: 'text-[color:var(--color-danger-fg)] hover:bg-white/5',
 };
 
 const toneOutline: Record<ButtonTone, string> = {
@@ -73,11 +73,11 @@ const toneOutline: Record<ButtonTone, string> = {
   accent:
     'text-[#4A8BEA] border [border-color:rgba(var(--stash-accent-rgb),0.45)] hover:[background:rgba(var(--stash-accent-rgb),0.10)]',
   success:
-    'text-[#43D66B] border border-[rgba(34,197,94,0.45)] hover:[background:rgba(34,197,94,0.10)]',
+    'text-[color:var(--color-success-fg)] border border-[rgba(var(--color-success-rgb),0.45)] hover:[background:rgba(var(--color-success-rgb),0.10)]',
   warning:
-    'text-[#fbbf24] border border-[rgba(245,158,11,0.45)] hover:[background:rgba(245,158,11,0.10)]',
+    'text-[color:var(--color-warning-fg)] border border-[rgba(var(--color-warning-rgb),0.45)] hover:[background:rgba(var(--color-warning-rgb),0.10)]',
   danger:
-    'text-[#f87171] border border-[rgba(239,68,68,0.45)] hover:[background:rgba(239,68,68,0.10)]',
+    'text-[color:var(--color-danger-fg)] border border-[rgba(var(--color-danger-rgb),0.45)] hover:[background:rgba(var(--color-danger-rgb),0.10)]',
 };
 
 const variantTone = (variant: ButtonVariant, tone: ButtonTone): string => {

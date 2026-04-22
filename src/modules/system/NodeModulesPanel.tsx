@@ -239,7 +239,7 @@ export const NodeModulesPanel = () => {
                         <div className="t-primary tabular-nums font-medium">
                           {formatBytes(e.size_bytes)}
                         </div>
-                        <div className="t-tertiary text-[11px]">{formatDate(e.last_modified)}</div>
+                        <div className="t-tertiary text-meta">{formatDate(e.last_modified)}</div>
                       </div>
                       <RevealButton path={e.path} stopPropagation />
                     </>

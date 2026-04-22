@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, userEvent, within } from 'storybook/test';
 import { useState } from 'react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Button } from './Button';
@@ -36,6 +37,15 @@ export const Neutral: Story = {
 };
 
 export const Danger: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement.ownerDocument.body);
+    const dialog = await canvas.findByRole('dialog');
+    await expect(dialog).toHaveAccessibleName(/delete/i);
+    const suppress = await canvas.findByRole('checkbox');
+    await expect(suppress).not.toBeChecked();
+    await userEvent.click(suppress);
+    await expect(suppress).toBeChecked();
+  },
   render: () => {
     const Demo = () => {
       const [open, setOpen] = useState(true);

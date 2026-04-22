@@ -19,7 +19,7 @@ export function TelegramShell() {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-3 py-2 border-b border-white/5">
-        <div className="text-[11px] font-medium uppercase tracking-wider text-white/40">
+        <div className="text-meta font-medium uppercase tracking-wider text-white/40">
           Inbox
         </div>
         <Button

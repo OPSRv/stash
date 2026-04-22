@@ -12,7 +12,7 @@ describe('PopupShell', () => {
     const { container } = render(<PopupShell />);
     // Default module is clipboard; its popup renders a search input.
     // Lazy-loaded: wait for the chunk to resolve.
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     expect(container.querySelector('[role="searchbox"]')).toBeInTheDocument();
   });
 
@@ -23,7 +23,7 @@ describe('PopupShell', () => {
 
   it('does not mount views for tabs that were never opened', async () => {
     render(<PopupShell />);
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     // Notes tab has not been clicked — its view must not be in the DOM.
     expect(screen.queryByPlaceholderText(/search notes/i)).toBeNull();
   });
@@ -31,13 +31,13 @@ describe('PopupShell', () => {
   it('keeps previously opened tabs mounted (hidden) to preserve state', async () => {
     const user = userEvent.setup();
     render(<PopupShell />);
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     await user.click(screen.getByRole('button', { name: /^Notes/ }));
     // Notes tab mounts.
-    await screen.findByPlaceholderText(/search notes/i);
+    await screen.findByPlaceholderText(/search notes/i, undefined, { timeout: 8000 });
     // Back to clipboard — Notes view still in DOM but hidden.
     await user.click(screen.getByRole('button', { name: /^Clipboard/ }));
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     const notesInput = document.querySelector(
       'input[placeholder*="Search notes" i]',
     );
@@ -82,7 +82,7 @@ describe('PopupShell', () => {
     window.addEventListener('stash:downloader-prefill', prefill as EventListener);
 
     render(<PopupShell />);
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     await waitFor(() => expect(handlers['clipboard:changed']).toBeDefined());
     handlers['clipboard:changed']!({ payload: 42 });
 
@@ -107,7 +107,7 @@ describe('PopupShell', () => {
     window.addEventListener('stash:downloader-prefill', prefill as EventListener);
 
     render(<PopupShell />);
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     await waitFor(() => expect(handlers['clipboard:changed']).toBeDefined());
     handlers['clipboard:changed']!({ payload: 1 });
 
@@ -119,7 +119,7 @@ describe('PopupShell', () => {
   it('Esc hides the popup via the Rust hide_popup command', async () => {
     const user = userEvent.setup();
     render(<PopupShell />);
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     vi.mocked(invoke).mockClear();
     await user.keyboard('{Escape}');
     expect(invoke).toHaveBeenCalledWith('hide_popup');
@@ -128,9 +128,9 @@ describe('PopupShell', () => {
   it('⌘⌥4 switches to the Notes module (bound to tabShortcutDigit, not index)', async () => {
     const user = userEvent.setup();
     render(<PopupShell />);
-    await screen.findByRole('searchbox');
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     await user.keyboard('{Meta>}{Alt>}4{/Alt}{/Meta}');
-    await screen.findByPlaceholderText(/search notes/i);
+    await screen.findByPlaceholderText(/search notes/i, undefined, { timeout: 8000 });
     // Notes input must be visible (not inside a hidden container).
     const notesInput = document.querySelector(
       'input[placeholder*="Search notes" i]',

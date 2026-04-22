@@ -47,7 +47,7 @@ export const VoiceItem = ({
       <AudioPlayer src={filePath} durationHint={durationSec} />
       {transcribing && (
         <div
-          className="text-[11px] text-white/60 flex items-center gap-2"
+          className="text-meta text-white/60 flex items-center gap-2"
           role="status"
           aria-live="polite"
         >
@@ -56,7 +56,7 @@ export const VoiceItem = ({
         </div>
       )}
       {!transcribing && failed && !transcript && (
-        <div className="flex items-center gap-2 text-[11px] text-amber-300/80">
+        <div className="flex items-center gap-2 text-meta text-amber-300/80">
           <span>⚠ Не вдалося транскрибувати</span>
           {onRetry && (
             <button
@@ -72,7 +72,7 @@ export const VoiceItem = ({
       {transcript && !editing && (
         <div className="flex items-start gap-2 group/transcript">
           <p
-            className="flex-1 text-[13px] leading-[18px] text-white/90 whitespace-pre-wrap bg-white/3 rounded-md px-3 py-2 border border-white/5"
+            className="flex-1 text-body text-white/90 whitespace-pre-wrap bg-white/3 rounded-md px-3 py-2 border border-white/5"
             onDoubleClick={() => onEditTranscript && setEditing(true)}
             title={onEditTranscript ? 'Double-click to edit' : undefined}
           >
@@ -83,7 +83,7 @@ export const VoiceItem = ({
               type="button"
               onClick={() => setEditing(true)}
               aria-label="Edit transcript"
-              className="opacity-0 group-hover/transcript:opacity-100 focus:opacity-100 mt-1 text-[11px] text-white/50 hover:text-white/90 transition-opacity"
+              className="opacity-0 group-hover/transcript:opacity-100 focus:opacity-100 mt-1 text-meta text-white/50 hover:text-white/90 transition-opacity"
             >
               edit
             </button>

@@ -16,7 +16,7 @@ interface PostureBadgeProps {
 
 export const PostureBadge = ({ posture, size = 'sm' }: PostureBadgeProps) => {
   const style = STYLES[posture];
-  const px = size === 'md' ? 'px-2 py-1 text-meta' : 'px-1.5 py-0.5 text-[11px]';
+  const px = size === 'md' ? 'px-2 py-1 text-meta' : 'px-1.5 py-0.5 text-meta';
   return (
     <span
       className={`inline-flex items-center gap-1 rounded font-medium ${px}`}

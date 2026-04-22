@@ -245,7 +245,7 @@ export const ProcessesPanel = () => {
                         <div className="t-primary font-medium truncate" title={p.command}>
                           {p.name}
                         </div>
-                        <div className="t-tertiary text-[11px] truncate" title={p.command}>
+                        <div className="t-tertiary text-meta truncate" title={p.command}>
                           {p.user}
                         </div>
                       </div>

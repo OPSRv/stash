@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 
 import { Button } from '../../shared/ui/Button';
+import { Textarea } from '../../shared/ui/Textarea';
 
 const LINE_HEIGHT = 20;
 const MIN_ROWS = 1;
@@ -67,7 +68,7 @@ export const ChatComposer = ({
       className="flex items-end gap-2 px-3 py-2 border-t hair"
       style={{ background: 'var(--color-surface)' }}
     >
-      <textarea
+      <Textarea
         ref={textareaRef}
         value={value}
         disabled={disabled}
@@ -75,7 +76,7 @@ export const ChatComposer = ({
         onChange={(e) => onChange(e.currentTarget.value)}
         onKeyDown={handleKey}
         rows={MIN_ROWS}
-        className="input-field flex-1 resize-none rounded-md px-3 py-2 text-body nice-scroll"
+        className="flex-1 resize-none nice-scroll"
         style={{
           lineHeight: `${LINE_HEIGHT}px`,
           minHeight: `${LINE_HEIGHT * MIN_ROWS + V_PADDING}px`,

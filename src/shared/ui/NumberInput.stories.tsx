@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, userEvent, within } from 'storybook/test';
 import { useState } from 'react';
 import { NumberInput } from './NumberInput';
 
@@ -33,6 +34,15 @@ export const Playground: Story = {
 };
 
 export const WithRange: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const input = await canvas.findByRole('spinbutton', { name: 'minutes' });
+    await expect(input).toHaveAttribute('aria-valuenow', '12');
+    await userEvent.click(canvas.getByRole('button', { name: 'Increment' }));
+    await expect(input).toHaveAttribute('aria-valuenow', '13');
+    await userEvent.click(canvas.getByRole('button', { name: 'Decrement' }));
+    await expect(input).toHaveAttribute('aria-valuenow', '12');
+  },
   render: () => {
     const Demo = () => {
       const [v, setV] = useState<number | null>(12);

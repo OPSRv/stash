@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { IconButton } from '../../shared/ui/IconButton';
 import { Spinner } from '../../shared/ui/Spinner';
+import { Textarea } from '../../shared/ui/Textarea';
 import {
   BoldIcon,
   BulletListIcon,
@@ -408,13 +409,14 @@ export const NoteEditor = ({
           </IconButton>
         </div>
       </div>
-      <textarea
+      <Textarea
+        bare
         ref={ref}
         value={value}
         onChange={(e) => onChange(e.currentTarget.value)}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        className="flex-1 bg-transparent outline-none resize-none px-5 py-5 t-primary text-body font-mono leading-relaxed min-h-0"
+        className="flex-1 resize-none px-5 py-5 t-primary text-body font-mono leading-relaxed min-h-0"
         spellCheck={false}
       />
     </div>

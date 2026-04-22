@@ -191,7 +191,7 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
           dropActive ? 'bg-[rgba(var(--stash-accent-rgb),0.08)]' : ''
         }`}
       >
-        <div className="flex items-center gap-2.5 text-[11px] t-tertiary">
+        <div className="flex items-center gap-2.5 text-meta t-tertiary">
           <Button size="xs" variant="ghost" onClick={addFromPicker}>
             + Attach file
           </Button>
@@ -215,7 +215,7 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
       }`}
     >
       <div className="flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-white/40">
+        <span className="text-meta font-semibold uppercase tracking-wider text-white/40">
           Attachments · {items.length}
         </span>
         <span className="h-px flex-1 bg-white/5" />

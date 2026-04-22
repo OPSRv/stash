@@ -221,7 +221,7 @@ export const LargeFilesPanel = () => {
                       <div className="t-primary tabular-nums font-medium">
                         {formatBytes(f.size_bytes)}
                       </div>
-                      <div className="t-tertiary text-[11px]">{formatDate(f.modified_secs)}</div>
+                      <div className="t-tertiary text-meta">{formatDate(f.modified_secs)}</div>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <RevealButton path={f.path} />

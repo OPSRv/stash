@@ -61,7 +61,7 @@ const BrightnessSlider = ({ value, onChange, onCommit, disabled, note }: Brightn
           {pct}%
         </span>
       </div>
-      {note && <div className="t-tertiary text-[11px] mt-1">{note}</div>}
+      {note && <div className="t-tertiary text-meta mt-1">{note}</div>}
     </div>
   );
 };

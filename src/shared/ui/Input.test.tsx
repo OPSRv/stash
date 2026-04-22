@@ -31,7 +31,7 @@ describe('Input', () => {
 
   it('applies danger border for tone=danger', () => {
     const { container } = render(<Input placeholder="d" tone="danger" />);
-    expect((container.firstChild as HTMLElement).className).toContain('rgba(239,68,68,0.45)');
+    expect((container.firstChild as HTMLElement).className).toContain('--color-danger-rgb');
   });
 
   it('applies disabled styling', () => {

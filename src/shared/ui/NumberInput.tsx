@@ -155,7 +155,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
 
     const dangerCls =
       tone === 'danger' || invalid || draftIsInvalid
-        ? 'border-[rgba(239,68,68,0.45)]'
+        ? 'border-[rgba(var(--color-danger-rgb),0.45)]'
         : '';
     const disCls = disabled ? 'opacity-40 cursor-not-allowed' : '';
     const atMin = min != null && value != null && value <= min;

@@ -1322,7 +1322,7 @@ export const ClipboardPopup = () => {
               <PlatformBadge platform={videoBanner.platform} />
               <span className="t-primary text-meta font-medium truncate">Download this video</span>
             </div>
-            <div className="t-tertiary text-[11px] truncate">{videoBanner.info.title}</div>
+            <div className="t-tertiary text-meta truncate">{videoBanner.info.title}</div>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             {videoBanner.qualities.slice(0, 3).map((q) => (

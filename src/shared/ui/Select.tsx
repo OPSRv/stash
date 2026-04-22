@@ -155,7 +155,7 @@ export const Select = <T extends string>({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onTriggerKey}
-        className="input-field rounded-md pl-2.5 pr-2 py-1 text-body inline-flex items-center gap-2 min-w-[120px] text-left disabled:opacity-50"
+        className="input-field ring-focus rounded-md h-9 pl-2.5 pr-2 text-body inline-flex items-center gap-2 min-w-[120px] text-left disabled:opacity-40 disabled:cursor-not-allowed"
       >
         <span className="truncate flex-1">{selected?.label ?? placeholder ?? ''}</span>
         <ChevronIcon open={open} />

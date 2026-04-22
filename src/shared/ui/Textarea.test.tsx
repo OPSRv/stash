@@ -24,7 +24,7 @@ describe('Textarea', () => {
 
   it('applies danger border for invalid', () => {
     const { container } = render(<Textarea placeholder="d" invalid />);
-    expect(container.querySelector('textarea')!.className).toContain('rgba(239,68,68,0.45)');
+    expect(container.querySelector('textarea')!.className).toContain('--color-danger-rgb');
   });
 
   it('forwards ref', () => {

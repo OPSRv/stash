@@ -68,7 +68,7 @@ export const DocumentItem = ({ filePath, mimeType, caption }: DocumentItemProps)
       <div className="flex flex-col gap-1">
         <AudioPlayer src={filePath} caption={basename(filePath)} />
         {caption && (
-          <p className="text-[13px] leading-[18px] text-white/80 whitespace-pre-wrap">
+          <p className="text-body text-white/80 whitespace-pre-wrap">
             {caption}
           </p>
         )}
@@ -97,7 +97,7 @@ export const TextItem = ({ content }: TextItemProps) => {
       {first && (
         <>
           <LinkEmbed href={first} />
-          <div className="flex items-center gap-2 text-[11px]">
+          <div className="flex items-center gap-2 text-meta">
             <button
               type="button"
               onClick={() => {

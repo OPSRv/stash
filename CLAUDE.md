@@ -4,6 +4,16 @@
 
 Stash — macOS menubar app, **Tauri 2 + React 19 + TS + Rust**. Single 920×520 popup hosts features as tabs. Global toggle `⌘⇧V`; tab switch `⌘⌥1..7`.
 
+## Три слони (project values)
+
+Окрім стандартних **DRY / KISS / YAGNI**, усі рішення в Stash оцінюються через **три слони**:
+
+1. **UI/UX** — кожна взаємодія має бути передбачувана, фокус-менеджмент не ламається, feedback миттєвий, темна/світла тема, reduced-motion, accessibility не опційні.
+2. **Модульність** — кожен модуль у `src/modules/*` стендалон: свої `api.ts`, тести, `index.tsx` з lazy popup. Ніяких крос-модульних імпортів напряму, тільки через `shared/` або `stash:navigate` події.
+3. **Перформанс** — lazy tabs, prefetch on hover, нічого важкого в popup-open path, без зайвих ре-рендерів, bundle-stub для важких залежностей (як `lowlight`).
+
+Коли пропонуєш правку — свідомо калібруй проти цих трьох. Якщо одна з них просідає — це має бути явний trade-off, а не випадкове.
+
 ## Module system
 
 Each feature = self-contained module plugged into `src/modules/registry.ts`.
@@ -45,4 +55,5 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
 - **Accent colour**: use `accent(α)` from `src/shared/theme/accent.ts` — never inline the `rgba(var(--stash-accent-rgb), α)` template. Tailwind arbitrary classes (`bg-[rgba(…)]`) are the one exception.
 - **DRY the second copy**: before hand-rolling a formatter, hook, or layout block, grep `src/shared/` (`format/`, `hooks/`, `util/`, `ui/`, `theme/`). Canonical helpers already exist for bytes / duration, set-selection, async-load, reveal-in-Finder, copy-to-clipboard, panel headers, list rows, centered spinner. Extending one beats adding a fourth.
 - **Language**: never add Russian (`ru`) to locale/translator lists.
-- **No ad-hoc buttons/inputs**: route through `src/shared/ui/` primitives (`Button`, `Input`, `NumberInput`, `SearchInput`, `Select`, `SegmentedControl`, `Checkbox`, `SelectionHeader`, `Toggle`, `TabButton`, `IconButton`, `ConfirmDialog`, `Modal`, `Toast`, `Cheatsheet`, `GlobalSearch`). No inline RGBA hex.
+- **No ad-hoc buttons/inputs**: route through `src/shared/ui/` primitives (`Button`, `Input`, `NumberInput`, `SearchInput`, `Textarea`, `Select`, `SegmentedControl`, `Checkbox`, `SelectionHeader`, `Toggle`, `TabButton`, `IconButton`, `ConfirmDialog`, `Modal`, `Drawer`, `StatCard`, `Toast`, `Cheatsheet`, `GlobalSearch`). No inline RGBA hex — use CSS variables or `accent(α)`.
+- **Text sizing via tokens only**: use `text-meta` / `text-body` / `text-title` / `text-heading`. Hard-coded `text-[11px]`/`[13px]`/`[15px]`/`[18px]` are forbidden in `src/modules/**` and `src/settings/**`. Shared primitives may keep magic values only when a token would break height invariants (e.g. `h-8`).

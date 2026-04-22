@@ -259,7 +259,7 @@ const NavTile = ({
           <Badge tone="neutral" className="uppercase tracking-wider">soon</Badge>
         )}
       </span>
-      <span className="block t-tertiary text-[11px] truncate">{item.hint}</span>
+      <span className="block t-tertiary text-meta truncate">{item.hint}</span>
     </span>
   </button>
 );

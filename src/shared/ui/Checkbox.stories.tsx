@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, userEvent, within } from 'storybook/test';
 import { useMemo, useState } from 'react';
 import { Checkbox } from './Checkbox';
 
@@ -60,6 +61,20 @@ export const Sizes: Story = {
 };
 
 export const SelectAll: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // Initially: 1 of 4 items picked → header is indeterminate.
+    const header = await canvas.findByLabelText('Select all');
+    await expect((header as HTMLInputElement).indeterminate).toBe(true);
+    // Click header → all on.
+    await userEvent.click(header);
+    const clearAll = await canvas.findByLabelText('Clear selection');
+    await expect((clearAll as HTMLInputElement).checked).toBe(true);
+    // Click again → all off.
+    await userEvent.click(clearAll);
+    const nowSelectAll = await canvas.findByLabelText('Select all');
+    await expect((nowSelectAll as HTMLInputElement).checked).toBe(false);
+  },
   render: () => {
     const Demo = () => {
       const items = ['Screenshots', 'Notes', 'Clipboard', 'Downloads'];

@@ -5,6 +5,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification';
 import { Badge } from '../../shared/ui/Badge';
+import { StatCard } from '../../shared/ui/StatCard';
 import { RadialGauge } from './RadialGauge';
 import { Sparkline } from './Sparkline';
 import { dashboardMetrics, type DashboardMetrics, type NetIface } from './api';
@@ -71,68 +72,51 @@ const IfaceCard = ({
       : iface.kind === 'ethernet'
       ? ETHERNET_GLYPH
       : DEFAULT_GLYPH;
+  const header = (
+    <span className="flex items-center gap-1.5">
+      <span className="t-primary text-body font-semibold truncate">
+        {IFACE_LABEL[iface.kind]}
+      </span>
+      {iface.is_primary && (
+        <Badge tone="neutral" className="uppercase tracking-wider">primary</Badge>
+      )}
+      <span className="text-[10px] t-tertiary">{iface.name}</span>
+    </span>
+  );
   return (
-    <div
-      className="rounded-2xl p-3 relative overflow-hidden"
-      style={{
-        background: `linear-gradient(135deg, ${c0}1c, ${c1}2e)`,
-        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.07)',
-      }}
-    >
-      <div
-        aria-hidden
-        className="absolute -top-6 -right-6 w-24 h-24 rounded-full"
-        style={{
-          background: `radial-gradient(closest-side, ${c1}55, transparent)`,
-          filter: 'blur(6px)',
-        }}
-      />
-      <div className="relative flex items-center gap-3">
-        <div
-          aria-hidden
-          className="shrink-0 w-10 h-10 rounded-xl inline-flex items-center justify-center"
-          style={{
-            background: `linear-gradient(135deg, ${c0}, ${c1})`,
-            boxShadow: `0 6px 18px -6px ${c1}, inset 0 0 0 1px rgba(255,255,255,0.2)`,
-          }}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d={glyph} />
-          </svg>
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="t-primary text-body font-semibold truncate">
-              {IFACE_LABEL[iface.kind]}
+    <StatCard
+      gradient={[c0, c1]}
+      icon={
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d={glyph} />
+        </svg>
+      }
+      eyebrow={header}
+      value={
+        <span className="flex items-center gap-3">
+          <span className="min-w-0">
+            <span className="block t-tertiary text-[10px]">↓ DOWN</span>
+            <span className="t-primary text-body font-semibold">
+              {hist ? formatRate(hist.rxRate) : '…'}
             </span>
-            {iface.is_primary && (
-              <Badge tone="neutral" className="uppercase tracking-wider">primary</Badge>
-            )}
-            <span className="text-[10px] t-tertiary">{iface.name}</span>
+          </span>
+          <span className="min-w-0">
+            <span className="block t-tertiary text-[10px]">↑ UP</span>
+            <span className="t-primary text-body font-semibold">
+              {hist ? formatRate(hist.txRate) : '…'}
+            </span>
+          </span>
+        </span>
+      }
+      footer={
+        hist && hist.rx.length >= 2 ? (
+          <div className="flex items-center gap-1">
+            <Sparkline values={hist.rx} color={c1} width={90} height={20} />
+            <Sparkline values={hist.tx} color={c0} width={90} height={20} />
           </div>
-          <div className="flex items-center gap-3 mt-0.5 tabular-nums">
-            <div className="min-w-0">
-              <div className="t-tertiary text-[10px]">↓ DOWN</div>
-              <div className="t-primary text-body font-semibold">
-                {hist ? formatRate(hist.rxRate) : '…'}
-              </div>
-            </div>
-            <div className="min-w-0">
-              <div className="t-tertiary text-[10px]">↑ UP</div>
-              <div className="t-primary text-body font-semibold">
-                {hist ? formatRate(hist.txRate) : '…'}
-              </div>
-            </div>
-          </div>
-          {hist && hist.rx.length >= 2 && (
-            <div className="mt-1 flex items-center gap-1">
-              <Sparkline values={hist.rx} color={c1} width={90} height={20} />
-              <Sparkline values={hist.tx} color={c0} width={90} height={20} />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+        ) : null
+      }
+    />
   );
 };
 
@@ -343,7 +327,7 @@ export const DashboardPanel = () => {
               <div className="t-primary tabular-nums text-body font-semibold">
                 {m ? formatBytes(m.mem_used_bytes) : '—'}
               </div>
-              <div className="t-tertiary text-[11px] tabular-nums">
+              <div className="t-tertiary text-meta tabular-nums">
                 з {m ? formatBytes(m.mem_total_bytes) : '—'}
               </div>
               <div className="mt-1">
@@ -382,7 +366,7 @@ export const DashboardPanel = () => {
               <div className="t-primary tabular-nums text-body font-semibold">
                 {m ? formatBytes(m.disk_used_bytes) : '—'}
               </div>
-              <div className="t-tertiary text-[11px] tabular-nums">
+              <div className="t-tertiary text-meta tabular-nums">
                 з {m ? formatBytes(m.disk_total_bytes) : '—'}
               </div>
             </div>

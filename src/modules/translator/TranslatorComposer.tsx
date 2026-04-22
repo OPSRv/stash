@@ -8,6 +8,7 @@ import { Kbd } from '../../shared/ui/Kbd';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { Select } from '../../shared/ui/Select';
 import { Spinner } from '../../shared/ui/Spinner';
+import { Textarea } from '../../shared/ui/Textarea';
 import { CloseIcon, HistoryIcon, SpeakerIcon, SwapIcon } from '../../shared/ui/icons';
 import { TARGET_LANGUAGES, isRtl, languageLabel } from './languages';
 import { MAX_CHARS, WARN_CHARS } from './translator.constants';
@@ -134,7 +135,8 @@ export const TranslatorComposer = ({
               </button>
             )}
           </div>
-          <textarea
+          <Textarea
+            bare
             ref={sourceRef}
             aria-label="Text to translate"
             value={draft}
@@ -149,7 +151,7 @@ export const TranslatorComposer = ({
             placeholder="Paste or type — auto-translates"
             rows={4}
             maxLength={MAX_CHARS + 200}
-            className="bg-transparent outline-none resize-none t-primary text-body leading-snug flex-1 min-h-0 overflow-y-auto"
+            className="resize-none t-primary text-body leading-snug flex-1 min-h-0 overflow-y-auto"
           />
           <div className="flex items-center justify-between mt-1">
             <span

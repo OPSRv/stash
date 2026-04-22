@@ -362,7 +362,7 @@ export function InboxPanel() {
             {groups.map((group) => (
               <div key={group.label} className="flex flex-col">
                 <div className="px-4 pt-4 pb-1.5 flex items-center gap-2">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-white/35">
+                  <span className="text-meta font-semibold uppercase tracking-wider text-white/35">
                     {group.label}
                   </span>
                   <span className="h-px flex-1 bg-white/5" />
@@ -442,7 +442,7 @@ const InboxRow = ({
       selected ? 'bg-[rgba(var(--stash-accent-rgb),0.18)]' : 'hover:bg-white/3'
     }`}
   >
-    <div className="flex items-center gap-2 text-[11px] text-white/40">
+    <div className="flex items-center gap-2 text-meta text-white/40">
       {/* Hidden checkbox kept purely for assistive tech + form
           semantics — the visible "click anywhere on the row" affordance
           is the li itself. `sr-only` removes it from the layout while
@@ -612,7 +612,7 @@ const EmptyState = ({ connection }: { connection: ConnectionStatus | null }) => 
           <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
         </svg>
       </div>
-      <h3 className="text-[15px] font-medium text-white/90">
+      <h3 className="text-title font-medium text-white/90">
         {paired ? 'Inbox is empty' : 'Connect Telegram first'}
       </h3>
       <p className="text-[12px] text-white/50 max-w-xs">

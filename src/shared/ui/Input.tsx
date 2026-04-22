@@ -26,7 +26,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     { size = 'md', tone = 'default', leadingIcon, trailing, invalid, disabled, className = '', ...rest },
     ref,
   ) => {
-    const danger = tone === 'danger' || invalid ? 'border-[rgba(239,68,68,0.45)]' : '';
+    const danger = tone === 'danger' || invalid ? 'border-[rgba(var(--color-danger-rgb),0.45)]' : '';
     const dis = disabled ? 'opacity-40 cursor-not-allowed' : '';
 
     if (leadingIcon != null || trailing != null) {
