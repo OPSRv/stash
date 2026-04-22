@@ -34,6 +34,15 @@ pub trait ClipboardReader {
     fn read_files(&mut self) -> Vec<PathBuf> {
         Vec::new()
     }
+    /// Unfiltered "is there any `public.file-url` on the pasteboard?"
+    /// probe. Separate from `read_files` because the latter applies
+    /// the promise-ID + existence filter and can return empty even
+    /// when a file-url IS there — the monitor uses this probe to
+    /// skip the image-read path in that case (otherwise Finder's
+    /// drag icon lands in the history as a fake screenshot).
+    fn has_files(&mut self) -> bool {
+        !self.read_files().is_empty()
+    }
 }
 
 pub struct Monitor<R: ClipboardReader> {
@@ -73,16 +82,27 @@ impl<R: ClipboardReader> Monitor<R> {
         // we'd store the Finder icon PNG and mis-classify the clip as
         // an image. Checking files first and returning early when they
         // exist keeps folder/file copies as real file rows.
-        let files = self.reader.read_files();
-        if !files.is_empty() {
+        // Two-stage check: first ask "does the pasteboard hold file
+        // URLs AT ALL" (cheap, no filtering). If yes, we own this
+        // tick — either insert a file row, or bail out — but under
+        // no circumstance read the image, because Finder co-seeds
+        // the drag icon as `public.tiff` and we'd store it as a
+        // phantom screenshot (the `Image · 1024×1024` bug).
+        let has_files_on_pb = self.reader.has_files();
+        if has_files_on_pb {
+            let files = self.reader.read_files();
+            if files.is_empty() {
+                // Pasteboard had file-urls but every single one was
+                // filtered out (WebKit promise IDs, non-existent
+                // paths). We still OWN this poll — don't fall
+                // through to image and store a drag icon.
+                return Ok(None);
+            }
             let key = Self::files_key(&files);
             if self.last_files_key.as_deref() == Some(key.as_str()) {
                 return Ok(None);
             }
             let entries = Self::file_entries(&files);
-            // All entries filtered out at this point (pasteboard had
-            // only promise-IDs / ephemeral WebKit drops) — bail out
-            // rather than inserting a blank `kind='file'` row.
             if entries.is_empty() {
                 self.last_files_key = Some(key);
                 return Ok(None);
@@ -91,9 +111,9 @@ impl<R: ClipboardReader> Monitor<R> {
                 .unwrap_or_else(|_| "{\"files\":[]}".to_string());
             let id = repo.insert_files(&key, &meta, now)?;
             self.last_files_key = Some(key);
-            // A new file copy invalidates the text/image dedupe state —
-            // next iteration's stale image from the same Finder copy
-            // must not fire as a fresh row.
+            // A new file copy invalidates the text/image dedupe
+            // state — the same Finder copy's stale image must not
+            // fire as a fresh row on a later tick.
             self.last_image_hash = None;
             self.last_text = None;
             return Ok(Some(id));
@@ -228,6 +248,9 @@ impl ClipboardReader for ArboardReader {
     fn read_files(&mut self) -> Vec<PathBuf> {
         super::pasteboard::read_file_urls()
     }
+    fn has_files(&mut self) -> bool {
+        super::pasteboard::has_file_urls()
+    }
     fn read_image(&mut self) -> Option<RgbaImage> {
         let img = self.inner.get_image().ok()?;
         Some(RgbaImage {
@@ -248,6 +271,12 @@ mod tests {
         text_queue: Vec<Option<String>>,
         image_queue: Vec<Option<RgbaImage>>,
         files_queue: Vec<Vec<PathBuf>>,
+        /// Per-tick "does the pasteboard claim to hold any file-url?"
+        /// answer, independent of whether `files_queue` has anything
+        /// passing the user-visible filter. Separate because the
+        /// monitor needs to know about promise-ID-only pasteboards
+        /// so it can skip reading the Finder drag icon image.
+        has_files_queue: Vec<bool>,
     }
 
     impl FakeReader {
@@ -256,6 +285,7 @@ mod tests {
                 text_queue: values.into_iter().map(|v| v.map(str::to_string)).collect(),
                 image_queue: vec![],
                 files_queue: vec![],
+                has_files_queue: vec![],
             }
         }
     }
@@ -280,6 +310,16 @@ mod tests {
                 Vec::new()
             } else {
                 self.files_queue.remove(0)
+            }
+        }
+        fn has_files(&mut self) -> bool {
+            if self.has_files_queue.is_empty() {
+                // Default: inferred from whether the next read_files
+                // tick has anything. Matches production behaviour
+                // closely enough for legacy test callers.
+                self.files_queue.first().map_or(false, |f| !f.is_empty())
+            } else {
+                self.has_files_queue.remove(0)
             }
         }
     }
@@ -366,6 +406,7 @@ mod tests {
             text_queue: vec![None],
             image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
             files_queue: vec![],
+            has_files_queue: vec![],
         };
         let tmp = std::env::temp_dir().join(format!("stash-test-{}", std::process::id()));
         let mut monitor = Monitor::with_images_dir(reader, tmp.clone());
@@ -388,6 +429,7 @@ mod tests {
             text_queue: vec![None],
             image_queue: vec![None],
             files_queue: vec![vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.mp4")]],
+            has_files_queue: vec![true],
         };
         let mut monitor = Monitor::new(reader);
 
@@ -413,6 +455,7 @@ mod tests {
             text_queue: vec![None],
             image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
             files_queue: vec![vec![PathBuf::from("/tmp/finder-folder")]],
+            has_files_queue: vec![true],
         };
         let tmp = std::env::temp_dir().join(format!("stash-test-priority-{}", std::process::id()));
         let mut monitor = Monitor::with_images_dir(reader, tmp.clone());
@@ -433,6 +476,7 @@ mod tests {
             text_queue: vec![None, None],
             image_queue: vec![None, None],
             files_queue: vec![paths.clone(), paths.clone()],
+            has_files_queue: vec![true, true],
         };
         let mut monitor = Monitor::new(reader);
 
@@ -454,6 +498,7 @@ mod tests {
                 vec![PathBuf::from("/tmp/a.txt")],
                 vec![PathBuf::from("/tmp/b.txt")],
             ],
+            has_files_queue: vec![true, true],
         };
         let mut monitor = Monitor::new(reader);
 
@@ -461,6 +506,32 @@ mod tests {
         monitor.poll_once(&mut repo, 200).unwrap();
 
         assert_eq!(repo.list(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn pasteboard_with_file_urls_skips_image_read_even_when_filter_rejects_all_paths() {
+        // The exact scenario from the `Image · 1024×1024` bug: Finder
+        // put BOTH a file-url and its drag icon on the pasteboard,
+        // but `read_files()` returned empty (say the path got
+        // filtered out for some reason). Monitor must not fall
+        // through and store the icon as a standalone screenshot.
+        let mut repo = setup();
+        let bytes = vec![1u8; 16]; // 2×2 RGBA
+        let reader = FakeReader {
+            text_queue: vec![None],
+            image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
+            files_queue: vec![vec![]], // filter stripped every path
+            has_files_queue: vec![true], // …but the pb still has file-urls
+        };
+        let tmp =
+            std::env::temp_dir().join(format!("stash-test-filter-{}", std::process::id()));
+        let mut monitor = Monitor::with_images_dir(reader, tmp.clone());
+
+        let result = monitor.poll_once(&mut repo, 100).unwrap();
+
+        assert_eq!(result, None, "must not insert the Finder drag icon");
+        assert_eq!(repo.list(10).unwrap().len(), 0);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

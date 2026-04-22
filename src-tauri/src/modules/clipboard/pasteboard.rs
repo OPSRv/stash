@@ -137,6 +137,36 @@ pub fn read_file_urls() -> Vec<PathBuf> {
     Vec::new()
 }
 
+/// Cheap "does the pasteboard claim to hold any file-urls at all?"
+/// check. Unlike [`read_file_urls`] this does NOT run the
+/// user-visible-path filter — it answers the literal question
+/// "is there at least one `public.file-url` entry on the general
+/// pasteboard right now?". The monitor uses this to decide whether
+/// to skip the image-read path: when the user copies a folder from
+/// Finder, macOS seeds the pasteboard with BOTH a file-url AND a
+/// TIFF-encoded drag icon, and we must not store that drag icon as
+/// a standalone image clip even if the file-url happens to be a
+/// promise-ID that our filter rejects.
+#[cfg(target_os = "macos")]
+pub fn has_file_urls() -> bool {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeFileURL};
+    use objc2_foundation::NSString;
+    let pb = NSPasteboard::generalPasteboard();
+    let Some(items) = pb.pasteboardItems() else { return false };
+    let ftype: &NSString = unsafe { NSPasteboardTypeFileURL };
+    for item in items.iter() {
+        if item.stringForType(ftype).is_some() {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn has_file_urls() -> bool {
+    false
+}
+
 /// Replace the general pasteboard contents with the given file URLs.
 /// After this returns Ok, ⌘V in Finder (or any app that accepts file
 /// copies) will paste real files, not a text list. We `clearContents`
