@@ -18,6 +18,7 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
+import { copyText } from '../util/clipboard';
 
 // rehype-highlight ships with all ~190 highlight.js languages by default,
 // dragging ~250 KB of grammar into every chunk that touches the markdown
@@ -112,20 +113,16 @@ const CodeBlock = ({
     [],
   );
   const onCopy = async () => {
-    try {
-      const text = (codeRef.current?.textContent ?? '').replace(/\n$/, '');
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      if (resetTimerRef.current !== null) {
-        window.clearTimeout(resetTimerRef.current);
-      }
-      resetTimerRef.current = window.setTimeout(() => {
-        resetTimerRef.current = null;
-        setCopied(false);
-      }, 1400);
-    } catch {
-      // ignore — clipboard may be unavailable in some contexts
+    const text = (codeRef.current?.textContent ?? '').replace(/\n$/, '');
+    if (!(await copyText(text))) return;
+    setCopied(true);
+    if (resetTimerRef.current !== null) {
+      window.clearTimeout(resetTimerRef.current);
     }
+    resetTimerRef.current = window.setTimeout(() => {
+      resetTimerRef.current = null;
+      setCopied(false);
+    }, 1400);
   };
   return (
     <div className="relative group">

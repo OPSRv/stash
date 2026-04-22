@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
 import { loadSettings, type WebChatService } from '../../settings/store';
 import './web-animations.css';
 import { userAgentFor } from '../../shared/browserUA';
+import { copyText } from '../../shared/util/clipboard';
+import { MoreHorizontalIcon } from '../../shared/ui/icons';
 import { Input } from '../../shared/ui/Input';
 import { useToast } from '../../shared/ui/Toast';
 
@@ -180,7 +181,7 @@ export const EmbeddedWebChat = ({
   const copyUrl = useCallback(async () => {
     const current = await pickCurrentUrl(service.id, service.url);
     try {
-      await writeText(current);
+      if (!(await copyText(current))) throw new Error('clipboard unavailable');
       toast({ title: 'URL copied', description: current, variant: 'success' });
     } catch (e) {
       toast({
@@ -477,11 +478,7 @@ export const EmbeddedWebChat = ({
             className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
             title="More"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-              <circle cx="3" cy="7" r="1.2" fill="currentColor" />
-              <circle cx="7" cy="7" r="1.2" fill="currentColor" />
-              <circle cx="11" cy="7" r="1.2" fill="currentColor" />
-            </svg>
+            <MoreHorizontalIcon />
           </button>
           {menuOpen && (
             <div

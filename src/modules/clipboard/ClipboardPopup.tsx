@@ -35,7 +35,7 @@ import { detect as detectVideo, start as startDownload, type DetectedVideo } fro
 import { PlatformBadge } from '../downloader/PlatformBadge';
 import { notesCreate } from '../notes/api';
 import { PreviewDialog } from './PreviewDialog';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
+import { copyText } from '../../shared/util/clipboard';
 
 const iso = (ts: number) => {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
@@ -354,12 +354,10 @@ export const ClipboardPopup = () => {
 
   const handlePreviewCopy = useCallback(async () => {
     if (!previewItem) return;
-    try {
-      await writeText(previewItem.content);
+    if (await copyText(previewItem.content)) {
       toast({ title: 'Copied', variant: 'success', durationMs: 2000 });
-    } catch (e) {
-      console.error('copy failed:', e);
-      toast({ title: 'Copy failed', description: String(e), variant: 'error' });
+    } else {
+      toast({ title: 'Copy failed', variant: 'error' });
     }
   }, [previewItem, toast]);
 

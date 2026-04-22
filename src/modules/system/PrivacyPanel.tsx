@@ -3,8 +3,8 @@ import { Button } from '../../shared/ui/Button';
 import { Spinner } from '../../shared/ui/Spinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { listPrivacy, trashPath, type PrivacyItem } from './api';
 import { formatBytes } from './format';
 
@@ -117,9 +117,7 @@ export const PrivacyPanel = () => {
                     <div className="t-tertiary text-meta truncate" title={i.path}>{i.path}</div>
                   </div>
                   <div className="t-primary tabular-nums shrink-0">{formatBytes(i.size_bytes)}</div>
-                  <Button size="sm" variant="ghost" onClick={() => revealItemInDir(i.path).catch(() => undefined)}>
-                    Показати
-                  </Button>
+                  <RevealButton path={i.path} />
                   <Button size="sm" variant="soft" tone="danger" onClick={() => setPending(i)}>
                     У кошик
                   </Button>

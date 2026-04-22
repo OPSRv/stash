@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { formatDuration } from '../../../shared/format/duration';
 import { IconButton } from '../../../shared/ui/IconButton';
 import { CloseIcon, PauseIcon, PlayIcon } from '../../../shared/ui/icons';
 import { parseYouTubeId, useYouTubePlayer } from '../hooks/useYouTubePlayer';
@@ -8,12 +9,10 @@ type Props = {
   onVolume: (v: number) => void;
 };
 
-const formatTime = (s: number): string => {
-  if (!Number.isFinite(s) || s < 0) return '0:00';
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, '0')}`;
-};
+const formatTime = (s: number): string =>
+  // BackingTrack uses floor for an always-advancing clock; the canonical
+  // helper rounds, so we convert to ms to force floor semantics.
+  formatDuration(Math.max(0, s) * 1000, { unit: 'ms', includeHours: 'never' });
 
 const YT_CONTAINER_ID = 'metronome-yt-host';
 

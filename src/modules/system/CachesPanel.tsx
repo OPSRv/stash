@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
-import { Spinner } from '../../shared/ui/Spinner';
+import { CenterSpinner } from '../../shared/ui/CenterSpinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { ListItemRow } from '../../shared/ui/ListItemRow';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { useToast } from '../../shared/ui/Toast';
+import { useSetSelection } from '../../shared/hooks/useSetSelection';
 import { listCaches, trashPath, type CacheEntry, type CacheKind } from './api';
 import { formatBytes } from './format';
 
@@ -21,7 +24,8 @@ export const CachesPanel = () => {
   const [caches, setCaches] = useState<CacheEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const { selected, size: selectedSize, toggleOne, toggleAll, clear } =
+    useSetSelection<string>();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { toast } = useToast();
 
@@ -31,32 +35,22 @@ export const CachesPanel = () => {
     try {
       const list = await listCaches();
       setCaches(list);
-      setSelected(new Set());
+      clear();
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clear]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  const toggleOne = (path: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
+  const onToggleAll = useCallback(() => {
     if (!caches) return;
-    if (selected.size === caches.length) setSelected(new Set());
-    else setSelected(new Set(caches.map((c) => c.path)));
-  };
+    toggleAll(caches.map((c) => c.path));
+  }, [caches, toggleAll]);
 
   const totalSelected = useMemo(() => {
     if (!caches) return 0;
@@ -102,60 +96,45 @@ export const CachesPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(94,226,196,0.14), rgba(42,163,255,0.18))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-12 -right-8 w-40 h-40 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(42,163,255,0.4), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
+      <PanelHeader
+        gradient={['#5ee2c4', '#2aa3ff']}
+        icon={
+          <svg
+            width="26"
+            height="26"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
             aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#5ee2c4,#2aa3ff)',
-              boxShadow: '0 8px 24px -8px rgba(42,163,255,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
           >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <circle cx="12" cy="12" r="9" />
-              <path d="M3 12h18" />
-            </svg>
-          </div>
-          <div className="flex-1">
-            <div className="t-primary text-title font-semibold">Кеші</div>
-            <div className="t-tertiary text-meta">
-              Dev-tooling, браузерні та системні кеші. Видалення переносить у кошик.
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-1.5">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18" />
+          </svg>
+        }
+        title="Кеші"
+        description="Dev-tooling, браузерні та системні кеші. Видалення переносить у кошик."
+        trailing={
+          <>
             <div className="t-primary font-semibold text-title tabular-nums">
               {formatBytes(grandTotal)}
             </div>
             <Button size="sm" variant="ghost" onClick={refresh} loading={loading}>
               Перечитати
             </Button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {caches && caches.length > 0 && (
         <div className="px-4 py-1.5 border-b hair flex items-center justify-between t-secondary text-meta">
           <label className="flex items-center gap-1.5 cursor-pointer select-none">
             <input
               type="checkbox"
-              checked={selected.size === caches.length}
-              onChange={toggleAll}
+              checked={selectedSize === caches.length}
+              onChange={onToggleAll}
               className="ring-focus"
             />
             Обрати все
@@ -171,7 +150,7 @@ export const CachesPanel = () => {
               size="sm"
               variant="soft"
               tone="danger"
-              disabled={selected.size === 0}
+              disabled={selectedSize === 0}
               onClick={() => setConfirmOpen(true)}
             >
               У кошик
@@ -182,11 +161,7 @@ export const CachesPanel = () => {
 
       <div className="flex-1 min-h-0 overflow-auto">
         {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
-        {!error && !caches && loading && (
-          <div className="flex items-center justify-center h-full">
-            <Spinner />
-          </div>
-        )}
+        {!error && !caches && loading && <CenterSpinner />}
         {!error && caches && caches.length === 0 && (
           <EmptyState
             title="Кешів не знайдено"
@@ -199,27 +174,24 @@ export const CachesPanel = () => {
               const tint = KIND_TINT[c.kind];
               const checked = selected.has(c.path);
               return (
-                <li
+                <ListItemRow
                   key={c.path}
-                  className={`px-4 py-2 flex items-center gap-3 cursor-pointer transition-colors ${
-                    checked ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
-                  }`}
+                  selected={checked}
                   onClick={() => toggleOne(c.path)}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleOne(c.path)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="ring-focus shrink-0"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="t-primary text-body font-medium truncate">
-                        {c.label}
-                      </span>
+                  leading={
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleOne(c.path)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="ring-focus"
+                    />
+                  }
+                  title={
+                    <span className="flex items-center gap-2">
+                      <span className="truncate">{c.label}</span>
                       <span
-                        className="shrink-0 inline-flex items-center gap-1 px-1.5 py-px rounded text-[10px] t-secondary"
+                        className="shrink-0 inline-flex items-center gap-1 px-1.5 py-px rounded text-[10px] t-secondary font-normal"
                         style={{ background: tint.pill }}
                       >
                         <span
@@ -229,15 +201,15 @@ export const CachesPanel = () => {
                         />
                         {tint.label}
                       </span>
+                    </span>
+                  }
+                  meta={<span title={c.path}>{c.path}</span>}
+                  trailing={
+                    <div className="t-primary tabular-nums font-medium shrink-0">
+                      {formatBytes(c.size_bytes)}
                     </div>
-                    <div className="t-tertiary text-meta truncate" title={c.path}>
-                      {c.path}
-                    </div>
-                  </div>
-                  <div className="t-primary tabular-nums font-medium shrink-0">
-                    {formatBytes(c.size_bytes)}
-                  </div>
-                </li>
+                  }
+                />
               );
             })}
           </ul>
@@ -247,7 +219,7 @@ export const CachesPanel = () => {
       <ConfirmDialog
         open={confirmOpen}
         title="Очистити обрані кеші?"
-        description={`Буде переміщено у кошик ${selected.size} елементів (${formatBytes(totalSelected)}). Застосунки перегенерують ці файли при наступному запуску.`}
+        description={`Буде переміщено у кошик ${selectedSize} елементів (${formatBytes(totalSelected)}). Застосунки перегенерують ці файли при наступному запуску.`}
         confirmLabel="У кошик"
         tone="danger"
         onConfirm={clean}

@@ -3,8 +3,8 @@ import { Button } from '../../shared/ui/Button';
 import { Spinner } from '../../shared/ui/Spinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { emptyTrash, listTrashBins, type TrashBin } from './api';
 import { formatBytes } from './format';
 
@@ -145,9 +145,7 @@ export const TrashBinsPanel = () => {
                 <div className="t-primary tabular-nums font-medium shrink-0">
                   {formatBytes(b.size_bytes)}
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => revealItemInDir(b.path).catch(() => undefined)}>
-                  Показати
-                </Button>
+                <RevealButton path={b.path} />
               </li>
             ))}
           </ul>

@@ -4,8 +4,8 @@ import { Spinner } from '../../shared/ui/Spinner';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   cancelScan,
   scanLargeFiles,
@@ -250,14 +250,7 @@ export const LargeFilesPanel = () => {
                   <div className="t-tertiary text-[11px]">{formatDate(f.modified_secs)}</div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => revealItemInDir(f.path).catch(() => undefined)}
-                    title="Показати у Finder"
-                  >
-                    Показати
-                  </Button>
+                  <RevealButton path={f.path} />
                   <Button
                     size="sm"
                     variant="soft"

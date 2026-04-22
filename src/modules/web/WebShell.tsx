@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 import { saveSetting, type WebChatService } from '../../settings/store';
 import { Input } from '../../shared/ui/Input';
 import { useToast } from '../../shared/ui/Toast';
+import { copyText } from '../../shared/util/clipboard';
 
 import { AddWebServiceModal } from './AddWebServiceModal';
 import { EmbeddedWebChat } from './EmbeddedWebChat';
@@ -242,7 +242,7 @@ export const WebShell = () => {
   const copyServiceUrl = useCallback(
     async (svc: WebChatService) => {
       try {
-        await writeText(svc.url);
+        if (!(await copyText(svc.url))) throw new Error('clipboard unavailable');
         toast({ title: 'URL copied', description: svc.url, variant: 'success' });
       } catch (e) {
         toast({

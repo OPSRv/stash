@@ -4,8 +4,8 @@ import { Spinner } from '../../shared/ui/Spinner';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { cancelScan, findDuplicates, trashPath, type DuplicateGroup } from './api';
 import { pickFolder } from './pickFolder';
 import { formatBytes } from './format';
@@ -243,9 +243,7 @@ export const DuplicatesPanel = () => {
                           {p}
                         </div>
                       </div>
-                      <Button size="sm" variant="ghost" onClick={() => revealItemInDir(p).catch(() => undefined)}>
-                        Показати
-                      </Button>
+                      <RevealButton path={p} />
                       <Button
                         size="sm"
                         variant="soft"

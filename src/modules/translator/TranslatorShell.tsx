@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
+import { copyText } from '../../shared/util/clipboard';
 import { loadSettings, saveSetting } from '../../settings/store';
 import { TranslatorComposer } from './TranslatorComposer';
 import { TranslatorHistoryPanel } from './TranslatorHistoryPanel';
@@ -133,13 +133,11 @@ export const TranslatorShell = () => {
 
   const handleCopy = useCallback(
     async (text: string) => {
-      try {
-        await writeText(text);
+      if (await copyText(text)) {
         announce('Copied');
         toast({ title: 'Copied', variant: 'success', durationMs: 2000 });
-      } catch (error) {
-        console.error('copy failed', error);
-        toast({ title: 'Copy failed', description: String(error), variant: 'error' });
+      } else {
+        toast({ title: 'Copy failed', variant: 'error' });
       }
     },
     [toast, announce],

@@ -66,12 +66,10 @@ const pickFormat = (): { mime: string; ext: string } => {
   return { mime: '', ext: 'webm' };
 };
 
-const formatClock = (ms: number): string => {
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-};
+import { formatDuration } from '../../shared/format/duration';
+
+const formatClock = (ms: number): string =>
+  formatDuration(ms, { unit: 'ms', includeHours: 'never' });
 
 /** Normalized [0..1] loudness sample from an `AnalyserNode`. Simple RMS over
  *  the time-domain buffer — good enough for a visual level meter. */

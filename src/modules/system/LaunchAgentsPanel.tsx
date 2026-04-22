@@ -3,8 +3,8 @@ import { Button } from '../../shared/ui/Button';
 import { Spinner } from '../../shared/ui/Spinner';
 import { Toggle } from '../../shared/ui/Toggle';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   listLaunchAgents,
   toggleLaunchAgent,
@@ -81,13 +81,7 @@ export const LaunchAgentsPanel = () => {
             {a.pid !== null && ` · PID ${a.pid}`}
           </div>
         </div>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => revealItemInDir(a.path).catch(() => undefined)}
-        >
-          Показати
-        </Button>
+        <RevealButton path={a.path} />
         <Toggle
           checked={loaded}
           onChange={() => handleToggle(a)}

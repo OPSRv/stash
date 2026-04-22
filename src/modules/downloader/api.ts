@@ -1,4 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
+import { formatBytes as fmtBytes } from '../../shared/format/bytes';
+import { formatDuration as fmtDuration } from '../../shared/format/duration';
 
 export type Platform =
   | 'youtube'
@@ -132,20 +134,8 @@ export const platformBadge = (p: Platform | string): { label: string; bg: string
   return known[p as string] ?? known.generic;
 };
 
-export const formatBytes = (n: number | null | undefined): string => {
-  if (!n || n < 0) return '';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
-};
+export const formatBytes = (n: number | null | undefined): string =>
+  fmtBytes(n, { empty: '' });
 
-export const formatDuration = (sec: number | null | undefined): string => {
-  if (!sec || sec < 0) return '';
-  const s = Math.round(sec);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = s % 60;
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
-};
+export const formatDuration = (sec: number | null | undefined): string =>
+  fmtDuration(sec, { empty: '' });

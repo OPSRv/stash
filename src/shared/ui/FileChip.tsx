@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { formatBytes as fmtBytes } from '../format/bytes';
+import { DocumentIcon } from './icons';
 
 type FileChipProps = {
   /// Display name (usually the original filename, falling back to the
@@ -43,20 +45,7 @@ export const FileChip = ({
           color: 'rgb(var(--stash-accent-rgb))',
         }}
       >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6" />
-        </svg>
+        <DocumentIcon size={16} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium text-white/92 truncate" title={name}>
@@ -81,12 +70,8 @@ export const FileChip = ({
   </div>
 );
 
-/// Format a byte count for the `size` slot. Placed in this file so
-/// callers only import one thing. Preserves the old `formatBytes`
-/// semantics from the inbox MediaItems (B / KB / MB, one-decimal MB).
-export const formatBytes = (n: number | null | undefined): string => {
-  if (!n || n <= 0) return '';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
-};
+/// Re-export of the canonical formatter with FileChip's preset
+/// (stops at MB, empty string for null/0/negatives). Call sites in
+/// the Telegram inbox and notes attachments expect this exact shape.
+export const formatBytes = (n: number | null | undefined): string =>
+  fmtBytes(n, { stopAt: 'MB', empty: '' });

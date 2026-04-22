@@ -5,6 +5,7 @@ import { Button } from '../shared/ui/Button';
 import { ConfirmDialog } from '../shared/ui/ConfirmDialog';
 import { Toggle } from '../shared/ui/Toggle';
 import { useToast } from '../shared/ui/Toast';
+import { formatBytes } from '../shared/format/bytes';
 import { SettingRow } from './SettingRow';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
 import {
@@ -27,13 +28,6 @@ const withAutoHideSuspended = async <T,>(fn: () => Promise<T>): Promise<T> => {
   } finally {
     await invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
   }
-};
-
-const formatBytes = (n: number): string => {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 };
 
 export const BackupSection = () => {

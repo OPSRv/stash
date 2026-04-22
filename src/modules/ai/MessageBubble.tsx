@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { LazyMarkdown } from '../../shared/ui/LazyMarkdown';
+import { copyText } from '../../shared/util/clipboard';
 
 import type { Message } from './api';
 
@@ -15,13 +16,9 @@ export const MessageBubble = ({ message, showStoppedHint = true }: Props) => {
   const isUser = message.role === 'user';
 
   const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(message.content);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      // ignore
-    }
+    if (!(await copyText(message.content))) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
   };
 
   return (

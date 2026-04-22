@@ -1,7 +1,10 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
+import { writeText as tauriWriteText } from '@tauri-apps/plugin-clipboard-manager';
 
 import { Markdown } from './Markdown';
+
+const mockedWriteText = vi.mocked(tauriWriteText);
 
 describe('Markdown', () => {
   test('renders bold, lists, links', () => {
@@ -20,25 +23,11 @@ describe('Markdown', () => {
   });
 
   test('renders fenced code with language class and copy button when enabled', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    const originalClipboard = Object.getOwnPropertyDescriptor(
-      navigator,
-      'clipboard',
-    );
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    });
-    try {
-      render(<Markdown source={'```ts\nconst x = 1;\n```'} codeCopy />);
-      const btn = screen.getByRole('button', { name: 'Copy code' });
-      fireEvent.click(btn);
-      expect(writeText).toHaveBeenCalledWith('const x = 1;');
-    } finally {
-      if (originalClipboard) {
-        Object.defineProperty(navigator, 'clipboard', originalClipboard);
-      }
-    }
+    mockedWriteText.mockClear();
+    render(<Markdown source={'```ts\nconst x = 1;\n```'} codeCopy />);
+    const btn = screen.getByRole('button', { name: 'Copy code' });
+    fireEvent.click(btn);
+    expect(mockedWriteText).toHaveBeenCalledWith('const x = 1;');
   });
 
   test('does not render copy button when codeCopy is off', () => {
@@ -72,15 +61,7 @@ describe('Markdown', () => {
 
   test('does not warn when unmounted before copy-reset timeout fires', async () => {
     vi.useFakeTimers();
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    const originalClipboard = Object.getOwnPropertyDescriptor(
-      navigator,
-      'clipboard',
-    );
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    });
+    mockedWriteText.mockClear();
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const { unmount } = render(
@@ -99,9 +80,6 @@ describe('Markdown', () => {
       expect(calls).not.toMatch(/unmounted/i);
     } finally {
       errSpy.mockRestore();
-      if (originalClipboard) {
-        Object.defineProperty(navigator, 'clipboard', originalClipboard);
-      }
       vi.useRealTimers();
     }
   });

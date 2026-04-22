@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
-import { Spinner } from '../../shared/ui/Spinner';
+import { CenterSpinner } from '../../shared/ui/CenterSpinner';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { ListItemRow } from '../../shared/ui/ListItemRow';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
+import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   deleteTmSnapshot,
   deleteUnavailableSimulators,
@@ -44,28 +46,27 @@ const ScreenshotsTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
   return (
     <ul className="divide-y hair">
       {list.map((s) => (
-        <li key={s.path} className="px-4 py-2 flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="t-primary text-body font-medium truncate">
-              {s.path.split('/').pop()}
-            </div>
-            <div className="t-tertiary text-meta">{fmtDate(s.created_secs)}</div>
-          </div>
-          <div className="t-primary tabular-nums shrink-0">{formatBytes(s.size_bytes)}</div>
-          <Button size="sm" variant="ghost" onClick={() => revealItemInDir(s.path).catch(() => undefined)}>
-            Показати
-          </Button>
-          <Button
-            size="sm"
-            variant="soft"
-            tone="danger"
-            onClick={() =>
-              onPending({ kind: 'trash', path: s.path, size: s.size_bytes, label: s.path.split('/').pop() ?? s.path })
-            }
-          >
-            У кошик
-          </Button>
-        </li>
+        <ListItemRow
+          key={s.path}
+          title={s.path.split('/').pop()}
+          meta={fmtDate(s.created_secs)}
+          trailing={
+            <>
+              <div className="t-primary tabular-nums shrink-0">{formatBytes(s.size_bytes)}</div>
+              <RevealButton path={s.path} />
+              <Button
+                size="sm"
+                variant="soft"
+                tone="danger"
+                onClick={() =>
+                  onPending({ kind: 'trash', path: s.path, size: s.size_bytes, label: s.path.split('/').pop() ?? s.path })
+                }
+              >
+                У кошик
+              </Button>
+            </>
+          }
+        />
       ))}
     </ul>
   );
@@ -81,30 +82,31 @@ const IosTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
   return (
     <ul className="divide-y hair">
       {list.map((b) => (
-        <li key={b.path} className="px-4 py-2 flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="t-primary text-body font-medium truncate">
-              {b.device_name ?? b.uuid}
-            </div>
-            <div className="t-tertiary text-meta truncate" title={b.path}>
+        <ListItemRow
+          key={b.path}
+          title={b.device_name ?? b.uuid}
+          meta={
+            <span title={b.path}>
               {b.uuid} · {fmtDate(b.last_modified)}
-            </div>
-          </div>
-          <div className="t-primary tabular-nums shrink-0">{formatBytes(b.size_bytes)}</div>
-          <Button size="sm" variant="ghost" onClick={() => revealItemInDir(b.path).catch(() => undefined)}>
-            Показати
-          </Button>
-          <Button
-            size="sm"
-            variant="soft"
-            tone="danger"
-            onClick={() =>
-              onPending({ kind: 'trash', path: b.path, size: b.size_bytes, label: b.device_name ?? b.uuid })
-            }
-          >
-            У кошик
-          </Button>
-        </li>
+            </span>
+          }
+          trailing={
+            <>
+              <div className="t-primary tabular-nums shrink-0">{formatBytes(b.size_bytes)}</div>
+              <RevealButton path={b.path} />
+              <Button
+                size="sm"
+                variant="soft"
+                tone="danger"
+                onClick={() =>
+                  onPending({ kind: 'trash', path: b.path, size: b.size_bytes, label: b.device_name ?? b.uuid })
+                }
+              >
+                У кошик
+              </Button>
+            </>
+          }
+        />
       ))}
     </ul>
   );
@@ -120,26 +122,27 @@ const MailTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
   return (
     <ul className="divide-y hair">
       {list.map((m) => (
-        <li key={m.path} className="px-4 py-2 flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="t-primary text-body font-medium">Mail · {m.version}</div>
-            <div className="t-tertiary text-meta truncate">{m.path}</div>
-          </div>
-          <div className="t-primary tabular-nums shrink-0">{formatBytes(m.size_bytes)}</div>
-          <Button size="sm" variant="ghost" onClick={() => revealItemInDir(m.path).catch(() => undefined)}>
-            Показати
-          </Button>
-          <Button
-            size="sm"
-            variant="soft"
-            tone="danger"
-            onClick={() =>
-              onPending({ kind: 'trash', path: m.path, size: m.size_bytes, label: `Mail ${m.version}` })
-            }
-          >
-            У кошик
-          </Button>
-        </li>
+        <ListItemRow
+          key={m.path}
+          title={`Mail · ${m.version}`}
+          meta={m.path}
+          trailing={
+            <>
+              <div className="t-primary tabular-nums shrink-0">{formatBytes(m.size_bytes)}</div>
+              <RevealButton path={m.path} />
+              <Button
+                size="sm"
+                variant="soft"
+                tone="danger"
+                onClick={() =>
+                  onPending({ kind: 'trash', path: m.path, size: m.size_bytes, label: `Mail ${m.version}` })
+                }
+              >
+                У кошик
+              </Button>
+            </>
+          }
+        />
       ))}
     </ul>
   );
@@ -171,33 +174,36 @@ const XcodeTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
       {list.length === 0 && <EmptyState title="Симуляторів не знайдено" />}
       <ul className="divide-y hair">
         {list.map((s) => (
-          <li key={s.path} className="px-4 py-2 flex items-center gap-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="t-primary text-body font-medium truncate">{s.name}</span>
+          <ListItemRow
+            key={s.path}
+            title={
+              <span className="flex items-center gap-1.5">
+                <span className="truncate">{s.name}</span>
                 {!s.available && (
-                  <span className="text-[10px] px-1 py-px rounded bg-white/5 t-tertiary">
+                  <span className="text-[10px] px-1 py-px rounded bg-white/5 t-tertiary font-normal">
                     unavailable
                   </span>
                 )}
-              </div>
-              <div className="t-tertiary text-meta truncate">{s.path}</div>
-            </div>
-            <div className="t-primary tabular-nums shrink-0">{formatBytes(s.size_bytes)}</div>
-            <Button size="sm" variant="ghost" onClick={() => revealItemInDir(s.path).catch(() => undefined)}>
-              Показати
-            </Button>
-            <Button
-              size="sm"
-              variant="soft"
-              tone="danger"
-              onClick={() =>
-                onPending({ kind: 'trash', path: s.path, size: s.size_bytes, label: s.name })
-              }
-            >
-              У кошик
-            </Button>
-          </li>
+              </span>
+            }
+            meta={s.path}
+            trailing={
+              <>
+                <div className="t-primary tabular-nums shrink-0">{formatBytes(s.size_bytes)}</div>
+                <RevealButton path={s.path} />
+                <Button
+                  size="sm"
+                  variant="soft"
+                  tone="danger"
+                  onClick={() =>
+                    onPending({ kind: 'trash', path: s.path, size: s.size_bytes, label: s.name })
+                  }
+                >
+                  У кошик
+                </Button>
+              </>
+            }
+          />
         ))}
       </ul>
     </div>
@@ -215,30 +221,25 @@ const TmTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
   return (
     <ul className="divide-y hair">
       {list.map((s) => (
-        <li key={s.name} className="px-4 py-2 flex items-center gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="t-primary text-body font-medium">{s.created_at}</div>
-            <div className="t-tertiary text-meta truncate">{s.name}</div>
-          </div>
-          <Button
-            size="sm"
-            variant="soft"
-            tone="danger"
-            onClick={() => onPending({ kind: 'tm', name: s.name })}
-          >
-            Видалити
-          </Button>
-        </li>
+        <ListItemRow
+          key={s.name}
+          title={s.created_at}
+          meta={s.name}
+          trailing={
+            <Button
+              size="sm"
+              variant="soft"
+              tone="danger"
+              onClick={() => onPending({ kind: 'tm', name: s.name })}
+            >
+              Видалити
+            </Button>
+          }
+        />
       ))}
     </ul>
   );
 };
-
-const CenterSpinner = () => (
-  <div className="flex items-center justify-center py-10">
-    <Spinner />
-  </div>
-);
 
 export const DiskHogsPanel = () => {
   const [tab, setTab] = useState<Tab>('screenshots');
@@ -297,42 +298,17 @@ export const DiskHogsPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(255,216,107,0.12), rgba(255,58,111,0.18))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-40 h-40 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(255,58,111,0.35), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#ffd86b,#ff3a6f)',
-              boxShadow: '0 8px 24px -8px rgba(255,58,111,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 7v5l3 2" />
-            </svg>
-          </div>
-          <div className="flex-1">
-            <div className="t-primary text-title font-semibold">Важке на диску</div>
-            <div className="t-tertiary text-meta">
-              Скріншоти, iOS-бекапи, Mail, Xcode-симулятори, Time Machine snapshots.
-            </div>
-          </div>
+      <PanelHeader
+        gradient={['#ffd86b', '#ff3a6f']}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+        }
+        title="Важке на диску"
+        description="Скріншоти, iOS-бекапи, Mail, Xcode-симулятори, Time Machine snapshots."
+        inlineRight={
           <SegmentedControl<Tab>
             size="sm"
             value={tab}
@@ -346,8 +322,8 @@ export const DiskHogsPanel = () => {
               { value: 'tm', label: 'TM' },
             ]}
           />
-        </div>
-      </header>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-auto">{body}</div>
 

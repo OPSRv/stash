@@ -3,8 +3,9 @@ import { Button } from '../../shared/ui/Button';
 import { Spinner } from '../../shared/ui/Spinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { useSetSelection } from '../../shared/hooks/useSetSelection';
 import { cancelScan, scanNodeModules, trashPath, type NodeModulesEntry } from './api';
 import { pickFolder } from './pickFolder';
 import { formatBytes } from './format';
@@ -19,7 +20,8 @@ export const NodeModulesPanel = () => {
   const [entries, setEntries] = useState<NodeModulesEntry[] | null>(null);
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const { selected, size: selectedSize, toggleOne, toggleAll, clear } =
+    useSetSelection<string>();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const { toast } = useToast();
 
@@ -28,7 +30,7 @@ export const NodeModulesPanel = () => {
     if (!picked) return;
     setRoot(picked);
     setEntries(null);
-    setSelected(new Set());
+    clear();
     setScanning(true);
     setError(null);
     try {
@@ -39,22 +41,12 @@ export const NodeModulesPanel = () => {
     } finally {
       setScanning(false);
     }
-  }, []);
+  }, [clear]);
 
-  const toggleOne = (p: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(p)) next.delete(p);
-      else next.add(p);
-      return next;
-    });
-  };
-
-  const toggleAll = () => {
+  const onToggleAll = useCallback(() => {
     if (!entries) return;
-    if (selected.size === entries.length) setSelected(new Set());
-    else setSelected(new Set(entries.map((e) => e.path)));
-  };
+    toggleAll(entries.map((e) => e.path));
+  }, [entries, toggleAll]);
 
   const totalAll = useMemo(
     () => (entries ?? []).reduce((acc, e) => acc + e.size_bytes, 0),
@@ -106,12 +98,12 @@ export const NodeModulesPanel = () => {
       setScanning(true);
       try {
         setEntries(await scanNodeModules(root));
-        setSelected(new Set());
+        clear();
       } finally {
         setScanning(false);
       }
     }
-  }, [entries, selected, root, toast]);
+  }, [entries, selected, root, toast, clear]);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -187,8 +179,8 @@ export const NodeModulesPanel = () => {
           <label className="flex items-center gap-1.5 cursor-pointer select-none">
             <input
               type="checkbox"
-              checked={selected.size === entries.length}
-              onChange={toggleAll}
+              checked={selectedSize === entries.length}
+              onChange={onToggleAll}
               className="ring-focus"
             />
             Обрати все ({entries.length})
@@ -206,7 +198,7 @@ export const NodeModulesPanel = () => {
                 size="sm"
                 variant="soft"
                 tone="danger"
-                disabled={selected.size === 0}
+                disabled={selectedSize === 0}
                 onClick={() => setConfirmOpen(true)}
               >
                 У кошик
@@ -266,16 +258,7 @@ export const NodeModulesPanel = () => {
                     </div>
                     <div className="t-tertiary text-[11px]">{formatDate(e.last_modified)}</div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      revealItemInDir(e.path).catch(() => undefined);
-                    }}
-                  >
-                    Показати
-                  </Button>
+                  <RevealButton path={e.path} stopPropagation />
                 </li>
               );
             })}
@@ -286,7 +269,7 @@ export const NodeModulesPanel = () => {
       <ConfirmDialog
         open={confirmOpen}
         title="Перемістити обрані node_modules у кошик?"
-        description={`Буде переміщено ${selected.size} node_modules (${formatBytes(totalSelected)}). Виконайте npm install / pnpm install щоб відновити.`}
+        description={`Буде переміщено ${selectedSize} node_modules (${formatBytes(totalSelected)}). Виконайте npm install / pnpm install щоб відновити.`}
         confirmLabel="У кошик"
         tone="danger"
         onConfirm={bulkDelete}

@@ -337,3 +337,34 @@ export const TranslateIcon = ({ size = 14, className }: IconProps) => (
     <path d="M13 19l4-9 4 9M14.5 16h5" />
   </svg>
 );
+
+/// Plain sheet-of-paper glyph with a folded corner. The attachments chip,
+/// the caches panel, and the disk-hogs mail tile all want the same shape.
+/// Distinct from `NoteIcon` (which adds content lines inside).
+export const DocumentIcon = ({ size = 16, className }: IconProps) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    className={className}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.6}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <path d="M14 2v6h6" />
+  </svg>
+);
+
+/// Horizontal three-dot menu indicator. Used by the embedded web chat kebab
+/// and anywhere else we expose an overflow menu.
+export const MoreHorizontalIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 14 14" className={className} aria-hidden>
+    <circle cx="3" cy="7" r="1.2" fill="currentColor" />
+    <circle cx="7" cy="7" r="1.2" fill="currentColor" />
+    <circle cx="11" cy="7" r="1.2" fill="currentColor" />
+  </svg>
+);

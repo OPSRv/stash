@@ -73,13 +73,10 @@ const countWords = (text: string): number => {
   return matches ? matches.length : 0;
 };
 
-const formatDuration = (ms: number | null): string => {
-  if (!ms || ms <= 0) return '—';
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-};
+import { formatDuration as fmtDuration } from '../../shared/format/duration';
+
+const formatDuration = (ms: number | null): string =>
+  fmtDuration(ms, { unit: 'ms', empty: '—', includeHours: 'never' });
 
 const AUTOSAVE_DEBOUNCE_MS = 400;
 const SIDEBAR_COLLAPSED_KEY = 'stash:notes:sidebar-collapsed';

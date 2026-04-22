@@ -1,5 +1,5 @@
-import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { CloseIcon } from '../../shared/ui/icons';
+import { copyText } from '../../shared/util/clipboard';
 
 interface TranslationBannerProps {
   original: string;
@@ -23,12 +23,8 @@ export const TranslationBanner = ({
   to,
   onDismiss,
 }: TranslationBannerProps) => {
-  const copyTranslation = async () => {
-    try {
-      await writeText(translated);
-    } catch (e) {
-      console.error('copy translation failed', e);
-    }
+  const copyTranslation = () => {
+    void copyText(translated);
   };
 
   return (

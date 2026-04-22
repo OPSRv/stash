@@ -99,8 +99,18 @@ impl Assistant {
         if !inbox_text.is_empty() {
             messages.push(ChatMessage::system(inbox_text));
         }
+        // History replay strips tool-call / tool-response traces on
+        // purpose. Gemini requires every `functionCall` to be followed
+        // immediately by its `functionResponse`, and SQLite pruning
+        // (context_window × HISTORY_FACTOR) can cut the pair in half,
+        // yielding 400 "function response turn must come immediately
+        // after a function call turn". The current turn still gets
+        // live tool-calling; history keeps only the textual reply, so
+        // the model sees *what* it decided without the dangling call.
         for row in &history {
-            messages.push(history_to_message(row));
+            if let Some(m) = history_to_message(row) {
+                messages.push(m);
+            }
         }
         messages.push(ChatMessage::user(user_text));
 
@@ -394,25 +404,31 @@ pub async fn handle_user_text(
     assistant.handle(text).await
 }
 
-fn history_to_message(row: &ChatRow) -> ChatMessage {
+fn history_to_message(row: &ChatRow) -> Option<ChatMessage> {
     match row.role {
-        ChatRole::User => ChatMessage::user(&row.content),
+        ChatRole::User => Some(ChatMessage::user(&row.content)),
         ChatRole::Assistant => {
-            let (text, calls) = decode_assistant_row(&row.content);
-            ChatMessage {
-                role: Role::Assistant,
-                content: text,
-                tool_call_id: None,
-                tool_calls: calls,
+            // Drop the tool-call envelope and keep the textual body.
+            // If a historical assistant turn was *tool-call only*
+            // (empty text), we skip it entirely — there's nothing
+            // useful to replay without the paired tool response.
+            let (text, _calls) = decode_assistant_row(&row.content);
+            if text.trim().is_empty() {
+                None
+            } else {
+                Some(ChatMessage {
+                    role: Role::Assistant,
+                    content: text,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                })
             }
         }
-        ChatRole::System => ChatMessage::system(&row.content),
-        ChatRole::Tool => ChatMessage {
-            role: Role::Tool,
-            content: row.content.clone(),
-            tool_call_id: row.tool_call_id.clone(),
-            tool_calls: Vec::new(),
-        },
+        ChatRole::System => Some(ChatMessage::system(&row.content)),
+        // Tool responses only make sense next to their originating
+        // call; since we strip the calls, the responses are dropped
+        // too — symmetric, and avoids a dangling tool turn.
+        ChatRole::Tool => None,
     }
 }
 
@@ -692,5 +708,71 @@ mod tests {
         }];
         let (_, decoded_sig) = decode_assistant_row(&encode_assistant_row("", &calls_sig));
         assert_eq!(decoded_sig[0].signature.as_deref(), Some("opaque-sig"));
+    }
+
+    #[test]
+    fn history_replay_strips_tool_calls_and_drops_tool_rows() {
+        let assistant_with_call = ChatRow {
+            id: 1,
+            role: ChatRole::Assistant,
+            content: encode_assistant_row(
+                "let me check",
+                &[ToolCall {
+                    id: "c1".into(),
+                    name: "get_battery".into(),
+                    args_json: "{}".into(),
+                    signature: None,
+                }],
+            ),
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 1,
+        };
+        let tool_row = ChatRow {
+            id: 2,
+            role: ChatRole::Tool,
+            content: "{}".into(),
+            tool_call_id: Some("c1".into()),
+            tool_name: Some("get_battery".into()),
+            created_at: 2,
+        };
+        let user_row = ChatRow {
+            id: 3,
+            role: ChatRole::User,
+            content: "hi".into(),
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 3,
+        };
+        // Assistant keeps text, no tool_calls. Tool row is dropped.
+        let a = history_to_message(&assistant_with_call).unwrap();
+        assert_eq!(a.role, Role::Assistant);
+        assert_eq!(a.content, "let me check");
+        assert!(a.tool_calls.is_empty());
+        assert!(history_to_message(&tool_row).is_none());
+        assert!(history_to_message(&user_row).is_some());
+    }
+
+    #[test]
+    fn history_replay_drops_empty_tool_only_assistant_turns() {
+        // Pure tool-call assistant turn (no text) has nothing to
+        // replay without its tool response — skip entirely.
+        let row = ChatRow {
+            id: 1,
+            role: ChatRole::Assistant,
+            content: encode_assistant_row(
+                "",
+                &[ToolCall {
+                    id: "c1".into(),
+                    name: "x".into(),
+                    args_json: "{}".into(),
+                    signature: None,
+                }],
+            ),
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 1,
+        };
+        assert!(history_to_message(&row).is_none());
     }
 }
