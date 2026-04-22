@@ -186,10 +186,7 @@ pub(crate) async fn dispatch(
         None => return Response::err(format!("unknown command: {cmd_name}")),
     };
 
-    // `chat_id = 0` is a sentinel marking a CLI-originated invocation.
-    // No existing handler reads `chat_id`; if one starts to, it must
-    // treat `0` as "no Telegram chat".
-    let ctx = Ctx { chat_id: 0, app };
+    let ctx = Ctx { app };
     let reply = handler.handle(ctx, &req.args_text).await;
     Response::ok(reply.text)
 }

@@ -15,6 +15,7 @@ import { ClipboardTab } from './ClipboardTab';
 import { DownloadsTab } from './DownloadsTab';
 import { GeneralTab } from './GeneralTab';
 import { NotesTab } from './NotesTab';
+import { TelegramTab } from './TelegramTab';
 import { TerminalTab } from './TerminalTab';
 import { WebTab } from './WebTab';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
@@ -29,6 +30,7 @@ type Tab =
   | 'notes'
   | 'ai'
   | 'web'
+  | 'telegram'
   | 'about';
 
 const Stroke = ({ d }: { d: string }) => (
@@ -127,6 +129,15 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    id: 'telegram',
+    label: 'Telegram',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
+      </svg>
+    ),
+  },
+  {
     id: 'about',
     label: 'About',
     icon: (
@@ -146,6 +157,22 @@ export const SettingsShell = () => {
   const [tab, setTab] = useState<Tab>('general');
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [autostartOn, setAutostartOn] = useState(false);
+
+  // Cross-tab deep-link: other modules can dispatch
+  // `stash:settings-section` with a Tab id to scroll users straight to
+  // the right section after the Settings popup mounts. Used by the
+  // Telegram Inbox gear so clicking ⚙ jumps to Settings → Telegram.
+  useEffect(() => {
+    const onSection = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (!detail) return;
+      if (tabs.some((t) => t.id === detail)) {
+        setTab(detail as Tab);
+      }
+    };
+    window.addEventListener('stash:settings-section', onSection);
+    return () => window.removeEventListener('stash:settings-section', onSection);
+  }, []);
 
   useEffect(() => {
     loadSettings()
@@ -271,6 +298,7 @@ export const SettingsShell = () => {
         )}
         {tab === 'ai' && <AiTab settings={settings} onChange={update} />}
         {tab === 'web' && <WebTab settings={settings} onChange={update} />}
+        {tab === 'telegram' && <TelegramTab />}
         {tab === 'about' && <AboutTab />}
       </main>
     </div>

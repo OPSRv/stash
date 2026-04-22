@@ -109,6 +109,7 @@ use modules::ai::{
 };
 use modules::telegram::commands::{
     telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
+    telegram_send_inbox_to_notes,
     telegram_delete_memory, telegram_get_ai_settings, telegram_get_notification_settings,
     telegram_has_token, telegram_list_inbox, telegram_list_memory, telegram_mark_inbox_routed,
     telegram_reveal_inbox_file, telegram_set_ai_settings, telegram_set_notification_settings,
@@ -145,8 +146,9 @@ use modules::whisper::{
 };
 use modules::notes::{
     commands::{
-        notes_create, notes_delete, notes_get, notes_list, notes_read_audio_path,
-        notes_read_file, notes_read_image_path, notes_save_audio_bytes, notes_save_audio_file,
+        notes_add_attachment, notes_create, notes_delete, notes_get, notes_list,
+        notes_list_attachments, notes_read_audio_path, notes_read_file, notes_read_image_path,
+        notes_remove_attachment, notes_save_audio_bytes, notes_save_audio_file,
         notes_save_image_bytes, notes_save_image_file, notes_search, notes_set_pinned,
         notes_update, notes_write_file, NotesState,
     },
@@ -407,6 +409,9 @@ pub fn run() {
             notes_save_image_bytes,
             notes_save_image_file,
             notes_read_image_path,
+            notes_list_attachments,
+            notes_add_attachment,
+            notes_remove_attachment,
             notes_set_pinned,
             pomodoro_list_presets,
             pomodoro_save_preset,
@@ -508,6 +513,7 @@ pub fn run() {
             telegram_list_inbox,
             telegram_delete_inbox_item,
             telegram_mark_inbox_routed,
+            telegram_send_inbox_to_notes,
             telegram_reveal_inbox_file,
             telegram_get_notification_settings,
             telegram_set_notification_settings,

@@ -98,10 +98,6 @@ impl Tool for ListReminders {
             .collect();
         Ok(json!({ "reminders": items }))
     }
-
-    fn is_parallel_safe(&self) -> bool {
-        true
-    }
 }
 
 pub struct CancelReminder;
@@ -152,8 +148,8 @@ mod tests {
         let secrets: Arc<dyn crate::modules::telegram::keyring::SecretStore> =
             Arc::new(MemStore::new());
         ToolCtx {
-            app: None,
             state: Arc::new(TelegramState::new(repo, secrets)),
+            app: None,
             // 2026-04-22 12:00 UTC in epoch ms — a stable "now" so
             // relative offsets land on a predictable wall-clock.
             now_ms: 1_776_672_000_000,

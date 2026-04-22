@@ -54,6 +54,17 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
 futures-util = "0.3"
 symphonia = { version = "0.5", features = ["all"] }
+# Symphonia 0.5's "all" doesn't include Opus — Telegram voice ships as
+# OGG/Opus so we demux + decode it in a dedicated path (see
+# `modules::whisper::pipeline::decode_ogg_opus`).
+ogg = "0.9"
+opus = "0.3"
+# Pull the transitive `audiopus_sys` directly so we can enable the
+# `static` feature — without this, release bundles depend on Homebrew's
+# libopus.dylib. The bundled CMakeLists is pre-3.5; see
+# `.cargo/config.toml` for the `CMAKE_POLICY_VERSION_MINIMUM` bump that
+# lets modern CMake build it.
+audiopus_sys = { version = "0.2", features = ["static"] }
 rubato = "0.15"
 whisper-rs = { version = "0.14", features = ["raw-api"] }
 lru = "0.12"

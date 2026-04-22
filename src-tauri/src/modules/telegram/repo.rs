@@ -232,6 +232,25 @@ impl TelegramRepo {
         Ok(())
     }
 
+    /// Fetch the on-disk file path associated with an inbox row, if any.
+    /// Used by the delete command so it can unlink the file before
+    /// dropping the row. Returns `Ok(None)` when the row is gone or the
+    /// item is pure text.
+    pub fn inbox_item_file_path(&self, id: i64) -> Result<Option<String>> {
+        let nested = self
+            .conn
+            .query_row(
+                "SELECT file_path FROM inbox WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?;
+        // query_row wraps the row in an Option (row-present?); the
+        // column itself is nullable, so we collapse both layers into
+        // a single Option — the caller only cares "is there a blob".
+        Ok(nested.flatten())
+    }
+
     pub fn mark_inbox_routed(&mut self, id: i64, target: &str) -> Result<()> {
         self.conn.execute(
             "UPDATE inbox SET routed_to = ?1 WHERE id = ?2",
@@ -525,6 +544,39 @@ mod tests {
         let id = repo.insert_text_inbox(1, "x", 1).unwrap();
         repo.delete_inbox_item(id).unwrap();
         assert!(repo.list_inbox(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn inbox_item_file_path_returns_stored_blob_path() {
+        let mut repo = fresh();
+        let id = repo
+            .insert_media_inbox(
+                1,
+                "voice",
+                Some("/tmp/abc.ogg"),
+                Some("audio/ogg"),
+                Some(3),
+                None,
+                1,
+            )
+            .unwrap();
+        assert_eq!(
+            repo.inbox_item_file_path(id).unwrap().as_deref(),
+            Some("/tmp/abc.ogg")
+        );
+    }
+
+    #[test]
+    fn inbox_item_file_path_is_none_for_text() {
+        let mut repo = fresh();
+        let id = repo.insert_text_inbox(1, "x", 1).unwrap();
+        assert!(repo.inbox_item_file_path(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn inbox_item_file_path_is_none_for_missing_row() {
+        let repo = fresh();
+        assert!(repo.inbox_item_file_path(9999).unwrap().is_none());
     }
 
     #[test]

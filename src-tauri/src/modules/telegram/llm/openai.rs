@@ -200,6 +200,7 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
                 id,
                 name,
                 args_json,
+                signature: None,
             });
         }
     }
@@ -218,7 +219,7 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::telegram::llm::{ChatMessage, Role};
+    use crate::modules::telegram::llm::ChatMessage;
 
     #[test]
     fn to_wire_encodes_messages_and_tools() {
@@ -252,6 +253,7 @@ mod tests {
             id: "call_1".into(),
             name: "get_battery".into(),
             args_json: "{}".into(),
+            signature: None,
         });
         let wire = message_to_wire(&assistant);
         assert_eq!(wire["role"], "assistant");

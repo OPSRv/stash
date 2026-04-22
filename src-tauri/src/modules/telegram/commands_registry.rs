@@ -42,12 +42,11 @@ pub struct InlineButton {
     pub callback_data: String,
 }
 
-/// Context handed to every handler. Carries the chat id plus a Tauri
-/// `AppHandle` so handlers can `emit` cross-module refresh events
-/// (e.g. `/note` nudges the Notes panel to reload).
+/// Context handed to every handler. Carries a Tauri `AppHandle` so
+/// handlers can `emit` cross-module refresh events (e.g. `/note` nudges
+/// the Notes panel to reload).
 #[derive(Clone)]
 pub struct Ctx {
-    pub chat_id: i64,
     pub app: tauri::AppHandle,
 }
 

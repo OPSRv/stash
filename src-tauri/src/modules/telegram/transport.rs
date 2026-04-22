@@ -34,9 +34,6 @@ pub enum DispatchAction {
     /// Paired user sent plain text. Phase 1.5 pipes this into the inbox;
     /// for now the caller drops it.
     IngestText { chat_id: i64, text: String },
-    /// Paired user hit an unknown slash-command. Static reply from here
-    /// so tests can assert the exact wording.
-    UnknownCommand { chat_id: i64, name: String },
 }
 
 /// Parse an inbound text message + chat_id into a dispatcher action while
@@ -310,10 +307,7 @@ async fn handle_update(
             if let Some(handler) = state.find_command(&name) {
                 let reply = handler
                     .handle(
-                        crate::modules::telegram::commands_registry::Ctx {
-                            chat_id,
-                            app: app.clone(),
-                        },
+                        crate::modules::telegram::commands_registry::Ctx { app: app.clone() },
                         &args,
                     )
                     .await;
@@ -373,11 +367,6 @@ async fn handle_update(
                     }
                 }
             }
-        }
-        DispatchAction::UnknownCommand { name, .. } => {
-            state
-                .sender
-                .enqueue(chat_id, format!("❓ Невідома команда: /{name}"));
         }
     }
     let _ = app.emit("telegram:status_changed", ());
@@ -510,6 +499,10 @@ async fn handle_media(
         let app_for_task = app.clone();
         let state_for_task = Arc::clone(state);
         let chat_for_task = chat_id;
+        // Tell the UI transcription started so the Inbox panel can
+        // surface a per-row spinner while Whisper chews on the file.
+        use tauri::Emitter;
+        let _ = app.emit("telegram:transcribing", inbox_id);
         tauri::async_runtime::spawn(async move {
             match crate::modules::whisper::commands::transcribe_with_active_model(
                 &app_for_task,
@@ -521,12 +514,13 @@ async fn handle_media(
                 Ok(text) => {
                     let trimmed = text.trim().to_string();
                     if trimmed.is_empty() {
+                        // Nothing usable came back — clear the UI spinner.
+                        let _ = app_for_task.emit("telegram:transcribe_failed", inbox_id);
                         return;
                     }
                     if let Ok(mut repo) = state_for_task.repo.lock() {
                         let _ = repo.set_inbox_transcript(inbox_id, &trimmed);
                     }
-                    use tauri::Emitter;
                     let _ = app_for_task.emit("telegram:inbox_updated", inbox_id);
                     let preview = trimmed.chars().take(200).collect::<String>();
                     let reply = if trimmed.chars().count() > 200 {
@@ -538,6 +532,7 @@ async fn handle_media(
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "whisper transcription failed");
+                    let _ = app_for_task.emit("telegram:transcribe_failed", inbox_id);
                     state_for_task
                         .sender
                         .enqueue(chat_for_task, format!("⚠️ Whisper не впорався: {e}"));
@@ -581,10 +576,7 @@ async fn handle_callback(
         Some(
             handler
                 .handle(
-                    crate::modules::telegram::commands_registry::Ctx {
-                        chat_id: user_id,
-                        app: app.clone(),
-                    },
+                    crate::modules::telegram::commands_registry::Ctx { app: app.clone() },
                     &action,
                 )
                 .await,

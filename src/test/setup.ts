@@ -7,8 +7,24 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (p: string) => `asset://localhost/${p}`,
 }));
 
+// Event mock — remembers listeners per event name and exposes `__emit`
+// so tests can drive UI paths that react to Tauri events without going
+// through the real IPC. `listen` still returns an unsubscribe fn so
+// existing test assertions keep working unchanged.
+const __listeners = new Map<string, Set<(payload: unknown) => void>>();
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn().mockResolvedValue(() => {}),
+  listen: vi.fn(async (event: string, handler: (payload: { payload: unknown }) => void) => {
+    const bag = __listeners.get(event) ?? new Set();
+    const wrapped = (payload: unknown) => handler({ payload } as { payload: unknown });
+    bag.add(wrapped);
+    __listeners.set(event, bag);
+    return () => {
+      bag.delete(wrapped);
+    };
+  }),
+  __emit: (event: string, payload: unknown) => {
+    __listeners.get(event)?.forEach((fn) => fn(payload));
+  },
 }));
 
 vi.mock('@tauri-apps/api/window', () => {

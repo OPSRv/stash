@@ -31,26 +31,14 @@ use super::state::TelegramState;
 pub const TOOL_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct ToolCtx {
-    /// Tauri handle for cross-module events / shell actions. Wrapped
-    /// in `Option` so unit tests can construct a `ToolCtx` without a
-    /// running Tauri runtime — tools that actually need it surface a
-    /// clear error when the handle is absent.
-    pub app: Option<tauri::AppHandle>,
     pub state: Arc<TelegramState>,
+    /// Tauri handle for tools that dispatch slash-commands or emit
+    /// cross-module events. `None` in unit tests that don't exercise
+    /// those paths — tools requiring it surface a clear error.
+    pub app: Option<tauri::AppHandle>,
     /// Unix epoch milliseconds. Passed in by the orchestrator so
     /// tests can inject a deterministic clock.
     pub now_ms: i64,
-}
-
-impl ToolCtx {
-    /// Accessor for handlers that *require* the AppHandle. Using
-    /// this over `.app.as_ref().ok_or(...)` keeps the error message
-    /// uniform across tools.
-    pub fn app(&self) -> Result<&tauri::AppHandle, String> {
-        self.app
-            .as_ref()
-            .ok_or_else(|| "tool requires AppHandle (missing in this context)".to_string())
-    }
 }
 
 #[async_trait]
@@ -59,15 +47,6 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &'static str;
     fn schema(&self) -> Value;
     async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String>;
-
-    /// Tools that touch only local state can run in parallel with
-    /// peer calls in the same assistant turn. Default `false`
-    /// (serialized) — opt in when you know the tool has no shared
-    /// mutable dependency. Currently advisory; the orchestrator will
-    /// read this in a later task.
-    fn is_parallel_safe(&self) -> bool {
-        false
-    }
 }
 
 pub struct ToolRegistry {
@@ -233,11 +212,9 @@ mod tests {
     }
 
     fn fake_ctx() -> ToolCtx {
-        // `app` is `None` in unit tests — the test tools don't read
-        // it. Production orchestration always passes `Some(handle)`.
         ToolCtx {
-            app: None,
             state: fresh_state(),
+            app: None,
             now_ms: 0,
         }
     }
@@ -260,6 +237,7 @@ mod tests {
             id: "c1".into(),
             name: "echo".into(),
             args_json: "{\"hello\":\"world\"}".into(),
+            signature: None,
         };
         let out = reg.invoke(&ctx, &call).await.unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
@@ -274,6 +252,7 @@ mod tests {
             id: "c1".into(),
             name: "nope".into(),
             args_json: "{}".into(),
+            signature: None,
         };
         assert!(reg.invoke(&ctx, &call).await.unwrap_err().contains("unknown tool"));
     }
@@ -287,6 +266,7 @@ mod tests {
             id: "c1".into(),
             name: "hang".into(),
             args_json: "{}".into(),
+            signature: None,
         };
         let res = reg.invoke(&ctx, &call).await;
         assert!(res.unwrap_err().contains("timed out"));
@@ -317,6 +297,7 @@ mod tests {
             id: "c1".into(),
             name: "echo".into(),
             args_json: "".into(),
+            signature: None,
         };
         let out = reg.invoke(&ctx, &call).await.unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();

@@ -185,12 +185,33 @@ pub fn telegram_delete_inbox_item(
     state: State<'_, Arc<TelegramState>>,
     id: i64,
 ) -> Result<(), String> {
+    // Snapshot the file path *before* we drop the row so we can unlink
+    // the blob. We tolerate a missing row here — the frontend may race a
+    // duplicate delete, which should be a no-op instead of a hard error.
+    let file_path = {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.inbox_item_file_path(id).map_err(|e| e.to_string())?
+    };
+
     state
         .repo
         .lock()
         .map_err(|e| e.to_string())?
         .delete_inbox_item(id)
         .map_err(|e| e.to_string())?;
+
+    if let Some(p) = file_path {
+        let path = std::path::PathBuf::from(&p);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            // Missing file is fine — the row may have been orphaned by
+            // an earlier manual cleanup, or the file was never saved
+            // successfully in the first place.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => tracing::warn!(path = %p, error = %e, "telegram: failed to unlink inbox blob"),
+        }
+    }
+
     let _ = app.emit("telegram:inbox_updated", id);
     Ok(())
 }
@@ -259,6 +280,146 @@ pub fn telegram_delete_memory(
 ) -> Result<bool, String> {
     let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
     repo.memory_delete(id).map_err(|e| e.to_string())
+}
+
+/// Create a Notes entry from a single inbox item. For text messages the
+/// body carries the text verbatim; for voice the transcript (if any) is
+/// used as the body. Any attached file is copied into the new note's
+/// attachments dir so deleting the inbox row later doesn't orphan it.
+/// The inbox row is marked `routed_to = "notes"` on success.
+#[tauri::command]
+pub fn telegram_send_inbox_to_notes(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+    notes_state: State<'_, crate::modules::notes::commands::NotesState>,
+    id: i64,
+) -> Result<i64, String> {
+    use tauri::Manager;
+    let item = {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.list_inbox(500)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|i| i.id == id)
+            .ok_or_else(|| format!("inbox item {id} not found"))?
+    };
+
+    let body = pick_note_body(&item);
+    let title = pick_note_title(&item, &body);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let note_id = notes_state
+        .repo
+        .lock()
+        .unwrap()
+        .create(&title, &body, now)
+        .map_err(|e| e.to_string())?;
+
+    if let Some(rel) = item.file_path.as_deref() {
+        let data_dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| format!("app_data_dir: {e}"))?;
+        let src = data_dir.join(rel);
+        if src.is_file() {
+            let dir = data_dir
+                .join("notes")
+                .join("attachments")
+                .join(note_id.to_string());
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let original_name = src
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("file")
+                .to_string();
+            let safe: String = original_name
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            let suffix = format!(
+                "{:08x}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0)
+                    & 0xFFFF_FFFF
+            );
+            let dest = dir.join(format!("{suffix}_{safe}"));
+            std::fs::copy(&src, &dest).map_err(|e| format!("copy: {e}"))?;
+            let size = std::fs::metadata(&dest).ok().map(|m| m.len() as i64);
+            let abs = dest
+                .to_str()
+                .ok_or_else(|| "attachment path is not valid UTF-8".to_string())?;
+            notes_state
+                .repo
+                .lock()
+                .unwrap()
+                .add_attachment(
+                    note_id,
+                    abs,
+                    &original_name,
+                    item.mime_type.as_deref(),
+                    size,
+                    now,
+                )
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
+    state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .mark_inbox_routed(id, "notes")
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("telegram:inbox_updated", id);
+    let _ = app.emit("notes:changed", note_id);
+    Ok(note_id)
+}
+
+fn pick_note_body(item: &crate::modules::telegram::repo::InboxItem) -> String {
+    if let Some(t) = item.text_content.as_deref() {
+        if !t.trim().is_empty() {
+            return t.to_string();
+        }
+    }
+    if let Some(t) = item.transcript.as_deref() {
+        if !t.trim().is_empty() {
+            return t.to_string();
+        }
+    }
+    if let Some(c) = item.caption.as_deref() {
+        if !c.trim().is_empty() {
+            return c.to_string();
+        }
+    }
+    String::new()
+}
+
+fn pick_note_title(
+    item: &crate::modules::telegram::repo::InboxItem,
+    body: &str,
+) -> String {
+    let first_line = body.lines().next().unwrap_or("").trim();
+    if !first_line.is_empty() {
+        return first_line.chars().take(80).collect();
+    }
+    if let Some(p) = item.file_path.as_deref() {
+        if let Some(name) = p.rsplit(['/', '\\']).next() {
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    format!("[{}]", item.kind)
 }
 
 #[tauri::command]

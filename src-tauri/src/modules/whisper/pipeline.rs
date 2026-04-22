@@ -6,6 +6,7 @@
 
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
@@ -91,30 +92,22 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
         .ok_or_else(|| PipelineError::Decode("unknown sample rate".into()))?;
     let track_id = track.id;
 
-    let mut decoder = symphonia::default::get_codecs()
+    let mut decoder = match symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())
-        .map_err(|e| {
-            // Symphonia's `unsupported codec` surface is opaque. If we
-            // recognise an Opus stream, surface actionable text rather than
-            // the raw Symphonia message.
-            let msg = e.to_string();
-            if msg.to_lowercase().contains("codec")
-                && path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|s| s.eq_ignore_ascii_case("webm"))
-                    .unwrap_or(false)
-            {
-                PipelineError::Decode(
-                    "this recording uses Opus (webm), which the transcription \
-                     pipeline can't decode yet. Re-record the note — new \
-                     recordings use mp4/AAC, which works out of the box."
-                        .into(),
-                )
-            } else {
-                PipelineError::Decode(msg)
+    {
+        Ok(d) => d,
+        Err(e) => {
+            // Symphonia 0.5 has no Opus codec. Telegram voice ships as
+            // OGG/Opus, so fall back to the pure-Rust opus path when
+            // the file looks like an Ogg container (the sniffer reads
+            // the first few bytes without committing).
+            drop(format);
+            if is_ogg_opus(path).unwrap_or(false) {
+                return decode_ogg_opus(path);
             }
-        })?;
+            return Err(PipelineError::Decode(e.to_string()));
+        }
+    };
 
     let mut samples: Vec<f32> = Vec::new();
 
@@ -146,6 +139,100 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
         return Err(PipelineError::Empty);
     }
     Ok(DecodedPcm { samples, sample_rate })
+}
+
+/// Peek the first few bytes to detect an OGG container carrying Opus.
+/// An Ogg page starts with `OggS`, and the first Opus packet carries
+/// an `OpusHead` magic 28 bytes into the first page. Reading 64 bytes
+/// is enough to catch it without mis-identifying Vorbis-in-Ogg.
+fn is_ogg_opus(path: &Path) -> std::io::Result<bool> {
+    let mut f = File::open(path)?;
+    let mut head = [0u8; 64];
+    let n = f.read(&mut head)?;
+    if n < 4 || &head[..4] != b"OggS" {
+        return Ok(false);
+    }
+    // Scan what we have for OpusHead. Simpler than parsing the page
+    // layout — false positives would require "OpusHead" to appear in
+    // a Vorbis comment header, which isn't realistic.
+    Ok(head[..n].windows(8).any(|w| w == b"OpusHead"))
+}
+
+/// Pure-Rust OGG/Opus decode. Demuxes the Ogg container with `ogg`,
+/// reads the 19-byte OpusHead (magic + channel count + preskip +
+/// input sample rate), then feeds every audio packet into libopus
+/// (`opus` crate). Libopus always decodes at 48 kHz internally — we
+/// set `sample_rate = 48_000` on the returned buffer so the existing
+/// resampler handles the step down to Whisper's 16 kHz.
+fn decode_ogg_opus(path: &Path) -> Result<DecodedPcm, PipelineError> {
+    use ogg::reading::PacketReader;
+
+    let mut file = File::open(path).map_err(|e| PipelineError::Io(e.to_string()))?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|e| PipelineError::Io(e.to_string()))?;
+    let mut reader = PacketReader::new(file);
+
+    // --- OpusHead (first packet) -----------------------------------
+    let head = reader
+        .read_packet_expected()
+        .map_err(|e| PipelineError::Decode(format!("ogg: {e}")))?;
+    if head.data.len() < 19 || &head.data[..8] != b"OpusHead" {
+        return Err(PipelineError::Decode("not an OpusHead packet".into()));
+    }
+    let channels = head.data[9];
+    if channels == 0 || channels > 2 {
+        return Err(PipelineError::Decode(format!(
+            "unsupported Opus channel count: {channels}"
+        )));
+    }
+    let opus_channels = if channels == 1 {
+        opus::Channels::Mono
+    } else {
+        opus::Channels::Stereo
+    };
+
+    // --- OpusTags (second packet) — skip. --------------------------
+    let _ = reader
+        .read_packet_expected()
+        .map_err(|e| PipelineError::Decode(format!("ogg tags: {e}")))?;
+
+    // --- Decode loop -----------------------------------------------
+    let mut decoder = opus::Decoder::new(48_000, opus_channels)
+        .map_err(|e| PipelineError::Decode(format!("opus init: {e}")))?;
+    // 120ms at 48 kHz is the max Opus frame size; sized per-channel.
+    let max_frame = 5_760 * channels as usize;
+    let mut scratch = vec![0f32; max_frame];
+    let mut samples: Vec<f32> = Vec::new();
+
+    loop {
+        match reader.read_packet() {
+            Ok(Some(pkt)) => {
+                let n = decoder
+                    .decode_float(&pkt.data, &mut scratch, false)
+                    .map_err(|e| PipelineError::Decode(format!("opus decode: {e}")))?;
+                if channels == 1 {
+                    samples.extend_from_slice(&scratch[..n]);
+                } else {
+                    // Stereo → mono downmix on the fly.
+                    for f in 0..n {
+                        let l = scratch[f * 2];
+                        let r = scratch[f * 2 + 1];
+                        samples.push((l + r) * 0.5);
+                    }
+                }
+            }
+            Ok(None) => break,
+            Err(e) => return Err(PipelineError::Decode(format!("ogg read: {e}"))),
+        }
+    }
+
+    if samples.is_empty() {
+        return Err(PipelineError::Empty);
+    }
+    Ok(DecodedPcm {
+        samples,
+        sample_rate: 48_000,
+    })
 }
 
 /// Downmix any supported `AudioBufferRef` to a mono f32 tail. Symphonia's
@@ -337,5 +424,52 @@ mod tests {
     fn error_display_is_informative() {
         assert!(format!("{}", PipelineError::Empty).contains("no audio"));
         assert!(format!("{}", PipelineError::Io("x".into())).contains("x"));
+    }
+
+    fn write_tmp(bytes: &[u8]) -> std::path::PathBuf {
+        use std::io::Write;
+        let path = std::env::temp_dir().join(format!(
+            "stash-ogg-sniff-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn sniff_accepts_ogg_opus_signature() {
+        // Minimal Ogg page header (30 bytes) + OpusHead magic.
+        // Fields past the magic don't matter for the sniffer.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"OggS"); // capture pattern
+        buf.extend_from_slice(&[0; 26]); // rest of page header
+        buf.extend_from_slice(b"OpusHead");
+        let p = write_tmp(&buf);
+        assert!(is_ogg_opus(&p).unwrap());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn sniff_rejects_ogg_vorbis() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"OggS");
+        buf.extend_from_slice(&[0; 26]);
+        // Vorbis identification packet begins with 0x01 + "vorbis".
+        buf.push(0x01);
+        buf.extend_from_slice(b"vorbis");
+        let p = write_tmp(&buf);
+        assert!(!is_ogg_opus(&p).unwrap());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn sniff_rejects_non_ogg() {
+        let p = write_tmp(b"RIFF\0\0\0\0WAVE");
+        assert!(!is_ogg_opus(&p).unwrap());
+        let _ = std::fs::remove_file(&p);
     }
 }

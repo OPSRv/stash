@@ -1,4 +1,4 @@
-use crate::modules::notes::repo::{Note, NoteSummary, NotesRepo};
+use crate::modules::notes::repo::{Note, NoteAttachment, NoteSummary, NotesRepo};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
@@ -109,20 +109,202 @@ pub fn notes_delete(
     // Fetch first so we can clean up the audio file the row points to. If
     // the row is missing, treat the delete as a no-op rather than an error —
     // the UI has already moved on.
-    let maybe = to_string_err(state.repo.lock().unwrap().get(id))?;
-    if let Some(note) = maybe {
-        if let Some(p) = note.audio_path.as_deref() {
-            // Only delete files that live under our audio dir — defence in
-            // depth against a corrupted row pointing somewhere unexpected.
-            if let Ok(base) = audio_dir(&app) {
-                let path = Path::new(p);
-                if path.starts_with(&base) {
-                    let _ = std::fs::remove_file(path);
+    let (maybe_audio, attachments) = {
+        let repo = state.repo.lock().unwrap();
+        let note = to_string_err(repo.get(id))?;
+        let attach = to_string_err(repo.list_attachments(id))?;
+        (note.and_then(|n| n.audio_path), attach)
+    };
+    if let Some(p) = maybe_audio {
+        // Only delete files that live under our audio dir — defence in
+        // depth against a corrupted row pointing somewhere unexpected.
+        if let Ok(base) = audio_dir(&app) {
+            let path = Path::new(&p);
+            if path.starts_with(&base) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    // Attachments are always owned copies under `notes/attachments/`,
+    // so unlink unconditionally. Missing file is not an error.
+    let attach_base = attachments_root(&app).ok();
+    for a in attachments {
+        let path = Path::new(&a.file_path);
+        if let Some(ref base) = attach_base {
+            if path.starts_with(base) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    // Drop the row. `ON DELETE CASCADE` on note_attachments cleans the
+    // DB side; file unlinks above handle the disk side.
+    to_string_err(state.repo.lock().unwrap().delete(id))
+}
+
+fn attachments_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("notes")
+        .join("attachments");
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    Ok(base)
+}
+
+fn attachments_dir(app: &tauri::AppHandle, note_id: i64) -> Result<PathBuf, String> {
+    let dir = attachments_root(app)?.join(note_id.to_string());
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Sanitise a filename down to portable ASCII-safe form. We keep the
+/// original extension verbatim so mime-detection works on the copy,
+/// but strip separators and weird chars that could let a malicious
+/// name escape the attachments directory.
+fn sanitize_filename(input: &str) -> String {
+    let name = input.rsplit(['/', '\\']).next().unwrap_or(input);
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "file".to_string()
+    } else {
+        cleaned
+    }
+}
+
+#[tauri::command]
+pub fn notes_list_attachments(
+    state: State<'_, NotesState>,
+    note_id: i64,
+) -> Result<Vec<NoteAttachment>, String> {
+    to_string_err(state.repo.lock().unwrap().list_attachments(note_id))
+}
+
+/// Copy `source_path` into the note's attachments dir and record a
+/// row. Callers pass the absolute path the user selected (drag-drop
+/// target or picker result); we never read from arbitrary locations
+/// silently — the file is *copied*, so removing the attachment never
+/// touches the original.
+#[tauri::command]
+pub fn notes_add_attachment(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    note_id: i64,
+    source_path: String,
+) -> Result<NoteAttachment, String> {
+    let src = PathBuf::from(&source_path);
+    if !src.is_file() {
+        return Err(format!("source is not a file: {source_path}"));
+    }
+    let original_name = src
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file")
+        .to_string();
+    let safe = sanitize_filename(&original_name);
+    let dir = attachments_dir(&app, note_id)?;
+    // Prefix with an 8-char hex suffix to avoid collisions when the same
+    // filename appears twice on one note.
+    let suffix = {
+        let mut t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        t ^= (note_id as u64).rotate_left(13);
+        format!("{:08x}", t & 0xFFFF_FFFF)
+    };
+    let dest_name = format!("{suffix}_{safe}");
+    let dest = dir.join(&dest_name);
+    std::fs::copy(&src, &dest).map_err(|e| format!("copy failed: {e}"))?;
+
+    let size_bytes = std::fs::metadata(&dest).ok().map(|m| m.len() as i64);
+    let mime_type = mime_from_extension(&dest);
+
+    let abs = dest
+        .to_str()
+        .ok_or_else(|| "attachment path is not valid UTF-8".to_string())?
+        .to_string();
+
+    let id = to_string_err(state.repo.lock().unwrap().add_attachment(
+        note_id,
+        &abs,
+        &original_name,
+        mime_type.as_deref(),
+        size_bytes,
+        now(),
+    ))?;
+    let att = to_string_err(state.repo.lock().unwrap().get_attachment(id))?
+        .ok_or_else(|| "attachment vanished immediately after insert".to_string())?;
+    use tauri::Emitter;
+    let _ = app.emit("notes:attachments_changed", note_id);
+    Ok(att)
+}
+
+#[tauri::command]
+pub fn notes_remove_attachment(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    id: i64,
+) -> Result<(), String> {
+    let removed_path = to_string_err(state.repo.lock().unwrap().delete_attachment(id))?;
+    if let Some(p) = removed_path {
+        // Only unlink files under our attachments root, guarding against
+        // poisoned rows pointing outside the sandbox.
+        if let Ok(base) = attachments_root(&app) {
+            let path = Path::new(&p);
+            if path.starts_with(&base) {
+                match std::fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => tracing::warn!(%p, error = %e, "notes: failed to unlink attachment"),
                 }
             }
         }
     }
-    to_string_err(state.repo.lock().unwrap().delete(id))
+    use tauri::Emitter;
+    let _ = app.emit("notes:attachments_changed", id);
+    Ok(())
+}
+
+/// Best-effort mime-type guess from extension. Accurate enough for UI
+/// dispatch (image/video/audio vs. doc); anything unknown becomes
+/// `None` and the frontend renders a generic file chip.
+fn mime_from_extension(p: &Path) -> Option<String> {
+    let ext = p.extension()?.to_str()?.to_ascii_lowercase();
+    let m = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "heic" | "heif" => "image/heif",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "oga" => "audio/ogg",
+        "opus" => "audio/opus",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "txt" => "text/plain",
+        "md" => "text/markdown",
+        "json" => "application/json",
+        _ => return None,
+    };
+    Some(m.to_string())
 }
 
 const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;

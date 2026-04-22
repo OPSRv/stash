@@ -1,0 +1,8 @@
+# `audiopus_sys` bundles libopus sources with a pre-3.5 CMakeLists.txt.
+# Modern CMake (4.x, shipped with current Xcode) refuses to run it
+# without an explicit policy bump. Setting the env var here makes every
+# CMake invocation (including transitive dependency build scripts)
+# accept the old file, so `cargo build` / `cargo run` / `tauri build`
+# all work out of the box with no extra shell exports.
+[env]
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"

@@ -211,6 +211,7 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
                     id,
                     name,
                     args_json,
+                    signature: None,
                 });
             }
             _ => {
@@ -259,6 +260,7 @@ mod tests {
             id: "toolu_1".into(),
             name: "get_battery".into(),
             args_json: "{\"scope\":\"now\"}".into(),
+            signature: None,
         });
         let wire = assistant_to_wire(&a);
         assert_eq!(wire["role"], "assistant");

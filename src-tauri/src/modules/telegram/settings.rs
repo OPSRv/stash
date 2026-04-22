@@ -6,7 +6,6 @@
 //! Missing keys default to "enabled" — a pristine install sends all
 //! notifications out of the box; the user opts **out**, not in.
 
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -168,17 +167,7 @@ pub fn category_enabled(state: &TelegramState, category: super::notifier::Catego
         Category::DownloadComplete => settings.download_complete,
         Category::BatteryLow => settings.battery_low,
         Category::Calendar => settings.calendar,
-        Category::Generic => true,
     }
-}
-
-/// Thin wrapper used by async tasks that hold `Arc<TelegramState>` and
-/// don't want to deal with borrowing the inner value.
-pub fn category_enabled_arc(
-    state: &Arc<TelegramState>,
-    category: super::notifier::Category,
-) -> bool {
-    category_enabled(state.as_ref(), category)
 }
 
 #[cfg(test)]
@@ -187,6 +176,7 @@ mod tests {
     use crate::modules::telegram::keyring::MemStore;
     use crate::modules::telegram::repo::TelegramRepo;
     use rusqlite::Connection;
+    use std::sync::Arc;
 
     fn fresh() -> TelegramState {
         let repo = TelegramRepo::new(Connection::open_in_memory().unwrap()).unwrap();

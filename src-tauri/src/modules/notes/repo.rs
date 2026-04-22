@@ -14,6 +14,20 @@ fn escape_like(s: &str) -> String {
     out
 }
 
+/// A file attached to a note. The `file_path` is absolute and points
+/// at a copy the app owns under `notes/attachments/<note_id>/…` — we
+/// never link straight into someone else's directory.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct NoteAttachment {
+    pub id: i64,
+    pub note_id: i64,
+    pub file_path: String,
+    pub original_name: String,
+    pub mime_type: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Note {
     pub id: i64,
@@ -59,6 +73,10 @@ pub struct NotesRepo {
 
 impl NotesRepo {
     pub fn new(conn: Connection) -> Result<Self> {
+        // Enable FK enforcement for this connection so the attachments
+        // table's `ON DELETE CASCADE` actually fires — SQLite keeps
+        // foreign keys off by default for backwards compatibility.
+        conn.execute("PRAGMA foreign_keys = ON", [])?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS notes (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +86,19 @@ impl NotesRepo {
                 updated_at  INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_notes_updated
-                ON notes(updated_at DESC);",
+                ON notes(updated_at DESC);
+            CREATE TABLE IF NOT EXISTS note_attachments (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                note_id        INTEGER NOT NULL
+                               REFERENCES notes(id) ON DELETE CASCADE,
+                file_path      TEXT NOT NULL,
+                original_name  TEXT NOT NULL DEFAULT '',
+                mime_type      TEXT,
+                size_bytes     INTEGER,
+                created_at     INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_note_attach_note
+                ON note_attachments(note_id);",
         )?;
         // Additive migrations. `ALTER TABLE ADD COLUMN` is not idempotent in
         // SQLite, so we check the existing columns first.
@@ -175,6 +205,70 @@ impl NotesRepo {
         )?;
         let rows = stmt.query_map(params![like, LIST_PREVIEW_CHARS as i64], Self::map_summary)?;
         rows.collect()
+    }
+
+    // -------------------- attachments --------------------
+
+    pub fn add_attachment(
+        &mut self,
+        note_id: i64,
+        file_path: &str,
+        original_name: &str,
+        mime_type: Option<&str>,
+        size_bytes: Option<i64>,
+        now: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO note_attachments
+                 (note_id, file_path, original_name, mime_type, size_bytes, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![note_id, file_path, original_name, mime_type, size_bytes, now],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn list_attachments(&self, note_id: i64) -> Result<Vec<NoteAttachment>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, note_id, file_path, original_name, mime_type, size_bytes, created_at
+             FROM note_attachments
+             WHERE note_id = ?1
+             ORDER BY created_at ASC, id ASC",
+        )?;
+        let rows = stmt.query_map(params![note_id], Self::map_attachment)?;
+        rows.collect()
+    }
+
+    pub fn get_attachment(&self, id: i64) -> Result<Option<NoteAttachment>> {
+        self.conn
+            .query_row(
+                "SELECT id, note_id, file_path, original_name, mime_type, size_bytes, created_at
+                 FROM note_attachments WHERE id = ?1",
+                params![id],
+                Self::map_attachment,
+            )
+            .optional()
+    }
+
+    /// Delete an attachment row and return the stored file path so the
+    /// caller can unlink the blob. Returns `Ok(None)` when the row is
+    /// already gone — a double-delete is not an error.
+    pub fn delete_attachment(&mut self, id: i64) -> Result<Option<String>> {
+        let path = self.get_attachment(id)?.map(|a| a.file_path);
+        self.conn
+            .execute("DELETE FROM note_attachments WHERE id = ?1", params![id])?;
+        Ok(path)
+    }
+
+    fn map_attachment(row: &rusqlite::Row<'_>) -> Result<NoteAttachment> {
+        Ok(NoteAttachment {
+            id: row.get("id")?,
+            note_id: row.get("note_id")?,
+            file_path: row.get("file_path")?,
+            original_name: row.get("original_name")?,
+            mime_type: row.get("mime_type").ok(),
+            size_bytes: row.get("size_bytes").ok(),
+            created_at: row.get("created_at")?,
+        })
     }
 
     fn map_row(row: &rusqlite::Row<'_>) -> Result<Note> {
@@ -312,6 +406,53 @@ mod tests {
         let hits = repo.search_summaries("pin").unwrap();
         assert_eq!(hits[0].id, old);
         assert_eq!(hits[1].id, new);
+    }
+
+    #[test]
+    fn add_and_list_attachments_round_trip() {
+        let mut repo = fresh();
+        let note = repo.create("n", "", 1).unwrap();
+        let aid = repo
+            .add_attachment(
+                note,
+                "/tmp/x.pdf",
+                "report.pdf",
+                Some("application/pdf"),
+                Some(1024),
+                10,
+            )
+            .unwrap();
+        let list = repo.list_attachments(note).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, aid);
+        assert_eq!(list[0].file_path, "/tmp/x.pdf");
+        assert_eq!(list[0].original_name, "report.pdf");
+        assert_eq!(list[0].mime_type.as_deref(), Some("application/pdf"));
+        assert_eq!(list[0].size_bytes, Some(1024));
+    }
+
+    #[test]
+    fn delete_attachment_returns_path_for_unlink() {
+        let mut repo = fresh();
+        let note = repo.create("n", "", 1).unwrap();
+        let aid = repo
+            .add_attachment(note, "/tmp/a.bin", "a.bin", None, None, 1)
+            .unwrap();
+        let path = repo.delete_attachment(aid).unwrap();
+        assert_eq!(path.as_deref(), Some("/tmp/a.bin"));
+        assert!(repo.list_attachments(note).unwrap().is_empty());
+        // Second delete is a no-op, not a hard error.
+        assert_eq!(repo.delete_attachment(aid).unwrap(), None);
+    }
+
+    #[test]
+    fn deleting_note_cascades_attachments() {
+        let mut repo = fresh();
+        let note = repo.create("n", "", 1).unwrap();
+        repo.add_attachment(note, "/tmp/a", "a", None, None, 1).unwrap();
+        repo.add_attachment(note, "/tmp/b", "b", None, None, 2).unwrap();
+        repo.delete(note).unwrap();
+        assert!(repo.list_attachments(note).unwrap().is_empty());
     }
 
     #[test]

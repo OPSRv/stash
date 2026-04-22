@@ -39,11 +39,7 @@ impl Tool for GetBattery {
                 json!({ "present": false, "reason": "unavailable" })
             }
         })
-    }
-    fn is_parallel_safe(&self) -> bool {
-        true
-    }
-}
+    }}
 
 pub struct GetLastClip {
     state: Arc<ClipboardState>,
@@ -77,11 +73,7 @@ impl Tool for GetLastClip {
             "kind": item.kind,
             "content": item.content,
         }))
-    }
-    fn is_parallel_safe(&self) -> bool {
-        true
-    }
-}
+    }}
 
 pub struct PomodoroStatus {
     state: Arc<PomodoroState>,
@@ -126,10 +118,68 @@ impl Tool for PomodoroStatus {
             "current_block": current,
         }))
     }
-    fn is_parallel_safe(&self) -> bool {
-        true
-    }
 }
+
+/// Generic dispatcher that invokes any registered slash-command. The
+/// list of names + descriptions is injected into the conversation via
+/// a system message in `Assistant::handle`, so the model knows what it
+/// can call without a discovery round-trip.
+pub struct InvokeCommand;
+
+#[async_trait]
+impl Tool for InvokeCommand {
+    fn name(&self) -> &'static str {
+        "invoke_command"
+    }
+    fn description(&self) -> &'static str {
+        "Execute any registered Stash slash-command by name. The catalog of \
+         available commands is provided in a system message at the start of \
+         the conversation. Use this for actions like changing volume, \
+         controlling music, creating notes, etc."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Command name without the leading slash, e.g. \"volume\" or \"note\"."
+                },
+                "args": {
+                    "type": "string",
+                    "description": "Raw argument string passed to the command. Empty string when the command takes no arguments."
+                }
+            },
+            "required": ["name"],
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let name = args
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing required field: name".to_string())?
+            .trim()
+            .trim_start_matches('/');
+        if name.is_empty() {
+            return Err("command name is empty".to_string());
+        }
+        let cmd_args = args.get("args").and_then(|v| v.as_str()).unwrap_or("");
+        let app = ctx
+            .app
+            .clone()
+            .ok_or_else(|| "invoke_command requires a Tauri AppHandle (not in test)".to_string())?;
+        let handler = ctx
+            .state
+            .find_command(name)
+            .ok_or_else(|| format!("unknown command: /{name}"))?;
+        let reply = handler
+            .handle(
+                crate::modules::telegram::commands_registry::Ctx { app },
+                cmd_args,
+            )
+            .await;
+        Ok(json!({ "text": reply.text }))
+    }}
 
 #[cfg(test)]
 mod tests {
@@ -157,8 +207,8 @@ mod tests {
         let secrets: Arc<dyn crate::modules::telegram::keyring::SecretStore> =
             Arc::new(MemStore::new());
         ToolCtx {
-            app: None,
             state: Arc::new(TelegramState::new(repo, secrets)),
+            app: None,
             now_ms: 0,
         }
     }
@@ -201,5 +251,34 @@ mod tests {
         let out = PomodoroStatus::new(pomo).invoke(&ctx(), json!({})).await.unwrap();
         assert_eq!(out["status"], "idle");
         assert_eq!(out["remaining_sec"], 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn invoke_command_missing_name_errors() {
+        let err = InvokeCommand.invoke(&ctx(), json!({})).await.unwrap_err();
+        assert!(err.to_lowercase().contains("name"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn invoke_command_rejects_unknown_name() {
+        // `ctx.app` is None so the tool errors *before* looking up an
+        // unknown name — assert on that order explicitly.
+        let err = InvokeCommand
+            .invoke(&ctx(), json!({ "name": "absolutely-not-a-command" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("AppHandle"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn invoke_command_strips_leading_slash() {
+        // No AppHandle in tests, so we can't reach actual dispatch,
+        // but the tool must still accept `/name` and `name` alike —
+        // the missing-app error is produced only after name parsing.
+        let err = InvokeCommand
+            .invoke(&ctx(), json!({ "name": "/note" }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("AppHandle"));
     }
 }

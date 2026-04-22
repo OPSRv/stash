@@ -77,10 +77,6 @@ impl Tool for ListFacts {
         Ok(json!({ "facts": facts }))
     }
 
-    // Read-only; safe alongside peer calls.
-    fn is_parallel_safe(&self) -> bool {
-        true
-    }
 }
 
 pub struct ForgetFact;
@@ -134,8 +130,8 @@ mod tests {
         let secrets: Arc<dyn crate::modules::telegram::keyring::SecretStore> =
             Arc::new(MemStore::new());
         ToolCtx {
-            app: None,
             state: Arc::new(TelegramState::new(repo, secrets)),
+            app: None,
             now_ms: 1,
         }
     }

@@ -31,6 +31,10 @@ pub const HISTORY_FACTOR: usize = 4;
 
 pub struct Assistant {
     pub state: Arc<TelegramState>,
+    /// Optional Tauri handle. Needed only by tools that dispatch
+    /// slash-commands (the `invoke_command` tool). Unit tests build an
+    /// Assistant without one — tools that require it surface a clear
+    /// error when invoked in that mode.
     pub app: Option<tauri::AppHandle>,
     pub client: Box<dyn LlmClient>,
     pub tools: ToolRegistry,
@@ -81,6 +85,12 @@ impl Assistant {
                 .collect::<Vec<_>>()
                 .join("\n");
             messages.push(ChatMessage::system(format!("Known facts:\n{joined}")));
+        }
+        // Expose every registered slash-command so the model can
+        // dispatch them via the `invoke_command` tool.
+        let commands_text = list_commands_for_prompt(&self.state);
+        if !commands_text.is_empty() {
+            messages.push(ChatMessage::system(commands_text));
         }
         for row in &history {
             messages.push(history_to_message(row));
@@ -191,11 +201,34 @@ impl Assistant {
 
     fn tool_ctx(&self) -> ToolCtx {
         ToolCtx {
-            app: self.app.clone(),
             state: Arc::clone(&self.state),
+            app: self.app.clone(),
             now_ms: self.now_ms(),
         }
     }
+}
+
+/// Produce a short catalog of registered slash-commands so the model
+/// knows what it can dispatch through the `invoke_command` tool. The
+/// registry is the single source of truth — adding a new command in
+/// `lib.rs` surfaces to the AI with no extra wiring.
+fn list_commands_for_prompt(state: &TelegramState) -> String {
+    let reg = match state.commands.read() {
+        Ok(r) => r,
+        Err(_) => return String::new(),
+    };
+    let handlers = reg.enumerate();
+    if handlers.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "Available Stash commands (dispatch with the `invoke_command` tool, \
+         arguments passed as a single free-text string):\n",
+    );
+    for h in handlers {
+        out.push_str(&format!("- {} — {} ({})\n", h.name(), h.description(), h.usage()));
+    }
+    out.trim_end().to_string()
 }
 
 /// Serialize an assistant row for the chat table. Plain text replies
@@ -209,11 +242,15 @@ fn encode_assistant_row(text: &str, calls: &[ToolCall]) -> String {
     let calls_json: Vec<serde_json::Value> = calls
         .iter()
         .map(|c| {
-            serde_json::json!({
+            let mut obj = serde_json::json!({
                 "id": c.id,
                 "name": c.name,
                 "args": c.args_json,
-            })
+            });
+            if let Some(sig) = &c.signature {
+                obj["sig"] = serde_json::Value::String(sig.clone());
+            }
+            obj
         })
         .collect();
     let envelope = serde_json::json!({
@@ -241,6 +278,10 @@ fn decode_assistant_row(content: &str) -> (String, Vec<ToolCall>) {
                                 id: c.get("id")?.as_str()?.to_string(),
                                 name: c.get("name")?.as_str()?.to_string(),
                                 args_json: c.get("args")?.as_str()?.to_string(),
+                                signature: c
+                                    .get("sig")
+                                    .and_then(|s| s.as_str())
+                                    .map(str::to_string),
                             })
                         })
                         .collect()
@@ -283,6 +324,7 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::reminders::ListReminders);
     tools.register(super::tools::reminders::CancelReminder);
     tools.register(super::tools::stash::GetBattery);
+    tools.register(super::tools::stash::InvokeCommand);
     if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>() {
         tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));
     }
@@ -337,7 +379,7 @@ fn history_to_message(row: &ChatRow) -> ChatMessage {
 mod tests {
     use super::*;
     use crate::modules::telegram::keyring::{MemStore, SecretStore};
-    use crate::modules::telegram::llm::{LlmResponse, ToolSpec};
+    use crate::modules::telegram::llm::LlmResponse;
     use crate::modules::telegram::repo::TelegramRepo;
     use async_trait::async_trait;
     use rusqlite::Connection;
@@ -395,6 +437,7 @@ mod tests {
                 id: call_id.into(),
                 name: name.into(),
                 args_json: args.into(),
+            signature: None,
             }],
         }
     }
@@ -587,6 +630,7 @@ mod tests {
             id: "c1".into(),
             name: "list_facts".into(),
             args_json: "{}".into(),
+            signature: None,
         }];
         let encoded = encode_assistant_row("picking", &calls);
         let (text, decoded) = decode_assistant_row(&encoded);
@@ -595,5 +639,16 @@ mod tests {
         // Plain text bypasses the envelope.
         assert_eq!(encode_assistant_row("hi", &[]), "hi");
         assert_eq!(decode_assistant_row("hi"), ("hi".to_string(), vec![]));
+
+        // Gemini thoughtSignature survives round-trip so the next LLM
+        // request can echo it back on the functionCall part.
+        let calls_sig = vec![ToolCall {
+            id: "c1".into(),
+            name: "note".into(),
+            args_json: "{}".into(),
+            signature: Some("opaque-sig".into()),
+        }];
+        let (_, decoded_sig) = decode_assistant_row(&encode_assistant_row("", &calls_sig));
+        assert_eq!(decoded_sig[0].signature.as_deref(), Some("opaque-sig"));
     }
 }

@@ -194,9 +194,17 @@ fn assistant_to_wire(msg: &ChatMessage) -> Value {
     }
     for c in &msg.tool_calls {
         let args: Value = serde_json::from_str(&c.args_json).unwrap_or(json!({}));
-        parts.push(json!({
-            "functionCall": { "name": c.name, "args": args },
-        }));
+        let mut part = serde_json::Map::new();
+        part.insert(
+            "functionCall".into(),
+            json!({ "name": c.name, "args": args }),
+        );
+        // Gemini 2.5 rejects echoed functionCall parts that lack the
+        // `thoughtSignature` it originally emitted — see from_wire.
+        if let Some(sig) = &c.signature {
+            part.insert("thoughtSignature".into(), Value::String(sig.clone()));
+        }
+        parts.push(Value::Object(part));
     }
     json!({ "role": "model", "parts": parts })
 }
@@ -245,13 +253,19 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
                 .get("args")
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "{}".to_string());
-            // Gemini doesn't issue a call id — synthesise one from
-            // the name so ToolCall stays uniform across providers.
+            // Gemini 2.5 attaches an opaque thoughtSignature alongside
+            // each functionCall part. We must echo it back verbatim on
+            // the next request, otherwise Gemini returns 400.
+            let signature = part
+                .get("thoughtSignature")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             let id = format!("google-{}-{}", name, tool_calls.len());
             tool_calls.push(ToolCall {
                 id,
                 name,
                 args_json,
+                signature,
             });
         }
     }
@@ -298,6 +312,7 @@ mod tests {
             id: "ignored-on-wire".into(),
             name: "get_battery".into(),
             args_json: "{\"scope\":\"now\"}".into(),
+            signature: None,
         });
         let wire = assistant_to_wire(&a);
         assert_eq!(wire["role"], "model");
@@ -434,5 +449,53 @@ mod tests {
     fn from_wire_missing_candidates_is_bad_response() {
         let body = json!({ "error": "busted" });
         assert!(matches!(from_wire(&body), Err(LlmError::BadResponse(_))));
+    }
+
+    #[test]
+    fn from_wire_captures_thought_signature_on_function_call() {
+        let body = json!({
+            "candidates": [{
+                "content": {
+                    "role": "model",
+                    "parts": [
+                        { "functionCall": { "name": "note", "args": {} },
+                          "thoughtSignature": "ZmFrZS1zaWc=" }
+                    ]
+                }
+            }]
+        });
+        let out = from_wire(&body).unwrap();
+        assert_eq!(out.tool_calls.len(), 1);
+        assert_eq!(
+            out.tool_calls[0].signature.as_deref(),
+            Some("ZmFrZS1zaWc=")
+        );
+    }
+
+    #[test]
+    fn assistant_echoes_thought_signature_back_on_wire() {
+        let mut a = ChatMessage::assistant("");
+        a.tool_calls.push(ToolCall {
+            id: "ignored".into(),
+            name: "note".into(),
+            args_json: "{}".into(),
+            signature: Some("ZmFrZS1zaWc=".into()),
+        });
+        let wire = assistant_to_wire(&a);
+        assert_eq!(wire["parts"][0]["functionCall"]["name"], "note");
+        assert_eq!(wire["parts"][0]["thoughtSignature"], "ZmFrZS1zaWc=");
+    }
+
+    #[test]
+    fn assistant_without_signature_omits_field() {
+        let mut a = ChatMessage::assistant("");
+        a.tool_calls.push(ToolCall {
+            id: "ignored".into(),
+            name: "note".into(),
+            args_json: "{}".into(),
+            signature: None,
+        });
+        let wire = assistant_to_wire(&a);
+        assert!(wire["parts"][0].get("thoughtSignature").is_none());
     }
 }

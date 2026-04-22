@@ -54,6 +54,7 @@ impl ChatMessage {
         }
     }
 
+    #[cfg(test)]
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: Role::Assistant,
@@ -76,11 +77,17 @@ impl ChatMessage {
 /// Single tool invocation requested by the assistant. `args_json` is
 /// the serialized JSON object the tool expects — the registry parses
 /// and validates it at call time.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub args_json: String,
+    /// Opaque provider-specific blob (e.g. Gemini's `thoughtSignature`).
+    /// Must be echoed back on the same call when the assistant turn is
+    /// re-sent with tool results, otherwise Gemini 2.5 rejects the
+    /// request with 400. Other providers ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
 }
 
 /// Schema entry advertised to the model so it knows which tools it
@@ -128,7 +135,6 @@ pub enum LlmError {
     Auth,
     RateLimit,
     BadResponse(String),
-    ToolSchemaRejected(String),
 }
 
 impl std::fmt::Display for LlmError {
@@ -138,9 +144,6 @@ impl std::fmt::Display for LlmError {
             LlmError::Auth => write!(f, "invalid or missing API key"),
             LlmError::RateLimit => write!(f, "rate limited by provider"),
             LlmError::BadResponse(s) => write!(f, "bad response from provider: {s}"),
-            LlmError::ToolSchemaRejected(s) => {
-                write!(f, "provider rejected tool schema: {s}")
-            }
         }
     }
 }
