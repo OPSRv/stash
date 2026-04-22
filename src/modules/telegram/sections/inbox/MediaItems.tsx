@@ -1,6 +1,12 @@
 import { FileChip, formatBytes } from '../../../../shared/ui/FileChip';
 import { ImageThumbnail } from '../../../../shared/ui/ImageThumbnail';
 import { InlineVideo } from '../../../../shared/ui/InlineVideo';
+import {
+  LinkifiedText,
+  extractUrls,
+  openExternalUrl,
+} from '../../../../shared/ui/LinkifiedText';
+import { setPendingDownloaderUrl } from '../../../downloader/pendingUrl';
 
 /// Telegram-inbox body renderers. Each kind delegates to a shared
 /// `shared/ui/*` component so the same file type looks identical in
@@ -45,11 +51,47 @@ type TextItemProps = {
   content: string;
 };
 
-export const TextItem = ({ content }: TextItemProps) => (
-  <p className="text-[13px] leading-[18px] text-white/90 whitespace-pre-wrap">
-    {content}
-  </p>
-);
+/// Plain-text message row with linkified URLs. When the message carries
+/// at least one URL we surface two quick actions (Open / Download)
+/// under the text so a pasted YouTube or file URL can reach the
+/// Downloader in a single click without having to retype it.
+export const TextItem = ({ content }: TextItemProps) => {
+  const urls = extractUrls(content);
+  const first = urls[0];
+  return (
+    <div className="flex flex-col gap-1.5">
+      <LinkifiedText content={content} />
+      {first && (
+        <div className="flex items-center gap-2 text-[11px]">
+          <button
+            type="button"
+            onClick={() => void openExternalUrl(first)}
+            className="px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-white/80 hover:text-white transition-colors"
+            title={first}
+          >
+            Open
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPendingDownloaderUrl(first);
+              window.dispatchEvent(
+                new CustomEvent('stash:navigate', { detail: 'downloads' }),
+              );
+            }}
+            className="px-2 py-0.5 rounded bg-[rgba(var(--stash-accent-rgb),0.15)] hover:bg-[rgba(var(--stash-accent-rgb),0.25)] text-[rgb(var(--stash-accent-rgb))] transition-colors"
+            title={`Send ${first} to Downloader`}
+          >
+            ⤓ Download
+          </button>
+          {urls.length > 1 && (
+            <span className="text-white/40">+{urls.length - 1} more</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 // Re-export so existing callers of `formatBytes` from this file keep
 // working — but new code should import directly from `shared/ui`.

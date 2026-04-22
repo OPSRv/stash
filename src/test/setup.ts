@@ -72,6 +72,8 @@ vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
   revealItemInDir: vi.fn().mockResolvedValue(undefined),
+  openUrl: vi.fn().mockResolvedValue(undefined),
+  openPath: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@tauri-apps/plugin-notification', () => ({
