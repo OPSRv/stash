@@ -8,19 +8,26 @@ type Props = {
   /// Label used for the letter tile when the favicon can't load — first
   /// grapheme is uppercased.
   label: string;
-  /// Rendered size in CSS pixels. We always request at least 2× from the
-  /// favicon service so the tile stays crisp on retina.
+  /// Rendered size in CSS pixels. The fetch always asks for a
+  /// substantially larger source (see below) so the browser downscales a
+  /// sharp image instead of rendering a blurry upscale.
   size: number;
   className?: string;
 };
+
+/// Google's s2 service rounds the `sz` query up to the closest size the
+/// site actually provides (typically 16/32/64/128/256). At small display
+/// sizes on retina, a 16→28px upscale reads as blurry, so we always ask
+/// for 128 and let the browser do the downscale — crisp on both 1× and 2×
+/// without a per-tab DPR calculation.
+const FAVICON_SOURCE_SIZE = 128;
 
 /// Favicon <img> with a built-in accent-coloured letter-tile fallback.
 /// Guarantees every tab shows *some* visible icon — either the site's real
 /// favicon or a branded coloured letter — instead of silently collapsing
 /// to empty space when the fetch fails (offline, blocked host, etc.).
 export const Favicon = ({ url, label, size, className }: Props) => {
-  const requested = Math.max(32, size * 2);
-  const src = faviconUrlFor(url, requested);
+  const src = faviconUrlFor(url, FAVICON_SOURCE_SIZE);
   const [failed, setFailed] = useState(false);
 
   // Reset the failed flag when the URL changes so a rename / pin-as-home
