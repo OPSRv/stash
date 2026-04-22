@@ -124,6 +124,41 @@ fn split_command(s: &str) -> (&str, &str) {
     }
 }
 
+/// Heuristic: does `s` contain at least one URL worth storing in the
+/// inbox? Matches `http(s)://…` and bare `www.…` hosts — same rules
+/// the frontend LinkifiedText uses, kept simple (regex-free) on
+/// purpose. False positives (e.g. a string with "http://" as literal
+/// text about protocols) are OK — the user can still delete the row.
+pub(crate) fn contains_url(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    // Looks for a scheme + at least one non-whitespace/punctuation
+    // char immediately after. A bare "http://" in prose doesn't fire.
+    for needle in ["http://", "https://"] {
+        if let Some(pos) = lower.find(needle) {
+            let after = &lower[pos + needle.len()..];
+            if after
+                .chars()
+                .next()
+                .map(|c| !c.is_whitespace() && c.is_alphanumeric())
+                .unwrap_or(false)
+            {
+                return true;
+            }
+        }
+    }
+    if let Some(pos) = lower.find("www.") {
+        // Require a dot after www. (e.g. "www.site.com") so a sentence
+        // like "at www." doesn't fire.
+        let after = &lower[pos + 4..];
+        if let Some(first) = after.chars().next() {
+            if first.is_alphanumeric() && after[first.len_utf8()..].contains('.') {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 // -------------------- Live transport (teloxide) --------------------
 
 /// Spawned tokio task that long-polls Telegram until cancelled. Phase 0
@@ -321,6 +356,24 @@ async fn handle_update(
             }
         }
         DispatchAction::IngestText { text, .. } => {
+            // URLs always land in the inbox, even when the AI path
+            // succeeds — that's the surface where the user expects to
+            // see shareable links ("download this mp3", "save this
+            // article"). Pure chat without URLs still flows only to
+            // the assistant; otherwise the inbox would fill up with
+            // every "привіт" and become useless.
+            let mut inbox_already = false;
+            if contains_url(&text) {
+                let msg_id = msg.id.0 as i64;
+                if let Ok(mut repo) = state.repo.lock() {
+                    if let Ok(id) = repo.insert_text_inbox(msg_id, &text, now) {
+                        tracing::debug!(id, "inbox text with url saved");
+                        let _ = app.emit("telegram:inbox_added", id);
+                        inbox_already = true;
+                    }
+                }
+            }
+
             // Phase 3: free text goes to the AI assistant when one is
             // configured. Any missing-piece error (no key, no model,
             // provider not supported) falls back to the inbox so the
@@ -338,31 +391,41 @@ async fn handle_update(
                 }
                 Err(e) => {
                     tracing::info!(error = %e, "assistant unavailable, falling back to inbox");
-                    let inbox_id = {
+                    if inbox_already {
+                        // The URL-detect path already persisted this
+                        // message — avoid a duplicate row. Surface the
+                        // assistant failure so the user knows why
+                        // there's no AI reply, but don't pretend we're
+                        // "saving" something twice.
+                        state.sender.enqueue(
+                            chat_id,
+                            format!("🤖 ⚠️ Асистент недоступний ({e})."),
+                        );
+                    } else {
                         let msg_id = msg.id.0 as i64;
                         let received_at = now;
-                        match state.repo.lock() {
+                        let inbox_id = match state.repo.lock() {
                             Ok(mut repo) => repo
                                 .insert_text_inbox(msg_id, &text, received_at)
                                 .map_err(|e| e.to_string()),
                             Err(e) => Err(e.to_string()),
-                        }
-                    };
-                    match inbox_id {
-                        Ok(id) => {
-                            tracing::debug!(id, text_len = text.len(), "inbox text ingested");
-                            let _ = app.emit("telegram:inbox_added", id);
-                            state.sender.enqueue(
-                                chat_id,
-                                format!("📥 Збережено в інбокс (асистент: {e})."),
-                            );
-                        }
-                        Err(e2) => {
-                            tracing::warn!(error = %e2, "inbox insert failed");
-                            state.sender.enqueue(
-                                chat_id,
-                                "⚠️ Не вдалося зберегти в інбокс — переглянь лог Stash.",
-                            );
+                        };
+                        match inbox_id {
+                            Ok(id) => {
+                                tracing::debug!(id, text_len = text.len(), "inbox text ingested");
+                                let _ = app.emit("telegram:inbox_added", id);
+                                state.sender.enqueue(
+                                    chat_id,
+                                    format!("📥 Збережено в інбокс (асистент: {e})."),
+                                );
+                            }
+                            Err(e2) => {
+                                tracing::warn!(error = %e2, "inbox insert failed");
+                                state.sender.enqueue(
+                                    chat_id,
+                                    "⚠️ Не вдалося зберегти в інбокс — переглянь лог Stash.",
+                                );
+                            }
                         }
                     }
                 }
@@ -808,5 +871,19 @@ mod tests {
             dispatch_text(&mut p, &s, "/pair 123456", 42, 0),
             DispatchAction::ReplyAlreadyPaired { chat_id: 42 }
         );
+    }
+
+    #[test]
+    fn contains_url_matches_http_https_and_www() {
+        assert!(contains_url("grab https://example.com/song.mp3 please"));
+        assert!(contains_url("http://stash.dev"));
+        assert!(contains_url("see www.tauri.app today"));
+    }
+
+    #[test]
+    fn contains_url_ignores_bare_words_and_stubs() {
+        assert!(!contains_url("привіт"));
+        assert!(!contains_url("a note about http:// and https://"));
+        assert!(!contains_url("mention www. alone"));
     }
 }

@@ -226,6 +226,30 @@ describe('<InboxPanel />', () => {
     );
   });
 
+  it('a document with an image mime renders as an inline image preview', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox')
+        return [
+          mkItem({
+            id: 33,
+            kind: 'document',
+            text_content: null,
+            file_path: '/tmp/photo.png',
+            mime_type: 'image/png',
+          }),
+        ];
+      if (cmd === 'telegram_status') return { kind: 'paired', chat_id: 1 };
+      return undefined;
+    });
+    render(<InboxPanel />);
+    await screen.findByTestId('inbox-item-33');
+    // The ImageThumbnail button is the only thing that exposes an
+    // "Open <alt>" label — anything else would mean we fell back to
+    // the generic FileChip, which was the original bug.
+    expect(screen.getByRole('button', { name: /open/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /photo\.png/ })).toBeInTheDocument();
+  });
+
   it('text row with a URL shows Open + Download actions', async () => {
     const user = userEvent.setup();
     vi.mocked(invoke).mockImplementation(async (cmd) => {

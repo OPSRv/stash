@@ -1,3 +1,4 @@
+import { AudioPlayer } from '../../../../shared/ui/AudioPlayer';
 import { FileChip, formatBytes } from '../../../../shared/ui/FileChip';
 import { ImageThumbnail } from '../../../../shared/ui/ImageThumbnail';
 import { InlineVideo } from '../../../../shared/ui/InlineVideo';
@@ -43,9 +44,39 @@ type DocumentItemProps = {
   caption: string | null;
 };
 
-export const DocumentItem = ({ filePath, mimeType, caption }: DocumentItemProps) => (
-  <FileChip name={basename(filePath)} mimeType={mimeType} caption={caption} />
-);
+/// Telegram lets you send the same file either as a media kind (photo
+/// / voice / video) or as a generic document. The latter preserves the
+/// original bytes — a PNG sent "as file" arrives as kind=`document`
+/// with mime=`image/png`. Dispatch on the mime so the user still gets
+/// a real preview instead of a paper-icon chip.
+export const DocumentItem = ({ filePath, mimeType, caption }: DocumentItemProps) => {
+  const mime = (mimeType ?? '').toLowerCase();
+  if (mime.startsWith('image/')) {
+    return (
+      <ImageThumbnail
+        src={filePath}
+        alt={caption ?? basename(filePath)}
+        caption={caption}
+      />
+    );
+  }
+  if (mime.startsWith('video/')) {
+    return <InlineVideo src={filePath} caption={caption} />;
+  }
+  if (mime.startsWith('audio/')) {
+    return (
+      <div className="flex flex-col gap-1">
+        <AudioPlayer src={filePath} caption={basename(filePath)} />
+        {caption && (
+          <p className="text-[13px] leading-[18px] text-white/80 whitespace-pre-wrap">
+            {caption}
+          </p>
+        )}
+      </div>
+    );
+  }
+  return <FileChip name={basename(filePath)} mimeType={mimeType} caption={caption} />;
+};
 
 type TextItemProps = {
   content: string;
