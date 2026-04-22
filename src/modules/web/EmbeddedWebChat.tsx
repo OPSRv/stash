@@ -77,51 +77,40 @@ export const EmbeddedWebChat = ({
   // through a settings reload. Persistence still happens via `onZoomChange`.
   const [zoom, setZoom] = useState<number>(() => clampZoom(service.zoom ?? 1));
   const { toast } = useToast();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
+  // Overflow menu is now native (NSMenu via `@tauri-apps/api/menu`),
+  // so no open-state ref or outside-click bookkeeping lives here.
 
   // Reset zoom when switching services — each service keeps its own band.
   useEffect(() => {
     setZoom(clampZoom(service.zoom ?? 1));
   }, [service.id, service.zoom]);
 
-  /// Push/restore the native webview. `topInset` lets the caller
-  /// temporarily shrink the surface from the top so an HTML dropdown
-  /// has somewhere visible to land — without that shrink the native
-  /// surface sits on top of HTML and occludes the menu. Called with
-  /// 0 on normal sync, ~160 when the overflow menu opens.
-  const embedWithInset = useCallback(
-    async (topInset: number) => {
-      const el = sizerRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 10 || rect.height < 10) return;
-      const inset = Math.max(0, Math.min(topInset, Math.round(rect.height) - 40));
-      try {
-        const settings = await loadSettings();
-        const userAgent =
-          (service.userAgent && service.userAgent.trim()) ||
-          userAgentFor(settings.cookiesFromBrowser);
-        await webchatEmbed({
-          service: service.id,
-          url: service.url,
-          x: Math.round(rect.left),
-          y: Math.round(rect.top) + inset,
-          width: Math.round(rect.width),
-          height: Math.round(rect.height) - inset,
-          userAgent,
-          initialZoom: clampZoom(service.zoom ?? 1),
-        });
-        setAttached(true);
-        setError(null);
-      } catch (e) {
-        setError(String(e));
-      }
-    },
-    [service.id, service.url, service.zoom, service.userAgent],
-  );
-
-  const syncBounds = useCallback(() => embedWithInset(0), [embedWithInset]);
+  const syncBounds = useCallback(async () => {
+    const el = sizerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return;
+    try {
+      const settings = await loadSettings();
+      const userAgent =
+        (service.userAgent && service.userAgent.trim()) ||
+        userAgentFor(settings.cookiesFromBrowser);
+      await webchatEmbed({
+        service: service.id,
+        url: service.url,
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        userAgent,
+        initialZoom: clampZoom(service.zoom ?? 1),
+      });
+      setAttached(true);
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [service.id, service.url, service.zoom, service.userAgent]);
 
   useEffect(() => {
     let raf = requestAnimationFrame(() => {
@@ -364,30 +353,10 @@ export const EmbeddedWebChat = ({
     };
   }, [applyZoom, goBack, goForward, reload, service.id, startEditingUrl, zoom]);
 
-  // Close the overflow menu on outside-click or Escape. Whenever the
-  // menu actually closes, re-embed the webview — it was hidden while
-  // the menu was open so that dropdown items weren't occluded.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const close = () => {
-      setMenuOpen(false);
-      void syncBounds();
-    };
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        close();
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
-    };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen, syncBounds]);
+  // Native NSMenu handles its own dismissal (outside click, Escape,
+  // item pick), so no window-level keydown/mousedown listener is
+  // needed. Left here as a marker that the previous HTML-dropdown
+  // logic moved to `openOverflowMenu` via `@tauri-apps/api/menu`.
 
   const zoomLabel = useMemo(() => `${Math.round(zoom * 100)}%`, [zoom]);
 
@@ -409,14 +378,42 @@ export const EmbeddedWebChat = ({
     }
   })();
 
-  const runAndClose = (fn: () => void | Promise<unknown>) => () => {
-    setMenuOpen(false);
-    // Re-embed the webview that we hid when the menu opened. Guarded
-    // by a rAF so the dropdown has unmounted (frees focus-trap) before
-    // the native surface snaps back.
-    requestAnimationFrame(() => void syncBounds());
-    Promise.resolve(fn()).catch(() => {});
-  };
+  /// Build + popup a native NSMenu anchored at the More button. This
+  /// is the ONLY reliable way to render a dropdown over a WKWebView
+  /// child — NSMenu is a separate native surface and always sits on
+  /// top. HTML dropdowns were either hidden behind the webview or
+  /// forced us to shrink the webview (visible UI jump).
+  const openOverflowMenu = useCallback(
+    async (anchorEl: HTMLElement) => {
+      const rect = anchorEl.getBoundingClientRect();
+      const [{ Menu }, { LogicalPosition }] = await Promise.all([
+        import('@tauri-apps/api/menu'),
+        import('@tauri-apps/api/dpi'),
+      ]);
+      const items: { id: string; text: string; action: () => void; }[] = [
+        { id: 'copy-url', text: 'Copy URL', action: () => void copyUrl() },
+        {
+          id: 'open-browser',
+          text: 'Open in browser',
+          action: () => void openCurrentInBrowser(),
+        },
+      ];
+      if (onPinCurrentAsHome) {
+        items.push({ id: 'pin-home', text: 'Pin as home', action: () => void pinAsHome() });
+      }
+      if (onSaveAsTab) {
+        items.push({ id: 'save-tab', text: 'Save as tab', action: () => void saveAsTab() });
+      }
+      items.push({ id: 'reset', text: 'Reset session', action: () => void hardReset() });
+
+      const menu = await Menu.new({ items });
+      // Anchor the menu just under the button's bottom-left corner in
+      // logical pixels — LogicalPosition is relative to the window's
+      // top-left, matching our DOM rect.
+      await menu.popup(new LogicalPosition(rect.left, rect.bottom + 4));
+    },
+    [copyUrl, openCurrentInBrowser, onPinCurrentAsHome, onSaveAsTab, pinAsHome, saveAsTab, hardReset],
+  );
 
   return (
     <div className="h-full flex flex-col">
@@ -490,53 +487,16 @@ export const EmbeddedWebChat = ({
           )}
         </div>
 
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            aria-label="More actions"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => {
-              const next = !menuOpen;
-              setMenuOpen(next);
-              // The embedded native webview sits on top of HTML within
-              // its bounds, so this dropdown (which drops into the
-              // webview area) would be occluded. Instead of hiding the
-              // whole webview (leaves a black void) we shrink it from
-              // the top just enough for the menu to fit, so the user
-              // still sees their page below.
-              if (next) {
-                void embedWithInset(160);
-              } else {
-                void syncBounds();
-              }
-            }}
-            className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
-            title="More"
-          >
-            <MoreHorizontalIcon />
-          </button>
-          {menuOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 top-full mt-1 min-w-[180px] rounded-md border hair py-1 z-20 shadow-lg"
-              style={{ background: 'var(--color-surface)' }}
-            >
-              <MenuItem onClick={runAndClose(copyUrl)}>Copy URL</MenuItem>
-              <MenuItem onClick={runAndClose(openCurrentInBrowser)}>Open in browser</MenuItem>
-              {onPinCurrentAsHome && (
-                <MenuItem onClick={runAndClose(pinAsHome)}>Pin as home</MenuItem>
-              )}
-              {onSaveAsTab && (
-                <MenuItem onClick={runAndClose(saveAsTab)}>Save as tab</MenuItem>
-              )}
-              <div className="h-px my-1 mx-1" style={{ background: 'var(--color-hairline)' }} />
-              <MenuItem onClick={runAndClose(hardReset)} danger>
-                Reset session
-              </MenuItem>
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          aria-label="More actions"
+          aria-haspopup="menu"
+          onClick={(e) => void openOverflowMenu(e.currentTarget)}
+          className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
+          title="More"
+        >
+          <MoreHorizontalIcon />
+        </button>
       </div>
       <div
         ref={sizerRef}
@@ -601,25 +561,3 @@ const NavIconButton = ({
   </button>
 );
 
-const MenuItem = ({
-  onClick,
-  danger,
-  children,
-}: {
-  onClick: () => void;
-  danger?: boolean;
-  children: React.ReactNode;
-}) => (
-  <button
-    type="button"
-    role="menuitem"
-    onClick={onClick}
-    className={`w-full text-left px-3 py-1.5 text-meta transition-colors ${
-      danger
-        ? 't-secondary hover:text-red-400 hover:bg-white/[0.04]'
-        : 't-secondary hover:t-primary hover:bg-white/[0.04]'
-    }`}
-  >
-    {children}
-  </button>
-);
