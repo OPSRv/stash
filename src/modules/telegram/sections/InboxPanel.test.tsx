@@ -250,8 +250,7 @@ describe('<InboxPanel />', () => {
     expect(screen.getByRole('img', { name: /photo\.png/ })).toBeInTheDocument();
   });
 
-  it('text row with a URL shows Open + Download actions', async () => {
-    const user = userEvent.setup();
+  it('text row with a URL shows a Download action (embed renders via LinkEmbed)', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd) => {
       if (cmd === 'telegram_list_inbox')
         return [
@@ -265,15 +264,8 @@ describe('<InboxPanel />', () => {
     });
     render(<InboxPanel />);
     await screen.findByText(/Check/);
-    const open = screen.getByRole('button', { name: /^open$/i });
     const download = screen.getByRole('button', { name: /download/i });
-    expect(open).toBeInTheDocument();
     expect(download).toBeInTheDocument();
-    await user.click(download);
-    // The Downloader handoff is module-level state; verify the nav
-    // event fires (the rest is covered by the downloader's own tests).
-    // We listen directly because the side-effect is the whole point.
-    // The pending-URL setter is tested in its own module.
   });
 
   it('surfaces a "транскрибую" banner when transcribing event fires', async () => {
