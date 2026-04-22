@@ -9,6 +9,9 @@ import {
   copyOnly,
   clearAll,
   linkPreview,
+  parseFileMeta,
+  parseImageMeta,
+  type ClipboardItem,
 } from './api';
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -106,6 +109,68 @@ describe('clipboard api', () => {
       mockInvoke.mockResolvedValueOnce(null);
       const p = await linkPreview('https://blank.example');
       expect(p).toBeNull();
+    });
+  });
+
+  describe('parseFileMeta', () => {
+    const makeFileRow = (meta: string | null): ClipboardItem => ({
+      id: 1,
+      kind: 'file',
+      content: 'files:abc',
+      meta,
+      created_at: 100,
+      pinned: false,
+    });
+
+    it('returns the parsed files array when meta is well-formed', () => {
+      const row = makeFileRow(
+        JSON.stringify({
+          files: [
+            { path: '/tmp/a.png', name: 'a.png', size: 10, mime: 'image/png' },
+            { path: '/tmp/b.mp4', name: 'b.mp4', size: null, mime: 'video/mp4' },
+          ],
+        }),
+      );
+      const parsed = parseFileMeta(row);
+      expect(parsed?.files).toHaveLength(2);
+      expect(parsed?.files[0].path).toBe('/tmp/a.png');
+      expect(parsed?.files[1].mime).toBe('video/mp4');
+    });
+
+    it('returns null for non-file kinds', () => {
+      const textRow: ClipboardItem = {
+        id: 1,
+        kind: 'text',
+        content: 'hi',
+        meta: null,
+        created_at: 0,
+        pinned: false,
+      };
+      expect(parseFileMeta(textRow)).toBeNull();
+    });
+
+    it('returns null for missing or malformed meta', () => {
+      expect(parseFileMeta(makeFileRow(null))).toBeNull();
+      expect(parseFileMeta(makeFileRow('not json'))).toBeNull();
+      expect(parseFileMeta(makeFileRow('{"oops":true}'))).toBeNull();
+    });
+
+    it('rejects meta where files is not an array', () => {
+      expect(parseFileMeta(makeFileRow('{"files":"nope"}'))).toBeNull();
+    });
+  });
+
+  describe('parseImageMeta stays untouched for file kind', () => {
+    it('returns null for kind=file even with a structured meta', () => {
+      const row: ClipboardItem = {
+        id: 1,
+        kind: 'file',
+        content: 'files:x',
+        meta: '{"path":"/tmp/a","w":1,"h":1}',
+        created_at: 0,
+        pinned: false,
+      };
+      expect(parseImageMeta(row)).toBeNull();
     });
   });
 });

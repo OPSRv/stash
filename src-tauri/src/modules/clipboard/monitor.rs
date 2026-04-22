@@ -1,5 +1,6 @@
 use crate::modules::clipboard::repo::ClipboardRepo;
 use rusqlite::Result;
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -9,10 +10,29 @@ pub struct RgbaImage {
     pub height: u32,
 }
 
+/// One file entry inside the clipboard row's `meta` JSON for a
+/// `kind = 'file'` item. Mirrors the frontend `FileMeta` shape in
+/// `src/modules/clipboard/api.ts` (`parseFileMeta`).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct FileEntry {
+    pub path: String,
+    pub name: String,
+    pub size: Option<u64>,
+    pub mime: Option<String>,
+}
+
 pub trait ClipboardReader {
     fn read_text(&mut self) -> Option<String>;
     fn read_image(&mut self) -> Option<RgbaImage> {
         None
+    }
+    /// List of absolute filesystem paths currently on the pasteboard
+    /// as `public.file-url`. Default impl returns empty so non-macOS
+    /// readers and older tests don't need to care. Monitor checks files
+    /// BEFORE image so a Finder-copied folder doesn't get stored as
+    /// its drag-icon PNG.
+    fn read_files(&mut self) -> Vec<PathBuf> {
+        Vec::new()
     }
 }
 
@@ -20,6 +40,7 @@ pub struct Monitor<R: ClipboardReader> {
     reader: R,
     last_text: Option<String>,
     last_image_hash: Option<String>,
+    last_files_key: Option<String>,
     images_dir: Option<PathBuf>,
 }
 
@@ -30,6 +51,7 @@ impl<R: ClipboardReader> Monitor<R> {
             reader,
             last_text: None,
             last_image_hash: None,
+            last_files_key: None,
             images_dir: None,
         }
     }
@@ -39,17 +61,43 @@ impl<R: ClipboardReader> Monitor<R> {
             reader,
             last_text: None,
             last_image_hash: None,
+            last_files_key: None,
             images_dir: Some(dir),
         }
     }
 
     pub fn poll_once(&mut self, repo: &mut ClipboardRepo, now: i64) -> Result<Option<i64>> {
+        // Files go BEFORE image on purpose. When Finder copies a file
+        // or folder, macOS seeds the pasteboard with both `public.file-url`
+        // AND the drag icon as `public.tiff` — if we checked image first
+        // we'd store the Finder icon PNG and mis-classify the clip as
+        // an image. Checking files first and returning early when they
+        // exist keeps folder/file copies as real file rows.
+        let files = self.reader.read_files();
+        if !files.is_empty() {
+            let key = Self::files_key(&files);
+            if self.last_files_key.as_deref() == Some(key.as_str()) {
+                return Ok(None);
+            }
+            let entries = Self::file_entries(&files);
+            let meta = serde_json::to_string(&serde_json::json!({ "files": entries }))
+                .unwrap_or_else(|_| "{\"files\":[]}".to_string());
+            let id = repo.insert_files(&key, &meta, now)?;
+            self.last_files_key = Some(key);
+            // A new file copy invalidates the text/image dedupe state —
+            // next iteration's stale image from the same Finder copy
+            // must not fire as a fresh row.
+            self.last_image_hash = None;
+            self.last_text = None;
+            return Ok(Some(id));
+        }
         if let Some(text) = self.reader.read_text() {
             let trimmed = text.trim();
             if !trimmed.is_empty() && self.last_text.as_deref() != Some(text.as_str()) {
                 let id = repo.insert_text(&text, now)?;
                 self.last_text = Some(text);
                 self.last_image_hash = None;
+                self.last_files_key = None;
                 return Ok(Some(id));
             }
         }
@@ -73,10 +121,55 @@ impl<R: ClipboardReader> Monitor<R> {
                 );
                 let id = repo.insert_image(&hash, &meta, now)?;
                 self.last_image_hash = Some(hash);
+                self.last_files_key = None;
                 return Ok(Some(id));
             }
         }
         Ok(None)
+    }
+
+    /// Stable deduplication key for a file selection. We hash the
+    /// concatenated, newline-joined paths (order-preserving) so that
+    /// copying the same set of files twice updates `created_at` rather
+    /// than creating a duplicate row. Same shape as image hashing for
+    /// consistency.
+    fn files_key(paths: &[PathBuf]) -> String {
+        let mut h = Sha256::new();
+        h.update(b"files:");
+        for p in paths {
+            h.update(p.to_string_lossy().as_bytes());
+            h.update(b"\n");
+        }
+        format!("files:{:x}", h.finalize())
+    }
+
+    /// Build per-file metadata without failing the whole clip when one
+    /// path is inaccessible (permission denied, file gone): missing
+    /// size/mime simply drop to null in the JSON. The name defaults to
+    /// the path basename; the MIME is guessed from the extension — the
+    /// frontend's `detectFileKind` is authoritative anyway.
+    fn file_entries(paths: &[PathBuf]) -> Vec<FileEntry> {
+        paths
+            .iter()
+            .map(|p| {
+                let name = p
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| p.to_string_lossy().into_owned());
+                let size = std::fs::metadata(p).ok().map(|m| m.len());
+                let mime = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| guess_mime(&e.to_lowercase()));
+                FileEntry {
+                    path: p.to_string_lossy().into_owned(),
+                    name,
+                    size,
+                    mime,
+                }
+            })
+            .collect()
     }
 
     fn hash_image(image: &RgbaImage) -> String {
@@ -85,6 +178,12 @@ impl<R: ClipboardReader> Monitor<R> {
         hasher.update(image.height.to_le_bytes());
         hasher.update(&image.bytes);
         format!("{:x}", hasher.finalize())
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn test_files_key(paths: &[PathBuf]) -> String {
+        Self::files_key(paths)
     }
 
     fn save_png(image: &RgbaImage, dir: &Path, hash: &str) -> std::io::Result<PathBuf> {
@@ -119,6 +218,9 @@ impl ClipboardReader for ArboardReader {
     fn read_text(&mut self) -> Option<String> {
         self.inner.get_text().ok()
     }
+    fn read_files(&mut self) -> Vec<PathBuf> {
+        super::pasteboard::read_file_urls()
+    }
     fn read_image(&mut self) -> Option<RgbaImage> {
         let img = self.inner.get_image().ok()?;
         Some(RgbaImage {
@@ -138,6 +240,7 @@ mod tests {
     struct FakeReader {
         text_queue: Vec<Option<String>>,
         image_queue: Vec<Option<RgbaImage>>,
+        files_queue: Vec<Vec<PathBuf>>,
     }
 
     impl FakeReader {
@@ -145,6 +248,7 @@ mod tests {
             Self {
                 text_queue: values.into_iter().map(|v| v.map(str::to_string)).collect(),
                 image_queue: vec![],
+                files_queue: vec![],
             }
         }
     }
@@ -162,6 +266,13 @@ mod tests {
                 None
             } else {
                 self.image_queue.remove(0)
+            }
+        }
+        fn read_files(&mut self) -> Vec<PathBuf> {
+            if self.files_queue.is_empty() {
+                Vec::new()
+            } else {
+                self.files_queue.remove(0)
             }
         }
     }
@@ -247,6 +358,7 @@ mod tests {
         let reader = FakeReader {
             text_queue: vec![None],
             image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
+            files_queue: vec![],
         };
         let tmp = std::env::temp_dir().join(format!("stash-test-{}", std::process::id()));
         let mut monitor = Monitor::with_images_dir(reader, tmp.clone());
@@ -259,4 +371,152 @@ mod tests {
         // cleanup
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    // ---- file-url handling ----
+
+    #[test]
+    fn poll_with_files_inserts_file_kind_and_records_paths() {
+        let mut repo = setup();
+        let reader = FakeReader {
+            text_queue: vec![None],
+            image_queue: vec![None],
+            files_queue: vec![vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.mp4")]],
+        };
+        let mut monitor = Monitor::new(reader);
+
+        let id = monitor.poll_once(&mut repo, 500).unwrap().unwrap();
+
+        let item = repo.get(id).unwrap().unwrap();
+        assert_eq!(item.kind, "file");
+        let meta = item.meta.as_deref().unwrap();
+        assert!(meta.contains("\"/tmp/a.png\""));
+        assert!(meta.contains("\"/tmp/b.mp4\""));
+        assert!(meta.contains("\"name\":\"a.png\""));
+        assert!(meta.contains("\"mime\":\"image/png\""));
+    }
+
+    #[test]
+    fn files_take_priority_over_drag_icon_image() {
+        // Finder copy seeds BOTH public.file-url AND public.tiff on the
+        // pasteboard. Without the files-first check we'd save the icon
+        // PNG and mis-classify the clip as an image.
+        let mut repo = setup();
+        let bytes = vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255];
+        let reader = FakeReader {
+            text_queue: vec![None],
+            image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
+            files_queue: vec![vec![PathBuf::from("/tmp/finder-folder")]],
+        };
+        let tmp = std::env::temp_dir().join(format!("stash-test-priority-{}", std::process::id()));
+        let mut monitor = Monitor::with_images_dir(reader, tmp.clone());
+
+        let id = monitor.poll_once(&mut repo, 100).unwrap().unwrap();
+
+        let item = repo.get(id).unwrap().unwrap();
+        assert_eq!(item.kind, "file", "folder copy must store as file, not image");
+        assert_eq!(repo.list(10).unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn same_file_selection_deduplicates_on_second_poll() {
+        let mut repo = setup();
+        let paths = vec![PathBuf::from("/tmp/a.txt")];
+        let reader = FakeReader {
+            text_queue: vec![None, None],
+            image_queue: vec![None, None],
+            files_queue: vec![paths.clone(), paths.clone()],
+        };
+        let mut monitor = Monitor::new(reader);
+
+        let first = monitor.poll_once(&mut repo, 100).unwrap();
+        let second = monitor.poll_once(&mut repo, 200).unwrap();
+
+        assert!(first.is_some());
+        assert_eq!(second, None, "identical file selection must not reinsert");
+        assert_eq!(repo.list(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn different_file_selection_inserts_new_row() {
+        let mut repo = setup();
+        let reader = FakeReader {
+            text_queue: vec![None, None],
+            image_queue: vec![None, None],
+            files_queue: vec![
+                vec![PathBuf::from("/tmp/a.txt")],
+                vec![PathBuf::from("/tmp/b.txt")],
+            ],
+        };
+        let mut monitor = Monitor::new(reader);
+
+        monitor.poll_once(&mut repo, 100).unwrap();
+        monitor.poll_once(&mut repo, 200).unwrap();
+
+        assert_eq!(repo.list(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn files_key_is_deterministic_and_order_sensitive() {
+        let a = Monitor::<FakeReader>::test_files_key(&[PathBuf::from("/a"), PathBuf::from("/b")]);
+        let b = Monitor::<FakeReader>::test_files_key(&[PathBuf::from("/a"), PathBuf::from("/b")]);
+        let reversed = Monitor::<FakeReader>::test_files_key(&[PathBuf::from("/b"), PathBuf::from("/a")]);
+        assert_eq!(a, b);
+        assert_ne!(a, reversed, "order difference must produce a different key");
+        assert!(a.starts_with("files:"));
+    }
+
+    #[test]
+    fn guess_mime_covers_common_extensions() {
+        assert_eq!(guess_mime("png"), "image/png");
+        assert_eq!(guess_mime("jpg"), "image/jpeg");
+        assert_eq!(guess_mime("mp4"), "video/mp4");
+        assert_eq!(guess_mime("mp3"), "audio/mpeg");
+        assert_eq!(guess_mime("json"), "application/json");
+        assert_eq!(guess_mime("tsx"), "application/typescript");
+        assert_eq!(guess_mime("unknown-ext-xyz"), "application/octet-stream");
+    }
+}
+
+/// Extension → MIME lookup for file-clip metadata. Intentionally small
+/// and opinionated: the frontend's `detectFileKind` is authoritative
+/// for rendering, so this just needs to give downstream consumers
+/// (drag-out, export, AI context) a sensible content-type header.
+pub fn guess_mime(ext: &str) -> String {
+    match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "svg" => "image/svg+xml",
+        "heic" => "image/heic",
+        "tif" | "tiff" => "image/tiff",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "mkv" => "video/x-matroska",
+        "mp3" => "audio/mpeg",
+        "m4a" | "aac" => "audio/mp4",
+        "wav" => "audio/wav",
+        "ogg" | "opus" => "audio/ogg",
+        "flac" => "audio/flac",
+        "json" => "application/json",
+        "js" | "mjs" | "cjs" => "application/javascript",
+        "jsx" => "application/javascript",
+        "ts" | "tsx" => "application/typescript",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "xml" => "application/xml",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "md" | "markdown" | "mdx" => "text/markdown",
+        "txt" | "log" => "text/plain",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
+        "yaml" | "yml" => "application/x-yaml",
+        "sh" | "bash" | "zsh" => "application/x-sh",
+        _ => "application/octet-stream",
+    }
+    .to_string()
 }

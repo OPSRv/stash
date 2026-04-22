@@ -89,6 +89,27 @@ impl ClipboardRepo {
         self.id_by_content(hash)
     }
 
+    /// Insert (or refresh) a clipboard row that represents one or more
+    /// files copied from Finder. `content` is a synthetic stable key —
+    /// typically a sha256 of the joined paths so repeated copies of the
+    /// same selection deduplicate instead of accumulating. `meta_json`
+    /// carries the full `{files: [{path, name, size?, mime?}, ...]}`
+    /// payload the UI renders via `FilePreviewList`.
+    pub fn insert_files(
+        &mut self,
+        content_key: &str,
+        meta_json: &str,
+        created_at: i64,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO clipboard_items (kind, content, meta, created_at)
+             VALUES ('file', ?1, ?2, ?3)
+             ON CONFLICT(content) DO UPDATE SET created_at = excluded.created_at",
+            params![content_key, meta_json, created_at],
+        )?;
+        self.id_by_content(content_key)
+    }
+
     fn id_by_content(&self, content: &str) -> Result<i64> {
         self.conn.query_row(
             "SELECT id FROM clipboard_items WHERE content = ?1",

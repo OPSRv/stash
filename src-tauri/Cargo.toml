@@ -79,6 +79,12 @@ async-trait = "0.1"
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
 window-vibrancy = "0.6"
+# Used by the clipboard module to talk to NSPasteboard directly (file-url
+# reads, multi-file writes). Versions match the graph Tauri already pulls
+# in so we don't compile two copies of AppKit bindings.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
 
 # Release profile tuned for a snappy menubar tool: LTO + a single codegen unit
 # give a measurable runtime speedup (loops / iterator chains inline better) in

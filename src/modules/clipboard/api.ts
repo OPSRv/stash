@@ -1,8 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 
+/// `file` is produced by the Rust clipboard monitor when Finder puts
+/// one or more `public.file-url` entries on the pasteboard. `meta` for
+/// these rows carries the full payload (see `FileMeta`) — `content`
+/// is an opaque stable dedupe key (`files:<sha256>`) and should not be
+/// rendered to users.
 export type ClipboardItem = {
   id: number;
-  kind: 'text' | 'image';
+  kind: 'text' | 'image' | 'file';
   content: string;
   meta: string | null;
   created_at: number;
@@ -19,6 +24,32 @@ export const parseImageMeta = (item: ClipboardItem): ImageMeta | null => {
   if (item.kind !== 'image' || !item.meta) return null;
   try {
     return JSON.parse(item.meta) as ImageMeta;
+  } catch {
+    return null;
+  }
+};
+
+/// Per-entry shape inside a `kind = 'file'` clipboard row. Mirrors the
+/// Rust `FileEntry` struct in `monitor.rs`. `size` and `mime` are
+/// best-effort — missing size means the file was inaccessible at
+/// monitor time; missing mime means no extension match.
+export type FileEntry = {
+  path: string;
+  name: string;
+  size: number | null;
+  mime: string | null;
+};
+
+export type FileMeta = {
+  files: FileEntry[];
+};
+
+export const parseFileMeta = (item: ClipboardItem): FileMeta | null => {
+  if (item.kind !== 'file' || !item.meta) return null;
+  try {
+    const parsed = JSON.parse(item.meta) as Partial<FileMeta>;
+    if (!parsed || !Array.isArray(parsed.files)) return null;
+    return { files: parsed.files };
   } catch {
     return null;
   }
