@@ -138,6 +138,22 @@ describe('WebShell (Arc-style sidebar)', () => {
     expect(vi.mocked(writeText)).toHaveBeenCalledWith('https://gemini.google.com/app');
   });
 
+  test('⌘⇧C is a no-op when the Web tab is hidden (another popup tab active)', async () => {
+    const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+    vi.mocked(writeText).mockClear();
+    // Render WebShell inside a `hidden` container — the same DOM
+    // shape PopupShell produces when another module is on top.
+    render(
+      <ToastProvider>
+        <div hidden>
+          <WebShell />
+        </div>
+      </ToastProvider>,
+    );
+    fireEvent.keyDown(window, { key: 'c', metaKey: true, shiftKey: true });
+    expect(vi.mocked(writeText)).not.toHaveBeenCalled();
+  });
+
   test('per-tab copy-URL button invokes writeText with that tab’s URL', async () => {
     const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
     vi.mocked(writeText).mockClear();

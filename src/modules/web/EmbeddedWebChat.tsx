@@ -353,16 +353,22 @@ export const EmbeddedWebChat = ({
     };
   }, [applyZoom, goBack, goForward, reload, service.id, startEditingUrl, zoom]);
 
-  // Close the overflow menu on outside-click or Escape.
+  // Close the overflow menu on outside-click or Escape. Whenever the
+  // menu actually closes, re-embed the webview — it was hidden while
+  // the menu was open so that dropdown items weren't occluded.
   useEffect(() => {
     if (!menuOpen) return;
+    const close = () => {
+      setMenuOpen(false);
+      void syncBounds();
+    };
     const onDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false);
+        close();
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false);
+      if (e.key === 'Escape') close();
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
@@ -370,7 +376,7 @@ export const EmbeddedWebChat = ({
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
     };
-  }, [menuOpen]);
+  }, [menuOpen, syncBounds]);
 
   const zoomLabel = useMemo(() => `${Math.round(zoom * 100)}%`, [zoom]);
 
@@ -394,6 +400,10 @@ export const EmbeddedWebChat = ({
 
   const runAndClose = (fn: () => void | Promise<unknown>) => () => {
     setMenuOpen(false);
+    // Re-embed the webview that we hid when the menu opened. Guarded
+    // by a rAF so the dropdown has unmounted (frees focus-trap) before
+    // the native surface snaps back.
+    requestAnimationFrame(() => void syncBounds());
     Promise.resolve(fn()).catch(() => {});
   };
 
@@ -475,7 +485,20 @@ export const EmbeddedWebChat = ({
             aria-label="More actions"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((v) => !v)}
+            onClick={() => {
+              const next = !menuOpen;
+              setMenuOpen(next);
+              // The embedded native webview sits on top of HTML content
+              // within its bounds, so this dropdown (which drops into
+              // the webview area) would otherwise be invisible. Hide
+              // the webview while the menu is open; re-attach on close
+              // via syncBounds so page state is preserved.
+              if (next) {
+                void webchatHide(service.id).catch(() => {});
+              } else {
+                void syncBounds();
+              }
+            }}
             className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
             title="More"
           >

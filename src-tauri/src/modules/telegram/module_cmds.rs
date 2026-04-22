@@ -608,6 +608,15 @@ impl CommandHandler for MusicCmd {
                     ..Default::default()
                 }
             }
+            "open" => {
+                reveal_music_tab(&ctx.app);
+                Reply {
+                    text: "📻 Відкриваю YouTube Music у Stash. Коли плеєр завантажиться, керуй кнопками нижче."
+                        .to_string(),
+                    keyboard: Some(music_keyboard()),
+                    ..Default::default()
+                }
+            }
             "play" | "pause" | "toggle" => run_music_action(
                 &ctx,
                 crate::modules::music::commands::music_play_pause,
@@ -709,11 +718,13 @@ fn run_music_action(
             ..Default::default()
         },
         Err(e) if e.contains("not attached") => {
-            reveal_music_tab(&ctx.app);
+            // Don't auto-reveal: user might be away from the Mac and
+            // doesn't want the popup to pop up without warning. Give
+            // them an explicit button so tapping it is the intent.
             Reply {
-                text: "📻 Плеєр ще не відкритий — відкриваю у Stash. Спробуй кнопку ще раз за кілька секунд."
+                text: "📻 Плеєр ще не відкритий — натисни «Відкрити Music», щоб запустити вкладку."
                     .to_string(),
-                keyboard: Some(music_keyboard()),
+                keyboard: Some(music_open_keyboard()),
                 ..Default::default()
             }
         }
@@ -733,6 +744,18 @@ fn reveal_music_tab(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("popup") {
         let _ = win.show();
         let _ = win.set_focus();
+    }
+}
+
+/// Single-button keyboard shown when the Music webview isn't attached
+/// yet. Tapping it routes to `MusicCmd` with arg `"open"`, which calls
+/// `reveal_music_tab` and swaps back to the full playback keyboard.
+fn music_open_keyboard() -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![vec![InlineButton {
+            text: "📻 Відкрити Music".into(),
+            callback_data: "music:open".into(),
+        }]],
     }
 }
 

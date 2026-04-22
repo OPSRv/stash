@@ -65,6 +65,16 @@ export const WebShell = () => {
   const services = useWebServices();
   const { toast } = useToast();
 
+  /// Root-element ref used to gate host-level keyboard shortcuts. The
+  /// popup shell keeps every previously-visited tab mounted inside a
+  /// `<div hidden={!isActive}>` wrapper, so WebShell's window-level
+  /// `keydown` listeners keep firing even when the user is on
+  /// Clipboard / Notes / any other tab. `closest('[hidden]')` walks
+  /// ancestors looking for that wrapper — null means we're the active
+  /// tab, non-null means we're hidden and must early-out.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const isActiveTab = () => !rootRef.current?.closest('[hidden]');
+
   const [storedActive, setStoredActive] = useState<string>(() => {
     try {
       return localStorage.getItem(LAST_TAB_KEY) ?? '';
@@ -302,6 +312,10 @@ export const WebShell = () => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.metaKey) return;
+      // Only react when the Web tab is actually on-screen — otherwise
+      // the user copying something in Clipboard/Notes with ⌘⇧C would
+      // get our "Copy URL" path silently running.
+      if (!isActiveTab()) return;
       const k = e.key.toLowerCase();
       if (e.shiftKey && k === 'c' && activeService) {
         e.preventDefault();
@@ -576,7 +590,7 @@ export const WebShell = () => {
     : null;
 
   return (
-    <div className="flex flex-row h-full w-full" style={{ background: 'var(--color-scrim)' }}>
+    <div ref={rootRef} className="flex flex-row h-full w-full" style={{ background: 'var(--color-scrim)' }}>
       <aside
         aria-label="Web services"
         className={`relative flex flex-col shrink-0 py-2 gap-0.5 border-r hair transition-[width,background] ${
