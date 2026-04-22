@@ -236,6 +236,19 @@ describe('ClipboardPopup', () => {
       });
     });
 
+    it('Space on a file row opens the FilePreviewDialog with every file', async () => {
+      const user = userEvent.setup();
+      render(<ClipboardPopup />);
+      await screen.findByText('hello.txt');
+      // Navigate down to the multi-file row (2nd in list).
+      await user.keyboard('{ArrowDown}');
+      await user.keyboard(' ');
+      // Dialog title appears with the count summary.
+      expect(await screen.findByRole('dialog', { name: /file clip preview/i }))
+        .toBeInTheDocument();
+      expect(screen.getByText(/3 files/i)).toBeInTheDocument();
+    });
+
     it('Files filter tab restricts the list to file rows, and ⌘5 activates it', async () => {
       const user = userEvent.setup();
       mockInvoke.mockImplementation(async (cmd) => {

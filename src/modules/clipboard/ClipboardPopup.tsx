@@ -38,6 +38,7 @@ import { detect as detectVideo, start as startDownload, type DetectedVideo } fro
 import { PlatformBadge } from '../downloader/PlatformBadge';
 import { notesCreate } from '../notes/api';
 import { PreviewDialog } from './PreviewDialog';
+import { FilePreviewDialog } from './FilePreviewDialog';
 import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 
@@ -82,6 +83,7 @@ export const ClipboardPopup = () => {
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
   const deleteConfirm = useSuppressibleConfirm<number>('clipboard.delete');
   const [previewId, setPreviewId] = useState<number | null>(null);
+  const [filePreviewId, setFilePreviewId] = useState<number | null>(null);
   const { toast } = useToast();
   const { announce } = useAnnounce();
 
@@ -593,6 +595,9 @@ export const ClipboardPopup = () => {
       } else if (e.key === ' ' && !typingInInput && item.kind === 'text') {
         e.preventDefault();
         setPreviewId(item.id);
+      } else if (e.key === ' ' && !typingInInput && item.kind === 'file') {
+        e.preventDefault();
+        setFilePreviewId(item.id);
       } else if (e.key === 'Backspace' && !typingInInput) {
         e.preventDefault();
         handleDelete(item.id);
@@ -644,25 +649,45 @@ export const ClipboardPopup = () => {
       const first = files[0];
       const firstKind = detectFileKind({ name: first.name, mime: first.mime });
       const extraCount = files.length - 1;
-      // Reuse image thumbnail for single-file image copies so they
-      // look identical to `kind='image'` screenshots.
-      const icon =
-        firstKind.kind === 'image' ? (
-          <img
-            src={convertFileSrc(first.path)}
-            alt=""
-            className="w-7 h-7 rounded-md object-cover"
-          />
-        ) : (
-          iconFor('file')
-        );
+      // Rendering strategy for the left-hand icon:
+      //  - Single file image → 28 px thumbnail (matches `kind='image'`).
+      //  - 2–4 images → tiny 2×2 collage so the user can see what's
+      //    in the clip without opening the Space preview.
+      //  - Anything else   → generic document icon.
+      const imageFiles = files.filter((f) => {
+        const k = detectFileKind({ name: f.name, mime: f.mime }).kind;
+        return k === 'image';
+      });
+      const useCollage = files.length > 1 && imageFiles.length >= 2 && imageFiles.length <= 4;
+      const icon = useCollage ? (
+        <div className="w-7 h-7 rounded-md overflow-hidden grid grid-cols-2 grid-rows-2 gap-[1px] bg-white/10">
+          {imageFiles.slice(0, 4).map((f) => (
+            <img
+              key={f.path}
+              src={convertFileSrc(f.path)}
+              alt=""
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ))}
+        </div>
+      ) : firstKind.kind === 'image' ? (
+        <img
+          src={convertFileSrc(first.path)}
+          alt=""
+          className="w-7 h-7 rounded-md object-cover"
+          loading="lazy"
+        />
+      ) : (
+        iconFor('file')
+      );
       const tint = typeTint.file;
       return (
         <Row
           key={item.id}
           primary={first.name}
           icon={icon}
-          iconTint={firstKind.kind === 'image' ? 'transparent' : tint.bg}
+          iconTint={firstKind.kind === 'image' || useCollage ? 'transparent' : tint.bg}
           iconColor={tint.fg}
           actions={
             <>
@@ -945,6 +970,30 @@ export const ClipboardPopup = () => {
         onCopy={handlePreviewCopy}
         onSaveToNote={handleSaveToNote}
       />
+      {(() => {
+        const filePreviewItem =
+          filePreviewId == null
+            ? null
+            : rawItems.find((i) => i.id === filePreviewId && i.kind === 'file') ?? null;
+        const filePreviewFiles = filePreviewItem
+          ? parseFileMeta(filePreviewItem)?.files ?? []
+          : [];
+        return (
+          <FilePreviewDialog
+            open={filePreviewItem !== null && filePreviewFiles.length > 0}
+            files={filePreviewFiles}
+            onClose={() => setFilePreviewId(null)}
+            onRevealFirst={(p) => {
+              void revealInFinder(p);
+              setFilePreviewId(null);
+            }}
+            onOpenFirst={(p) => {
+              void openFile(p);
+              setFilePreviewId(null);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 };
