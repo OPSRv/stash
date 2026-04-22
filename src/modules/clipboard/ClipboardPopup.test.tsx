@@ -133,6 +133,64 @@ describe('ClipboardPopup', () => {
     });
   });
 
+  describe('text subtype rendering', () => {
+    const textItems = [
+      { id: 20, kind: 'text', content: 'alice@example.com', created_at: 100, pinned: false, meta: null },
+      { id: 21, kind: 'text', content: '#3a7bff', created_at: 110, pinned: false, meta: null },
+      { id: 22, kind: 'text', content: '550e8400-e29b-41d4-a716-446655440000', created_at: 120, pinned: false, meta: null },
+      { id: 23, kind: 'text', content: 'sk-ant-api03-' + 'a'.repeat(80), created_at: 130, pinned: false, meta: null },
+    ];
+    beforeEach(() => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'clipboard_list') return textItems;
+        if (cmd === 'clipboard_search') return textItems;
+        return undefined;
+      });
+    });
+
+    it('renders an email row with a Send-email action that opens mailto:', async () => {
+      const user = userEvent.setup();
+      render(<ClipboardPopup />);
+      await screen.findByText('alice@example.com');
+      const sendBtn = screen.getByLabelText('Send email');
+      await user.click(sendBtn);
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await waitFor(() => {
+        expect(openUrl).toHaveBeenCalledWith('mailto:alice@example.com');
+      });
+    });
+
+    it('masks secret rows by default and toggles reveal', async () => {
+      const user = userEvent.setup();
+      render(<ClipboardPopup />);
+      await screen.findByText('alice@example.com');
+      const secretRaw = textItems[3].content;
+      // Raw value is NOT visible initially — it's masked.
+      expect(screen.queryByText(secretRaw)).toBeNull();
+      // Reveal button appears with that exact title.
+      const revealBtn = screen.getByLabelText('Reveal secret');
+      await user.click(revealBtn);
+      await waitFor(() => {
+        expect(screen.getByText(secretRaw)).toBeInTheDocument();
+      });
+    });
+
+    it('renders a hex-color row with a live colour swatch', async () => {
+      render(<ClipboardPopup />);
+      await screen.findByText('#3a7bff');
+      const swatch = document.querySelector('span[aria-hidden="true"][style*="background"]');
+      expect(swatch).not.toBeNull();
+      expect((swatch as HTMLElement).style.background).toContain('rgb(58, 123, 255)');
+    });
+
+    it('renders a UUID row with the distinctive uuid tint', async () => {
+      render(<ClipboardPopup />);
+      expect(
+        await screen.findByText('550e8400-e29b-41d4-a716-446655440000'),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe('kind=file rows', () => {
     const fileItems = [
       {

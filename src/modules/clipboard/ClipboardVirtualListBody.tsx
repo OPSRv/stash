@@ -2,9 +2,9 @@ import { useRef, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import type { ClipboardItem } from './api';
-import type { ContentType } from './contentType';
+import type { ContentType, TextSubtype } from './contentType';
 
-type TypedItem = ClipboardItem & { type: ContentType };
+type TypedItem = ClipboardItem & { type: ContentType; subtype: TextSubtype };
 
 export type VirtualEntry =
   | { kind: 'label'; key: string; label: string }

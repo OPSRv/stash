@@ -30,8 +30,15 @@ import {
   togglePin,
 } from './api';
 import { detectFileKind } from '../../shared/util/fileKind';
-import { detectType, type ContentType } from './contentType';
-import { iconFor, typeTint } from './icons';
+import {
+  detectTextSubtype,
+  detectType,
+  maskSecret,
+  prettyJson,
+  type ContentType,
+  type TextSubtype,
+} from './contentType';
+import { iconFor, subtypeVisual, typeTint } from './icons';
 import { ClipboardVirtualList } from './ClipboardVirtualList';
 import { LinkRow } from './LinkRow';
 import { detect as detectVideo, start as startDownload, type DetectedVideo } from '../downloader/api';
@@ -84,6 +91,15 @@ export const ClipboardPopup = () => {
   const deleteConfirm = useSuppressibleConfirm<number>('clipboard.delete');
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [filePreviewId, setFilePreviewId] = useState<number | null>(null);
+  const [revealedSecrets, setRevealedSecrets] = useState<Set<number>>(() => new Set());
+  const toggleReveal = useCallback((id: number) => {
+    setRevealedSecrets((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
   const { toast } = useToast();
   const { announce } = useAnnounce();
 
@@ -230,14 +246,19 @@ export const ClipboardPopup = () => {
 
   const typed = useMemo(
     () =>
-      rawItems.map((i) => ({
-        ...i,
-        type: (i.kind === 'image'
-          ? 'image'
-          : i.kind === 'file'
-            ? 'file'
-            : detectType(i.content)) as ContentType,
-      })),
+      rawItems.map((i) => {
+        const type: ContentType =
+          i.kind === 'image'
+            ? 'image'
+            : i.kind === 'file'
+              ? 'file'
+              : detectType(i.content);
+        const subtype: TextSubtype =
+          i.kind === 'text' && type === 'text'
+            ? detectTextSubtype(i.content)
+            : 'plain';
+        return { ...i, type, subtype };
+      }),
     [rawItems]
   );
 
@@ -372,6 +393,18 @@ export const ClipboardPopup = () => {
     [previewId, rawItems]
   );
 
+  /// Pretty-print JSON clips in the preview dialog so a pasted API
+  /// response reads like formatted source, not a flattened blob. For
+  /// every other subtype the raw content is rendered untouched.
+  const previewBody = useMemo(() => {
+    if (!previewItem) return '';
+    if (previewItem.kind !== 'text') return previewItem.content;
+    if (detectTextSubtype(previewItem.content) === 'json') {
+      return prettyJson(previewItem.content) ?? previewItem.content;
+    }
+    return previewItem.content;
+  }, [previewItem]);
+
   const closePreview = useCallback(() => setPreviewId(null), []);
 
   const handlePreviewCopy = useCallback(async () => {
@@ -441,6 +474,23 @@ export const ClipboardPopup = () => {
           description: String(e),
           variant: 'error',
         });
+      }
+    },
+    [toast],
+  );
+
+  /// Open an arbitrary URL (`mailto:`, `tel:`, `http(s)://`, etc.)
+  /// through the system handler. Used by the email/phone subtype
+  /// actions — `openUrl` is the entitled path that keeps these links
+  /// working when the popup is in a sandboxed webview.
+  const openExternal = useCallback(
+    async (url: string) => {
+      try {
+        const { openUrl } = await import('@tauri-apps/plugin-opener');
+        await openUrl(url);
+      } catch (e) {
+        console.error('open url failed:', e);
+        toast({ title: 'Could not open link', description: String(e), variant: 'error' });
       }
     },
     [toast],
@@ -759,28 +809,90 @@ export const ClipboardPopup = () => {
         />
       );
     }
-    const tint = typeTint[item.type];
     const imageMeta = item.kind === 'image' ? parseImageMeta(item) : null;
+    // Text rows now get subtype-driven visuals; image rows keep the
+    // existing thumbnail path.
+    const isSecret = item.subtype === 'secret';
+    const showSecret = !isSecret || revealedSecrets.has(item.id);
+    const subVisual = item.kind === 'text' ? subtypeVisual[item.subtype] : null;
+    const tint = imageMeta
+      ? typeTint.image
+      : subVisual
+        ? subVisual.tint
+        : typeTint[item.type];
+    const SubIcon = subVisual?.icon;
+    // Hex/RGB clips swap the icon tint for the actual colour so the
+    // user can recognise the shade at a glance.
+    const hexSwatchColor =
+      item.subtype === 'hex-color' && item.kind === 'text' ? item.content.trim() : null;
     const icon = imageMeta ? (
       <img
         src={convertFileSrc(imageMeta.path)}
         alt=""
         className="w-7 h-7 rounded-md object-cover"
       />
+    ) : hexSwatchColor ? (
+      <span
+        className="w-7 h-7 rounded-md block border border-white/12"
+        style={{ background: hexSwatchColor }}
+        aria-hidden
+      />
+    ) : SubIcon ? (
+      <SubIcon />
     ) : (
       iconFor(item.type)
     );
-    const primary = imageMeta ? `Image · ${imageMeta.w}×${imageMeta.h}` : item.content;
+    const primary = imageMeta
+      ? `Image · ${imageMeta.w}×${imageMeta.h}`
+      : item.kind === 'text' && isSecret && !showSecret
+        ? maskSecret(item.content)
+        : item.kind === 'text' && item.subtype === 'json'
+          ? item.content.replace(/\s+/g, ' ').slice(0, 160)
+          : item.content;
     return (
       <Row
         key={item.id}
         primary={primary}
         icon={icon}
-        iconTint={imageMeta ? 'transparent' : tint.bg}
+        iconTint={imageMeta || hexSwatchColor ? 'transparent' : tint.bg}
         iconColor={tint.fg}
         actions={
           <>
-            {item.kind === 'text' && isLongText(item.content) && (
+            {item.kind === 'text' && isSecret && (
+              <IconButton
+                onClick={() => toggleReveal(item.id)}
+                title={showSecret ? 'Hide secret' : 'Reveal secret'}
+              >
+                <EyeIcon size={12} />
+              </IconButton>
+            )}
+            {item.kind === 'text' && item.subtype === 'email' && (
+              <IconButton
+                onClick={() => openExternal(`mailto:${item.content.trim()}`)}
+                title="Send email"
+              >
+                <ExternalIcon size={12} />
+              </IconButton>
+            )}
+            {item.kind === 'text' && item.subtype === 'phone' && (
+              <IconButton
+                onClick={() =>
+                  openExternal(`tel:${item.content.replace(/[^+\d]/g, '')}`)
+                }
+                title="Call / FaceTime"
+              >
+                <ExternalIcon size={12} />
+              </IconButton>
+            )}
+            {item.kind === 'text' && item.subtype === 'file-path' && (
+              <IconButton
+                onClick={() => revealInFinder(item.content.trim())}
+                title="Reveal in Finder"
+              >
+                <EyeIcon size={12} />
+              </IconButton>
+            )}
+            {item.kind === 'text' && !isSecret && isLongText(item.content) && (
               <IconButton
                 onClick={() => setPreviewId(item.id)}
                 title="Preview (Space)"
@@ -796,7 +908,7 @@ export const ClipboardPopup = () => {
                 <ExternalIcon size={12} />
               </IconButton>
             )}
-            {item.kind === 'text' && (
+            {item.kind === 'text' && !isSecret && (
               <>
                 <SendToTranslatorButton text={item.content} />
                 <AskAiButton text={item.content} />
@@ -965,7 +1077,7 @@ export const ClipboardPopup = () => {
       />
       <PreviewDialog
         open={previewItem !== null && previewItem.kind === 'text'}
-        text={previewItem?.content ?? ''}
+        text={previewBody}
         onClose={closePreview}
         onCopy={handlePreviewCopy}
         onSaveToNote={handleSaveToNote}

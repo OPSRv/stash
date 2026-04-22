@@ -5,11 +5,11 @@ import { Kbd } from '../../shared/ui/Kbd';
 import { Row } from '../../shared/ui/Row';
 import { ExternalIcon, NoteIcon, PinIcon, TrashIcon } from '../../shared/ui/icons';
 import type { ClipboardItem } from './api';
-import type { ContentType } from './contentType';
+import type { ContentType, TextSubtype } from './contentType';
 import { iconFor, typeTint } from './icons';
 import { useLinkPreview } from './useLinkPreview';
 
-type LinkRowItem = ClipboardItem & { type: ContentType };
+type LinkRowItem = ClipboardItem & { type: ContentType; subtype: TextSubtype };
 
 interface LinkRowProps {
   item: LinkRowItem;

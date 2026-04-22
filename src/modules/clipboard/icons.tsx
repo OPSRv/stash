@@ -1,4 +1,5 @@
-import type { ContentType } from './contentType';
+import type { ReactNode } from 'react';
+import type { ContentType, TextSubtype } from './contentType';
 
 const iconProps = {
   width: 14,
@@ -70,4 +71,89 @@ export const iconFor = (type: ContentType) => {
     default:
       return <TextIcon />;
   }
+};
+
+// ---- text-subtype visuals -------------------------------------------------
+
+export const EmailIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="5" width="18" height="14" rx="2" />
+    <path d="m3 7 9 6 9-6" />
+  </svg>
+);
+
+export const PhoneIcon = () => (
+  <svg {...iconProps}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+  </svg>
+);
+
+export const HashIcon = () => (
+  <svg {...iconProps}>
+    <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+  </svg>
+);
+
+export const BraceIcon = () => (
+  <svg {...iconProps}>
+    <path d="M8 3H6a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2M16 3h2a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2" />
+  </svg>
+);
+
+export const FolderPathIcon = () => (
+  <svg {...iconProps}>
+    <path d="M4 4h5l2 2h9v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+  </svg>
+);
+
+export const LockIcon = () => (
+  <svg {...iconProps}>
+    <rect x="3" y="11" width="18" height="11" rx="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+/// Per-subtype visuals for `kind='text'` rows. `plain` keeps the
+/// original text-row tint so ordinary prose looks exactly like it did
+/// before we introduced subtypes.
+export const subtypeVisual: Record<
+  TextSubtype,
+  { icon: () => ReactNode; tint: { bg: string; fg: string } }
+> = {
+  plain: {
+    icon: TextIcon,
+    tint: typeTint.text,
+  },
+  email: {
+    icon: EmailIcon,
+    tint: { bg: 'rgba(80,200,120,0.12)', fg: '#6FD39B' },
+  },
+  phone: {
+    icon: PhoneIcon,
+    tint: { bg: 'rgba(80,200,120,0.12)', fg: '#6FD39B' },
+  },
+  'hex-color': {
+    // Tint is overridden inline with the actual colour value so the
+    // user sees the shade right away.
+    icon: HashIcon,
+    tint: { bg: 'rgba(255,255,255,0.06)', fg: 'rgba(255,255,255,0.85)' },
+  },
+  uuid: {
+    icon: HashIcon,
+    tint: { bg: 'rgba(180,120,255,0.08)', fg: '#B48BFF' },
+  },
+  json: {
+    icon: BraceIcon,
+    tint: { bg: 'rgba(180,120,255,0.10)', fg: '#B48BFF' },
+  },
+  'file-path': {
+    icon: FolderPathIcon,
+    tint: typeTint.file,
+  },
+  secret: {
+    icon: LockIcon,
+    // Red-ish tint telegraphs "be careful with this" without being
+    // as loud as destructive-action red.
+    tint: { bg: 'rgba(239, 68, 68, 0.12)', fg: '#E56B6B' },
+  },
 };

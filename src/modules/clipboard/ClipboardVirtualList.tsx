@@ -3,9 +3,9 @@ import { EmptyState } from '../../shared/ui/EmptyState';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { ClipboardVirtualListBody, type VirtualEntry } from './ClipboardVirtualListBody';
 import type { ClipboardItem } from './api';
-import type { ContentType } from './contentType';
+import type { ContentType, TextSubtype } from './contentType';
 
-type TypedItem = ClipboardItem & { type: ContentType };
+type TypedItem = ClipboardItem & { type: ContentType; subtype: TextSubtype };
 
 interface ClipboardVirtualListProps {
   empty: boolean;
