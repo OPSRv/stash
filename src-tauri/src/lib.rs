@@ -94,6 +94,16 @@ fn popup_position_reset(
 fn popup_position_status(state: tauri::State<'_, Arc<PopupPositionState>>) -> bool {
     state.data.lock().unwrap().user_moved
 }
+
+/// Hide the popup — the same path the tray/⌘⇧V toggle uses. Exposed so the
+/// frontend Esc handler can minimise to tray reliably regardless of which
+/// child webview currently holds focus.
+#[tauri::command]
+fn hide_popup(app: tauri::AppHandle) {
+    if let Some(win) = resolve_popup(&app) {
+        let _ = win.hide();
+    }
+}
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -396,6 +406,7 @@ pub fn run() {
             set_popup_auto_hide,
             popup_position_reset,
             popup_position_status,
+            hide_popup,
             open_system_settings,
             notes_list,
             notes_search,

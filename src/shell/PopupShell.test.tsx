@@ -116,6 +116,15 @@ describe('PopupShell', () => {
     window.removeEventListener('stash:downloader-prefill', prefill as EventListener);
   });
 
+  it('Esc hides the popup via the Rust hide_popup command', async () => {
+    const user = userEvent.setup();
+    render(<PopupShell />);
+    await screen.findByRole('searchbox');
+    vi.mocked(invoke).mockClear();
+    await user.keyboard('{Escape}');
+    expect(invoke).toHaveBeenCalledWith('hide_popup');
+  });
+
   it('⌘⌥4 switches to the Notes module (bound to tabShortcutDigit, not index)', async () => {
     const user = userEvent.setup();
     render(<PopupShell />);

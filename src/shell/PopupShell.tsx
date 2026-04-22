@@ -228,9 +228,11 @@ export const PopupShell = () => {
           setCheatsheetOpen(false);
           return;
         }
-        getCurrentWindow()
-          .hide()
-          .catch(() => {});
+        // Route through the Rust side so hiding uses the same path as the
+        // tray / ⌘⇧V toggle — `getCurrentWindow().hide()` was unreliable
+        // when focus sat on a child webview (Web / AI / Music).
+        e.preventDefault();
+        invoke('hide_popup').catch(() => {});
         return;
       }
       // ⌘⌥1/2/3 switch modules. Each module declares a stable
