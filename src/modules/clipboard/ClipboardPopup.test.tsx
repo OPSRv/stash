@@ -221,6 +221,23 @@ describe('ClipboardPopup', () => {
         await screen.findByText('550e8400-e29b-41d4-a716-446655440000'),
       ).toBeInTheDocument();
     });
+
+    it('clicking a secret row invokes clipboard_copy_only (auto-clear then runs in the background)', async () => {
+      const user = userEvent.setup();
+      render(<ClipboardPopup />);
+      await screen.findByLabelText('Reveal secret');
+      // Find the secret row by its role and masked primary.
+      const rows = screen.getAllByRole('option');
+      const secretRow = rows.find((r) =>
+        r.textContent?.startsWith('sk-a'),
+      );
+      expect(secretRow).toBeTruthy();
+      await user.click(secretRow!);
+      // id 23 corresponds to the secret fixture entry.
+      await waitFor(() =>
+        expect(mockInvoke).toHaveBeenCalledWith('clipboard_copy_only', { id: 23 }),
+      );
+    });
   });
 
   describe('kind=file rows', () => {

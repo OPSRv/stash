@@ -94,6 +94,7 @@ export const ClipboardPopup = () => {
   const [filePreviewId, setFilePreviewId] = useState<number | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Set<number>>(() => new Set());
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: number } | null>(null);
+  const secretClearTimer = useRef<number | null>(null);
   const toggleReveal = useCallback((id: number) => {
     setRevealedSecrets((prev) => {
       const next = new Set(prev);
@@ -104,6 +105,50 @@ export const ClipboardPopup = () => {
   }, []);
   const { toast } = useToast();
   const { announce } = useAnnounce();
+
+  const SECRET_CLEAR_MS = 60_000;
+  useEffect(
+    () => () => {
+      if (secretClearTimer.current !== null)
+        window.clearTimeout(secretClearTimer.current);
+    },
+    [],
+  );
+
+  /// After a secret-subtype row lands on the system clipboard, start
+  /// a 60 s timer. When it fires we re-read the pasteboard and clear
+  /// it only if the value is still our secret — copying something
+  /// else in the meantime is a strong "I'm done, don't touch it"
+  /// signal that we must respect. 60 s matches 1Password's default
+  /// and is enough to paste into a normal login flow but short enough
+  /// that a forgotten clip doesn't sit in history for the next app.
+  const scheduleSecretClear = useCallback(
+    (expected: string) => {
+      if (secretClearTimer.current !== null)
+        window.clearTimeout(secretClearTimer.current);
+      secretClearTimer.current = window.setTimeout(async () => {
+        secretClearTimer.current = null;
+        try {
+          const { readText, writeText } = await import(
+            '@tauri-apps/plugin-clipboard-manager'
+          );
+          const current = await readText().catch(() => null);
+          if (current === expected) {
+            await writeText('');
+            toast({
+              title: 'Secret cleared from clipboard',
+              description: '60 s auto-clear to avoid leaving credentials behind.',
+              variant: 'default',
+              durationMs: 3000,
+            });
+          }
+        } catch {
+          /* best-effort — clipboard plugin can be unavailable in tests */
+        }
+      }, SECRET_CLEAR_MS);
+    },
+    [toast],
+  );
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
 
@@ -286,21 +331,36 @@ export const ClipboardPopup = () => {
     (i: number) => {
       const item = flat[i];
       if (!item) return;
+      const isSecret = item.kind === 'text' && item.subtype === 'secret';
       pasteItem(item.id)
-        .then(() => announce('Pasted'))
+        .then(() => {
+          announce('Pasted');
+          if (isSecret) scheduleSecretClear(item.content);
+        })
         .catch((e) => console.error('paste failed:', e));
     },
-    [flat, announce]
+    [flat, announce, scheduleSecretClear]
   );
 
   const copyAt = useCallback(
     (i: number) => {
       const item = flat[i];
       if (!item) return;
+      const isSecret = item.kind === 'text' && item.subtype === 'secret';
       copyOnly(item.id)
         .then(() => {
           announce('Copied to clipboard');
-          toast({ title: 'Copied', variant: 'success', durationMs: 2000 });
+          if (isSecret) {
+            toast({
+              title: 'Secret copied',
+              description: 'Clipboard auto-clears in 60 s.',
+              variant: 'default',
+              durationMs: 3000,
+            });
+            scheduleSecretClear(item.content);
+          } else {
+            toast({ title: 'Copied', variant: 'success', durationMs: 2000 });
+          }
           getCurrentWindow().hide().catch(() => {});
         })
         .catch((e) => {
@@ -308,7 +368,7 @@ export const ClipboardPopup = () => {
           toast({ title: 'Copy failed', description: String(e), variant: 'error' });
         });
     },
-    [flat, toast, announce]
+    [flat, toast, announce, scheduleSecretClear]
   );
 
   const onSelect = useCallback(
@@ -337,16 +397,27 @@ export const ClipboardPopup = () => {
     (i: number) => {
       const item = flat[i];
       if (!item) return;
+      const isSecret = item.kind === 'text' && item.subtype === 'secret';
       bumpItemToTop(item.id);
       announce('Copied to clipboard');
-      toast({ title: 'Copied', variant: 'success', durationMs: 1600 });
+      if (isSecret) {
+        toast({
+          title: 'Secret copied',
+          description: 'Clipboard auto-clears in 60 s.',
+          variant: 'default',
+          durationMs: 3000,
+        });
+        scheduleSecretClear(item.content);
+      } else {
+        toast({ title: 'Copied', variant: 'success', durationMs: 1600 });
+      }
       copyOnly(item.id).catch((e) => {
         console.error('copy failed:', e);
         toast({ title: 'Copy failed', description: String(e), variant: 'error' });
         reload();
       });
     },
-    [flat, toast, announce, bumpItemToTop, reload],
+    [flat, toast, announce, bumpItemToTop, reload, scheduleSecretClear],
   );
 
   const { index, setIndex } = useKeyboardNav({
