@@ -92,6 +92,13 @@ impl Assistant {
         if !commands_text.is_empty() {
             messages.push(ChatMessage::system(commands_text));
         }
+        // Inject a terse recap of the most recent inbox items so the
+        // assistant can reference them ("що я надсилав учора?",
+        // "summarise those voice notes").
+        let inbox_text = recent_inbox_for_prompt(&self.state);
+        if !inbox_text.is_empty() {
+            messages.push(ChatMessage::system(inbox_text));
+        }
         for row in &history {
             messages.push(history_to_message(row));
         }
@@ -227,6 +234,40 @@ fn list_commands_for_prompt(state: &TelegramState) -> String {
     );
     for h in handlers {
         out.push_str(&format!("- {} — {} ({})\n", h.name(), h.description(), h.usage()));
+    }
+    out.trim_end().to_string()
+}
+
+/// Summarise the last few inbox items as a system message. Helps the
+/// assistant answer "what did I send yesterday?" or summarise without
+/// forcing the user to re-paste the content. Limited to six rows to
+/// keep the context footprint small.
+fn recent_inbox_for_prompt(state: &TelegramState) -> String {
+    let repo = match state.repo.lock() {
+        Ok(r) => r,
+        Err(_) => return String::new(),
+    };
+    let Ok(items) = repo.list_inbox(6) else {
+        return String::new();
+    };
+    if items.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "Recent Telegram inbox (newest first — may help ground follow-up questions):\n",
+    );
+    for it in items {
+        let summary = it
+            .text_content
+            .as_deref()
+            .or(it.transcript.as_deref())
+            .or(it.caption.as_deref())
+            .unwrap_or("[attachment only]");
+        // Cap per-line length so a pasted essay doesn't dominate the
+        // prompt — the model can always scroll via /summarize.
+        let short: String = summary.chars().take(200).collect();
+        let ellipsis = if summary.chars().count() > 200 { "…" } else { "" };
+        out.push_str(&format!("- [{}] {short}{ellipsis}\n", it.kind));
     }
     out.trim_end().to_string()
 }

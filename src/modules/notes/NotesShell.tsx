@@ -1076,7 +1076,24 @@ export const NotesShell = () => {
                 )}
               </div>
             </div>
-            {activeId != null && <NoteAttachmentsPanel noteId={activeId} />}
+            {activeId != null && (
+              <NoteAttachmentsPanel
+                noteId={activeId}
+                onEmbedMarkdown={(snippet) => {
+                  // Append as its own paragraph so the embed sits on a
+                  // clean line — the preview treats image/audio embeds
+                  // on a dedicated line specially (see MarkdownPreview).
+                  setBody((prev) => {
+                    const sep = prev.endsWith('\n\n') || prev.length === 0
+                      ? ''
+                      : prev.endsWith('\n')
+                      ? '\n'
+                      : '\n\n';
+                    return `${prev}${sep}${snippet}\n`;
+                  });
+                }}
+              />
+            )}
             <div className="flex-1 flex min-h-0">
               {showEditor && (
                 <div

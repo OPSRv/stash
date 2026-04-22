@@ -16,6 +16,10 @@ import {
 
 type Props = {
   noteId: number;
+  /// Opt-in callback: when supplied, each attachment row surfaces an
+  /// "Embed in body" affordance that asks the parent to paste a
+  /// markdown reference into the editor. Left undefined in tests.
+  onEmbedMarkdown?: (snippet: string) => void;
 };
 
 const basename = (p: string) => p.replace(/^.*[\\/]/, '');
@@ -47,7 +51,16 @@ const revealInFinder = async (path: string) => {
 /// landed anywhere in the app while a note is active get attached) and
 /// a classic "+ Add file" picker. Media kinds get inline renderers so
 /// the user can skim a note without leaving the popup.
-export const NoteAttachmentsPanel = ({ noteId }: Props) => {
+const markdownForAttachment = (a: NoteAttachment): string => {
+  const url = `file://${a.file_path}`;
+  const alt = a.original_name || 'attachment';
+  const kind = kindOf(a);
+  if (kind === 'image') return `![${alt}](${url})`;
+  if (kind === 'audio' || kind === 'video') return `![${alt}](${url})`;
+  return `[${alt}](${url})`;
+};
+
+export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
   const [items, setItems] = useState<NoteAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -176,6 +189,16 @@ export const NoteAttachmentsPanel = ({ noteId }: Props) => {
           >
             <AttachmentBody item={a} />
             <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 focus-within:opacity-100 hover:opacity-100 transition-opacity">
+              {onEmbedMarkdown && (
+                <IconButton
+                  title="Embed in note body as markdown"
+                  onClick={() => onEmbedMarkdown(markdownForAttachment(a))}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M4 6h16M4 12h10M4 18h16" />
+                  </svg>
+                </IconButton>
+              )}
               <IconButton
                 title="Reveal in Finder"
                 onClick={() => void revealInFinder(a.file_path)}
