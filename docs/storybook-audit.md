@@ -2,6 +2,18 @@
 
 Станом на 2026-04-22. Мета: (1) зафіксувати примітиви в `src/shared/ui/`, які мусять мати `*.stories.tsx` за проєктним правилом, але ще не мають; (2) виявити місця в `src/modules/**` і `src/settings/**`, де замість примітивів рендеряться нативні елементи чи дубльовані JSX-блоки — кандидати на витяг у `src/shared/ui/` з подальшим сторі-покриттям.
 
+## Прогрес виконання
+
+- **Phase 1** ✅ зроблено — додано сторі для 11 примітивів (`CenterSpinner`, `Row`, `ListItemRow`, `ToastCard`, `LiveRegion`, `RevealButton`, `SendToTranslatorButton`, `AskAiButton`, `LinkifiedText`, `FileChip`, `Markdown`).
+- **Phase 2** ✅ зроблено — додано сторі для 12 примітивів (`AudioPlayer`, `VideoPlayer`, `InlineVideo`, `ImageThumbnail`, `Lightbox`, `Modal`, `Cheatsheet`, `GlobalSearch`, `ContextMenu`, `FilePreview`, `CodePreview`, `LazyMarkdown`).
+- **Phase 3** ✅ частково — inline `rgba(...)` у `downloader/*` переведено на Tailwind-класи (7 файлів). `SmartScanPanel` box-shadow лишено як виняток (нетривіальна градієнтна тінь). Pills у `CachesPanel`/`PrivacyPanel`/`TranslationRow`/`TranslationBanner` **не чіпано** — потребують додавання `Badge size="xs"` + `customColor` у шаблоні, бо поточний `Badge` має fixed padding. Це тягне на Phase 4.
+- **Phase 4** ⏸ відкладено — `Skeleton`/`MediaChip`/`VerticalTabList`/`Badge size="xs"` потребують нових публічних API і оновлення кожного колсайту. Зона ризику > ніж користь за один пас — робити разом з власником модуля.
+- **Phase 5** ✅ зроблено — сторі для `PlatformBadge`, `PostureBadge`.
+- **Phase 6** ❌ не застосовне — при рев’ю `role="button"`-обгорток у `NowPlayingBar`, `WebchatNowPlayingBar`, `NotesShell` виявилось, що кожна з них містить **вкладені `IconButton`**. Нативний `<button>` не може вміщати інший `<button>`, тож `role="button"` + `tabIndex` + Enter/Space handler — це **правильна** ARIA-розмітка для цього випадку, а не ad-hoc. Свою ж рекомендацію з §2.1 слід вважати помилковою. Лишити як є.
+
+---
+
+
 ---
 
 ## 1. Наявні примітиви без `*.stories.tsx`
