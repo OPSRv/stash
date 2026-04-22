@@ -55,6 +55,7 @@ const filters: { id: Filter; label: string; hint: string }[] = [
   { id: 'text', label: 'Text', hint: '⌘2' },
   { id: 'image', label: 'Images', hint: '⌘3' },
   { id: 'link', label: 'Links', hint: '⌘4' },
+  { id: 'file', label: 'Files', hint: '⌘5' },
 ];
 
 const PREVIEW_MIN_CHARS = 280;
@@ -537,7 +538,7 @@ export const ClipboardPopup = () => {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.metaKey && ['1', '2', '3', '4'].includes(e.key)) {
+      if (e.metaKey && ['1', '2', '3', '4', '5'].includes(e.key)) {
         e.preventDefault();
         setFilter(filters[Number(e.key) - 1].id);
         return;

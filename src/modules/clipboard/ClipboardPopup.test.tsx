@@ -211,5 +211,32 @@ describe('ClipboardPopup', () => {
         expect(mockInvoke).toHaveBeenCalledWith('clipboard_paste', { id: 10 });
       });
     });
+
+    it('Files filter tab restricts the list to file rows, and ⌘5 activates it', async () => {
+      const user = userEvent.setup();
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'clipboard_list')
+          return [
+            ...fileItems,
+            {
+              id: 99,
+              kind: 'text',
+              content: 'plain note',
+              meta: null,
+              created_at: 400,
+              pinned: false,
+            },
+          ];
+        if (cmd === 'clipboard_search') return fileItems;
+        return undefined;
+      });
+      render(<ClipboardPopup />);
+      await screen.findByText('plain note');
+      await user.keyboard('{Meta>}5{/Meta}');
+      // File rows still present…
+      expect(screen.getByText('hello.txt')).toBeInTheDocument();
+      // …but the text row is filtered out.
+      expect(screen.queryByText('plain note')).toBeNull();
+    });
   });
 });
