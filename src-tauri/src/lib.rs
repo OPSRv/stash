@@ -763,6 +763,19 @@ pub fn run() {
             telegram_state.register_command(
                 modules::telegram::module_cmds::ForgetFactCmd::new(Arc::clone(&telegram_state)),
             );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::ScreenshotCmd,
+            );
+            let power_timers = Arc::new(modules::system::power::PowerTimers::new());
+            telegram_state.register_command(
+                modules::telegram::module_cmds::DisplayCmd,
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::SleepCmd::new(Arc::clone(&power_timers)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::ShutdownCmd::new(Arc::clone(&power_timers)),
+            );
 
             // Outbound watchers — battery + calendar + reminders ticker.
             modules::telegram::battery_watcher::spawn(app.handle().clone());

@@ -8,6 +8,7 @@
 //! single-user traffic is tiny and dropping messages silently is worse than
 //! holding a handful of strings.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -27,6 +28,11 @@ pub struct Outbound {
     pub text: String,
     /// Optional inline keyboard sent alongside the message.
     pub keyboard: Option<super::commands_registry::InlineKeyboard>,
+    /// Document attachments. When non-empty, the first document carries
+    /// `text` as its caption and the remaining are sent as follow-ups
+    /// without captions. Sent via `send_document` (not `send_photo`) so
+    /// PNGs aren't re-encoded. Empty = plain text-only message.
+    pub documents: Vec<PathBuf>,
 }
 
 pub struct TelegramSender {
@@ -83,6 +89,21 @@ impl TelegramSender {
         text: impl Into<String>,
         keyboard: Option<super::commands_registry::InlineKeyboard>,
     ) {
+        self.enqueue_full(chat_id, text, keyboard, Vec::new());
+    }
+
+    /// Full form: text + optional keyboard + optional document
+    /// attachments. When `documents` is non-empty the send path switches
+    /// from `send_message` to `send_document` (first doc captioned with
+    /// `text`, rest sent plain) — keeps PNGs byte-identical on the
+    /// recipient side, unlike `send_photo` which re-encodes.
+    pub fn enqueue_full(
+        &self,
+        chat_id: i64,
+        text: impl Into<String>,
+        keyboard: Option<super::commands_registry::InlineKeyboard>,
+        documents: Vec<PathBuf>,
+    ) {
         let text = text.into();
         match self.slot.lock().unwrap().as_ref() {
             Some(inner) => {
@@ -90,6 +111,7 @@ impl TelegramSender {
                     chat_id,
                     text,
                     keyboard,
+                    documents,
                 }) {
                     tracing::warn!(error = %e, "telegram sender: enqueue failed");
                 }
@@ -145,7 +167,7 @@ async fn run_drain(
 
 async fn send_with_retry(bot: &teloxide::Bot, msg: &Outbound) {
     use teloxide::prelude::*;
-    use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
+    use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile};
 
     let keyboard = msg.keyboard.as_ref().map(|k| {
         let rows: Vec<Vec<InlineKeyboardButton>> = k
@@ -162,13 +184,39 @@ async fn send_with_retry(bot: &teloxide::Bot, msg: &Outbound) {
         InlineKeyboardMarkup::new(rows)
     });
 
+    let chat = ChatId(msg.chat_id);
     let mut backoff = BACKOFF_START;
     for attempt in 0..=MAX_RETRIES {
-        let mut req = bot.send_message(ChatId(msg.chat_id), &msg.text);
-        if let Some(k) = keyboard.clone() {
-            req = req.reply_markup(k);
-        }
-        match req.await {
+        let result = if msg.documents.is_empty() {
+            let mut req = bot.send_message(chat, &msg.text);
+            if let Some(k) = keyboard.clone() {
+                req = req.reply_markup(k);
+            }
+            req.await.map(|_| ())
+        } else {
+            // First document carries the caption + keyboard; trailing
+            // documents go out plain. Unrolled instead of using `?` so
+            // retry accounting stays uniform across both branches.
+            let mut last = Ok(());
+            for (i, path) in msg.documents.iter().enumerate() {
+                let mut req = bot.send_document(chat, InputFile::file(path));
+                if i == 0 {
+                    req = req.caption(&msg.text);
+                    if let Some(k) = keyboard.clone() {
+                        req = req.reply_markup(k);
+                    }
+                }
+                match req.await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        last = Err(e);
+                        break;
+                    }
+                }
+            }
+            last.map(|_| ())
+        };
+        match result {
             Ok(_) => return,
             Err(e) => {
                 if attempt == MAX_RETRIES {

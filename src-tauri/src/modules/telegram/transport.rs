@@ -348,7 +348,7 @@ async fn handle_update(
                     .await;
                 state
                     .sender
-                    .enqueue_with_keyboard(chat_id, reply.text, reply.keyboard);
+                    .enqueue_full(chat_id, reply.text, reply.keyboard, reply.documents);
             } else {
                 state
                     .sender

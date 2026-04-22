@@ -7,6 +7,7 @@
 //! change when commands come or go.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,10 +15,17 @@ use async_trait::async_trait;
 /// Reply a handler wants delivered to the user. Optionally carries an
 /// inline keyboard for buttons; the transport layer converts it to the
 /// teloxide shape before sending.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Reply {
     pub text: String,
     pub keyboard: Option<InlineKeyboard>,
+    /// File attachments sent alongside `text`. On Telegram these go as
+    /// `send_document` (not `send_photo`) so PNGs from multi-4K screen
+    /// captures keep every pixel — the photo path re-encodes and scales
+    /// down to ≤1280px, which defeats the point for a screenshot tool.
+    /// On non-Telegram transports (CLI) only `text` is delivered, so
+    /// handlers must still put usable paths or a summary into `text`.
+    pub documents: Vec<PathBuf>,
 }
 
 impl Reply {
@@ -25,6 +33,15 @@ impl Reply {
         Self {
             text: s.into(),
             keyboard: None,
+            documents: Vec::new(),
+        }
+    }
+
+    pub fn with_documents(text: impl Into<String>, documents: Vec<PathBuf>) -> Self {
+        Self {
+            text: text.into(),
+            keyboard: None,
+            documents,
         }
     }
 }

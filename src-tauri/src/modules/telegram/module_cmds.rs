@@ -418,6 +418,7 @@ impl CommandHandler for VolumeCmd {
         Reply {
             text: format_volume(&snap),
             keyboard: Some(volume_keyboard()),
+            ..Default::default()
         }
     }
 }
@@ -584,6 +585,7 @@ impl CommandHandler for MusicCmd {
                 Reply {
                     text,
                     keyboard: Some(music_keyboard()),
+                    ..Default::default()
                 }
             }
             "play" | "pause" | "toggle" => {
@@ -591,6 +593,7 @@ impl CommandHandler for MusicCmd {
                     Ok(()) => Reply {
                         text: format!("⏯️ {}", read_after_action(&ctx.app, "перемкнуто")),
                         keyboard: Some(music_keyboard()),
+                        ..Default::default()
                     },
                     Err(e) => Reply::text(format!("⚠️ {e}")),
                 }
@@ -599,6 +602,7 @@ impl CommandHandler for MusicCmd {
                 Ok(()) => Reply {
                     text: format!("⏭️ {}", read_after_action(&ctx.app, "далі")),
                     keyboard: Some(music_keyboard()),
+                    ..Default::default()
                 },
                 Err(e) => Reply::text(format!("⚠️ {e}")),
             },
@@ -606,6 +610,7 @@ impl CommandHandler for MusicCmd {
                 Ok(()) => Reply {
                     text: format!("⏮️ {}", read_after_action(&ctx.app, "назад")),
                     keyboard: Some(music_keyboard()),
+                    ..Default::default()
                 },
                 Err(e) => Reply::text(format!("⚠️ {e}")),
             },
@@ -990,5 +995,214 @@ impl CommandHandler for SummarizeCmd {
             }
             Err(e) => Reply::text(format!("⚠️ AI: {e}")),
         }
+    }
+}
+
+// -------------------- /screenshot --------------------
+
+pub struct ScreenshotCmd;
+
+#[async_trait]
+impl CommandHandler for ScreenshotCmd {
+    fn name(&self) -> &'static str {
+        "screenshot"
+    }
+    fn description(&self) -> &'static str {
+        "Captures every connected screen and sends them back as files \
+         (uncompressed PNGs, not re-encoded photos). Pass `main` to \
+         capture only the primary display. Each PNG is written to the \
+         OS temp dir; the reply text lists the file paths so CLI users \
+         can open them locally."
+    }
+    fn usage(&self) -> &'static str {
+        "/screenshot [main]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let sub = args.trim().to_ascii_lowercase();
+        let result = tokio::task::spawn_blocking(move || {
+            if matches!(sub.as_str(), "main" | "primary" | "1") {
+                crate::modules::system::screenshot::capture_main_display().map(|p| vec![p])
+            } else {
+                crate::modules::system::screenshot::capture_all_displays()
+            }
+        })
+        .await;
+
+        let files = match result {
+            Ok(Ok(ps)) => ps,
+            Ok(Err(e)) => return Reply::text(format!("⚠️ screenshot: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ screenshot: task join: {e}")),
+        };
+
+        let paths_block = files
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let caption = format!(
+            "📸 Захоплено екранів: {}\n{}",
+            files.len(),
+            paths_block
+        );
+        Reply::with_documents(caption, files)
+    }
+}
+
+// -------------------- /display /sleep /shutdown --------------------
+
+use crate::modules::system::power::{self, PowerKind, PowerTimers};
+
+pub struct DisplayCmd;
+
+#[async_trait]
+impl CommandHandler for DisplayCmd {
+    fn name(&self) -> &'static str {
+        "display"
+    }
+    fn description(&self) -> &'static str {
+        "Turn the displays off immediately while leaving the Mac awake — \
+         Claude, builds, downloads and any background tasks keep running. \
+         Press any key or move the mouse to bring them back. No sudo."
+    }
+    fn usage(&self) -> &'static str {
+        "/display"
+    }
+    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
+        match tokio::task::spawn_blocking(power::display_off).await {
+            Ok(Ok(())) => Reply::text("💤 Екрани погашено (Mac працює далі)."),
+            Ok(Err(e)) => Reply::text(format!("⚠️ display: {e}")),
+            Err(e) => Reply::text(format!("⚠️ display: task join: {e}")),
+        }
+    }
+}
+
+pub struct SleepCmd {
+    timers: Arc<PowerTimers>,
+}
+
+impl SleepCmd {
+    pub fn new(timers: Arc<PowerTimers>) -> Self {
+        Self { timers }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for SleepCmd {
+    fn name(&self) -> &'static str {
+        "sleep"
+    }
+    fn description(&self) -> &'static str {
+        "Put the Mac to sleep. With no argument sleeps immediately; with \
+         a duration like `15m`, `30s` or `1h` schedules sleep after that \
+         delay (default unit is minutes, so `30` = 30 min). Use `cancel` \
+         to abort a pending timer, `status` to see remaining time."
+    }
+    fn usage(&self) -> &'static str {
+        "/sleep [<duration>|cancel|status]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        handle_power_cmd(&self.timers, PowerKind::Sleep, args).await
+    }
+}
+
+pub struct ShutdownCmd {
+    timers: Arc<PowerTimers>,
+}
+
+impl ShutdownCmd {
+    pub fn new(timers: Arc<PowerTimers>) -> Self {
+        Self { timers }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for ShutdownCmd {
+    fn name(&self) -> &'static str {
+        "shutdown"
+    }
+    fn description(&self) -> &'static str {
+        "Shut the Mac down. With no argument shuts down immediately; with \
+         a duration like `30m` schedules shutdown after that delay. Use \
+         `cancel` to abort a pending timer, `status` to see remaining time. \
+         Unsaved work in open apps may block the shutdown — the command \
+         surfaces that as an error."
+    }
+    fn usage(&self) -> &'static str {
+        "/shutdown [<duration>|cancel|status]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        handle_power_cmd(&self.timers, PowerKind::Shutdown, args).await
+    }
+}
+
+async fn handle_power_cmd(
+    timers: &Arc<PowerTimers>,
+    kind: PowerKind,
+    args: &str,
+) -> Reply {
+    let sub = args.trim().to_ascii_lowercase();
+    match sub.as_str() {
+        "cancel" | "off" | "stop" | "abort" => {
+            if timers.cancel(kind) {
+                Reply::text(format!("✖️ {} cancelled.", label(kind, true)))
+            } else {
+                Reply::text(format!("ℹ️ Немає запланованого {}.", label(kind, false)))
+            }
+        }
+        "status" => match timers.pending_fire_at(kind) {
+            Some(fire_at_ms) => {
+                let now = now_ms();
+                let remaining = (fire_at_ms - now).max(0) as u64;
+                Reply::text(format!(
+                    "⏱ {} через {}",
+                    label(kind, true),
+                    power::format_duration(std::time::Duration::from_millis(remaining))
+                ))
+            }
+            None => Reply::text(format!("ℹ️ Немає запланованого {}.", label(kind, false))),
+        },
+        "" => immediate(kind).await,
+        other => match power::parse_duration(other) {
+            Ok(delay) => {
+                timers.schedule(kind, delay);
+                Reply::text(format!(
+                    "⏳ {} заплановано через {}.",
+                    label(kind, true),
+                    power::format_duration(delay)
+                ))
+            }
+            Err(e) => Reply::text(format!("⚠️ {}: {e}", kind_word(kind))),
+        },
+    }
+}
+
+async fn immediate(kind: PowerKind) -> Reply {
+    let verb = match kind {
+        PowerKind::Sleep => power::sleep_now,
+        PowerKind::Shutdown => power::shutdown_now,
+    };
+    match tokio::task::spawn_blocking(verb).await {
+        Ok(Ok(())) => Reply::text(match kind {
+            PowerKind::Sleep => "😴 Засинаю…",
+            PowerKind::Shutdown => "⏻ Вимикаюсь…",
+        }),
+        Ok(Err(e)) => Reply::text(format!("⚠️ {}: {e}", kind_word(kind))),
+        Err(e) => Reply::text(format!("⚠️ {}: task join: {e}", kind_word(kind))),
+    }
+}
+
+fn label(kind: PowerKind, caps: bool) -> &'static str {
+    match (kind, caps) {
+        (PowerKind::Sleep, true) => "Sleep",
+        (PowerKind::Sleep, false) => "sleep",
+        (PowerKind::Shutdown, true) => "Shutdown",
+        (PowerKind::Shutdown, false) => "shutdown",
+    }
+}
+
+fn kind_word(kind: PowerKind) -> &'static str {
+    match kind {
+        PowerKind::Sleep => "sleep",
+        PowerKind::Shutdown => "shutdown",
     }
 }

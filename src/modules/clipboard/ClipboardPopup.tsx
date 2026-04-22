@@ -12,7 +12,14 @@ import { SearchInput } from '../../shared/ui/SearchInput';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { AskAiButton } from '../../shared/ui/AskAiButton';
 import { SendToTranslatorButton } from '../../shared/ui/SendToTranslatorButton';
-import { ExternalIcon, EyeIcon, NoteIcon, PinIcon, TrashIcon } from '../../shared/ui/icons';
+import {
+  CopyIcon,
+  ExternalIcon,
+  EyeIcon,
+  NoteIcon,
+  PinIcon,
+  TrashIcon,
+} from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
 import { useAnnounce } from '../../shared/ui/LiveRegion';
 import { useKeyboardNav } from '../../shared/hooks/useKeyboardNav';
@@ -38,7 +45,17 @@ import {
   type ContentType,
   type TextSubtype,
 } from './contentType';
-import { iconFor, subtypeVisual, typeTint } from './icons';
+import {
+  BraceIcon,
+  EmailIcon,
+  FolderPathIcon,
+  HashIcon,
+  LockIcon,
+  PhoneIcon,
+  iconFor,
+  subtypeVisual,
+  typeTint,
+} from './icons';
 import { ClipboardVirtualList } from './ClipboardVirtualList';
 import { LinkRow } from './LinkRow';
 import { detect as detectVideo, start as startDownload, type DetectedVideo } from '../downloader/api';
@@ -768,6 +785,7 @@ export const ClipboardPopup = () => {
         kind: 'action',
         label: 'Paste',
         shortcut: '↵',
+        icon: <ExternalIcon size={12} />,
         onSelect: () => {
           if (idx >= 0) pasteAt(idx);
         },
@@ -776,6 +794,7 @@ export const ClipboardPopup = () => {
         kind: 'action',
         label: 'Copy',
         shortcut: '⇧↵',
+        icon: <CopyIcon size={12} />,
         onSelect: () => {
           if (idx >= 0) copyAt(idx);
         },
@@ -790,16 +809,19 @@ export const ClipboardPopup = () => {
           out.push({
             kind: 'action',
             label: 'Reveal in Finder',
+            icon: <FolderPathIcon />,
             onSelect: () => revealInFinder(first.path),
           });
           out.push({
             kind: 'action',
             label: 'Open with default app',
+            icon: <ExternalIcon size={12} />,
             onSelect: () => openFile(first.path),
           });
           out.push({
             kind: 'action',
             label: 'Copy first file path',
+            icon: <CopyIcon size={12} />,
             onSelect: () => {
               void copyText(first.path);
               toast({ title: 'Path copied', variant: 'success', durationMs: 1400 });
@@ -809,6 +831,7 @@ export const ClipboardPopup = () => {
             out.push({
               kind: 'action',
               label: `Copy all ${files.length} paths`,
+              icon: <CopyIcon size={12} />,
               onSelect: () => {
                 void copyText(files.map((f) => f.path).join('\n'));
                 toast({ title: 'Paths copied', variant: 'success', durationMs: 1400 });
@@ -823,16 +846,19 @@ export const ClipboardPopup = () => {
           out.push({
             kind: 'action',
             label: 'Open in Preview',
+            icon: <ExternalIcon size={12} />,
             onSelect: () => openImageInViewer(meta.path),
           });
           out.push({
             kind: 'action',
             label: 'Reveal PNG in Finder',
+            icon: <FolderPathIcon />,
             onSelect: () => revealInFinder(meta.path),
           });
           out.push({
             kind: 'action',
             label: 'Copy PNG path',
+            icon: <CopyIcon size={12} />,
             onSelect: () => {
               void copyText(meta.path);
               toast({ title: 'Path copied', variant: 'success', durationMs: 1400 });
@@ -847,6 +873,7 @@ export const ClipboardPopup = () => {
             out.push({
               kind: 'action',
               label: 'Copy as pretty JSON',
+              icon: <BraceIcon />,
               onSelect: () => {
                 void copyText(pretty);
                 toast({ title: 'Pretty JSON copied', variant: 'success', durationMs: 1400 });
@@ -860,6 +887,7 @@ export const ClipboardPopup = () => {
             kind: 'action',
             label:
               item.subtype === 'hex-color' ? 'Copy value' : 'Copy without dashes',
+            icon: <HashIcon />,
             onSelect: () => {
               const value =
                 item.subtype === 'uuid'
@@ -875,6 +903,7 @@ export const ClipboardPopup = () => {
           out.push({
             kind: 'action',
             label: 'Send email',
+            icon: <EmailIcon />,
             onSelect: () => openExternal(`mailto:${item.content.trim()}`),
           });
         }
@@ -883,6 +912,7 @@ export const ClipboardPopup = () => {
           out.push({
             kind: 'action',
             label: 'Call / FaceTime',
+            icon: <PhoneIcon />,
             onSelect: () =>
               openExternal(`tel:${item.content.replace(/[^+\d]/g, '')}`),
           });
@@ -892,6 +922,7 @@ export const ClipboardPopup = () => {
           out.push({
             kind: 'action',
             label: 'Reveal in Finder',
+            icon: <FolderPathIcon />,
             onSelect: () => revealInFinder(item.content.trim()),
           });
         }
@@ -900,7 +931,17 @@ export const ClipboardPopup = () => {
           out.push({
             kind: 'action',
             label: revealedSecrets.has(item.id) ? 'Hide secret' : 'Reveal secret',
+            icon: revealedSecrets.has(item.id) ? <LockIcon /> : <EyeIcon size={12} />,
             onSelect: () => toggleReveal(item.id),
+          });
+        }
+        if (item.type === 'link' && item.subtype !== 'secret') {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: 'Open in browser',
+            icon: <ExternalIcon size={12} />,
+            onSelect: () => openExternal(item.content.trim()),
           });
         }
         if (item.subtype !== 'secret' && isLongText(item.content)) {
@@ -909,6 +950,7 @@ export const ClipboardPopup = () => {
             kind: 'action',
             label: 'Preview…',
             shortcut: 'Space',
+            icon: <EyeIcon size={12} />,
             onSelect: () => setPreviewId(item.id),
           });
         }
@@ -920,6 +962,7 @@ export const ClipboardPopup = () => {
         kind: 'action',
         label: item.pinned ? 'Unpin' : 'Pin',
         shortcut: '⌘P',
+        icon: <PinIcon size={12} filled={item.pinned} />,
         onSelect: () => handleTogglePin(item.id),
       });
       out.push({
@@ -927,6 +970,7 @@ export const ClipboardPopup = () => {
         label: 'Delete',
         shortcut: '⌫',
         tone: 'danger',
+        icon: <TrashIcon size={12} />,
         onSelect: () => handleDelete(item.id),
       });
       return out;
