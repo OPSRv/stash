@@ -1,10 +1,12 @@
 import { useCallback, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
-import { Spinner } from '../../shared/ui/Spinner';
-import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { ListItemRow } from '../../shared/ui/ListItemRow';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { RevealButton } from '../../shared/ui/RevealButton';
+import { SegmentedControl } from '../../shared/ui/SegmentedControl';
+import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
 import {
   cancelScan,
@@ -114,43 +116,18 @@ export const LargeFilesPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(255,216,107,0.12), rgba(255,145,77,0.18))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-36 h-36 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(255,145,77,0.35), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#ffd86b,#ff914d)',
-              boxShadow: '0 8px 24px -8px rgba(255,145,77,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-              <path d="M14 3v6h6M9 13h6M9 17h4" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="t-primary text-title font-semibold">Великі файли</div>
-            <div className="t-tertiary text-meta truncate">
-              {root ?? 'Домашня папка · пропускаються node_modules, кеші, контейнери'}
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-1.5">
+      <PanelHeader
+        gradient={['#ffd86b', '#ff914d']}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+            <path d="M14 3v6h6M9 13h6M9 17h4" />
+          </svg>
+        }
+        title="Великі файли"
+        description={root ?? 'Домашня папка · пропускаються node_modules, кеші, контейнери'}
+        trailing={
+          <>
             <SegmentedControl<Threshold>
               size="sm"
               value={threshold}
@@ -181,9 +158,9 @@ export const LargeFilesPanel = () => {
                 </Button>
               )}
             </div>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {result && (
         <div className="px-4 py-1.5 border-b hair t-secondary text-meta flex items-center justify-between">
@@ -218,49 +195,48 @@ export const LargeFilesPanel = () => {
         {!error && result && result.files.length > 0 && (
           <ul className="divide-y hair">
             {result.files.map((f) => (
-              <li
+              <ListItemRow
                 key={f.path}
-                className="px-4 py-2 flex items-center gap-3 hover:bg-white/[0.03]"
-              >
-                <div
-                  aria-hidden
-                  className="shrink-0 w-8 h-8 rounded-lg inline-flex items-center justify-center"
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(255,216,107,0.25), rgba(255,145,77,0.35))',
-                    boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)',
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffb067" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-                    <path d="M14 3v6h6" />
-                  </svg>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="t-primary text-body font-medium truncate" title={f.path}>
-                    {basename(f.path)}
-                  </div>
-                  <div className="t-tertiary text-meta truncate" title={f.path}>
-                    {dirname(f.path)}
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <div className="t-primary tabular-nums font-medium">
-                    {formatBytes(f.size_bytes)}
-                  </div>
-                  <div className="t-tertiary text-[11px]">{formatDate(f.modified_secs)}</div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <RevealButton path={f.path} />
-                  <Button
-                    size="sm"
-                    variant="soft"
-                    tone="danger"
-                    onClick={() => setPending(f)}
+                className="hover:bg-white/[0.03]"
+                leading={
+                  <div
+                    aria-hidden
+                    className="w-8 h-8 rounded-lg inline-flex items-center justify-center"
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(255,216,107,0.25), rgba(255,145,77,0.35))',
+                      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.1)',
+                    }}
                   >
-                    У кошик
-                  </Button>
-                </div>
-              </li>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffb067" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+                      <path d="M14 3v6h6" />
+                    </svg>
+                  </div>
+                }
+                title={<span title={f.path}>{basename(f.path)}</span>}
+                meta={<span title={f.path}>{dirname(f.path)}</span>}
+                trailing={
+                  <>
+                    <div className="text-right shrink-0">
+                      <div className="t-primary tabular-nums font-medium">
+                        {formatBytes(f.size_bytes)}
+                      </div>
+                      <div className="t-tertiary text-[11px]">{formatDate(f.modified_secs)}</div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <RevealButton path={f.path} />
+                      <Button
+                        size="sm"
+                        variant="soft"
+                        tone="danger"
+                        onClick={() => setPending(f)}
+                      >
+                        У кошик
+                      </Button>
+                    </div>
+                  </>
+                }
+              />
             ))}
           </ul>
         )}

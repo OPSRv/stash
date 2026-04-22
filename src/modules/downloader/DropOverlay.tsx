@@ -1,6 +1,8 @@
+import { accent } from '../../shared/theme/accent';
+
 const overlayStyle = {
-  background: 'rgba(var(--stash-accent-rgb),0.12)',
-  border: '2px dashed rgba(var(--stash-accent-rgb),0.6)',
+  background: accent(0.12),
+  border: `2px dashed ${accent(0.6)}`,
   borderRadius: 'var(--radius-lg)',
 } as const;
 

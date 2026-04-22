@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { accent } from '../../shared/theme/accent';
 import { Button } from '../../shared/ui/Button';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { IconButton } from '../../shared/ui/IconButton';
@@ -117,7 +118,7 @@ export const SessionPlayer = ({ snapshot, banner, onDismissBanner }: SessionPlay
         <div
           role="status"
           className="px-4 py-2.5 flex items-center justify-between border-b hair"
-          style={{ background: 'rgba(var(--stash-accent-rgb),0.14)' }}
+          style={{ background: accent(0.14) }}
         >
           <div className="flex items-center gap-2">
             <PostureBadge posture={banner.to} size="md" />

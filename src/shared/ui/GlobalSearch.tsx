@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { accent } from '../theme/accent';
 import { useFocusTrap } from './useFocusTrap';
 
 type SearchHit = {
@@ -11,7 +12,7 @@ type SearchHit = {
 };
 
 const kindBadge: Record<SearchHit['kind'], { label: string; bg: string }> = {
-  clipboard: { label: 'CLIP', bg: 'rgba(var(--stash-accent-rgb),0.18)' },
+  clipboard: { label: 'CLIP', bg: accent(0.18) },
   download: { label: 'DL', bg: 'rgba(34,197,94,0.18)' },
   note: { label: 'NOTE', bg: 'rgba(236,72,153,0.18)' },
 };

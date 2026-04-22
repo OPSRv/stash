@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { accent } from '../../shared/theme/accent';
 import { PauseIcon, PlayIcon } from '../../shared/ui/icons';
 import { metronomeGetState, metronomeSaveState } from './api';
 import { BPM_MAX, BPM_MIN, DEFAULT_STATE, TIME_SIGNATURES, type MetronomeState } from './metronome.constants';
@@ -160,13 +161,11 @@ export const MetronomeShell = () => {
           style={{
             width: 52,
             height: 52,
-            background: engine.isPlaying
-              ? 'rgba(var(--stash-accent-rgb), 1)'
-              : 'rgba(var(--stash-accent-rgb), 0.15)',
-            color: engine.isPlaying ? '#fff' : 'rgba(var(--stash-accent-rgb), 1)',
+            background: engine.isPlaying ? accent(1) : accent(0.15),
+            color: engine.isPlaying ? '#fff' : accent(1),
             boxShadow: engine.isPlaying
-              ? '0 8px 24px -6px rgba(var(--stash-accent-rgb), 0.55)'
-              : 'inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.35)',
+              ? `0 8px 24px -6px ${accent(0.55)}`
+              : `inset 0 0 0 1px ${accent(0.35)}`,
           }}
         >
           {engine.isPlaying ? <PauseIcon size={18} /> : <PlayIcon size={18} />}

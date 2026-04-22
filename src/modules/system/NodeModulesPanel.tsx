@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
-import { Spinner } from '../../shared/ui/Spinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { ListItemRow } from '../../shared/ui/ListItemRow';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { RevealButton } from '../../shared/ui/RevealButton';
+import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
 import { useSetSelection } from '../../shared/hooks/useSetSelection';
 import { cancelScan, scanNodeModules, trashPath, type NodeModulesEntry } from './api';
@@ -107,43 +109,18 @@ export const NodeModulesPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(94,226,196,0.10), rgba(23,178,106,0.18))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-40 h-40 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(23,178,106,0.35), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#5ee2c4,#17b26a)',
-              boxShadow: '0 8px 24px -8px rgba(23,178,106,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M3 7l9-4 9 4v10l-9 4-9-4z" />
-              <path d="M3 7l9 4 9-4M12 11v10" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="t-primary text-title font-semibold">node_modules</div>
-            <div className="t-tertiary text-meta truncate">
-              {root ?? 'Оберіть папку — знайдемо всі node_modules рекурсивно'}
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-1.5">
+      <PanelHeader
+        gradient={['#5ee2c4', '#17b26a']}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M3 7l9-4 9 4v10l-9 4-9-4z" />
+            <path d="M3 7l9 4 9-4M12 11v10" />
+          </svg>
+        }
+        title="node_modules"
+        description={root ?? 'Оберіть папку — знайдемо всі node_modules рекурсивно'}
+        trailing={
+          <>
             {entries && (
               <div className="t-primary font-semibold text-title tabular-nums">
                 {formatBytes(totalAll)}
@@ -170,9 +147,9 @@ export const NodeModulesPanel = () => {
                 {root ? 'Інша папка' : 'Обрати папку'}
               </Button>
             </div>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {entries && entries.length > 0 && (
         <div className="px-4 py-1.5 border-b hair flex items-center justify-between t-secondary text-meta">
@@ -230,36 +207,37 @@ export const NodeModulesPanel = () => {
             {entries.map((e) => {
               const checked = selected.has(e.path);
               return (
-                <li
+                <ListItemRow
                   key={e.path}
+                  selected={checked}
                   onClick={() => toggleOne(e.path)}
-                  className={`px-4 py-2 flex items-center gap-3 cursor-pointer ${
-                    checked ? 'bg-white/[0.05]' : 'hover:bg-white/[0.03]'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleOne(e.path)}
-                    onClick={(ev) => ev.stopPropagation()}
-                    className="ring-focus shrink-0"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="t-primary text-body font-medium truncate" title={e.path}>
+                  leading={
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleOne(e.path)}
+                      onClick={(ev) => ev.stopPropagation()}
+                      className="ring-focus"
+                    />
+                  }
+                  title={
+                    <span title={e.path}>
                       {e.project.split('/').slice(-2).join('/')}
-                    </div>
-                    <div className="t-tertiary text-meta truncate" title={e.path}>
-                      {e.project}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="t-primary tabular-nums font-medium">
-                      {formatBytes(e.size_bytes)}
-                    </div>
-                    <div className="t-tertiary text-[11px]">{formatDate(e.last_modified)}</div>
-                  </div>
-                  <RevealButton path={e.path} stopPropagation />
-                </li>
+                    </span>
+                  }
+                  meta={<span title={e.path}>{e.project}</span>}
+                  trailing={
+                    <>
+                      <div className="text-right shrink-0">
+                        <div className="t-primary tabular-nums font-medium">
+                          {formatBytes(e.size_bytes)}
+                        </div>
+                        <div className="t-tertiary text-[11px]">{formatDate(e.last_modified)}</div>
+                      </div>
+                      <RevealButton path={e.path} stopPropagation />
+                    </>
+                  }
+                />
               );
             })}
           </ul>

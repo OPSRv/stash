@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { accent } from '../../shared/theme/accent';
 import { Button } from '../../shared/ui/Button';
 import { Select } from '../../shared/ui/Select';
 import { MicIcon, StopCircleIcon } from '../../shared/ui/icons';
@@ -369,7 +370,7 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
                     flex: 1,
                     minWidth: 2,
                     height: `${Math.max(6, lvl * 100)}%`,
-                    background: 'rgba(var(--stash-accent-rgb), 0.7)',
+                    background: accent(0.7),
                     borderRadius: 1,
                     transition: 'height 40ms linear',
                   }}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
+import { accent } from '../theme/accent';
 import { IconButton } from './IconButton';
 import { PauseIcon, PlayIcon, WaveformIcon } from './icons';
 
@@ -237,7 +238,7 @@ export const AudioPlayer = ({
         aria-label={playing ? 'Pause' : 'Play'}
         className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors disabled:opacity-40"
         style={{
-          backgroundColor: 'rgba(var(--stash-accent-rgb), 0.18)',
+          backgroundColor: accent(0.18),
           color: 'rgb(var(--stash-accent-rgb))',
         }}
       >
@@ -352,8 +353,8 @@ const WaveformDisplay = ({
     <div
       className={`my-3 rounded-lg px-3 py-2.5 flex items-center gap-3 w-full ${className ?? ''}`}
       style={{
-        background: 'rgba(var(--stash-accent-rgb), 0.08)',
-        border: '1px solid rgba(var(--stash-accent-rgb), 0.22)',
+        background: accent(0.08),
+        border: `1px solid ${accent(0.22)}`,
       }}
       data-testid="audio-waveform"
     >
@@ -398,9 +399,7 @@ const WaveformDisplay = ({
                   flex: 1,
                   minWidth: 1,
                   height: `${h * 100}%`,
-                  background: lit
-                    ? 'rgba(var(--stash-accent-rgb), 0.9)'
-                    : 'rgba(255,255,255,0.18)',
+                  background: lit ? accent(0.9) : 'rgba(255,255,255,0.18)',
                   borderRadius: 1,
                   transition: 'background 120ms linear',
                 }}

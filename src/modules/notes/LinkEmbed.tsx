@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { accent } from '../../shared/theme/accent';
 import { useLinkPreview } from '../clipboard/useLinkPreview';
 
 type Props = { href: string };
@@ -84,7 +85,7 @@ const PreviewCard = ({ href }: { href: string }) => {
       ) : (
         <div
           className="w-20 h-14 shrink-0 rounded-md flex items-center justify-center t-tertiary text-meta"
-          style={{ background: 'rgba(var(--stash-accent-rgb), 0.12)' }}
+          style={{ background: accent(0.12) }}
           aria-hidden
         >
           {host.slice(0, 1).toUpperCase()}

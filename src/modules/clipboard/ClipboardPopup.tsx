@@ -35,6 +35,7 @@ import { detect as detectVideo, start as startDownload, type DetectedVideo } fro
 import { PlatformBadge } from '../downloader/PlatformBadge';
 import { notesCreate } from '../notes/api';
 import { PreviewDialog } from './PreviewDialog';
+import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 
 const iso = (ts: number) => {
@@ -652,7 +653,7 @@ export const ClipboardPopup = () => {
       {selectionCount > 0 && (
         <div
           className="px-3 py-2 flex items-center justify-between border-b hair"
-          style={{ background: 'rgba(var(--stash-accent-rgb),0.08)' }}
+          style={{ background: accent(0.08) }}
         >
           <span className="t-primary text-meta font-medium">
             {selectionCount} selected

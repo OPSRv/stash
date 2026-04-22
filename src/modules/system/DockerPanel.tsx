@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
-import { Spinner } from '../../shared/ui/Spinner';
-import { EmptyState } from '../../shared/ui/EmptyState';
+import { CenterSpinner } from '../../shared/ui/CenterSpinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { EmptyState } from '../../shared/ui/EmptyState';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { useToast } from '../../shared/ui/Toast';
 import { dockerPrune, dockerStatus, type DockerStatus } from './api';
 import { formatBytes } from './format';
@@ -67,49 +68,27 @@ export const DockerPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background: 'linear-gradient(135deg, rgba(14,165,233,0.12), rgba(94,226,196,0.14))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-40 h-40 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(14,165,233,0.4), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#0ea5e9,#5ee2c4)',
-              boxShadow: '0 8px 24px -8px rgba(14,165,233,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="3" y="7" width="4" height="4" rx="0.5" />
-              <rect x="8" y="7" width="4" height="4" rx="0.5" />
-              <rect x="13" y="7" width="4" height="4" rx="0.5" />
-              <rect x="8" y="3" width="4" height="4" rx="0.5" />
-              <path d="M2 14h20c0 3-3 6-10 6-6 0-10-3-10-6z" />
-            </svg>
-          </div>
-          <div className="flex-1">
-            <div className="t-primary text-title font-semibold">Docker</div>
-            <div className="t-tertiary text-meta">
-              {status?.installed === false
-                ? 'Docker не встановлено'
-                : status?.running === false
-                ? 'Демон не запущено — відкрийте Docker Desktop'
-                : `Запущено ${status?.version ?? ''} · використовує ${formatBytes(totalSize)}`}
-            </div>
-          </div>
-          {status?.running && (
+      <PanelHeader
+        gradient={['#0ea5e9', '#5ee2c4']}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="3" y="7" width="4" height="4" rx="0.5" />
+            <rect x="8" y="7" width="4" height="4" rx="0.5" />
+            <rect x="13" y="7" width="4" height="4" rx="0.5" />
+            <rect x="8" y="3" width="4" height="4" rx="0.5" />
+            <path d="M2 14h20c0 3-3 6-10 6-6 0-10-3-10-6z" />
+          </svg>
+        }
+        title="Docker"
+        description={
+          status?.installed === false
+            ? 'Docker не встановлено'
+            : status?.running === false
+            ? 'Демон не запущено — відкрийте Docker Desktop'
+            : `Запущено ${status?.version ?? ''} · використовує ${formatBytes(totalSize)}`
+        }
+        trailing={
+          status?.running ? (
             <div className="text-right">
               <div className="t-tertiary text-[10px] uppercase tracking-wider">
                 Можна звільнити
@@ -118,17 +97,13 @@ export const DockerPanel = () => {
                 {formatBytes(reclaimable)}
               </div>
             </div>
-          )}
-        </div>
-      </header>
+          ) : undefined
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-auto p-4 space-y-3">
         {error && <div className="t-danger">Помилка: {error}</div>}
-        {!error && !status && (
-          <div className="flex items-center justify-center py-6">
-            <Spinner />
-          </div>
-        )}
+        {!error && !status && <CenterSpinner fit="inline" />}
         {!error && status && !status.installed && (
           <EmptyState
             title="Docker не знайдено"

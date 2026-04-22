@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useAsync } from '../../shared/hooks/useAsync';
 import { Button } from '../../shared/ui/Button';
-import { Spinner } from '../../shared/ui/Spinner';
+import { CenterSpinner } from '../../shared/ui/CenterSpinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { ListItemRow } from '../../shared/ui/ListItemRow';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { RevealButton } from '../../shared/ui/RevealButton';
 import { useToast } from '../../shared/ui/Toast';
 import { listPrivacy, trashPath, type PrivacyItem } from './api';
@@ -15,16 +18,9 @@ const CAT_TINT: Record<string, { bg: string; dot: string }> = {
 };
 
 export const PrivacyPanel = () => {
-  const [items, setItems] = useState<PrivacyItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: items, error, reload: refresh } = useAsync(listPrivacy);
   const [pending, setPending] = useState<PrivacyItem | null>(null);
   const { toast } = useToast();
-
-  const refresh = useCallback(() => {
-    listPrivacy().then(setItems).catch((e) => setError(String(e)));
-  }, []);
-
-  useEffect(refresh, [refresh]);
 
   const total = useMemo(
     () => (items ?? []).reduce((a, i) => a + i.size_bytes, 0),
@@ -50,78 +46,57 @@ export const PrivacyPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(208,140,255,0.12), rgba(255,58,111,0.16))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-40 h-40 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(208,140,255,0.35), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#d08cff,#ff3a6f)',
-              boxShadow: '0 8px 24px -8px rgba(208,140,255,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z" />
-            </svg>
+      <PanelHeader
+        gradient={['#d08cff', '#ff3a6f']}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z" />
+          </svg>
+        }
+        title="Приватність"
+        description="Історія браузерів, Recent Items, QuickLook, shell history."
+        trailing={
+          <div className="t-primary tabular-nums text-title font-semibold">
+            {formatBytes(total)}
           </div>
-          <div className="flex-1">
-            <div className="t-primary text-title font-semibold">Приватність</div>
-            <div className="t-tertiary text-meta">
-              Історія браузерів, Recent Items, QuickLook, shell history.
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="t-primary tabular-nums text-title font-semibold">
-              {formatBytes(total)}
-            </div>
-          </div>
-        </div>
-      </header>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-auto">
         {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
-        {!error && !items && <div className="flex items-center justify-center h-full"><Spinner /></div>}
+        {!error && !items && <CenterSpinner />}
         {items && items.length === 0 && <EmptyState title="Нічого не знайдено" />}
         {items && items.length > 0 && (
           <ul className="divide-y hair">
             {items.map((i) => {
               const tint = CAT_TINT[i.category] ?? CAT_TINT.system;
               return (
-                <li key={i.path} className="px-4 py-2 flex items-center gap-3 hover:bg-white/[0.03]">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="t-primary text-body font-medium truncate">{i.label}</span>
+                <ListItemRow
+                  key={i.path}
+                  className="hover:bg-white/[0.03]"
+                  title={
+                    <span className="flex items-center gap-2">
+                      <span className="truncate">{i.label}</span>
                       <span
-                        className="shrink-0 inline-flex items-center gap-1 px-1.5 py-px rounded text-[10px] t-secondary"
+                        className="shrink-0 inline-flex items-center gap-1 px-1.5 py-px rounded text-[10px] t-secondary font-normal"
                         style={{ background: tint.bg }}
                       >
                         <span aria-hidden className="w-1.5 h-1.5 rounded-full" style={{ background: tint.dot }} />
                         {i.category}
                       </span>
-                    </div>
-                    <div className="t-tertiary text-meta truncate" title={i.path}>{i.path}</div>
-                  </div>
-                  <div className="t-primary tabular-nums shrink-0">{formatBytes(i.size_bytes)}</div>
-                  <RevealButton path={i.path} />
-                  <Button size="sm" variant="soft" tone="danger" onClick={() => setPending(i)}>
-                    У кошик
-                  </Button>
-                </li>
+                    </span>
+                  }
+                  meta={<span title={i.path}>{i.path}</span>}
+                  trailing={
+                    <>
+                      <div className="t-primary tabular-nums shrink-0">{formatBytes(i.size_bytes)}</div>
+                      <RevealButton path={i.path} />
+                      <Button size="sm" variant="soft" tone="danger" onClick={() => setPending(i)}>
+                        У кошик
+                      </Button>
+                    </>
+                  }
+                />
               );
             })}
           </ul>

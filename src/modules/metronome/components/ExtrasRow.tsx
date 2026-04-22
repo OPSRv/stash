@@ -1,3 +1,4 @@
+import { accent } from '../../../shared/theme/accent';
 import { Toggle } from '../../../shared/ui/Toggle';
 import {
   BPM_MAX,
@@ -197,9 +198,9 @@ export const ExtrasRow = ({ state, onPatch }: Props) => {
           data-testid="preset-save"
           className="shrink-0 text-meta font-medium px-2.5 py-1 rounded-md transition-colors"
           style={{
-            background: 'rgba(var(--stash-accent-rgb), 0.18)',
-            color: 'rgba(var(--stash-accent-rgb), 1)',
-            boxShadow: 'inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.35)',
+            background: accent(0.18),
+            color: accent(1),
+            boxShadow: `inset 0 0 0 1px ${accent(0.35)}`,
           }}
         >
           + Save current

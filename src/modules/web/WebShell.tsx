@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { saveSetting, type WebChatService } from '../../settings/store';
 import { Input } from '../../shared/ui/Input';
 import { useToast } from '../../shared/ui/Toast';
+import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 
 import { AddWebServiceModal } from './AddWebServiceModal';
@@ -507,7 +508,7 @@ export const WebShell = () => {
                   aria-hidden="true"
                   className="absolute inset-[-3px] rounded-full pointer-events-none"
                   style={{
-                    boxShadow: '0 0 0 1.5px rgba(var(--stash-accent-rgb), 0.9)',
+                    boxShadow: `0 0 0 1.5px ${accent(0.9)}`,
                     animation: 'stash-web-pulse 1.1s ease-in-out infinite',
                   }}
                 />
@@ -690,8 +691,8 @@ export const WebShell = () => {
             aria-hidden="true"
             className="absolute inset-1 rounded-lg pointer-events-none flex items-center justify-center text-meta font-medium text-center px-2"
             style={{
-              border: '1.5px dashed rgba(var(--stash-accent-rgb), 0.9)',
-              background: 'rgba(var(--stash-accent-rgb), 0.12)',
+              border: `1.5px dashed ${accent(0.9)}`,
+              background: accent(0.12),
               color: 'rgb(var(--stash-accent-rgb))',
             }}
           >

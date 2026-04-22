@@ -10,6 +10,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Button } from '../../shared/ui/Button';
 import { AskAiButton } from '../../shared/ui/AskAiButton';
 import { SearchIcon, CloseIcon } from '../../shared/ui/icons';
+import { accent } from '../../shared/theme/accent';
 import { loadSettings } from '../../settings/store';
 import { ptyClose, ptyOpen, ptyResize, ptyWrite, type DataPayload, type ExitPayload } from './api';
 import './terminal-animations.css';
@@ -385,7 +386,7 @@ export const TerminalShell = () => {
         <div
           className="px-3 py-2 flex items-center gap-3 text-meta border-b hair"
           style={{
-            background: 'rgba(var(--stash-accent-rgb), 0.08)',
+            background: accent(0.08),
             color: 'var(--color-warning-fg)',
           }}
         >

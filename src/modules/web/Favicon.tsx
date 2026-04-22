@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { accent } from '../../shared/theme/accent';
 import { faviconUrlFor } from './webchatApi';
 
 type Props = {
@@ -47,7 +48,7 @@ export const Favicon = ({ url, label, size, className }: Props) => {
         style={{
           width: size,
           height: size,
-          background: 'rgba(var(--stash-accent-rgb), 0.25)',
+          background: accent(0.25),
           fontSize: Math.max(9, Math.floor(size * 0.6)),
           lineHeight: 1,
         }}

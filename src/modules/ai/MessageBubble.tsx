@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { accent } from '../../shared/theme/accent';
 import { LazyMarkdown } from '../../shared/ui/LazyMarkdown';
 import { copyText } from '../../shared/util/clipboard';
 
@@ -29,7 +30,7 @@ export const MessageBubble = ({ message, showStoppedHint = true }: Props) => {
         }`}
         style={{
           background: isUser
-            ? 'rgba(var(--stash-accent-rgb), 0.14)'
+            ? accent(0.14)
             : 'var(--color-surface-muted)',
           // Break long URLs and unbroken tokens so bubbles in narrow
           // sidebars (notes chat @ 340-400 px) don't push content past

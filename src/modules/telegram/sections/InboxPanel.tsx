@@ -4,6 +4,7 @@ import { appDataDir, join } from '@tauri-apps/api/path';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { invoke } from '@tauri-apps/api/core';
 
+import { accent } from '../../../shared/theme/accent';
 import { IconButton } from '../../../shared/ui/IconButton';
 import { SearchInput } from '../../../shared/ui/SearchInput';
 import { Button } from '../../../shared/ui/Button';
@@ -587,7 +588,7 @@ const EmptyState = ({ connection }: { connection: ConnectionStatus | null }) => 
     <div className="flex flex-col items-center justify-center py-16 px-8 text-center gap-3">
       <div
         className="w-12 h-12 rounded-full flex items-center justify-center"
-        style={{ backgroundColor: 'rgba(var(--stash-accent-rgb), 0.10)' }}
+        style={{ backgroundColor: accent(0.10) }}
       >
         <svg
           width="20"

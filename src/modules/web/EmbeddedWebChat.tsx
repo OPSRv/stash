@@ -5,6 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { loadSettings, type WebChatService } from '../../settings/store';
 import './web-animations.css';
 import { userAgentFor } from '../../shared/browserUA';
+import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 import { MoreHorizontalIcon } from '../../shared/ui/icons';
 import { Input } from '../../shared/ui/Input';
@@ -514,7 +515,7 @@ export const EmbeddedWebChat = ({
             className="absolute left-0 top-0 h-0.5 z-10 pointer-events-none"
             style={{
               width: '100%',
-              background: 'linear-gradient(90deg, transparent, rgba(var(--stash-accent-rgb), 0.9), transparent)',
+              background: `linear-gradient(90deg, transparent, ${accent(0.9)}, transparent)`,
               backgroundSize: '40% 100%',
               backgroundRepeat: 'no-repeat',
               animation: 'stash-web-progress 1.1s linear infinite',

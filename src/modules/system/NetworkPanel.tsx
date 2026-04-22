@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Button } from '../../shared/ui/Button';
-import { SearchInput } from '../../shared/ui/SearchInput';
-import { Spinner } from '../../shared/ui/Spinner';
+import { CenterSpinner } from '../../shared/ui/CenterSpinner';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
+import { SearchInput } from '../../shared/ui/SearchInput';
 import { useToast } from '../../shared/ui/Toast';
 import { listConnections, killProcess, type NetConnection } from './api';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
@@ -77,44 +78,17 @@ export const NetworkPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(94,226,196,0.12), rgba(42,163,255,0.18))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-40 h-40 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(42,163,255,0.35), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#5ee2c4,#2aa3ff)',
-              boxShadow: '0 8px 24px -8px rgba(42,163,255,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M5 12a14 14 0 0 1 14 0M3 8a20 20 0 0 1 18 0M7 16a8 8 0 0 1 10 0" />
-              <circle cx="12" cy="20" r="1.2" />
-            </svg>
-          </div>
-          <div className="flex-1">
-            <div className="t-primary text-title font-semibold">Мережа</div>
-            <div className="t-tertiary text-meta">
-              Усі TCP/UDP-зʼєднання · {rows ? `${rows.length}` : '…'} активних · оновлення 5 с
-            </div>
-          </div>
-        </div>
-      </header>
+      <PanelHeader
+        gradient={['#5ee2c4', '#2aa3ff']}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M5 12a14 14 0 0 1 14 0M3 8a20 20 0 0 1 18 0M7 16a8 8 0 0 1 10 0" />
+            <circle cx="12" cy="20" r="1.2" />
+          </svg>
+        }
+        title="Мережа"
+        description={`Усі TCP/UDP-зʼєднання · ${rows ? rows.length : '…'} активних · оновлення 5 с`}
+      />
 
       <SearchInput
         compact
@@ -125,7 +99,7 @@ export const NetworkPanel = () => {
 
       <div className="flex-1 min-h-0 flex flex-col">
         {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
-        {!error && !rows && <div className="flex items-center justify-center py-6"><Spinner /></div>}
+        {!error && !rows && <CenterSpinner fit="inline" />}
         {filtered && filtered.length === 0 && <EmptyState title="Нічого не знайдено" />}
         {filtered && filtered.length > 0 && (
           <>

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { accent } from '../../shared/theme/accent';
 
 type Props = {
   /// 0..1 filled arc ratio.
@@ -27,8 +28,8 @@ export const RadialGauge = ({
   const circumference = 2 * Math.PI * radius;
   const dash = circumference * clamped;
   const id = `rg-${Math.random().toString(36).slice(2, 8)}`;
-  const [c0, c1] = gradient ?? ['rgba(var(--stash-accent-rgb),1)', 'rgba(var(--stash-accent-rgb),0.35)'];
-  const glowColor = glow ?? 'rgba(var(--stash-accent-rgb),0.35)';
+  const [c0, c1] = gradient ?? [accent(1), accent(0.35)];
+  const glowColor = glow ?? accent(0.35);
   return (
     <div
       className="relative inline-flex items-center justify-center"

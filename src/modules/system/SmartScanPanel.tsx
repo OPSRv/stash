@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
 import {
@@ -242,40 +243,16 @@ export const SmartScanPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background: 'linear-gradient(135deg, rgba(255,216,107,0.12), rgba(255,58,111,0.18))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-48 h-48 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(255,58,111,0.35), transparent)',
-            filter: 'blur(14px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-16 h-16 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#ffd86b,#ff3a6f)',
-              boxShadow: '0 10px 30px -10px rgba(255,58,111,0.65), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="t-primary text-title font-semibold">Розумне прибирання</div>
-            <div className="t-tertiary text-meta">
-              Один клік — перевіряємо все що можна почистити й trash-ємо разом.
-            </div>
-          </div>
+      <PanelHeader
+        gradient={['#ffd86b', '#ff3a6f']}
+        icon={
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
+          </svg>
+        }
+        title="Розумне прибирання"
+        description="Один клік — перевіряємо все що можна почистити й trash-ємо разом."
+        trailing={
           <div className="text-right">
             <div className="t-tertiary text-[10px] uppercase tracking-wider">
               Обрано
@@ -285,8 +262,8 @@ export const SmartScanPanel = () => {
             </div>
             <div className="t-tertiary text-meta">{selectedCount} категорій</div>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <div className="flex-1 min-h-0 overflow-auto p-4 space-y-2">
         {scanning && !buckets && (

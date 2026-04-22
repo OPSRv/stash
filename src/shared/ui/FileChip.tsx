@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { formatBytes as fmtBytes } from '../format/bytes';
+import { accent } from '../theme/accent';
 import { DocumentIcon } from './icons';
 
 type FileChipProps = {
@@ -41,7 +42,7 @@ export const FileChip = ({
       <div
         className="w-9 h-9 rounded-md flex items-center justify-center shrink-0"
         style={{
-          backgroundColor: 'rgba(var(--stash-accent-rgb), 0.10)',
+          backgroundColor: accent(0.10),
           color: 'rgb(var(--stash-accent-rgb))',
         }}
       >

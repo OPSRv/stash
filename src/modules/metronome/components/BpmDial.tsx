@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { accent } from '../../../shared/theme/accent';
 import { BPM_MAX, BPM_MIN, tempoName } from '../metronome.constants';
 
 type Props = {
@@ -117,7 +118,7 @@ export const BpmDial = ({ bpm, onChange, pulseSeq, pulseAccent, isPlaying }: Pro
         <path
           d={fillPath}
           fill="none"
-          stroke={`rgba(var(--stash-accent-rgb), ${isPlaying ? 0.95 : 0.8})`}
+          stroke={accent(isPlaying ? 0.95 : 0.8)}
           strokeWidth={STROKE}
           strokeLinecap="round"
           style={{ transition: 'd 200ms cubic-bezier(0.2,0,0,1)' }}
@@ -130,7 +131,7 @@ export const BpmDial = ({ bpm, onChange, pulseSeq, pulseAccent, isPlaying }: Pro
             cy={cy}
             r={RADIUS - 6}
             fill="none"
-            stroke={`rgba(var(--stash-accent-rgb), ${pulseAccent ? 0.9 : 0.55})`}
+            stroke={accent(pulseAccent ? 0.9 : 0.55)}
             strokeWidth={pulseAccent ? 2 : 1.5}
             style={{
               transformOrigin: '50% 50%',

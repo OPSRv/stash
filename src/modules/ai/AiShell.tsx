@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamText } from 'ai';
 
+import { accent } from '../../shared/theme/accent';
 import { useToast } from '../../shared/ui/Toast';
 
 import {
@@ -324,7 +325,7 @@ export const AiShell = () => {
       <div className="px-3 py-2 border-b hair flex items-center gap-2">
         <span
           className="px-2 py-0.5 rounded-full text-meta truncate"
-          style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
+          style={{ background: accent(0.18) }}
           title={modelLabel(settings.aiProvider, settings.aiModel)}
         >
           {modelLabel(settings.aiProvider, settings.aiModel)}

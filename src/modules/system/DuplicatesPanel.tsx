@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
-import { Spinner } from '../../shared/ui/Spinner';
-import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import { PanelHeader } from '../../shared/ui/PanelHeader';
 import { RevealButton } from '../../shared/ui/RevealButton';
+import { SegmentedControl } from '../../shared/ui/SegmentedControl';
+import { Spinner } from '../../shared/ui/Spinner';
 import { useToast } from '../../shared/ui/Toast';
 import { cancelScan, findDuplicates, trashPath, type DuplicateGroup } from './api';
 import { pickFolder } from './pickFolder';
@@ -108,43 +109,18 @@ export const DuplicatesPanel = () => {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header
-        className="px-4 py-3 relative overflow-hidden"
-        style={{
-          background:
-            'linear-gradient(135deg, rgba(208,140,255,0.12), rgba(85,97,255,0.18))',
-          boxShadow: 'inset 0 -1px 0 rgba(255,255,255,0.06)',
-        }}
-      >
-        <div
-          aria-hidden
-          className="absolute -top-10 -right-6 w-40 h-40 rounded-full"
-          style={{
-            background: 'radial-gradient(closest-side, rgba(122,75,255,0.35), transparent)',
-            filter: 'blur(10px)',
-          }}
-        />
-        <div className="relative flex items-center gap-4">
-          <div
-            aria-hidden
-            className="w-14 h-14 rounded-2xl inline-flex items-center justify-center"
-            style={{
-              background: 'linear-gradient(135deg,#d08cff,#5561ff)',
-              boxShadow: '0 8px 24px -8px rgba(122,75,255,0.55), inset 0 0 0 1px rgba(255,255,255,0.2)',
-            }}
-          >
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <rect x="4" y="4" width="12" height="12" rx="2" />
-              <rect x="8" y="8" width="12" height="12" rx="2" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="t-primary text-title font-semibold">Дублікати</div>
-            <div className="t-tertiary text-meta truncate">
-              {root ?? 'SHA-256 + розмір. Спочатку оберіть папку.'}
-            </div>
-          </div>
-          <div className="flex flex-col items-end gap-1.5">
+      <PanelHeader
+        gradient={['#d08cff', '#5561ff']}
+        icon={
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="4" y="4" width="12" height="12" rx="2" />
+            <rect x="8" y="8" width="12" height="12" rx="2" />
+          </svg>
+        }
+        title="Дублікати"
+        description={root ?? 'SHA-256 + розмір. Спочатку оберіть папку.'}
+        trailing={
+          <>
             <SegmentedControl<Threshold>
               size="sm"
               value={threshold}
@@ -174,9 +150,9 @@ export const DuplicatesPanel = () => {
                 {root ? 'Інша папка' : 'Обрати папку'}
               </Button>
             </div>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
       {groups && groups.length > 0 && (
         <div className="px-4 py-1.5 border-b hair t-secondary text-meta flex items-center justify-between">

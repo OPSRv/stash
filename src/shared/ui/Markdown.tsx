@@ -18,6 +18,7 @@ import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import 'highlight.js/styles/github-dark.css';
+import { accent } from '../theme/accent';
 import { copyText } from '../util/clipboard';
 
 // rehype-highlight ships with all ~190 highlight.js languages by default,
@@ -131,7 +132,7 @@ const CodeBlock = ({
         onClick={onCopy}
         aria-label="Copy code"
         className="absolute top-2 right-2 text-meta px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-        style={{ background: 'rgba(var(--stash-accent-rgb), 0.14)' }}
+        style={{ background: accent(0.14) }}
       >
         {copied ? 'Copied' : 'Copy'}
       </button>

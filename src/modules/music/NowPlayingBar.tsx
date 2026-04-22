@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { accent } from '../../shared/theme/accent';
 import { IconButton } from '../../shared/ui/IconButton';
 import { CloseIcon, NextIcon, PauseIcon, PlayIcon, PrevIcon } from '../../shared/ui/icons';
 import { musicNext, musicPlayPause, musicPrev, type NowPlaying } from './api';
@@ -44,8 +45,8 @@ export const NowPlayingBar = memo(({ state, onOpen, onClose, onOptimistic }: Now
       }}
       className="px-2 py-1.5 rounded-lg flex items-center gap-2 cursor-pointer select-none"
       style={{
-        background: 'rgba(var(--stash-accent-rgb), 0.08)',
-        border: '1px solid rgba(var(--stash-accent-rgb), 0.22)',
+        background: accent(0.08),
+        border: `1px solid ${accent(0.22)}`,
       }}
     >
       <div className="w-7 h-7 rounded-md overflow-hidden shrink-0 bg-black/30 flex items-center justify-center">

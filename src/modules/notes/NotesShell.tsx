@@ -20,6 +20,7 @@ import {
   UploadIcon,
 } from '../../shared/ui/icons';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
+import { accent } from '../../shared/theme/accent';
 import { useToast } from '../../shared/ui/Toast';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
@@ -772,9 +773,9 @@ export const NotesShell = () => {
           style={{
             // Accent-tinted fog so the drop zone reads as "ready to accept"
             // without obscuring the underlying list layout beneath it.
-            background: 'rgba(var(--stash-accent-rgb), 0.12)',
+            background: accent(0.12),
             backdropFilter: 'blur(2px)',
-            border: '2px dashed rgba(var(--stash-accent-rgb), 0.6)',
+            border: `2px dashed ${accent(0.6)}`,
             borderRadius: 10,
             margin: 6,
           }}
@@ -784,7 +785,7 @@ export const NotesShell = () => {
             style={{
               background: 'var(--color-surface)',
               boxShadow: '0 12px 40px -12px rgba(0,0,0,0.5)',
-              border: '1px solid rgba(var(--stash-accent-rgb), 0.4)',
+              border: `1px solid ${accent(0.4)}`,
             }}
           >
             <MicIcon size={18} />

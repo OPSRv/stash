@@ -1,3 +1,4 @@
+import { accent } from '../../shared/theme/accent';
 import { CloseIcon } from '../../shared/ui/icons';
 import { copyText } from '../../shared/util/clipboard';
 
@@ -9,12 +10,12 @@ interface TranslationBannerProps {
 }
 
 const bannerStyle = {
-  background: 'rgba(var(--stash-accent-rgb), 0.08)',
-  border: '1px solid rgba(var(--stash-accent-rgb), 0.25)',
+  background: accent(0.08),
+  border: `1px solid ${accent(0.25)}`,
 } as const;
 
 const pillStyle = {
-  background: 'rgba(var(--stash-accent-rgb), 0.22)',
+  background: accent(0.22),
 } as const;
 
 export const TranslationBanner = ({

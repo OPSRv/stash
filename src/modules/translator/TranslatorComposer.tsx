@@ -1,4 +1,5 @@
 import { type RefObject } from 'react';
+import { accent } from '../../shared/theme/accent';
 import { AskAiButton } from '../../shared/ui/AskAiButton';
 import { Button } from '../../shared/ui/Button';
 import { Card } from '../../shared/ui/Card';
@@ -107,7 +108,7 @@ export const TranslatorComposer = ({
             <span
               className="text-meta rounded-full px-1.5 leading-[1.2]"
               style={{
-                background: 'rgba(var(--stash-accent-rgb), 0.18)',
+                background: accent(0.18),
                 color: 'var(--stash-accent)',
               }}
             >

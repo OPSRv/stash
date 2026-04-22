@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
+import { CenterSpinner } from '../../shared/ui/CenterSpinner';
 import { Spinner } from '../../shared/ui/Spinner';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
@@ -144,9 +145,7 @@ export const UninstallerPanel = () => {
         <div className="flex-1 min-h-0 overflow-auto">
           {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
           {!error && !apps && (
-            <div className="flex items-center justify-center py-6">
-              <Spinner />
-            </div>
+            <CenterSpinner fit="inline" />
           )}
           {filtered && filtered.length === 0 && (
             <EmptyState title="Нічого не знайдено" />

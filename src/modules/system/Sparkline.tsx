@@ -1,3 +1,5 @@
+import { accent } from '../../shared/theme/accent';
+
 type Props = {
   values: number[];
   width?: number;
@@ -10,7 +12,7 @@ type Props = {
 };
 
 export const Sparkline = ({ values, width = 120, height = 32, color, max }: Props) => {
-  const c = color ?? 'rgba(var(--stash-accent-rgb),1)';
+  const c = color ?? accent(1);
   if (values.length === 0) {
     return <svg width={width} height={height} aria-hidden />;
   }

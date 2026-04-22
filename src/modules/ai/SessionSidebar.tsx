@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { accent } from '../../shared/theme/accent';
 import { Button } from '../../shared/ui/Button';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 
@@ -92,7 +93,7 @@ export const SessionSidebar = ({
                 >
                   <div
                     className="w-7 h-7 rounded-full flex items-center justify-center text-meta shrink-0"
-                    style={{ background: 'rgba(var(--stash-accent-rgb), 0.18)' }}
+                    style={{ background: accent(0.18) }}
                   >
                     {initials(s.title)}
                   </div>
@@ -121,8 +122,8 @@ export const SessionSidebar = ({
                             <span
                               className="shrink-0 px-1.5 py-0 rounded text-meta tabular-nums"
                               style={{
-                                background: 'rgba(var(--stash-accent-rgb), 0.16)',
-                                color: 'rgba(var(--stash-accent-rgb), 1)',
+                                background: accent(0.16),
+                                color: accent(1),
                                 fontSize: 9,
                                 letterSpacing: 0.3,
                                 textTransform: 'uppercase',
