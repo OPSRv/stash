@@ -51,6 +51,14 @@ const nextId = (() => {
 /// without waiting for the first to finish.
 export const useVideoDetect = (): UseVideoDetectResult => {
   const [sessions, setSessions] = useState<DetectSession[]>([]);
+  /// Always-fresh snapshot of `sessions` for callers that can't depend
+  /// on it reactively — `run` needs to dedupe against current state
+  /// without growing its useCallback deps (which would churn every
+  /// consumer on every session list change).
+  const sessionsRef = useRef<DetectSession[]>([]);
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
   /// Per-session cancel flag: incremented when the user clicks cancel so
   /// the in-flight promise knows to drop its result on return. Keyed by
   /// session id so flipping one doesn't stomp on another.
@@ -98,6 +106,18 @@ export const useVideoDetect = (): UseVideoDetectResult => {
   const run = useCallback((url: string) => {
     const trimmed = url.trim();
     if (!trimmed) return;
+    // Dedupe against any existing live session for this exact URL.
+    // React.StrictMode double-invokes mount effects in dev, so `run`
+    // can land twice back-to-back for the same URL (clipboard copy →
+    // PopupShell prefill + DownloadsShell mount read). A user pasting
+    // the same URL twice shouldn't spawn a second detect either.
+    if (
+      sessionsRef.current.some(
+        (s) => s.url === trimmed && (s.detecting || s.detected),
+      )
+    ) {
+      return;
+    }
     const id = nextId();
     const session: DetectSession = {
       id,

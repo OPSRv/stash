@@ -142,6 +142,29 @@ describe('useVideoDetect', () => {
     expect(s.detecting).toBe(false);
   });
 
+  it('run() is a no-op when a live session already exists for that exact URL', () => {
+    vi.mocked(detect).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(detectQuick).mockResolvedValue(null);
+    const { result } = renderHook(() => useVideoDetect());
+    act(() => {
+      result.current.run('https://youtu.be/abc');
+    });
+    expect(result.current.sessions).toHaveLength(1);
+    // Second identical call (e.g. StrictMode re-invoke) must not stack.
+    act(() => {
+      result.current.run('https://youtu.be/abc');
+    });
+    expect(result.current.sessions).toHaveLength(1);
+    // A DIFFERENT URL still opens its own session.
+    act(() => {
+      result.current.run('https://youtu.be/xyz');
+    });
+    expect(result.current.sessions).toHaveLength(2);
+    // detect was called exactly twice total, not three times — dedup
+    // fires BEFORE the API invoke so no wasted work.
+    expect(vi.mocked(detect)).toHaveBeenCalledTimes(2);
+  });
+
   it('clearAll() drops every queued session', () => {
     vi.mocked(detect).mockImplementation(() => new Promise(() => {}));
     vi.mocked(detectQuick).mockResolvedValue(null);
