@@ -20,6 +20,7 @@ interface LinkRowProps {
   onDelete: (id: number) => void;
   onClick: (flatIndex: number, event?: ReactMouseEvent) => void;
   onSaveToNote: (id: number) => void;
+  onContextMenu?: (flatIndex: number, event: ReactMouseEvent) => void;
   className?: string;
 }
 
@@ -43,6 +44,7 @@ const LinkRowImpl = ({
   onDelete,
   onClick,
   onSaveToNote,
+  onContextMenu,
   className,
 }: LinkRowProps) => {
   const preview = useLinkPreview(item.content);
@@ -119,6 +121,7 @@ const LinkRowImpl = ({
       active={active}
       selected={selected}
       onSelect={(e) => onClick(flatIndex, e as ReactMouseEvent)}
+      onContextMenu={onContextMenu ? (e) => onContextMenu(flatIndex, e) : undefined}
       className={className}
     />
   );

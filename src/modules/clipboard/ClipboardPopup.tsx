@@ -46,6 +46,7 @@ import { PlatformBadge } from '../downloader/PlatformBadge';
 import { notesCreate } from '../notes/api';
 import { PreviewDialog } from './PreviewDialog';
 import { FilePreviewDialog } from './FilePreviewDialog';
+import { ContextMenu, type ContextMenuItem } from '../../shared/ui/ContextMenu';
 import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 
@@ -92,6 +93,7 @@ export const ClipboardPopup = () => {
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [filePreviewId, setFilePreviewId] = useState<number | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Set<number>>(() => new Set());
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: number } | null>(null);
   const toggleReveal = useCallback((id: number) => {
     setRevealedSecrets((prev) => {
       const next = new Set(prev);
@@ -253,10 +255,13 @@ export const ClipboardPopup = () => {
             : i.kind === 'file'
               ? 'file'
               : detectType(i.content);
+        // Subtype runs for every text clip regardless of the top-level
+        // ContentType — a JSON blob hits `code` via the brace in
+        // CODE_HINTS but we still want the JSON subtype actions; a
+        // secret that matches a URL would be wrong to expose as a
+        // link anyway.
         const subtype: TextSubtype =
-          i.kind === 'text' && type === 'text'
-            ? detectTextSubtype(i.content)
-            : 'plain';
+          i.kind === 'text' ? detectTextSubtype(i.content) : 'plain';
         return { ...i, type, subtype };
       }),
     [rawItems]
@@ -537,6 +542,20 @@ export const ClipboardPopup = () => {
     setSelectionAnchor(null);
   }, []);
 
+  const handleRowContextMenu = useCallback(
+    (flatIndex: number, e: React.MouseEvent) => {
+      const item = flat[flatIndex];
+      if (!item) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIndex(flatIndex);
+      setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id });
+    },
+    // setIndex comes from useKeyboardNav — stable across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [flat],
+  );
+
   const handleRowClick = useCallback(
     (flatIndex: number, e?: React.MouseEvent) => {
       const item = flat[flatIndex];
@@ -664,6 +683,199 @@ export const ClipboardPopup = () => {
   const formatBytes = (n: number) =>
     n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 
+  /// Build the context-menu action list for a given row. Pulls in
+  /// subtype-aware entries (Copy pretty JSON, Copy hex as rgb, open
+  /// mailto:, etc.) so power users can skip hovering for IconButtons.
+  /// Every entry closes the menu after firing — the ContextMenu
+  /// component handles that automatically via its `onSelect → onClose`
+  /// wrapper, so individual handlers here focus on the side-effect.
+  const buildCtxItems = useCallback(
+    (item: (typeof typed)[number]): ContextMenuItem[] => {
+      const out: ContextMenuItem[] = [];
+      const idx = flat.findIndex((f) => f.id === item.id);
+      out.push({
+        kind: 'action',
+        label: 'Paste',
+        shortcut: '↵',
+        onSelect: () => {
+          if (idx >= 0) pasteAt(idx);
+        },
+      });
+      out.push({
+        kind: 'action',
+        label: 'Copy',
+        shortcut: '⇧↵',
+        onSelect: () => {
+          if (idx >= 0) copyAt(idx);
+        },
+      });
+
+      // kind-specific actions
+      if (item.kind === 'file') {
+        const files = parseFileMeta(item)?.files ?? [];
+        const first = files[0];
+        if (first) {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: 'Reveal in Finder',
+            onSelect: () => revealInFinder(first.path),
+          });
+          out.push({
+            kind: 'action',
+            label: 'Open with default app',
+            onSelect: () => openFile(first.path),
+          });
+          out.push({
+            kind: 'action',
+            label: 'Copy first file path',
+            onSelect: () => {
+              void copyText(first.path);
+              toast({ title: 'Path copied', variant: 'success', durationMs: 1400 });
+            },
+          });
+          if (files.length > 1) {
+            out.push({
+              kind: 'action',
+              label: `Copy all ${files.length} paths`,
+              onSelect: () => {
+                void copyText(files.map((f) => f.path).join('\n'));
+                toast({ title: 'Paths copied', variant: 'success', durationMs: 1400 });
+              },
+            });
+          }
+        }
+      } else if (item.kind === 'image') {
+        const meta = parseImageMeta(item);
+        if (meta) {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: 'Open in Preview',
+            onSelect: () => openImageInViewer(meta.path),
+          });
+          out.push({
+            kind: 'action',
+            label: 'Reveal PNG in Finder',
+            onSelect: () => revealInFinder(meta.path),
+          });
+          out.push({
+            kind: 'action',
+            label: 'Copy PNG path',
+            onSelect: () => {
+              void copyText(meta.path);
+              toast({ title: 'Path copied', variant: 'success', durationMs: 1400 });
+            },
+          });
+        }
+      } else if (item.kind === 'text') {
+        if (item.subtype === 'json') {
+          const pretty = prettyJson(item.content);
+          if (pretty) {
+            out.push({ kind: 'separator' });
+            out.push({
+              kind: 'action',
+              label: 'Copy as pretty JSON',
+              onSelect: () => {
+                void copyText(pretty);
+                toast({ title: 'Pretty JSON copied', variant: 'success', durationMs: 1400 });
+              },
+            });
+          }
+        }
+        if (item.subtype === 'hex-color' || item.subtype === 'uuid') {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label:
+              item.subtype === 'hex-color' ? 'Copy value' : 'Copy without dashes',
+            onSelect: () => {
+              const value =
+                item.subtype === 'uuid'
+                  ? item.content.replace(/-/g, '')
+                  : item.content.trim();
+              void copyText(value);
+              toast({ title: 'Copied', variant: 'success', durationMs: 1400 });
+            },
+          });
+        }
+        if (item.subtype === 'email') {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: 'Send email',
+            onSelect: () => openExternal(`mailto:${item.content.trim()}`),
+          });
+        }
+        if (item.subtype === 'phone') {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: 'Call / FaceTime',
+            onSelect: () =>
+              openExternal(`tel:${item.content.replace(/[^+\d]/g, '')}`),
+          });
+        }
+        if (item.subtype === 'file-path') {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: 'Reveal in Finder',
+            onSelect: () => revealInFinder(item.content.trim()),
+          });
+        }
+        if (item.subtype === 'secret') {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: revealedSecrets.has(item.id) ? 'Hide secret' : 'Reveal secret',
+            onSelect: () => toggleReveal(item.id),
+          });
+        }
+        if (item.subtype !== 'secret' && isLongText(item.content)) {
+          out.push({ kind: 'separator' });
+          out.push({
+            kind: 'action',
+            label: 'Preview…',
+            shortcut: 'Space',
+            onSelect: () => setPreviewId(item.id),
+          });
+        }
+      }
+
+      // Tail: pin + delete always available.
+      out.push({ kind: 'separator' });
+      out.push({
+        kind: 'action',
+        label: item.pinned ? 'Unpin' : 'Pin',
+        shortcut: '⌘P',
+        onSelect: () => handleTogglePin(item.id),
+      });
+      out.push({
+        kind: 'action',
+        label: 'Delete',
+        shortcut: '⌫',
+        tone: 'danger',
+        onSelect: () => handleDelete(item.id),
+      });
+      return out;
+    },
+    [
+      flat,
+      pasteAt,
+      copyAt,
+      revealInFinder,
+      openFile,
+      openImageInViewer,
+      openExternal,
+      toast,
+      handleTogglePin,
+      handleDelete,
+      revealedSecrets,
+      toggleReveal,
+    ],
+  );
+
   const renderRow = (item: (typeof typed)[number], flatIndex: number) => {
     const enterClass = item.id === newItemId ? 'clip-row-enter' : undefined;
     if (item.kind === 'file') {
@@ -692,6 +904,7 @@ export const ClipboardPopup = () => {
             active={index === flatIndex}
             selected={selectedIds.has(item.id)}
             onSelect={(e) => handleRowClick(flatIndex, e)}
+            onContextMenu={(e) => handleRowContextMenu(flatIndex, e)}
             className={enterClass}
           />
         );
@@ -789,6 +1002,7 @@ export const ClipboardPopup = () => {
           active={index === flatIndex}
           selected={selectedIds.has(item.id)}
           onSelect={(e) => handleRowClick(flatIndex, e)}
+            onContextMenu={(e) => handleRowContextMenu(flatIndex, e)}
           className={enterClass}
         />
       );
@@ -804,6 +1018,7 @@ export const ClipboardPopup = () => {
           onTogglePin={handleTogglePin}
           onDelete={handleDelete}
           onClick={handleRowClick}
+          onContextMenu={handleRowContextMenu}
           onSaveToNote={handleRowSaveToNote}
           className={enterClass}
         />
@@ -935,6 +1150,7 @@ export const ClipboardPopup = () => {
         active={index === flatIndex}
         selected={selectedIds.has(item.id)}
         onSelect={(e) => handleRowClick(flatIndex, e)}
+            onContextMenu={(e) => handleRowContextMenu(flatIndex, e)}
         className={enterClass}
       />
     );
@@ -1082,6 +1298,20 @@ export const ClipboardPopup = () => {
         onCopy={handlePreviewCopy}
         onSaveToNote={handleSaveToNote}
       />
+      {(() => {
+        const ctxItem = ctxMenu ? typed.find((i) => i.id === ctxMenu.id) : null;
+        if (!ctxMenu || !ctxItem) return null;
+        return (
+          <ContextMenu
+            open
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            items={buildCtxItems(ctxItem)}
+            onClose={() => setCtxMenu(null)}
+            label={`Actions for clipboard item ${ctxItem.id}`}
+          />
+        );
+      })()}
       {(() => {
         const filePreviewItem =
           filePreviewId == null

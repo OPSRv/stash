@@ -77,10 +77,15 @@ describe('FilePreview textual kinds', () => {
     );
     const scope = container.querySelector('[data-file-kind="code"]');
     expect(scope).not.toBeNull();
-    await waitFor(() => {
-      const pre = scope!.querySelector('pre');
-      expect(pre?.className ?? '').toContain('language-typescript');
-    });
+    // LazyMarkdown pulls react-markdown + highlight.js grammars on
+    // first mount; that chunk can take >1 s under parallel test load.
+    await waitFor(
+      () => {
+        const pre = scope!.querySelector('pre');
+        expect(pre?.className ?? '').toContain('language-typescript');
+      },
+      { timeout: 5000 },
+    );
   });
 
   it('fetches textual content when only src is provided', async () => {

@@ -133,6 +133,38 @@ describe('ClipboardPopup', () => {
     });
   });
 
+  describe('context menu', () => {
+    it('right-click on a text row opens a menu with subtype-aware actions', async () => {
+      mockInvoke.mockImplementation(async (cmd) => {
+        if (cmd === 'clipboard_list')
+          return [
+            {
+              id: 70,
+              kind: 'text',
+              content: '{"ok":true,"n":42}',
+              meta: null,
+              created_at: 500,
+              pinned: false,
+            },
+          ];
+        return undefined;
+      });
+      render(<ClipboardPopup />);
+      const user = userEvent.setup();
+      const row = await screen.findByText(/"ok":true/);
+      const option = row.closest('[role="option"]') as HTMLElement;
+      await user.pointer({ keys: '[MouseRight]', target: option });
+      const menu = await screen.findByRole('menu');
+      expect(menu).toBeInTheDocument();
+      // Generic actions present.
+      expect(screen.getByRole('menuitem', { name: /Paste/i })).toBeInTheDocument();
+      // Subtype-specific: "Copy as pretty JSON".
+      expect(
+        screen.getByRole('menuitem', { name: /Copy as pretty JSON/i }),
+      ).toBeInTheDocument();
+    });
+  });
+
   describe('text subtype rendering', () => {
     const textItems = [
       { id: 20, kind: 'text', content: 'alice@example.com', created_at: 100, pinned: false, meta: null },

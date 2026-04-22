@@ -11,6 +11,12 @@ type RowProps = {
   active?: boolean;
   pinned?: boolean;
   onSelect?: (e?: React.MouseEvent) => void;
+  /// Right-click handler. Receives the original event so callers can
+  /// call `preventDefault()` to suppress the native menu (the global
+  /// `contextMenuGuard` already does that for non-editable targets,
+  /// but row-level context menus should still consume the event so it
+  /// doesn't bubble to window-level listeners).
+  onContextMenu?: (e: React.MouseEvent) => void;
   selected?: boolean;
   className?: string;
 };
@@ -26,6 +32,7 @@ export const Row = ({
   active = false,
   pinned = false,
   onSelect,
+  onContextMenu,
   selected = false,
   className = '',
 }: RowProps) => {
@@ -43,6 +50,7 @@ export const Row = ({
       role="option"
       aria-selected={active ? 'true' : 'false'}
       onClick={(e) => onSelect?.(e)}
+      onContextMenu={onContextMenu}
       className={classes}
     >
       {icon && (
