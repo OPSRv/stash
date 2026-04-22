@@ -37,6 +37,7 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
 ## Conventions easy to get wrong
 
 - **Popup auto-hide**: native modals (folder/save dialogs) must wrap the open call with `invoke('set_popup_auto_hide', { enabled: false })` before and `true` after, otherwise blur hides the popup and cancels the dialog. See `SettingsShell` folder picker.
-- **Accent colour**: `rgba(var(--stash-accent-rgb), α)` — never hardcode.
+- **Accent colour**: use `accent(α)` from `src/shared/theme/accent.ts` — never inline the `rgba(var(--stash-accent-rgb), α)` template. Tailwind arbitrary classes (`bg-[rgba(…)]`) are the one exception.
+- **DRY the second copy**: before hand-rolling a formatter, hook, or layout block, grep `src/shared/` (`format/`, `hooks/`, `util/`, `ui/`, `theme/`). Canonical helpers already exist for bytes / duration, set-selection, async-load, reveal-in-Finder, copy-to-clipboard, panel headers, list rows, centered spinner. Extending one beats adding a fourth.
 - **Language**: never add Russian (`ru`) to locale/translator lists.
 - **No ad-hoc buttons/inputs**: route through `src/shared/ui/` primitives (`Button`, `Input`, `SearchInput`, `Select`, `SegmentedControl`, `Toggle`, `TabButton`, `IconButton`, `ConfirmDialog`, `Toast`, `Cheatsheet`, `GlobalSearch`). No inline RGBA hex.
