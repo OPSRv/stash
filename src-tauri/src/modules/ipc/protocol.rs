@@ -8,14 +8,19 @@ use serde::{Deserialize, Serialize};
 
 /// Request envelope sent by the CLI. `args_text` is the raw argument
 /// string after the command name, matching the Telegram dispatcher's
-/// convention (handlers do their own parsing). `cwd` is the client's
-/// working directory, forwarded for commands that care (e.g. future
-/// `claude` launcher).
+/// convention (handlers do their own parsing). `args` preserves the
+/// original positional boundaries for handlers that need them — the
+/// plain `.join(" ")` in `args_text` is lossy when multiple arguments
+/// contain internal whitespace (`"a b" "c d"` collapses to `"a b c d"`).
+/// `cwd` is the client's working directory, forwarded for commands that
+/// care (e.g. future `claude` launcher).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     pub cmd: String,
     #[serde(default)]
     pub args_text: String,
+    #[serde(default)]
+    pub args: Vec<String>,
     #[serde(default)]
     pub cwd: Option<String>,
 }

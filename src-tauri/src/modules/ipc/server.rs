@@ -25,6 +25,24 @@ use super::protocol::{Request, Response};
 use crate::modules::telegram::commands_registry::Ctx;
 use crate::modules::telegram::state::TelegramState;
 
+/// Return `true` if something is currently accepting connections on
+/// the socket at `path`. Short-timeout blocking connect — we only run
+/// this once at startup, before the Tokio runtime is fully up.
+fn socket_is_live(path: &std::path::Path) -> bool {
+    use std::os::unix::net::UnixStream as StdUnixStream;
+    use std::time::Duration;
+    // connect() doesn't take a timeout directly — set non-blocking and
+    // attempt once; ECONNREFUSED / ENOENT mean nothing is listening.
+    match StdUnixStream::connect(path) {
+        Ok(stream) => {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
 /// Absolute path to the IPC socket inside the app's data directory.
 /// Kept as a function (not a lazy_static) because the data dir is
 /// resolved at runtime through the Tauri `path()` resolver.
@@ -49,12 +67,21 @@ pub fn spawn(app: AppHandle, state: Arc<TelegramState>) {
         }
     };
 
-    // Clear any stale socket. This is safe: the data dir is per-user,
-    // and if another Stash instance is actually running on the same
-    // socket, `bind` below will still succeed *after* the unlink — but
-    // two live apps on one user account is already an unsupported
-    // state (both would fight for the tray).
+    // Clear any stale socket — but only if nothing is actually
+    // listening on it. A quick blocking `connect` with a short timeout
+    // tells us whether another live Stash owns the endpoint; if so we
+    // stand down instead of hijacking its CLI traffic. Two live apps on
+    // one user account would fight for the tray anyway, but stealing
+    // the socket makes the symptom harder to diagnose than just logging
+    // and giving up here.
     if path.exists() {
+        if socket_is_live(&path) {
+            tracing::warn!(
+                path = %path.display(),
+                "ipc: socket is already live (another Stash instance?), CLI disabled"
+            );
+            return;
+        }
         if let Err(e) = std::fs::remove_file(&path) {
             tracing::warn!(error = %e, path = %path.display(), "ipc: cannot remove stale socket");
             return;

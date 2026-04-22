@@ -53,6 +53,19 @@ fn resolve_binary(app: &AppHandle) -> Option<PathBuf> {
     None
 }
 
+/// Is `dir` currently listed in the user's `$PATH`? Exact match on
+/// canonicalised components — no fuzzy prefix check.
+fn path_contains(dir: &Path) -> bool {
+    let Ok(path_env) = std::env::var("PATH") else {
+        return false;
+    };
+    let target = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    std::env::split_paths(&path_env).any(|p| {
+        let resolved = p.canonicalize().unwrap_or(p);
+        resolved == target
+    })
+}
+
 fn link_candidates() -> Vec<PathBuf> {
     let mut out = vec![PathBuf::from("/usr/local/bin/stash")];
     if let Some(home) = dirs_next::home_dir() {
@@ -115,11 +128,12 @@ pub fn stash_cli_install(app: AppHandle) -> Result<String, String> {
         .to_str()
         .ok_or_else(|| "binary path is not valid UTF-8".to_string())?;
 
-    // Prefer /usr/local/bin when the directory already exists (typical
-    // Homebrew layout). On a fresh Apple Silicon box without Homebrew
-    // this directory is often absent and the admin prompt feels
-    // gratuitous — fall back to ~/.local/bin in that case.
-    if Path::new("/usr/local/bin").is_dir() {
+    // Prefer /usr/local/bin only when it's actually on the user's PATH
+    // — otherwise we'd pop an admin prompt to create a symlink the
+    // shell can't even find. On Apple Silicon with Homebrew at
+    // /opt/homebrew the directory exists but isn't in PATH for most
+    // users, so plain `is_dir()` was misleading.
+    if Path::new("/usr/local/bin").is_dir() && path_contains(Path::new("/usr/local/bin")) {
         // The literal command we run inside osascript; double quotes
         // around paths guard against spaces in HOME or install dirs.
         let shell = format!(

@@ -7,6 +7,7 @@
 //! - `0` command succeeded
 //! - `1` command failed (app was reachable but reported an error)
 //! - `2` Stash is not running (socket missing / connect refused)
+//! - `3` transport or protocol error (encode/write/read/decode)
 
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -27,6 +28,8 @@ struct Request {
     cmd: String,
     #[serde(default)]
     args_text: String,
+    #[serde(default)]
+    args: Vec<String>,
     #[serde(default)]
     cwd: Option<String>,
 }
@@ -49,7 +52,7 @@ fn socket_path() -> Option<PathBuf> {
 
 fn print_usage() {
     eprintln!(
-        "usage: stash <command> [args...]\n\
+        "usage: stash [--json] <command> [args...]\n\
          \n\
          examples:\n  \
          stash help\n  \
@@ -59,36 +62,83 @@ fn print_usage() {
          stash clip\n\
          \n\
          flags:\n  \
-         --json    print the raw JSON response instead of text\n"
+         --json        print the raw JSON response instead of text\n  \
+         --version,-V  print stash CLI version and exit\n  \
+         --help,-h     print this help and exit\n"
     );
+}
+
+fn print_version() {
+    println!("stash {}", env!("CARGO_PKG_VERSION"));
+}
+
+/// Split argv into pre-command flags (`--json`, `--help`, `--version`)
+/// and everything the server should see. Global flags are only honoured
+/// *before* the command name so arguments like
+/// `stash note "think about --json design"` keep `--json` intact.
+struct Parsed {
+    json_out: bool,
+    show_help: bool,
+    show_version: bool,
+    rest: Vec<String>,
+}
+
+fn parse_argv(mut argv: Vec<String>) -> Parsed {
+    let mut json_out = false;
+    let mut show_help = false;
+    let mut show_version = false;
+    let mut rest: Vec<String> = Vec::with_capacity(argv.len());
+    while !argv.is_empty() {
+        let tok = argv.remove(0);
+        match tok.as_str() {
+            "--json" => json_out = true,
+            "--help" | "-h" => show_help = true,
+            "--version" | "-V" => show_version = true,
+            // `--` ends flag parsing explicitly, like most CLIs.
+            "--" => {
+                rest.extend(argv.drain(..));
+                break;
+            }
+            // First non-flag token is the command — everything after it,
+            // including strings that happen to start with `--`, belongs
+            // to the command's own argv.
+            _ => {
+                rest.push(tok);
+                rest.extend(argv.drain(..));
+                break;
+            }
+        }
+    }
+    Parsed { json_out, show_help, show_version, rest }
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
-    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let Parsed {
+        json_out,
+        show_help,
+        show_version,
+        mut rest,
+    } = parse_argv(argv);
 
-    let mut json_out = false;
-    args.retain(|a| {
-        if a == "--json" {
-            json_out = true;
-            false
-        } else {
-            true
-        }
-    });
-
-    if args.is_empty() {
-        print_usage();
-        return ExitCode::from(1);
+    if show_version {
+        print_version();
+        return ExitCode::SUCCESS;
     }
-
-    let cmd = args.remove(0);
-    if cmd == "--help" || cmd == "-h" {
+    if show_help {
         print_usage();
         return ExitCode::SUCCESS;
     }
+    if rest.is_empty() {
+        print_usage();
+        // Exit 3 (usage error) instead of 1 so scripts can distinguish
+        // "Stash said no" from "you invoked me wrong".
+        return ExitCode::from(3);
+    }
 
-    let args_text = args.join(" ");
+    let cmd = rest.remove(0);
+    let args_text = rest.join(" ");
     let cwd = std::env::current_dir()
         .ok()
         .and_then(|p| p.into_os_string().into_string().ok());
@@ -96,6 +146,7 @@ async fn main() -> ExitCode {
     let req = Request {
         cmd,
         args_text,
+        args: rest,
         cwd,
     };
 
@@ -103,7 +154,7 @@ async fn main() -> ExitCode {
         Some(p) => p,
         None => {
             eprintln!("stash: cannot resolve data directory");
-            return ExitCode::from(2);
+            return ExitCode::from(3);
         }
     };
 
@@ -125,14 +176,14 @@ async fn main() -> ExitCode {
         Ok(s) => s,
         Err(e) => {
             eprintln!("stash: encode request: {e}");
-            return ExitCode::from(1);
+            return ExitCode::from(3);
         }
     };
     body.push('\n');
 
     if let Err(e) = write_half.write_all(body.as_bytes()).await {
         eprintln!("stash: write: {e}");
-        return ExitCode::from(2);
+        return ExitCode::from(3);
     }
     // Closing our write half lets the server finish reading cleanly
     // even if its read_line is still buffered.
@@ -143,32 +194,39 @@ async fn main() -> ExitCode {
     match tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut line)).await {
         Ok(Ok(0)) => {
             eprintln!("stash: server closed connection without reply");
-            return ExitCode::from(2);
+            return ExitCode::from(3);
         }
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
             eprintln!("stash: read: {e}");
-            return ExitCode::from(2);
+            return ExitCode::from(3);
         }
         Err(_) => {
             eprintln!("stash: server timed out");
-            return ExitCode::from(2);
+            return ExitCode::from(3);
         }
-    }
-
-    if json_out {
-        let mut out = std::io::stdout().lock();
-        let _ = out.write_all(line.as_bytes());
-        return ExitCode::SUCCESS;
     }
 
     let resp: Response = match serde_json::from_str(line.trim_end()) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("stash: invalid response: {e}");
-            return ExitCode::from(2);
+            return ExitCode::from(3);
         }
     };
+
+    // `--json` forwards the raw wire response for scripting, but the
+    // exit code still reflects `ok` so callers can branch on it without
+    // parsing the payload themselves.
+    if json_out {
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(line.as_bytes());
+        return if resp.ok {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        };
+    }
 
     if resp.ok {
         if !resp.text.is_empty() {
@@ -181,5 +239,53 @@ async fn main() -> ExitCode {
             resp.error.unwrap_or_else(|| "command failed".into())
         );
         ExitCode::from(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_argv_extracts_json_flag_before_command() {
+        let p = parse_argv(vec!["--json".into(), "status".into()]);
+        assert!(p.json_out);
+        assert_eq!(p.rest, vec!["status"]);
+    }
+
+    #[test]
+    fn parse_argv_does_not_strip_flags_from_command_args() {
+        // `--json` inside the command payload must survive — otherwise
+        // `stash note "think about --json"` silently corrupts the note.
+        let p = parse_argv(vec![
+            "note".into(),
+            "think about --json design".into(),
+        ]);
+        assert!(!p.json_out);
+        assert_eq!(p.rest, vec!["note", "think about --json design"]);
+    }
+
+    #[test]
+    fn parse_argv_handles_help_and_version_anywhere_before_command() {
+        let p = parse_argv(vec!["-h".into()]);
+        assert!(p.show_help);
+
+        let p = parse_argv(vec!["--version".into()]);
+        assert!(p.show_version);
+
+        let p = parse_argv(vec!["--json".into(), "-V".into()]);
+        assert!(p.json_out);
+        assert!(p.show_version);
+    }
+
+    #[test]
+    fn parse_argv_double_dash_terminates_flag_parsing() {
+        let p = parse_argv(vec![
+            "--".into(),
+            "--version".into(),
+            "arg".into(),
+        ]);
+        assert!(!p.show_version);
+        assert_eq!(p.rest, vec!["--version", "arg"]);
     }
 }
