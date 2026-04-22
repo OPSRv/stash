@@ -127,11 +127,23 @@ impl ClipboardRepo {
         rows.collect()
     }
 
+    /// Search text rows by content AND file rows by any filename in
+    /// their JSON meta. Image rows have nothing meaningful to search,
+    /// so they're excluded (users find screenshots by scrolling, not
+    /// typing — and the synthetic `content` is an sha256 hash).
+    ///
+    /// The `meta LIKE` on file rows trades a little imprecision (a
+    /// query like `"name":` would match the JSON keys themselves) for
+    /// avoiding a per-row JSON parse; in practice users type real
+    /// filename fragments, so the false-positive rate is negligible.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<ClipboardItem>> {
         let like = format!("%{}%", escape_like(query));
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items
-             WHERE kind = 'text' AND content LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+             WHERE
+                (kind = 'text' AND content LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+                OR
+                (kind = 'file' AND meta LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
              ORDER BY pinned DESC, created_at DESC LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![like, limit as i64], Self::map_row)?;
@@ -303,6 +315,47 @@ mod tests {
         let results = repo.search("findme", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].kind, "text");
+    }
+
+    #[test]
+    fn search_matches_filenames_in_file_meta() {
+        let mut repo = fresh_repo();
+        repo.insert_text("unrelated", 1).unwrap();
+        repo.insert_files(
+            "files:abc",
+            r#"{"files":[{"path":"/tmp/invoice-2025.pdf","name":"invoice-2025.pdf"}]}"#,
+            2,
+        )
+        .unwrap();
+        repo.insert_files(
+            "files:def",
+            r#"{"files":[{"path":"/tmp/report.md","name":"report.md"}]}"#,
+            3,
+        )
+        .unwrap();
+
+        let hits = repo.search("invoice", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].kind, "file");
+        assert!(hits[0].meta.as_deref().unwrap().contains("invoice-2025.pdf"));
+    }
+
+    #[test]
+    fn search_crosses_text_and_file_rows() {
+        let mut repo = fresh_repo();
+        repo.insert_text("keynote draft", 1).unwrap();
+        repo.insert_files(
+            "files:k",
+            r#"{"files":[{"path":"/tmp/keynote.pdf","name":"keynote.pdf"}]}"#,
+            2,
+        )
+        .unwrap();
+
+        let hits = repo.search("keynote", 10).unwrap();
+        assert_eq!(hits.len(), 2);
+        // Newer row comes first.
+        assert_eq!(hits[0].kind, "file");
+        assert_eq!(hits[1].kind, "text");
     }
 
     #[test]
