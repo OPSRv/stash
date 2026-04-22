@@ -545,6 +545,7 @@ mod tests {
         AiSettings {
             system_prompt: "p".into(),
             context_window: 10,
+        reply_on_voice: true,
         }
         .save(state.as_ref())
         .unwrap();
@@ -577,7 +578,7 @@ mod tests {
     async fn system_prompt_and_facts_are_injected() {
         let state = fresh_state();
         AiSettings {
-            system_prompt: "be brief".into(),
+            system_prompt: "be brief".into(), reply_on_voice: true,
             context_window: 50,
         }
         .save(state.as_ref())

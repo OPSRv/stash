@@ -924,3 +924,71 @@ impl CommandHandler for ForgetFactCmd {
         }
     }
 }
+
+// -------------------- /summarize --------------------
+
+/// `/summarize [N]` — collect the last N inbox items (text body,
+/// voice transcript, photo/video caption) and ask the assistant for a
+/// single-paragraph recap with emojis. N defaults to 10 and is capped
+/// at 50 so one command can't consume a whole context window.
+pub struct SummarizeCmd {
+    state: Arc<TelegramState>,
+}
+
+impl SummarizeCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for SummarizeCmd {
+    fn name(&self) -> &'static str {
+        "summarize"
+    }
+    fn description(&self) -> &'static str {
+        "Підсумок останніх N повідомлень в інбоксі (N=10 за замовчуванням)"
+    }
+    fn usage(&self) -> &'static str {
+        "/summarize [N]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let n = args.trim().parse::<usize>().unwrap_or(10).clamp(1, 50);
+        let items = match self.state.repo.lock() {
+            Ok(repo) => match repo.list_inbox(n) {
+                Ok(list) => list,
+                Err(e) => return Reply::text(format!("⚠️ {e}")),
+            },
+            Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
+        };
+        if items.is_empty() {
+            return Reply::text("📭 В інбоксі нічого немає.");
+        }
+        let mut prompt = String::from(
+            "Summarise the following recent Telegram-inbox items into one short \
+             paragraph, in the same language as the majority of entries. \
+             Use one or two emojis to group themes (📝 notes, 🎤 voice, 📷 photo, \
+             📎 file). Skip meta-statements, just deliver the content.\n\n",
+        );
+        for (i, it) in items.iter().enumerate() {
+            let content = it
+                .text_content
+                .as_deref()
+                .or(it.transcript.as_deref())
+                .or(it.caption.as_deref())
+                .unwrap_or("[no text]");
+            prompt.push_str(&format!("{}. [{}] {}\n", i + 1, it.kind, content));
+        }
+        match super::assistant::handle_user_text(&ctx.app, &self.state, &prompt).await {
+            Ok(reply) => {
+                let body = reply.text.trim();
+                if body.is_empty() {
+                    Reply::text("🤷 Нема на що відповісти — AI нічого не повернув.")
+                } else {
+                    Reply::text(format!("🗒 {body}"))
+                }
+            }
+            Err(e) => Reply::text(format!("⚠️ AI: {e}")),
+        }
+    }
+}

@@ -34,6 +34,9 @@ export type NotificationSettings = {
 export type AiSettings = {
   system_prompt: string;
   context_window: number;
+  /// When true the assistant runs on every voice-note transcript.
+  /// Default `true` — matches the original behaviour.
+  reply_on_voice: boolean;
 };
 
 export type MemoryRow = {

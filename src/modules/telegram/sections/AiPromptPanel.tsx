@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../../shared/ui/Button';
 import { Textarea } from '../../../shared/ui/Textarea';
+import { Toggle } from '../../../shared/ui/Toggle';
 import { SliderField } from '../../../settings/SliderField';
 import * as api from '../api';
 import type { AiSettings } from '../types';
@@ -101,6 +102,7 @@ export function AiPromptPanel() {
           value={settings.system_prompt}
           onChange={(e) => onPrompt(e.target.value)}
           aria-label="System prompt"
+          className="w-full block"
         />
         <div className="flex justify-end mt-2">
           <Button variant="soft" tone="neutral" onClick={onReset}>
@@ -119,6 +121,20 @@ export function AiPromptPanel() {
           step={10}
           onChange={onWindow}
           display={`${settings.context_window} msg`}
+        />
+      </div>
+
+      <div className="py-3 flex items-start justify-between gap-4">
+        <div>
+          <div className="t-primary text-body font-medium">AI reply on voice</div>
+          <div className="t-tertiary text-meta">
+            When off, voice notes only send a transcript — no AI reply.
+          </div>
+        </div>
+        <Toggle
+          checked={settings.reply_on_voice}
+          onChange={(v) => schedule({ ...settings, reply_on_voice: v })}
+          label="AI reply on voice"
         />
       </div>
     </>

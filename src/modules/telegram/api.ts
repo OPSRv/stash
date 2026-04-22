@@ -49,6 +49,11 @@ export const setInboxTranscript = (id: number, transcript: string): Promise<void
 export const retryTranscribe = (id: number): Promise<void> =>
   invoke('telegram_retry_transcribe', { id });
 
+/** Push a text message to the paired Telegram chat. Returns `false`
+ *  when the bot isn't paired yet — callers typically toast the result. */
+export const sendText = (text: string): Promise<boolean> =>
+  invoke('telegram_send_text', { text });
+
 export const revealInboxFile = (id: number): Promise<void> =>
   invoke('telegram_reveal_inbox_file', { id });
 

@@ -422,6 +422,30 @@ fn pick_note_title(
     format!("[{}]", item.kind)
 }
 
+/// Push an arbitrary text message into the paired Telegram chat.
+/// Used by the Notes module's "Send to Telegram" button — lets a
+/// hand-written or polished note round-trip to the user's phone.
+/// Silently no-op when the bot isn't paired; that's friendlier than
+/// an error dialog when the user just hasn't set up Telegram yet.
+#[tauri::command]
+pub fn telegram_send_text(
+    state: State<'_, Arc<TelegramState>>,
+    text: String,
+) -> Result<bool, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(false);
+    }
+    let pairing = state.pairing.lock().map_err(|e| e.to_string())?;
+    let chat_id = match &*pairing {
+        PairingState::Paired { chat_id } => *chat_id,
+        _ => return Ok(false),
+    };
+    drop(pairing);
+    state.sender.enqueue(chat_id, trimmed.to_string());
+    Ok(true)
+}
+
 /// Overwrite the stored transcript for a voice inbox row. Used by the
 /// UI "edit transcript" affordance so typos can be fixed before the
 /// text ends up in a note or AI context.

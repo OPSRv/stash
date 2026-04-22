@@ -986,6 +986,52 @@ export const NotesShell = () => {
                     <MicIcon size={13} />
                   </IconButton>
                   <IconButton
+                    onClick={async () => {
+                      try {
+                        const trimmed = body.trim();
+                        if (!trimmed) {
+                          toast({
+                            title: 'Nothing to send',
+                            description: 'Write something first.',
+                            variant: 'default',
+                          });
+                          return;
+                        }
+                        const composed = title.trim()
+                          ? `*${title.trim()}*\n\n${trimmed}`
+                          : trimmed;
+                        const sent = await invoke<boolean>('telegram_send_text', {
+                          text: composed,
+                        });
+                        if (sent) {
+                          toast({
+                            title: 'Sent to Telegram',
+                            variant: 'success',
+                            durationMs: 1500,
+                          });
+                        } else {
+                          toast({
+                            title: 'Pair Telegram first',
+                            description: 'Settings → Telegram → Connection',
+                            variant: 'default',
+                          });
+                        }
+                      } catch (e) {
+                        toast({
+                          title: 'Send failed',
+                          description: e instanceof Error ? e.message : String(e),
+                          variant: 'error',
+                        });
+                      }
+                    }}
+                    title="Send this note to Telegram"
+                    stopPropagation={false}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
+                    </svg>
+                  </IconButton>
+                  <IconButton
                     onClick={() => {
                       setChatOpen((v) => {
                         const next = !v;

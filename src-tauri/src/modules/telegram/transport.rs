@@ -535,31 +535,35 @@ async fn handle_media(
                         .sender
                         .enqueue(chat_for_task, format!("📝 {trimmed}"));
 
-                    // Then pipe the transcript through the assistant.
-                    // Any AI failure (missing key, rate limit, bad model)
-                    // is surfaced inline — the user still has the
-                    // transcript above, so the flow degrades gracefully.
-                    match super::assistant::handle_user_text(
-                        &app_for_task,
-                        &state_for_task,
-                        &trimmed,
-                    )
-                    .await
-                    {
-                        Ok(reply) => {
-                            let body = reply.text.trim();
-                            if !body.is_empty() {
-                                state_for_task
-                                    .sender
-                                    .enqueue(chat_for_task, format!("🤖 {body}"));
+                    // Then pipe the transcript through the assistant —
+                    // but only when the user actually wants AI replies
+                    // on voice notes. Toggle lives in Settings →
+                    // Telegram → AI Prompt (`reply_on_voice`).
+                    let reply_enabled = super::settings::AiSettings::load(&state_for_task)
+                        .reply_on_voice;
+                    if reply_enabled {
+                        match super::assistant::handle_user_text(
+                            &app_for_task,
+                            &state_for_task,
+                            &trimmed,
+                        )
+                        .await
+                        {
+                            Ok(reply) => {
+                                let body = reply.text.trim();
+                                if !body.is_empty() {
+                                    state_for_task
+                                        .sender
+                                        .enqueue(chat_for_task, format!("🤖 {body}"));
+                                }
                             }
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "assistant on transcript failed");
-                            state_for_task.sender.enqueue(
-                                chat_for_task,
-                                format!("🤖 ⚠️ не вдалося опрацювати: {e}"),
-                            );
+                            Err(e) => {
+                                tracing::warn!(error = %e, "assistant on transcript failed");
+                                state_for_task.sender.enqueue(
+                                    chat_for_task,
+                                    format!("🤖 ⚠️ не вдалося опрацювати: {e}"),
+                                );
+                            }
                         }
                     }
                 }

@@ -112,8 +112,9 @@ use modules::telegram::commands::{
     telegram_send_inbox_to_notes,
     telegram_delete_memory, telegram_get_ai_settings, telegram_get_notification_settings,
     telegram_has_token, telegram_list_inbox, telegram_list_memory, telegram_mark_inbox_routed,
-    telegram_retry_transcribe, telegram_reveal_inbox_file, telegram_set_ai_settings,
-    telegram_set_inbox_transcript, telegram_set_notification_settings,
+    telegram_retry_transcribe, telegram_reveal_inbox_file, telegram_send_text,
+    telegram_set_ai_settings, telegram_set_inbox_transcript,
+    telegram_set_notification_settings,
     telegram_set_token, telegram_start_pairing, telegram_status, telegram_unpair,
 };
 use modules::clipboard::{
@@ -516,6 +517,7 @@ pub fn run() {
             telegram_mark_inbox_routed,
             telegram_send_inbox_to_notes,
             telegram_retry_transcribe,
+            telegram_send_text,
             telegram_set_inbox_transcript,
             telegram_reveal_inbox_file,
             telegram_get_notification_settings,
@@ -734,6 +736,9 @@ pub fn run() {
             );
             telegram_state.register_command(
                 modules::telegram::module_cmds::MemoryCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::SummarizeCmd::new(Arc::clone(&telegram_state)),
             );
             telegram_state.register_command(
                 modules::telegram::module_cmds::ForgetFactCmd::new(Arc::clone(&telegram_state)),

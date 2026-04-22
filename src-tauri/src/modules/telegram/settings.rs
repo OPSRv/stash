@@ -24,6 +24,7 @@ pub const DEFAULT_BATTERY_THRESHOLD: u32 = 20;
 
 pub const KEY_AI_SYSTEM_PROMPT: &str = "ai.system_prompt";
 pub const KEY_AI_CONTEXT_WINDOW: &str = "ai.context_window";
+pub const KEY_AI_REPLY_ON_VOICE: &str = "ai.reply_on_voice";
 
 pub const DEFAULT_AI_SYSTEM_PROMPT: &str =
     "You are Oleksandr's Stash assistant, talking back through Telegram. \
@@ -116,6 +117,11 @@ fn bool_to_kv(b: bool) -> String {
 pub struct AiSettings {
     pub system_prompt: String,
     pub context_window: u32,
+    /// When `true` the assistant runs on every voice-note transcript
+    /// and replies with 🤖 in Telegram. When `false` the user only
+    /// sees the plain 📝 transcript and can trigger AI manually.
+    /// Defaults to `true` — this is the original behaviour.
+    pub reply_on_voice: bool,
 }
 
 impl AiSettings {
@@ -131,9 +137,17 @@ impl AiSettings {
             .and_then(|s| s.parse::<u32>().ok())
             .map(clamp_context_window)
             .unwrap_or(DEFAULT_AI_CONTEXT_WINDOW);
+        // Default: on. Stored as "0" / "1" for parity with the other
+        // boolean flags in the kv table.
+        let reply_on_voice = repo
+            .as_ref()
+            .and_then(|r| r.kv_get(KEY_AI_REPLY_ON_VOICE).ok().flatten())
+            .map(|s| s != "0")
+            .unwrap_or(true);
         Self {
             system_prompt,
             context_window,
+            reply_on_voice,
         }
     }
 
@@ -152,6 +166,8 @@ impl AiSettings {
             &clamp_context_window(self.context_window).to_string(),
         )
         .map_err(|e| e.to_string())?;
+        repo.kv_set(KEY_AI_REPLY_ON_VOICE, &bool_to_kv(self.reply_on_voice))
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 }
@@ -226,6 +242,9 @@ mod tests {
         let ai = AiSettings::load(&s);
         assert_eq!(ai.system_prompt, DEFAULT_AI_SYSTEM_PROMPT);
         assert_eq!(ai.context_window, DEFAULT_AI_CONTEXT_WINDOW);
+        // reply_on_voice defaults on so existing users keep the
+        // pre-toggle behaviour (transcript + AI reply).
+        assert!(ai.reply_on_voice);
     }
 
     #[test]
@@ -234,6 +253,7 @@ mod tests {
         let ai = AiSettings {
             system_prompt: "You are a snarky cat.".into(),
             context_window: 80,
+            reply_on_voice: false,
         };
         ai.save(&s).unwrap();
         let reloaded = AiSettings::load(&s);
@@ -246,6 +266,7 @@ mod tests {
         AiSettings {
             system_prompt: "p".into(),
             context_window: 9999,
+            reply_on_voice: true,
         }
         .save(&s)
         .unwrap();
@@ -254,6 +275,7 @@ mod tests {
         AiSettings {
             system_prompt: "p".into(),
             context_window: 1,
+            reply_on_voice: true,
         }
         .save(&s)
         .unwrap();
@@ -266,6 +288,7 @@ mod tests {
         AiSettings {
             system_prompt: "   ".into(),
             context_window: 50,
+            reply_on_voice: true,
         }
         .save(&s)
         .unwrap();
