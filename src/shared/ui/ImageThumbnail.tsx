@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 
 import { Lightbox } from './Lightbox';
+import { BrokenImageIcon } from './icons';
 
 type ImageThumbnailProps = {
   /// Absolute filesystem path OR a URL (asset://, file://, http, blob:).
@@ -37,29 +38,42 @@ export const ImageThumbnail = ({
   className,
 }: ImageThumbnailProps) => {
   const [open, setOpen] = useState(false);
+  const [broken, setBroken] = useState(false);
   const url = normalise(src);
   const label = alt ?? 'image';
   return (
     <div className="flex flex-col gap-2">
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label={`Open ${label}`}
-        className={`w-fit rounded-lg overflow-hidden border border-white/6 hover:border-white/15 transition-colors ${className ?? ''}`}
-      >
-        <img
-          src={url}
-          alt={label}
-          className="max-w-[220px] max-h-[160px] object-cover block"
-          loading="lazy"
-        />
-      </button>
+      {broken ? (
+        <div
+          role="img"
+          aria-label={`${label} (failed to load)`}
+          className={`w-[220px] h-[160px] flex flex-col items-center justify-center gap-2 rounded-lg border border-white/6 bg-white/3 text-white/40 ${className ?? ''}`}
+        >
+          <BrokenImageIcon size={32} />
+          <span className="text-[12px] leading-none">image unavailable</span>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={`Open ${label}`}
+          className={`w-fit rounded-lg overflow-hidden border border-white/6 hover:border-white/15 transition-colors ${className ?? ''}`}
+        >
+          <img
+            src={url}
+            alt={label}
+            className="max-w-[220px] max-h-[160px] object-cover block"
+            loading="lazy"
+            onError={() => setBroken(true)}
+          />
+        </button>
+      )}
       {caption && (
         <p className="text-[13px] leading-[18px] text-white/80 whitespace-pre-wrap">
           {caption}
         </p>
       )}
-      {open && <Lightbox src={url} alt={label} onClose={() => setOpen(false)} />}
+      {open && !broken && <Lightbox src={url} alt={label} onClose={() => setOpen(false)} />}
     </div>
   );
 };

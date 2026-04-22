@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ImageThumbnail } from './ImageThumbnail';
@@ -32,5 +32,13 @@ describe('<ImageThumbnail />', () => {
   it('surfaces the caption under the thumbnail', () => {
     render(<ImageThumbnail src="/tmp/cat.png" caption="morning photo" />);
     expect(screen.getByText(/morning photo/)).toBeInTheDocument();
+  });
+
+  it('falls back to a broken-image placeholder when the source fails to load', () => {
+    render(<ImageThumbnail src="about:invalid" alt="cat" />);
+    fireEvent.error(screen.getByAltText('cat'));
+    expect(screen.queryByAltText('cat')).toBeNull();
+    expect(screen.getByRole('img', { name: /cat \(failed to load\)/i })).toBeInTheDocument();
+    expect(screen.getByText(/image unavailable/i)).toBeInTheDocument();
   });
 });

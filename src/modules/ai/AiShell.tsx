@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamText } from 'ai';
 
-import { accent } from '../../shared/theme/accent';
+import { Badge } from '../../shared/ui/Badge';
 import { useToast } from '../../shared/ui/Toast';
 
 import {
@@ -323,13 +323,13 @@ export const AiShell = () => {
   return (
     <div className="flex flex-col h-full w-full" style={{ background: 'var(--color-bg)' }}>
       <div className="px-3 py-2 border-b hair flex items-center gap-2">
-        <span
-          className="px-2 py-0.5 rounded-full text-meta truncate"
-          style={{ background: accent(0.18) }}
+        <Badge
+          tone="accent"
           title={modelLabel(settings.aiProvider, settings.aiModel)}
+          className="truncate"
         >
           {modelLabel(settings.aiProvider, settings.aiModel)}
-        </span>
+        </Badge>
         <div className="flex-1" />
         {isStreaming && (
           <span className="t-tertiary text-meta shrink-0" aria-live="polite">

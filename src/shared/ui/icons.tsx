@@ -368,3 +368,14 @@ export const MoreHorizontalIcon = ({ size = 14, className }: IconProps) => (
     <circle cx="11" cy="7" r="1.2" fill="currentColor" />
   </svg>
 );
+
+export const BrokenImageIcon = ({ size = 24, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v9" />
+    <path d="M21 17v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5" />
+    <path d="M3 16l4-4 3 3" />
+    <path d="M14 14l2-2 5 5" />
+    <circle cx="15.5" cy="8.5" r="1.5" />
+    <path d="M3 3l18 18" strokeWidth="1.75" />
+  </svg>
+);

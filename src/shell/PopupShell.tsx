@@ -26,6 +26,7 @@ import {
 } from '../modules/downloader/api';
 import { setTranslatorSettings } from '../modules/translator/api';
 import { Cheatsheet } from '../shared/ui/Cheatsheet';
+import { GlobeLoader } from '../shared/ui/GlobeLoader';
 import { GlobalSearch } from '../shared/ui/GlobalSearch';
 import { TranslationBanner } from '../modules/clipboard/TranslationBanner';
 import { NowPlayingBar } from '../modules/music/NowPlayingBar';
@@ -628,7 +629,10 @@ export const PopupShell = () => {
               >
                 <Suspense
                   fallback={
-                    <div className="p-4 t-tertiary text-meta">Loading…</div>
+                    <GlobeLoader
+                      scale={0.6}
+                      caption={`Opening ${m.title}…`}
+                    />
                   }
                 >
                   <View />

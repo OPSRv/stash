@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 
 import { AudioPlayer } from '../../../../shared/ui/AudioPlayer';
+import { Button } from '../../../../shared/ui/Button';
 import { Spinner } from '../../../../shared/ui/Spinner';
+import { Textarea } from '../../../../shared/ui/Textarea';
 
 type VoiceItemProps = {
   filePath: string;
@@ -90,34 +92,35 @@ export const VoiceItem = ({
       )}
       {transcript && editing && onEditTranscript && (
         <div className="flex flex-col gap-2">
-          <textarea
+          <Textarea
             autoFocus
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            className="text-[13px] leading-[18px] text-white/90 bg-white/3 rounded-md px-3 py-2 border border-white/10 focus:border-[rgba(var(--stash-accent-rgb),0.4)] outline-none min-h-[72px] font-sans resize-y"
+            className="min-h-[72px]"
             aria-label="Edit transcript"
           />
           <div className="flex gap-2">
-            <button
-              type="button"
-              className="text-[11px] px-2 py-1 rounded bg-[rgba(var(--stash-accent-rgb),0.15)] hover:bg-[rgba(var(--stash-accent-rgb),0.25)] text-[rgb(var(--stash-accent-rgb))]"
+            <Button
+              size="xs"
+              variant="soft"
+              tone="accent"
               onClick={async () => {
                 await onEditTranscript(draft);
                 setEditing(false);
               }}
             >
               Save
-            </button>
-            <button
-              type="button"
-              className="text-[11px] px-2 py-1 rounded text-white/60 hover:text-white/90"
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
               onClick={() => {
                 setDraft(transcript);
                 setEditing(false);
               }}
             >
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}

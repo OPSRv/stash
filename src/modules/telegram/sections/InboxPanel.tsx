@@ -456,11 +456,7 @@ const InboxRow = ({
       />
       <KindBadge kind={item.kind} />
       <span className="font-mono tabular-nums">{formatTime(item.received_at)}</span>
-      {item.routed_to && (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-white/60">
-          → {item.routed_to}
-        </span>
-      )}
+      {item.routed_to && <Badge tone="neutral">→ {item.routed_to}</Badge>}
       <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
         <RowAction
           label="Save to Notes"
