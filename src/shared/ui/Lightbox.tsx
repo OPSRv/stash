@@ -7,9 +7,9 @@ type LightboxProps = {
 };
 
 /// Full-popup image viewer. Click-outside or Esc closes. Kept minimal
-/// on purpose — a photo from Telegram doesn't need zoom/rotate, and
-/// the popup isn't resizable, so we just fit-contain and let the user
-/// open in Finder for anything heavier.
+/// on purpose — the popup isn't resizable, so fit-contain is enough.
+/// Heavier cases (zoom, rotate) should open the file in Preview via
+/// the Finder reveal affordance.
 export const Lightbox = ({ src, alt, onClose }: LightboxProps) => {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -29,7 +29,7 @@ export const Lightbox = ({ src, alt, onClose }: LightboxProps) => {
     >
       <img
         src={src}
-        alt={alt ?? 'inbox image'}
+        alt={alt ?? 'image preview'}
         className="max-w-full max-h-full object-contain rounded-lg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       />

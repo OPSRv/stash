@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,7 +6,10 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 import { AudioPlayer } from '../../shared/ui/AudioPlayer';
 import { Button } from '../../shared/ui/Button';
+import { FileChip, formatBytes } from '../../shared/ui/FileChip';
 import { IconButton } from '../../shared/ui/IconButton';
+import { ImageThumbnail } from '../../shared/ui/ImageThumbnail';
+import { InlineVideo } from '../../shared/ui/InlineVideo';
 import {
   notesAddAttachment,
   notesListAttachments,
@@ -24,13 +26,6 @@ type Props = {
 };
 
 const basename = (p: string) => p.replace(/^.*[\\/]/, '');
-
-const formatBytes = (n: number | null | undefined) => {
-  if (!n || n <= 0) return '';
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
-};
 
 const kindOf = (a: NoteAttachment): 'image' | 'video' | 'audio' | 'file' => {
   const m = (a.mime_type ?? '').toLowerCase();
@@ -227,36 +222,19 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
 };
 
 const AttachmentBody = ({ item }: { item: NoteAttachment }) => {
-  const url = convertFileSrc(item.file_path);
   const kind = kindOf(item);
   switch (kind) {
     case 'image':
       return (
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center"
-          title={item.original_name}
-        >
-          <img
-            src={url}
-            alt={item.original_name}
-            className="h-24 w-auto max-w-[220px] object-cover block"
-            loading="lazy"
-          />
-        </a>
+        <div className="px-2 py-2">
+          <ImageThumbnail src={item.file_path} alt={item.original_name} />
+        </div>
       );
     case 'video':
       return (
-        <video
-          src={url}
-          controls
-          preload="metadata"
-          className="h-24 w-[220px] bg-black"
-        >
-          <track kind="captions" />
-        </video>
+        <div className="px-2 py-2">
+          <InlineVideo src={item.file_path} />
+        </div>
       );
     case 'audio':
       return (
@@ -270,27 +248,12 @@ const AttachmentBody = ({ item }: { item: NoteAttachment }) => {
     case 'file':
     default:
       return (
-        <div className="px-3 py-2.5 flex items-center gap-2 min-w-[220px]">
-          <div
-            className="w-8 h-8 rounded-md flex items-center justify-center shrink-0"
-            style={{
-              backgroundColor: 'rgba(var(--stash-accent-rgb), 0.10)',
-              color: 'rgb(var(--stash-accent-rgb))',
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <path d="M14 2v6h6" />
-            </svg>
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-medium text-white/90 truncate max-w-[160px]">
-              {basename(item.original_name) || basename(item.file_path)}
-            </div>
-            <div className="text-[10px] text-white/45 font-mono truncate">
-              {item.mime_type ?? '—'} · {formatBytes(item.size_bytes)}
-            </div>
-          </div>
+        <div className="px-3 py-2.5 min-w-[220px]">
+          <FileChip
+            name={basename(item.original_name) || basename(item.file_path)}
+            mimeType={item.mime_type}
+            size={formatBytes(item.size_bytes)}
+          />
         </div>
       );
   }
