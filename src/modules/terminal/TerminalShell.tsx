@@ -301,7 +301,14 @@ export const TerminalShell = () => {
           closePane(curTab.id, focusedPaneRef.current);
           return;
         }
-        if (curTabs.length > 1) closeTab(activeIdRef.current);
+        if (curTabs.length > 1) {
+          closeTab(activeIdRef.current);
+          return;
+        }
+        // Last tab + last pane: mirror native macOS ⌘W by hiding the popup.
+        // Same path as Escape / tray toggle, so focus bookkeeping is right
+        // across the embedded webviews.
+        invoke('hide_popup').catch(() => {});
         return;
       }
       if (key === 'd') {
