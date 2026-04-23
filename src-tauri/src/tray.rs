@@ -220,6 +220,21 @@ pub fn tray_set_player_artwork(app: AppHandle, bytes: Option<Vec<u8>>) -> Result
     Ok(())
 }
 
+/// Set (or clear) the text shown *next to* the tray icon in the menubar.
+/// Passing `None` removes the label so the icon reverts to bare glyph.
+///
+/// Used for at-a-glance state that belongs in the menubar rather than
+/// inside the popup — pomodoro countdown is the canonical consumer: the
+/// user doesn't want to pop the panel every 30 seconds just to see
+/// "how much is left". This is the whole point of a menubar app.
+pub fn set_title(app: &AppHandle, title: Option<&str>) {
+    if let Some(tray) = app.tray_by_id("main") {
+        if let Err(err) = tray.set_title(title) {
+            tracing::warn!(error = %err, "tray: set_title failed");
+        }
+    }
+}
+
 fn rebuild(app: &AppHandle) {
     let state = match app.try_state::<Arc<TrayState>>() {
         Some(s) => s,

@@ -50,6 +50,11 @@ pub fn spawn(state: Arc<PomodoroState>, app: AppHandle) {
         // Always emit the snapshot + a tick — the frontend relies on this
         // for its countdown render when the webview is alive.
         let _ = app.emit("pomodoro:tick", &snapshot);
+        // Mirror the countdown into the menubar tray title so the user
+        // can see time remaining without opening the popup. Paused
+        // sessions keep their last time but with a ⏸ prefix; idle
+        // clears the label so the icon reverts to bare glyph.
+        crate::tray::set_title(&app, format_tray_title(&snapshot).as_deref());
         if events.is_empty() {
             continue;
         }
@@ -125,5 +130,90 @@ pub fn emit_events(app: &AppHandle, events: &[EngineEvent]) {
             crate::modules::telegram::notifier::Category::Pomodoro,
             format!("🍅 Сесія завершена — {summary}"),
         );
+    }
+}
+
+/// Render the tray-title label for a pomodoro snapshot. Returns `None`
+/// for Idle so the caller clears the label. Running sessions show bare
+/// `MM:SS`; Paused sessions prefix `⏸` so at-a-glance the user knows
+/// the clock isn't moving.
+///
+/// Kept pure (no `app`/IO) so the behaviour is fully unit-tested — the
+/// driver calls it once per tick and pipes the result to `tray::set_title`.
+pub fn format_tray_title(snap: &super::engine::SessionSnapshot) -> Option<String> {
+    use super::engine::SessionStatus;
+    match snap.status {
+        SessionStatus::Idle => None,
+        SessionStatus::Running | SessionStatus::Paused => {
+            let total_sec = (snap.remaining_ms.max(0) / 1000) as u64;
+            let mins = total_sec / 60;
+            let secs = total_sec % 60;
+            let body = format!("{mins:02}:{secs:02}");
+            Some(match snap.status {
+                SessionStatus::Paused => format!("⏸ {body}"),
+                _ => body,
+            })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tray_title_tests {
+    use super::format_tray_title;
+    use super::super::engine::{SessionSnapshot, SessionStatus};
+
+    fn snap(status: SessionStatus, remaining_ms: i64) -> SessionSnapshot {
+        SessionSnapshot {
+            status,
+            blocks: Vec::new(),
+            current_idx: 0,
+            remaining_ms,
+            started_at: 0,
+            preset_id: None,
+        }
+    }
+
+    #[test]
+    fn idle_returns_none() {
+        assert_eq!(format_tray_title(&snap(SessionStatus::Idle, 0)), None);
+    }
+
+    #[test]
+    fn running_formats_mm_ss() {
+        let s = snap(SessionStatus::Running, 25 * 60 * 1000);
+        assert_eq!(format_tray_title(&s).as_deref(), Some("25:00"));
+    }
+
+    #[test]
+    fn running_pads_single_digit_minutes() {
+        let s = snap(SessionStatus::Running, 9 * 60 * 1000 + 5 * 1000);
+        assert_eq!(format_tray_title(&s).as_deref(), Some("09:05"));
+    }
+
+    #[test]
+    fn paused_gets_prefix() {
+        let s = snap(SessionStatus::Paused, 12 * 60 * 1000 + 34 * 1000);
+        assert_eq!(format_tray_title(&s).as_deref(), Some("⏸ 12:34"));
+    }
+
+    #[test]
+    fn zero_remaining_shows_zero() {
+        let s = snap(SessionStatus::Running, 0);
+        assert_eq!(format_tray_title(&s).as_deref(), Some("00:00"));
+    }
+
+    #[test]
+    fn negative_remaining_clamps_to_zero() {
+        let s = snap(SessionStatus::Running, -5000);
+        assert_eq!(format_tray_title(&s).as_deref(), Some("00:00"));
+    }
+
+    #[test]
+    fn hour_plus_overflows_minutes_field() {
+        // Blocks longer than an hour are rare but valid — we just let
+        // minutes exceed 60 rather than inventing an HH:MM:SS format
+        // the menubar can't fit anyway.
+        let s = snap(SessionStatus::Running, 90 * 60 * 1000);
+        assert_eq!(format_tray_title(&s).as_deref(), Some("90:00"));
     }
 }
