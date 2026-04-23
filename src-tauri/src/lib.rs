@@ -236,6 +236,25 @@ const CLIPBOARD_TRIM_EVERY_MS: u128 = 60_000;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        // `tauri-plugin-single-instance` MUST be the first plugin —
+        // per its docs, later plugins may spawn background tasks or
+        // acquire OS resources that we'd rather not duplicate if a
+        // second launch is about to hand off to us.
+        //
+        // Runs in the *first* (already-live) process when a duplicate
+        // launch is detected (Finder double-click, `open -a Stash`,
+        // relaunch after update). Without this, each relaunch would
+        // create a second tray icon, fight for the ⌘⇧V global shortcut,
+        // and open a second SQLite connection to the same db file.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            use tauri::Manager;
+            if let Some(win) = resolve_popup(app) {
+                let pos_state = app.state::<Arc<PopupPositionState>>();
+                position_popup(&win, &pos_state);
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+        }))
         .register_uri_scheme_protocol("stashnp", |ctx, request| {
             // One-way channel used by the injected YouTube Music poller to
             // report the now-playing state. We only care about the URL query
