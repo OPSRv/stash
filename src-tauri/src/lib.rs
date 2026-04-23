@@ -1,7 +1,5 @@
 mod backup;
 mod modules;
-#[cfg(target_os = "macos")]
-mod nspanel;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -957,13 +955,6 @@ pub fn run() {
                         Some(14.0),
                     ) {
                         eprintln!("[stash] apply_vibrancy failed: {e}");
-                    }
-                    // Re-class the popup NSWindow to an NSPanel with
-                    // `.nonactivatingPanel`, so toggling the popup
-                    // doesn't steal focus from whatever app the user
-                    // was typing into. See `nspanel.rs` for rationale.
-                    if let Err(e) = nspanel::convert_to_nonactivating_panel(&win) {
-                        tracing::warn!(error = %e, "nspanel conversion failed");
                     }
                 }
 
