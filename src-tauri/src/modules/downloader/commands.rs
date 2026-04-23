@@ -476,8 +476,8 @@ pub fn dl_set_cookies_browser(
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_max_parallel, normalize_cookies_browser, normalize_rate_limit, partition_missing_files,
-        resolve_downloads_dir, DownloadJob,
+        clamp_max_parallel, ensure_http_scheme, normalize_cookies_browser, normalize_rate_limit,
+        partition_missing_files, resolve_downloads_dir, DownloadJob,
     };
     use std::path::PathBuf;
 
@@ -591,5 +591,22 @@ mod tests {
             normalize_cookies_browser(Some("ARC".into())),
             Some("arc".into())
         );
+    }
+
+    #[test]
+    fn ensure_http_scheme_accepts_http_and_https() {
+        assert!(ensure_http_scheme("http://example.com/video").is_ok());
+        assert!(ensure_http_scheme("https://youtu.be/abc123").is_ok());
+        assert!(ensure_http_scheme("HTTPS://youtu.be/abc123").is_ok());
+    }
+
+    #[test]
+    fn ensure_http_scheme_rejects_non_http_and_garbage() {
+        assert!(ensure_http_scheme("file:///etc/passwd").is_err());
+        assert!(ensure_http_scheme("data:video/mp4;base64,AAA").is_err());
+        assert!(ensure_http_scheme("javascript:alert(1)").is_err());
+        assert!(ensure_http_scheme("ftp://example.com/").is_err());
+        assert!(ensure_http_scheme("").is_err());
+        assert!(ensure_http_scheme("not a url at all").is_err());
     }
 }

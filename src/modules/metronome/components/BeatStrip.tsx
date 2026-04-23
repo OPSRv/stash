@@ -1,5 +1,3 @@
-import { accent as accentColor } from '../../../shared/theme/accent';
-
 type Props = {
   numerator: number;
   accents: boolean[];
@@ -13,7 +11,6 @@ export const BeatStrip = ({ numerator, accents, activeBeat, onToggleAccent }: Pr
       {Array.from({ length: numerator }, (_, i) => {
         const isAccent = accents[i] ?? false;
         const active = i === activeBeat;
-        const size = isAccent ? 14 : 10;
         return (
           <button
             key={i}
@@ -22,24 +19,13 @@ export const BeatStrip = ({ numerator, accents, activeBeat, onToggleAccent }: Pr
             aria-checked={isAccent}
             aria-label={`Beat ${i + 1}${isAccent ? ' (accent)' : ''}`}
             onClick={() => onToggleAccent(i)}
-            className="p-1 transition-transform hover:scale-110"
+            className="p-1.5 hover:scale-110 transition-transform"
             data-testid={`beat-dot-${i}`}
           >
             <span
-              className="block"
-              style={{
-                width: size,
-                height: size,
-                transform: isAccent ? 'rotate(45deg)' : undefined,
-                background: active
-                  ? accentColor(1)
-                  : isAccent
-                    ? accentColor(0.4)
-                    : 'rgba(255,255,255,0.18)',
-                borderRadius: isAccent ? 2 : 999,
-                boxShadow: active ? `0 0 12px ${accentColor(0.7)}` : undefined,
-                transition: 'background 120ms ease, box-shadow 120ms ease',
-              }}
+              className="metro-beat-dot block"
+              data-accent={isAccent}
+              data-active={active}
             />
           </button>
         );

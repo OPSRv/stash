@@ -1,4 +1,6 @@
 import { accent } from '../../shared/theme/accent';
+import { Button } from '../../shared/ui/Button';
+import { IconButton } from '../../shared/ui/IconButton';
 import { CloseIcon } from '../../shared/ui/icons';
 import { copyText } from '../../shared/util/clipboard';
 
@@ -45,21 +47,17 @@ export const TranslationBanner = ({
         </div>
         <div className="t-tertiary text-meta truncate mt-0.5">{original}</div>
       </div>
-      <button
+      <Button
+        size="xs"
+        variant="ghost"
         onClick={copyTranslation}
-        className="t-secondary hover:t-primary text-meta px-2 py-0.5 rounded shrink-0"
-        style={{ background: 'rgba(255,255,255,0.04)' }}
         title="Copy translation to clipboard"
       >
         Copy
-      </button>
-      <button
-        onClick={onDismiss}
-        className="t-tertiary hover:t-primary p-1 shrink-0"
-        aria-label="Dismiss"
-      >
+      </Button>
+      <IconButton onClick={onDismiss} title="Dismiss">
         <CloseIcon size={12} />
-      </button>
+      </IconButton>
     </div>
   );
 };

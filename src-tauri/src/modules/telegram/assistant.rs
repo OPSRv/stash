@@ -375,12 +375,21 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::reminders::ListReminders);
     tools.register(super::tools::reminders::CancelReminder);
     tools.register(super::tools::stash::GetBattery);
+    tools.register(super::tools::stash::MetronomeControl);
+    tools.register(super::tools::stash::MusicControl);
+    tools.register(super::tools::stash::VolumeControl);
+    tools.register(super::tools::stash::SaveNote);
+    tools.register(super::tools::stash::ListNotes);
+    tools.register(super::tools::stash::NavigateTab);
     tools.register(super::tools::stash::InvokeCommand);
     if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>() {
         tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));
     }
     if let Some(pomo) = app.try_state::<Arc<crate::modules::pomodoro::state::PomodoroState>>() {
         tools.register(super::tools::stash::PomodoroStatus::new(pomo.inner().clone()));
+        tools.register(super::tools::stash::PomodoroStart::new(pomo.inner().clone()));
+        tools.register(super::tools::stash::PomodoroStop::new(pomo.inner().clone()));
+        tools.register(super::tools::stash::PomodoroSavePreset::new(pomo.inner().clone()));
     }
 
     Ok(Assistant {

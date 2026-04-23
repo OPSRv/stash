@@ -82,14 +82,37 @@ export const closeTab = (tabs: Tab[], tabId: string): Tab[] => {
   return tabs.filter((t) => t.id !== tabId);
 };
 
-/// Reorder: move `srcId` into `dstId`'s slot.
-export const reorderTabs = (tabs: Tab[], srcId: string, dstId: string): Tab[] => {
+/// Reorder: drop `srcId` before or after `dstId` depending on the
+/// drop-zone side. `'left' | 'top'` → insert before; `'right' | 'bottom'`
+/// → insert after; `'center'` → land on dest's current slot (the old
+/// behaviour, kept for callers that don't yet distinguish sides).
+export const reorderTabs = (
+  tabs: Tab[],
+  srcId: string,
+  dstId: string,
+  side: DropPosition = 'center',
+): Tab[] => {
   const si = tabs.findIndex((t) => t.id === srcId);
   const di = tabs.findIndex((t) => t.id === dstId);
   if (si < 0 || di < 0 || si === di) return tabs;
   const next = [...tabs];
   const [item] = next.splice(si, 1);
-  next.splice(di, 0, item);
+  // `splice(si, 1)` shifts indices past si one slot left. `adjusted` is
+  // the destination index *in the array that still has the hole* at si.
+  const adjusted = si < di ? di - 1 : di;
+  let insertAt: number;
+  if (side === 'left' || side === 'top') {
+    insertAt = adjusted;
+  } else if (side === 'right' || side === 'bottom') {
+    insertAt = adjusted + 1;
+  } else {
+    // Default `center` behaviour preserves the legacy slot-swap UX:
+    // dragging past the dest lands after it (src<dst) or before it
+    // (src>dst). That's what users experience with HTML5-style drag
+    // reorders and what every existing caller / test expects.
+    insertAt = di;
+  }
+  next.splice(insertAt, 0, item);
   return next;
 };
 

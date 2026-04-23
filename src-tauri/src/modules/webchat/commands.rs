@@ -100,27 +100,75 @@ const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
       new Image().src = 'stashnp://report/loading?' + qs.toString();
     } catch(_) {}
   }
+
+  // --- navigation reporter --------------------------------------------
+  // Emits the live URL + document title so the host toolbar/sidebar can
+  // reflect the real page the user is on (not the home URL pinned at
+  // embed time). Deduped to avoid flooding when the page keeps touching
+  // document.title or pushes the same state twice.
+  var lastNav = '';
+  function reportNav(){
+    try {
+      var url = String(location.href || '');
+      var title = String(document.title || '');
+      var key = url + '' + title;
+      if (key === lastNav) return;
+      lastNav = key;
+      var qs = new URLSearchParams({
+        kind: 'nav',
+        service: SERVICE_ID,
+        url: url,
+        title: title,
+      });
+      new Image().src = 'stashnp://report/nav?' + qs.toString();
+    } catch(_) {}
+  }
   document.addEventListener('readystatechange', function(){
     if (document.readyState === 'loading') reportLoading('start');
     else if (document.readyState === 'complete') {
       reportLoading('end');
       applyZoom(INITIAL_ZOOM);
+      reportNav();
     }
   });
-  window.addEventListener('load', function(){ reportLoading('end'); applyZoom(INITIAL_ZOOM); });
+  window.addEventListener('load', function(){
+    reportLoading('end');
+    applyZoom(INITIAL_ZOOM);
+    reportNav();
+  });
   try {
     var _push = history.pushState;
     history.pushState = function(){
       reportLoading('start');
       var r = _push.apply(this, arguments);
-      setTimeout(function(){ reportLoading('end'); }, 400);
+      setTimeout(function(){ reportLoading('end'); reportNav(); }, 400);
+      return r;
+    };
+    var _replace = history.replaceState;
+    history.replaceState = function(){
+      var r = _replace.apply(this, arguments);
+      setTimeout(reportNav, 0);
       return r;
     };
     window.addEventListener('popstate', function(){
       reportLoading('start');
-      setTimeout(function(){ reportLoading('end'); }, 400);
+      setTimeout(function(){ reportLoading('end'); reportNav(); }, 400);
     });
+    window.addEventListener('hashchange', reportNav);
   } catch(_) {}
+  // Title can change without a URL change (chat renames itself, unread
+  // counter, etc.) — observe <title> mutations and re-emit.
+  try {
+    var titleEl = document.querySelector('title');
+    if (titleEl && 'MutationObserver' in window) {
+      new MutationObserver(reportNav).observe(titleEl, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+  } catch(_) {}
+  setTimeout(reportNav, 300);
 
   var last = '';
   function pickArtwork(m){
@@ -185,6 +233,20 @@ fn sanitize_zoom(value: Option<f64>) -> String {
         .map(|v| v.clamp(0.5, 2.0))
         .unwrap_or(1.0);
     format!("{z:.2}")
+}
+
+/// Parse a user-supplied URL and reject anything that is not `http`/`https`.
+/// The native webview builder trusts whatever `WebviewUrl::External` gets,
+/// so `file:`, `data:`, or `javascript:` would otherwise leak through.
+fn parse_http_url(url: &str) -> Result<url::Url, String> {
+    let parsed = url.parse::<url::Url>().map_err(|e| e.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "webchat: scheme '{}' not allowed (only http/https)",
+            parsed.scheme()
+        ));
+    }
+    Ok(parsed)
 }
 
 fn label_for(service: &str) -> Result<String, String> {
@@ -252,13 +314,7 @@ pub fn webchat_embed(
         return Ok(());
     }
 
-    let parsed = url.parse::<url::Url>().map_err(|e| e.to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(format!(
-            "webchat: scheme '{}' not allowed (only http/https)",
-            parsed.scheme()
-        ));
-    }
+    let parsed = parse_http_url(&url)?;
     let ua = user_agent
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| SAFARI_UA.to_string());
@@ -443,7 +499,7 @@ pub fn webchat_close(app: AppHandle, service: String) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{label_for, sanitize_zoom, SAFARI_UA};
+    use super::{label_for, parse_http_url, sanitize_zoom, SAFARI_UA};
 
     #[test]
     fn sanitize_zoom_clamps_and_formats() {
@@ -468,6 +524,30 @@ mod tests {
         assert!(label_for("has space").is_err());
         assert!(label_for("unicode·here").is_err());
         assert!(label_for("../evil").is_err());
+    }
+
+    #[test]
+    fn parse_http_url_accepts_http_and_https() {
+        assert!(parse_http_url("http://example.com/path").is_ok());
+        assert!(parse_http_url("https://claude.ai/").is_ok());
+        assert_eq!(
+            parse_http_url("https://x.test/").unwrap().host_str(),
+            Some("x.test")
+        );
+    }
+
+    #[test]
+    fn parse_http_url_rejects_other_schemes() {
+        assert!(parse_http_url("file:///etc/passwd").is_err());
+        assert!(parse_http_url("data:text/html,<script>alert(1)</script>").is_err());
+        assert!(parse_http_url("javascript:alert(1)").is_err());
+        assert!(parse_http_url("ftp://example.com/").is_err());
+    }
+
+    #[test]
+    fn parse_http_url_rejects_garbage() {
+        assert!(parse_http_url("").is_err());
+        assert!(parse_http_url("not a url").is_err());
     }
 
     #[test]

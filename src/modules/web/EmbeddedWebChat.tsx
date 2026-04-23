@@ -23,6 +23,7 @@ import {
   webchatHide,
   webchatReload,
   webchatSetZoom,
+  type WebchatNav,
 } from './webchatApi';
 
 type Props = {
@@ -76,6 +77,11 @@ export const EmbeddedWebChat = ({
   // Track zoom locally so keyboard bumps feel instant without round-tripping
   // through a settings reload. Persistence still happens via `onZoomChange`.
   const [zoom, setZoom] = useState<number>(() => clampZoom(service.zoom ?? 1));
+  // Live URL + title from the injected `webchat:nav` reporter. Seeded
+  // with the home URL + label so the toolbar has something to render
+  // before the first nav tick arrives.
+  const [currentUrl, setCurrentUrl] = useState<string>(service.url);
+  const [currentTitle, setCurrentTitle] = useState<string>(service.label);
   const { toast } = useToast();
   // Overflow menu is now native (NSMenu via `@tauri-apps/api/menu`),
   // so no open-state ref or outside-click bookkeeping lives here.
@@ -84,6 +90,33 @@ export const EmbeddedWebChat = ({
   useEffect(() => {
     setZoom(clampZoom(service.zoom ?? 1));
   }, [service.id, service.zoom]);
+
+  // Re-seed URL/title when switching to a different service so we don't
+  // briefly display the previous tab's page metadata.
+  useEffect(() => {
+    setCurrentUrl(service.url);
+    setCurrentTitle(service.label);
+  }, [service.id, service.url, service.label]);
+
+  // Subscribe to live nav ticks for this service. `webchat:nav` also
+  // fires on the initial load, so we don't need a separate poll on
+  // mount — the first tick lands right after the page is ready.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    listen<WebchatNav>('webchat:nav', (evt) => {
+      const p = evt.payload;
+      if (!p || p.service !== service.id) return;
+      if (p.url && p.url.startsWith('http')) setCurrentUrl(p.url);
+      if (p.title) setCurrentTitle(p.title);
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      unlisten?.();
+    };
+  }, [service.id]);
 
   const syncBounds = useCallback(async () => {
     const el = sizerRef.current;
@@ -372,9 +405,9 @@ export const EmbeddedWebChat = ({
 
   const host = (() => {
     try {
-      return new URL(service.url).hostname;
+      return new URL(currentUrl).hostname;
     } catch {
-      return service.url;
+      return currentUrl;
     }
   })();
 
@@ -475,9 +508,9 @@ export const EmbeddedWebChat = ({
               className="flex items-center gap-2 flex-1 min-w-0 h-7 px-2 text-meta t-secondary hover:t-primary rounded-md text-left"
               title="Edit URL (⌘L)"
             >
-              <Favicon url={service.url} label={service.label} size={14} />
+              <Favicon url={currentUrl} label={currentTitle || service.label} size={14} />
               <span className="t-primary font-medium shrink-0">{service.label}</span>
-              <span className="t-tertiary truncate">{host}</span>
+              <span className="t-tertiary truncate" title={currentUrl}>{host}</span>
               {zoom !== 1 && (
                 <span className="ml-auto pl-2 t-tertiary tabular-nums shrink-0" title="Zoom — ⌘0 to reset">
                   {zoomLabel}

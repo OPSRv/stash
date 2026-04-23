@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadSettings } from '../../settings/store';
 import { userAgentFor } from '../../shared/browserUA';
-import { Button } from '../../shared/ui/Button';
+import { RefreshIcon, TrashIcon } from '../../shared/ui/icons';
 import {
   musicClose,
   musicEmbed,
@@ -143,12 +143,28 @@ export const MusicShell = () => {
         <span className="t-primary text-body font-medium">YouTube Music</span>
         <span className="t-tertiary text-meta">music.youtube.com</span>
         <div className="flex-1" />
-        <Button size="sm" variant="soft" onClick={reload} title="Reload">
-          Reload
-        </Button>
-        <Button size="sm" variant="soft" tone="danger" onClick={hardClose} title="Sign out & reset">
-          Reset
-        </Button>
+        {/* Native `title` tooltip (macOS-level surface) — an HTML/DOM
+            tooltip would get covered by the child WKWebView that paints
+            over this toolbar, so we stick to the OS tooltip here just
+            like the main tab bar does. */}
+        <button
+          type="button"
+          onClick={reload}
+          aria-label="Reload"
+          title="Reload"
+          className="w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] t-secondary hover:t-primary transition-colors"
+        >
+          <RefreshIcon />
+        </button>
+        <button
+          type="button"
+          onClick={hardClose}
+          aria-label="Sign out & reset"
+          title="Sign out & reset"
+          className="w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] t-secondary hover:text-red-400 transition-colors"
+        >
+          <TrashIcon />
+        </button>
       </div>
       <div ref={sizerRef} className="flex-1 relative" style={placeholderStyle}>
         {!attached && !error && (

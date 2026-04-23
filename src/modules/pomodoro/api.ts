@@ -101,3 +101,37 @@ export const skipTo = (idx: number): Promise<SessionSnapshot> =>
 
 export const editBlocks = (blocks: Block[]): Promise<SessionSnapshot> =>
   invoke('pomodoro_edit_blocks', { blocks });
+
+// Telegram-notifications toggle shortcut. The canonical settings live in the
+// Telegram module; these helpers flip only the `pomodoro` field so the user
+// can silence pomodoro pings from the pomodoro UI without leaving the tab.
+type TelegramNotificationSettings = {
+  pomodoro: boolean;
+  download_complete: boolean;
+  battery_low: boolean;
+  calendar: boolean;
+  calendar_lead_minutes: number;
+  battery_threshold_pct: number;
+};
+
+export const getTelegramNotifyEnabled = async (): Promise<boolean> => {
+  const s = await invoke<TelegramNotificationSettings>(
+    'telegram_get_notification_settings',
+  );
+  return s.pomodoro;
+};
+
+export const setTelegramNotifyEnabled = async (enabled: boolean): Promise<void> => {
+  const s = await invoke<TelegramNotificationSettings>(
+    'telegram_get_notification_settings',
+  );
+  await invoke('telegram_set_notification_settings', {
+    settings: { ...s, pomodoro: enabled },
+  });
+};
+
+/** Whether the Telegram bot is paired with a chat — `true` means sending works. */
+export const getTelegramPaired = async (): Promise<boolean> => {
+  const status = await invoke<{ kind: string }>('telegram_status');
+  return status.kind === 'paired';
+};

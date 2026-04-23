@@ -2,20 +2,32 @@
 /// `<html>` — keeps the terminal matching Stash's light/dark theme
 /// without maintaining a parallel palette in xterm config.
 
-const readAccent = (): string => {
-  if (typeof document === 'undefined') return '#2f7ae5';
+const readAccentRgb = (): string => {
+  if (typeof document === 'undefined') return '47,122,229';
   const styles = getComputedStyle(document.documentElement);
   const rgb = styles.getPropertyValue('--stash-accent-rgb').trim();
-  if (!rgb) return styles.getPropertyValue('--stash-accent').trim() || '#2f7ae5';
-  return `rgb(${rgb})`;
+  return rgb || '47,122,229';
 };
+
+const readAccent = (): string => `rgb(${readAccentRgb()})`;
 
 export const xtermThemeFor = (isLight: boolean) => ({
   background: 'rgba(0,0,0,0)',
   foreground: isLight ? '#1a1c21' : '#e7e7ea',
   cursor: readAccent(),
   cursorAccent: isLight ? '#ffffff' : '#1a1c21',
-  selectionBackground: isLight ? 'rgba(47,122,229,0.25)' : 'rgba(74,139,234,0.35)',
+  // Selection uses the app's accent so it matches the rest of the
+  // chrome (tab underline, splitter hover, caret). Alpha is kept low —
+  // xterm highlights entire empty columns when the user sweeps past
+  // line-ends, so a heavy fill turns into a distracting wall of colour
+  // over empty buffer rows.
+  selectionBackground: isLight
+    ? `rgba(${readAccentRgb()}, 0.18)`
+    : `rgba(${readAccentRgb()}, 0.22)`,
+  selectionInactiveBackground: isLight
+    ? `rgba(${readAccentRgb()}, 0.10)`
+    : `rgba(${readAccentRgb()}, 0.12)`,
+  selectionForeground: undefined,
   black: isLight ? '#1a1c21' : '#1a1a1f',
   brightBlack: '#555',
   red: '#e0585b',

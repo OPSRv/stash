@@ -11,7 +11,7 @@ type IconButtonProps = {
   /** Tooltip placement relative to the button. Defaults to `bottom` because
    *  most icon buttons live near the top of a scroll container, and a
    *  top-placed tooltip would clip behind the tabs bar above. */
-  tooltipSide?: 'top' | 'bottom';
+  tooltipSide?: 'top' | 'bottom' | 'left' | 'right';
 };
 
 export const IconButton = ({
@@ -23,7 +23,7 @@ export const IconButton = ({
   disabled = false,
   tooltipSide = 'bottom',
 }: IconButtonProps) => {
-  const toneClass = tone === 'danger' ? 't-secondary hover:text-red-400' : 't-secondary hover:t-primary';
+  const toneClass = tone === 'danger' ? 't-primary hover:text-red-400' : 't-primary hover:t-primary';
   return (
     <Tooltip label={title} side={tooltipSide}>
       <button

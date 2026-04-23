@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamText } from 'ai';
+import { listen } from '@tauri-apps/api/event';
 
 import { Badge } from '../../shared/ui/Badge';
 import { useToast } from '../../shared/ui/Toast';
+import { useVoiceRecorder } from '../../shared/hooks/useVoiceRecorder';
 
 import {
   aiAppendMessage,
@@ -125,6 +127,31 @@ export const AiShell = () => {
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
+
+  // Voice input — mic button in the composer transcribes via whisper
+  // and appends the text to whatever the user already typed. Joining
+  // with a single space (rather than replacing) is the ergonomic
+  // choice: if you dictated something, tweaked it manually, then
+  // dictated a continuation, nothing is lost.
+  const voice = useVoiceRecorder({
+    onTranscript: (text) => {
+      setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+    },
+  });
+
+  // Global shortcut `⌘⇧A` fires `voice:activate` — start the mic
+  // as soon as the AI shell mounts and receives it. Only acts from
+  // idle/error so a second press during recording doesn't restart.
+  useEffect(() => {
+    const unlisten = listen<boolean>('voice:activate', () => {
+      if (voice.phase === 'idle' || voice.phase === 'error') {
+        void voice.start();
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, [voice]);
 
   const handleSend = useCallback(async () => {
     const prompt = input.trim();
@@ -391,6 +418,9 @@ export const AiShell = () => {
             placeholder={
               notConfigured ? 'Configure AI in Settings first.' : undefined
             }
+            voicePhase={voice.phase}
+            voiceError={voice.error}
+            onVoiceToggle={voice.toggle}
           />
         </section>
       </div>

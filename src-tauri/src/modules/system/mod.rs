@@ -1,4 +1,8 @@
+pub mod apps_control;
 pub mod battery;
+pub mod focus;
+pub mod reminders_bridge;
+pub mod weather;
 pub mod caches;
 pub mod cancel;
 pub mod commands;

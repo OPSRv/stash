@@ -8,12 +8,23 @@ describe('terminal api', () => {
     vi.mocked(invoke).mockResolvedValue(null);
   });
 
-  it('ptyOpen invokes pty_open with id + cols/rows', async () => {
+  it('ptyOpen invokes pty_open with id + cols/rows + null cwd by default', async () => {
     await ptyOpen('pane-1', 120, 40);
     expect(invoke).toHaveBeenCalledWith('pty_open', {
       id: 'pane-1',
       cols: 120,
       rows: 40,
+      cwd: null,
+    });
+  });
+
+  it('ptyOpen forwards an explicit cwd hint', async () => {
+    await ptyOpen('pane-1', 120, 40, '/Users/me/work');
+    expect(invoke).toHaveBeenCalledWith('pty_open', {
+      id: 'pane-1',
+      cols: 120,
+      rows: 40,
+      cwd: '/Users/me/work',
     });
   });
 

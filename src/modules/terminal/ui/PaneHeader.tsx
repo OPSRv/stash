@@ -1,7 +1,16 @@
-import { AskAiButton } from '../../../shared/ui/AskAiButton';
+import { useState } from 'react';
+
 import { Button } from '../../../shared/ui/Button';
+import { ContextMenu, type ContextMenuItem } from '../../../shared/ui/ContextMenu';
 import { DragDots } from '../../../shared/ui/DragDots';
-import { SearchIcon } from '../../../shared/ui/icons';
+import {
+  CloseIcon,
+  CodeIcon,
+  PencilIcon,
+  ReuseIcon,
+  SearchIcon,
+  SplitViewIcon,
+} from '../../../shared/ui/icons';
 import type { Orientation } from '../types';
 import { HeaderDivider } from './HeaderDivider';
 
@@ -9,11 +18,14 @@ export type Snippet = { id: string; label: string; command: string };
 
 export type PaneHeaderProps = {
   paneId: string;
-  /// Hide action labels (icon-only), below ~360 px.
+  /// Hide non-essential chrome (labels, status) below ~360 px. Action
+  /// buttons are always icon-only now so `compact` no longer changes
+  /// their rendering — kept as a prop for the status/label collapse.
   compact: boolean;
   /// Also hide the `$SHELL` status, below ~220 px.
   ultraCompact: boolean;
-  /// Hide the snippet chips, below ~520 px.
+  /// @deprecated snippets now live in a popover triggered by the
+  /// `Commands` button, so header width no longer decides visibility.
   hideSnippets: boolean;
   dead: boolean;
   statusLabel: string;
@@ -25,40 +37,82 @@ export type PaneHeaderProps = {
   onFind: () => void;
   onRestart: () => void;
   onSplit?: (orientation: Orientation) => void;
+  /// Maximize toggle — only passed when the tab has >1 leaves.
+  onToggleMaximize?: () => void;
+  /// Current maximize state (controls icon + tooltip).
+  maximized?: boolean;
   onClosePane?: () => void;
   /// Pointer-down on the pane's drag handle; the shell's drag
   /// manager owns the rest of the gesture.
   onPaneDragStart?: (e: React.PointerEvent) => void;
 };
 
-/// Pane header: drag-handle, status, snippets, action group. Collapses
-/// in stages as the pane narrows so the primary controls (Compose,
-/// Find, Restart) always stay reachable.
+/// Pane header: drag-handle, status, snippet-popover trigger, action
+/// group, close-on-far-right. All action controls are icon-only for a
+/// uniform, quiet header chrome that doesn't compete with xterm output
+/// for attention.
 export const PaneHeader = ({
   paneId,
   compact,
   ultraCompact,
-  hideSnippets,
   dead,
   statusLabel,
   snippets,
   runSnippet,
-  selection,
   composeOpen,
   toggleCompose,
   onFind,
   onRestart,
   onSplit,
+  onToggleMaximize,
+  maximized = false,
   onClosePane,
   onPaneDragStart,
 }: PaneHeaderProps) => {
-  const showSnippets = !hideSnippets && snippets.length > 0;
   const showStatus = !ultraCompact;
   const showLabel = !compact;
+  const hasSnippets = snippets.length > 0;
+
+  const [cmdMenu, setCmdMenu] = useState<{ x: number; y: number } | null>(null);
+
+  const openCmdMenu = (e: React.MouseEvent<HTMLElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Anchor popover below the button, right-aligned so it never
+    // clips off the right edge of a narrow pane.
+    setCmdMenu({ x: rect.right - 220, y: rect.bottom + 4 });
+  };
+
+  const cmdMenuItems: ContextMenuItem[] = [
+    ...snippets
+      .filter((sn) => sn.command.trim())
+      .map<ContextMenuItem>((sn) => ({
+        kind: 'action' as const,
+        label: sn.label || sn.command,
+        shortcut: sn.label ? sn.command : undefined,
+        icon: <CodeIcon size={12} />,
+        onSelect: () => {
+          runSnippet(sn.command).catch(() => {});
+        },
+        disabled: dead,
+      })),
+    { kind: 'separator' as const },
+    {
+      kind: 'action' as const,
+      label: 'Manage commands…',
+      onSelect: () => {
+        window.dispatchEvent(
+          new CustomEvent('stash:navigate', { detail: 'settings' }),
+        );
+        window.dispatchEvent(
+          new CustomEvent('stash:settings-section', { detail: 'terminal' }),
+        );
+      },
+    },
+  ];
 
   return (
     <div
-      className="flex items-center gap-1.5 px-2 py-1 shrink-0 border-b hair"
+      className="flex items-center gap-1 px-2 py-1 shrink-0 border-b hair"
       style={{ minHeight: 28 }}
     >
       <span
@@ -108,76 +162,96 @@ export const PaneHeader = ({
         </>
       )}
 
-      {showSnippets && (
-        <div
-          className="flex items-center gap-1 min-w-0"
-          style={{ overflowX: 'auto' }}
-        >
-          {snippets.map((sn) => (
-            <Button
-              key={sn.id}
-              size="xs"
-              variant="soft"
-              tone="accent"
-              onClick={() => {
-                runSnippet(sn.command).catch(() => {});
-              }}
-              disabled={dead || !sn.command.trim()}
-              title={`Send: ${sn.command}`}
-            >
-              {sn.label}
-            </Button>
-          ))}
-        </div>
-      )}
-
       <div className="flex-1" />
 
       <div className="flex items-center gap-0.5 shrink-0">
-        <AskAiButton
-          text={() => selection}
-          disabled={!selection.trim()}
-          title="Ask AI about the selected text"
-        />
-
-        {(onSplit || onClosePane) && <HeaderDivider />}
-
         {onSplit && (
           <>
             <Button
               size="xs"
               variant="ghost"
               onClick={() => onSplit('row')}
-              title="Split this tab side-by-side (⌘D)"
+              title="Split side-by-side (⌘D)"
               aria-label="Split right"
             >
-              ⊟
+              <SplitViewIcon size={13} />
             </Button>
             <Button
               size="xs"
               variant="ghost"
               onClick={() => onSplit('column')}
-              title="Split this tab top/bottom (⌘⇧D)"
+              title="Split top/bottom (⌘⇧D)"
               aria-label="Split down"
             >
-              ⊞
+              <SplitViewIcon size={13} className="rotate-90" />
             </Button>
+            {onToggleMaximize && (
+              <Button
+                size="xs"
+                variant={maximized ? 'soft' : 'ghost'}
+                tone={maximized ? 'accent' : 'neutral'}
+                onClick={onToggleMaximize}
+                title={maximized ? 'Restore layout (⌘E)' : 'Maximize pane (⌘E)'}
+                aria-label={maximized ? 'Restore' : 'Maximize'}
+                aria-pressed={maximized}
+              >
+                {/* Two-square glyph: corner-arrows in/out depending on state. */}
+                <svg
+                  width={13}
+                  height={13}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  {maximized ? (
+                    <>
+                      <path d="M9 3H3v6" />
+                      <path d="M15 3h6v6" />
+                      <path d="M3 15v6h6" />
+                      <path d="M15 21h6v-6" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M3 9V3h6" />
+                      <path d="M21 9V3h-6" />
+                      <path d="M3 15v6h6" />
+                      <path d="M21 15v6h-6" />
+                    </>
+                  )}
+                </svg>
+              </Button>
+            )}
+            <HeaderDivider />
           </>
         )}
-        {onClosePane && (
-          <Button
-            size="xs"
-            variant="ghost"
-            tone="danger"
-            onClick={onClosePane}
-            title="Close this pane (⌘W)"
-            aria-label="Close pane"
-          >
-            ✕
-          </Button>
-        )}
 
-        <HeaderDivider />
+        <Button
+          size="xs"
+          variant={cmdMenu ? 'soft' : 'ghost'}
+          tone={cmdMenu ? 'accent' : 'neutral'}
+          onClick={(e) => (cmdMenu ? setCmdMenu(null) : openCmdMenu(e))}
+          title={
+            hasSnippets
+              ? `Saved commands (${snippets.length})`
+              : 'Commands — add your own in Settings'
+          }
+          aria-label="Commands"
+          aria-haspopup="menu"
+          aria-expanded={!!cmdMenu}
+        >
+          <CodeIcon size={13} />
+        </Button>
+        <ContextMenu
+          open={!!cmdMenu}
+          x={cmdMenu?.x ?? 0}
+          y={cmdMenu?.y ?? 0}
+          items={cmdMenuItems}
+          onClose={() => setCmdMenu(null)}
+          label="Saved terminal commands"
+        />
 
         <Button
           size="xs"
@@ -187,7 +261,7 @@ export const PaneHeader = ({
           title="Multi-line prompt (⌘⇧E)"
           aria-label="Toggle compose"
         >
-          {compact ? '✎' : 'Compose'}
+          <PencilIcon size={13} />
         </Button>
         <Button
           size="xs"
@@ -195,9 +269,8 @@ export const PaneHeader = ({
           onClick={onFind}
           title="Search scrollback (⌘F)"
           aria-label="Find"
-          leadingIcon={!compact ? <SearchIcon size={12} /> : undefined}
         >
-          {compact ? <SearchIcon size={12} /> : 'Find'}
+          <SearchIcon size={13} />
         </Button>
         <Button
           size="xs"
@@ -207,8 +280,24 @@ export const PaneHeader = ({
           title={dead ? 'Start a fresh shell session' : 'Restart shell'}
           aria-label={dead ? 'Restart shell' : 'Restart'}
         >
-          {compact && !dead ? '↻' : dead ? 'Restart shell' : 'Restart'}
+          <ReuseIcon size={13} />
         </Button>
+
+        {onClosePane && (
+          <>
+            <HeaderDivider />
+            <Button
+              size="xs"
+              variant="ghost"
+              tone="danger"
+              onClick={onClosePane}
+              title="Close this pane (⌘W)"
+              aria-label="Close pane"
+            >
+              <CloseIcon size={13} />
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );

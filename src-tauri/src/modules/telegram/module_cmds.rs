@@ -45,7 +45,19 @@ impl CommandHandler for BatteryCmd {
             BatterySnapshot::Present { percent, charging } => {
                 let icon = if charging { "🔌" } else { "🔋" };
                 let status = if charging { "заряджається" } else { "від батареї" };
-                Reply::text(format!("{icon} {percent}% — {status}"))
+                // Below 20% + not plugged in → offer a quick sleep action.
+                let low = percent < 20 && !charging;
+                Reply {
+                    text: format!("{icon} {percent}% — {status}"),
+                    keyboard: if low {
+                        Some(InlineKeyboard {
+                            rows: vec![vec![InlineButton::new("💤 Sleep Mac", "sleep")]],
+                        })
+                    } else {
+                        None
+                    },
+                    ..Default::default()
+                }
             }
             BatterySnapshot::NoBattery => {
                 Reply::text("🔌 У цього Mac немає батареї (desktop / під'єднано до мережі).")
@@ -132,7 +144,18 @@ impl CommandHandler for ClipCmd {
         "/clip [N]"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
-        let n: usize = args.trim().parse().unwrap_or(1).max(1);
+        let trimmed = args.trim();
+        // Subcommand: `restore N` — push item N back onto the system
+        // clipboard. Only text items for now (image restoration needs
+        // the full paste pipeline).
+        if let Some(rest) = trimmed.strip_prefix("restore") {
+            let n: usize = rest.trim().parse().unwrap_or(1).max(1);
+            return match clip_restore_text(&self.state, n) {
+                Ok(preview) => Reply::text(format!("📋 Скопійовано №{n}: {preview}")),
+                Err(e) => Reply::text(format!("⚠️ {e}")),
+            };
+        }
+        let n: usize = trimmed.parse().unwrap_or(1).max(1);
         let items = match self
             .state
             .repo
@@ -143,15 +166,57 @@ impl CommandHandler for ClipCmd {
             Ok(v) => v,
             Err(e) => return Reply::text(format!("⚠️ помилка буфера: {e}")),
         };
+        let total = items.len();
         match items.get(n - 1) {
             Some(item) if item.kind == "text" => {
                 let content = truncate_preview(&item.content, 3_500);
-                Reply::text(content)
+                let mut row: Vec<InlineButton> = vec![
+                    InlineButton::new("📋 Re-copy", format!("clip:restore {n}")),
+                ];
+                if total > n {
+                    row.push(InlineButton::new("⏭ Next", format!("clip:{}", n + 1)));
+                }
+                if n > 1 {
+                    row.insert(0, InlineButton::new("⏮ Prev", format!("clip:{}", n - 1)));
+                }
+                Reply {
+                    text: content,
+                    keyboard: Some(InlineKeyboard { rows: vec![row] }),
+                    ..Default::default()
+                }
             }
             Some(item) => Reply::text(format!("📎 [{}] {}", item.kind, item.content)),
             None => Reply::text(format!("📭 Немає запису буфера на позиції {n}.")),
         }
     }
+}
+
+/// Re-push the Nth clipboard history item back onto the system
+/// clipboard. Returns a short preview on success. Image items are
+/// rejected — the full paste pipeline handles those, and wiring it
+/// in from the bot isn't worth the extra surface.
+fn clip_restore_text(state: &Arc<ClipboardState>, n: usize) -> Result<String, String> {
+    let items = state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())
+        .and_then(|repo| repo.list(n).map_err(|e| e.to_string()))?;
+    let item = items
+        .get(n - 1)
+        .ok_or_else(|| format!("немає запису буфера на позиції {n}"))?;
+    if item.kind != "text" {
+        return Err(format!(
+            "{} — небінарні записи бот поки не копіює; відкрий Stash",
+            item.kind
+        ));
+    }
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    clipboard
+        .set_text(item.content.clone())
+        .map_err(|e| e.to_string())?;
+    let preview: String = item.content.chars().take(60).collect();
+    let suffix = if item.content.chars().count() > 60 { "…" } else { "" };
+    Ok(format!("\"{preview}{suffix}\""))
 }
 
 fn truncate_preview(s: &str, max: usize) -> String {
@@ -202,14 +267,68 @@ impl CommandHandler for NoteCmd {
         };
         match result {
             Ok(id) => {
-                // Nudge the Notes panel to refresh — the panel normally
-                // reloads on its own writes but has no other signal to
-                // notice a cross-module insert.
                 let _ = ctx.app.emit("notes:changed", id);
-                Reply::text(format!("📝 Збережено нотатку №{id}: {title}"))
+                Reply {
+                    text: format!("📝 Збережено нотатку №{id}: {title}"),
+                    keyboard: Some(InlineKeyboard {
+                        rows: vec![vec![InlineButton::new("📝 Recent", "notes")]],
+                    }),
+                    ..Default::default()
+                }
             }
             Err(e) => Reply::text(format!("⚠️ помилка нотаток: {e}")),
         }
+    }
+}
+
+// -------------------- /notes --------------------
+
+pub struct NotesListCmd {
+    repo: Arc<Mutex<NotesRepo>>,
+}
+
+impl NotesListCmd {
+    pub fn new(repo: Arc<Mutex<NotesRepo>>) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for NotesListCmd {
+    fn name(&self) -> &'static str {
+        "notes"
+    }
+    fn description(&self) -> &'static str {
+        "Останні нотатки (newest first)"
+    }
+    fn usage(&self) -> &'static str {
+        "/notes"
+    }
+    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
+        let summaries = match self.repo.lock() {
+            Ok(r) => match r.list_summaries() {
+                Ok(v) => v,
+                Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+            },
+            Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+        };
+        if summaries.is_empty() {
+            return Reply::text("📭 Нотаток ще немає. Додай `/note <текст>`.");
+        }
+        let mut out = String::from("📝 Останні нотатки:\n");
+        for s in summaries.iter().take(10) {
+            let preview = s.preview.trim().replace('\n', " ");
+            let preview_short: String = preview.chars().take(60).collect();
+            out.push_str(&format!("• №{} — {}\n", s.id, if preview_short.is_empty() {
+                s.title.clone()
+            } else {
+                format!("{} · {}", s.title, preview_short)
+            }));
+        }
+        if summaries.len() > 10 {
+            out.push_str(&format!("…ще {}\n", summaries.len() - 10));
+        }
+        Reply::text(out.trim_end().to_string())
     }
 }
 
@@ -250,11 +369,17 @@ impl CommandHandler for RemindCmd {
             );
         };
         let created = now * 1000;
-        let mut repo = match self.state.repo.lock() {
-            Ok(r) => r,
-            Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
+        // Scope the mutex guard so it's dropped before we .await the
+        // Reminders.app mirror below — MutexGuard isn't Send and would
+        // otherwise block the handler future from being Send.
+        let insert_result = {
+            let mut repo = match self.state.repo.lock() {
+                Ok(r) => r,
+                Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
+            };
+            repo.insert_reminder(&text, due, created)
         };
-        match repo.insert_reminder(&text, due, created) {
+        match insert_result {
             Ok(id) => {
                 let mins = ((due - now) as f64 / 60.0).round() as i64;
                 let when = if mins < 60 {
@@ -264,9 +389,39 @@ impl CommandHandler for RemindCmd {
                 } else {
                     format!("через ~{} дн", mins / (24 * 60))
                 };
-                Reply::text(format!(
-                    "⏰ №{id} заплановано {when}: {text}\n(Скасувати: /forget {id})"
-                ))
+                // Mirror into macOS Reminders.app so the alert also
+                // rings on iPhone/iPad via iCloud. Best-effort: if the
+                // user hasn't granted Automation access, we keep the
+                // Stash-side reminder working and just annotate the
+                // reply rather than failing outright. The mirror tag
+                // in brackets survives into the returned text so the
+                // user learns whether the handshake went through.
+                let title = text.clone();
+                let mirror = tokio::task::spawn_blocking(move || {
+                    crate::modules::system::reminders_bridge::create_reminder(&title, due)
+                })
+                .await;
+                let tag = match mirror {
+                    Ok(Ok(())) => "📱 дзеркалю в Reminders",
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "reminders mirror failed");
+                        "⚠️ Reminders.app не дозволено — перевір Automation"
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "reminders mirror task join failed");
+                        "⚠️ Reminders.app: внутрішня помилка"
+                    }
+                };
+                Reply {
+                    text: format!("⏰ №{id} заплановано {when}: {text}\n{tag}"),
+                    keyboard: Some(InlineKeyboard {
+                        rows: vec![vec![InlineButton::new(
+                            "✖ Cancel",
+                            format!("forget:{id}"),
+                        )]],
+                    }),
+                    ..Default::default()
+                }
             }
             Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
         }
@@ -622,19 +777,22 @@ impl CommandHandler for MusicCmd {
                 crate::modules::music::commands::music_play_pause,
                 "⏯️",
                 "перемкнуто",
-            ),
+            )
+            .await,
             "next" => run_music_action(
                 &ctx,
                 crate::modules::music::commands::music_next,
                 "⏭️",
                 "далі",
-            ),
+            )
+            .await,
             "prev" => run_music_action(
                 &ctx,
                 crate::modules::music::commands::music_prev,
                 "⏮️",
                 "назад",
-            ),
+            )
+            .await,
             _ => Reply::text(format!(
                 "✍️ Використання: /music [play|pause|next|prev]. Отримано: {sub}"
             )),
@@ -699,35 +857,78 @@ fn format_now_playing(snap: &NowPlaying) -> String {
     format!("{icon} {title}{who}")
 }
 
-/// Dispatch a music-player click and shape the Reply uniformly. When
-/// the Music webview isn't attached yet (user hasn't opened the tab
-/// this session), reveal the popup on the Music tab so the child
-/// webview mounts — and send the keyboard back so the remote user can
-/// retry once the player is live. Other errors also keep the keyboard
-/// so the user isn't stranded after a transient click failure.
-fn run_music_action(
+/// Dispatch a music-player click and shape the Reply uniformly. On
+/// first call per session the YouTube-Music webview isn't attached
+/// yet — instead of bouncing the request back to the user with a
+/// manual "open Music" button, we auto-reveal the tab and poll for the
+/// webview to mount (takes ~5 s cold). The keyboard stays in play on
+/// every outcome so the user isn't stranded after a transient failure.
+async fn run_music_action(
     ctx: &Ctx,
     action: fn(tauri::AppHandle) -> Result<(), String>,
     emoji: &str,
     verb: &str,
 ) -> Reply {
+    // Fast path — if the webview is already attached the action just
+    // works without any UI jump.
+    match action(ctx.app.clone()) {
+        Ok(()) => {
+            return Reply {
+                text: format!("{emoji} {}", read_after_action(&ctx.app, verb)),
+                keyboard: Some(music_keyboard()),
+                ..Default::default()
+            };
+        }
+        Err(e) if !e.contains("not attached") => {
+            return Reply {
+                text: format!("⚠️ {e}"),
+                keyboard: Some(music_keyboard()),
+                ..Default::default()
+            };
+        }
+        Err(_) => {}
+    }
+
+    // Cold path — open the tab and wait for the child webview. 8 s
+    // covers first-launch YTM loads (~5 s empirically) with headroom;
+    // bail back to the manual prompt if we still don't see it so the
+    // user isn't silently left hanging.
+    reveal_music_tab(&ctx.app);
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let mut attached = false;
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        if ctx.app.webviews().contains_key("music") {
+            attached = true;
+            break;
+        }
+    }
+    if !attached {
+        return Reply {
+            text: "📻 Плеєр не встиг відкритись. Спробуй ще раз за пару секунд."
+                .into(),
+            keyboard: Some(music_open_keyboard()),
+            ..Default::default()
+        };
+    }
+    // Webview exists, but YTM's player-bar buttons render a beat later —
+    // give the DOM 600 ms to paint #play-pause-button before the first
+    // click. Empirical; without this the click lands on an empty doc
+    // and nothing happens.
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+
     match action(ctx.app.clone()) {
         Ok(()) => Reply {
             text: format!("{emoji} {}", read_after_action(&ctx.app, verb)),
             keyboard: Some(music_keyboard()),
             ..Default::default()
         },
-        Err(e) if e.contains("not attached") => {
-            // Don't auto-reveal: user might be away from the Mac and
-            // doesn't want the popup to pop up without warning. Give
-            // them an explicit button so tapping it is the intent.
-            Reply {
-                text: "📻 Плеєр ще не відкритий — натисни «Відкрити Music», щоб запустити вкладку."
-                    .to_string(),
-                keyboard: Some(music_open_keyboard()),
-                ..Default::default()
-            }
-        }
+        Err(e) if e.contains("not attached") => Reply {
+            text: "📻 Плеєр ще відкривається — повтори через секунду.".into(),
+            keyboard: Some(music_keyboard()),
+            ..Default::default()
+        },
         Err(e) => Reply {
             text: format!("⚠️ {e}"),
             keyboard: Some(music_keyboard()),
@@ -781,6 +982,52 @@ fn music_keyboard() -> InlineKeyboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dashboard_page_parser_clamps_and_defaults() {
+        assert_eq!(parse_dashboard_page(""), 1);
+        assert_eq!(parse_dashboard_page("page=1"), 1);
+        assert_eq!(parse_dashboard_page("page=2"), 2);
+        assert_eq!(parse_dashboard_page("page=3"), 3);
+        // Out-of-range clamps to the max page instead of crashing.
+        assert_eq!(parse_dashboard_page("page=99"), DASHBOARD_PAGES);
+        // Garbage falls back to page 1 so a mis-typed callback still renders.
+        assert_eq!(parse_dashboard_page("page=xx"), 1);
+        assert_eq!(parse_dashboard_page("random"), 1);
+    }
+
+    #[test]
+    fn dashboard_keyboard_has_footer_with_wraparound() {
+        let kb = dashboard_keyboard(1);
+        // Footer is the last row. Expect prev = wrap to last page, self =
+        // current page, next = 2.
+        let footer = kb.rows.last().expect("footer present");
+        assert_eq!(footer.len(), 3);
+        assert_eq!(footer[0].callback_data, format!("refresh:dashboard:page={DASHBOARD_PAGES}"));
+        assert!(footer[1].text.starts_with("1/"));
+        assert_eq!(footer[1].callback_data, "refresh:dashboard:page=1");
+        assert_eq!(footer[2].callback_data, "refresh:dashboard:page=2");
+    }
+
+    #[test]
+    fn dashboard_page_three_covers_all_known_tabs() {
+        // Page 3 exists to offer a one-tap jump to every app tab. If
+        // someone adds a tab to KNOWN_TABS we want to notice before
+        // shipping a dashboard that hides it from the AI-less user.
+        let kb = dashboard_keyboard(3);
+        let navigate_targets: std::collections::HashSet<&str> = kb
+            .rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .filter_map(|b| b.callback_data.strip_prefix("navigate:"))
+            .collect();
+        for tab in KNOWN_TABS {
+            assert!(
+                navigate_targets.contains(*tab),
+                "dashboard page 3 missing jump button for tab {tab}"
+            );
+        }
+    }
 
     #[test]
     fn pmset_parses_typical_output() {
@@ -860,6 +1107,124 @@ mod tests {
         let out = format_volume(&s);
         assert!(out.contains("42%"));
         assert!(out.starts_with("🔊"));
+    }
+
+    #[test]
+    fn parse_metronome_start_with_full_params() {
+        let r = parse_metronome_args("start bpm=140 sig=6/8 sub=2 sound=wood").unwrap();
+        assert_eq!(r.action.as_deref(), Some("start"));
+        assert_eq!(r.bpm, Some(140));
+        assert_eq!(r.numerator, Some(6));
+        assert_eq!(r.denominator, Some(8));
+        assert_eq!(r.subdivision, Some(2));
+        assert_eq!(r.sound.as_deref(), Some("wood"));
+    }
+
+    #[test]
+    fn parse_metronome_bare_bpm_change_has_no_action() {
+        let r = parse_metronome_args("bpm=100").unwrap();
+        assert!(r.action.is_none());
+        assert_eq!(r.bpm, Some(100));
+    }
+
+    #[test]
+    fn parse_metronome_rejects_out_of_range_bpm() {
+        let err = parse_metronome_args("bpm=999").unwrap_err();
+        assert!(err.to_lowercase().contains("bpm"));
+    }
+
+    #[test]
+    fn parse_metronome_rejects_bad_denominator() {
+        let err = parse_metronome_args("sig=4/3").unwrap_err();
+        assert!(err.contains("denominator"));
+    }
+
+    #[test]
+    fn parse_metronome_rejects_unknown_key() {
+        let err = parse_metronome_args("foo=1").unwrap_err();
+        assert!(err.contains("foo"));
+    }
+
+    #[test]
+    fn parse_metronome_accepts_play_alias_as_start() {
+        let r = parse_metronome_args("play").unwrap();
+        assert_eq!(r.action.as_deref(), Some("start"));
+    }
+
+    #[test]
+    fn parse_metronome_rejects_bad_sound() {
+        let err = parse_metronome_args("sound=gong").unwrap_err();
+        assert!(err.contains("sound"));
+    }
+
+    #[test]
+    fn format_metronome_reply_summarises_action_and_params() {
+        let r = MetronomeRemote {
+            action: Some("start".into()),
+            bpm: Some(140),
+            numerator: Some(6),
+            denominator: Some(8),
+            subdivision: None,
+            sound: None,
+        };
+        let out = format_metronome_reply(&r);
+        assert!(out.contains("140"));
+        assert!(out.contains("6/8"));
+        assert!(out.contains("старт"));
+    }
+
+    #[test]
+    fn parse_pomodoro_blocks_accepts_bare_minutes() {
+        let blocks = parse_pomodoro_blocks("25/sit 5/walk", 1000).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].duration_sec, 25 * 60);
+        assert_eq!(blocks[0].posture, Posture::Sit);
+        assert_eq!(blocks[1].duration_sec, 5 * 60);
+        assert_eq!(blocks[1].posture, Posture::Walk);
+    }
+
+    #[test]
+    fn parse_pomodoro_blocks_honours_unit_suffixes() {
+        let blocks = parse_pomodoro_blocks("90s/sit 1h/walk", 0).unwrap();
+        assert_eq!(blocks[0].duration_sec, 90);
+        assert_eq!(blocks[1].duration_sec, 3600);
+    }
+
+    #[test]
+    fn parse_pomodoro_blocks_rejects_missing_slash() {
+        let err = parse_pomodoro_blocks("25sit", 0).unwrap_err();
+        assert!(err.contains("посture") || err.contains("posture") || err.contains("/"));
+    }
+
+    #[test]
+    fn parse_pomodoro_blocks_rejects_unknown_posture() {
+        let err = parse_pomodoro_blocks("25/fly", 0).unwrap_err();
+        assert!(err.to_lowercase().contains("posture"));
+    }
+
+    #[test]
+    fn parse_pomodoro_blocks_rejects_zero_duration() {
+        let err = parse_pomodoro_blocks("0/sit", 0).unwrap_err();
+        assert!(err.contains("> 0"));
+    }
+
+    #[test]
+    fn parse_pomodoro_blocks_rejects_too_many() {
+        let tokens = (0..21).map(|_| "1/sit").collect::<Vec<_>>().join(" ");
+        let err = parse_pomodoro_blocks(&tokens, 0).unwrap_err();
+        assert!(err.contains("максимум"));
+    }
+
+    #[test]
+    fn parse_pomodoro_blocks_rejects_empty_input() {
+        let err = parse_pomodoro_blocks("", 0).unwrap_err();
+        assert!(err.contains("хоча б"));
+    }
+
+    #[test]
+    fn known_tabs_include_metronome_and_pomodoro() {
+        assert!(KNOWN_TABS.contains(&"metronome"));
+        assert!(KNOWN_TABS.contains(&"pomodoro"));
     }
 
     #[test]
@@ -1121,7 +1486,13 @@ impl CommandHandler for ScreenshotCmd {
             files.len(),
             paths_block
         );
-        Reply::with_documents(caption, files)
+        Reply {
+            text: caption,
+            documents: files,
+            keyboard: Some(InlineKeyboard {
+                rows: vec![vec![InlineButton::new("📸 Again", "screenshot")]],
+            }),
+        }
     }
 }
 
@@ -1203,6 +1574,701 @@ impl CommandHandler for ShutdownCmd {
     }
 }
 
+// -------------------- /focus --------------------
+
+use crate::modules::system::focus;
+
+pub struct FocusCmd;
+
+#[async_trait]
+impl CommandHandler for FocusCmd {
+    fn name(&self) -> &'static str {
+        "focus"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати macOS Focus: on / off / status. Одноразове налаштування через Shortcuts.app."
+    }
+    fn usage(&self) -> &'static str {
+        "/focus <on|off|status>"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let sub = args.trim().to_ascii_lowercase();
+        let verb = sub.as_str();
+        let status =
+            tokio::task::spawn_blocking(focus::check).await.unwrap_or(
+                focus::FocusCheck::ListFailed("internal: task join".into()),
+            );
+        if verb.is_empty() || verb == "status" {
+            return Reply::text(format_focus_status(&status));
+        }
+        match &status {
+            focus::FocusCheck::Ready => {}
+            focus::FocusCheck::CliMissing => {
+                return Reply::text(
+                    "⚠️ `shortcuts` CLI не знайдено. Потрібен macOS 12+.",
+                );
+            }
+            focus::FocusCheck::ShortcutsMissing { .. } => {
+                return Reply::text(format!(
+                    "⚠️ Не знайдено потрібних ярликів.\n{}",
+                    focus::setup_instructions()
+                ));
+            }
+            focus::FocusCheck::ListFailed(e) => {
+                return Reply::text(format!("⚠️ shortcuts list: {e}"));
+            }
+        }
+        match verb {
+            "on" | "enable" => match tokio::task::spawn_blocking(focus::enable).await {
+                Ok(Ok(())) => Reply::text("🔕 Focus увімкнено."),
+                Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+            },
+            "off" | "disable" => match tokio::task::spawn_blocking(focus::disable).await {
+                Ok(Ok(())) => Reply::text("🔔 Focus вимкнено."),
+                Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+            },
+            other => Reply::text(format!(
+                "❓ Невідомий підкоманда `{other}`.\nВикористання: {}",
+                self.usage()
+            )),
+        }
+    }
+}
+
+fn format_focus_status(s: &focus::FocusCheck) -> String {
+    match s {
+        focus::FocusCheck::Ready => {
+            "🔔 Focus готовий: `/focus on` або `/focus off`.".into()
+        }
+        focus::FocusCheck::CliMissing => {
+            "⚠️ `shortcuts` CLI не знайдено. Потрібен macOS 12+.".into()
+        }
+        focus::FocusCheck::ShortcutsMissing { on, off } => {
+            let missing = match (on, off) {
+                (false, false) => "обидва ярлики",
+                (true, false) => "«Stash Focus Off»",
+                (false, true) => "«Stash Focus On»",
+                (true, true) => unreachable!("Ready should hit other branch"),
+            };
+            format!(
+                "⚠️ Відсутнє: {missing}.\n{}",
+                focus::setup_instructions()
+            )
+        }
+        focus::FocusCheck::ListFailed(e) => format!("⚠️ shortcuts list: {e}"),
+    }
+}
+
+// -------------------- /weather --------------------
+
+use crate::modules::system::weather;
+
+pub struct WeatherCmd {
+    state: Arc<TelegramState>,
+}
+
+impl WeatherCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for WeatherCmd {
+    fn name(&self) -> &'static str {
+        "weather"
+    }
+    fn description(&self) -> &'static str {
+        "Погода з wttr.in. Без аргумента — з пам'яті (факт `location: <місто>`)."
+    }
+    fn usage(&self) -> &'static str {
+        "/weather [<місто>]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let arg = args.trim().to_string();
+        let city = if arg.is_empty() {
+            // Pull the `location:` fact out of memory. Falling back to IP
+            // geolocation would be surprising and wrong when the user
+            // asks for "their" weather after saving a city.
+            let facts: Vec<String> = match self.state.repo.lock() {
+                Ok(r) => match r.memory_list() {
+                    Ok(rows) => rows.into_iter().map(|r| r.fact).collect(),
+                    Err(e) => return Reply::text(format!("⚠️ пам'ять: {e}")),
+                },
+                Err(e) => return Reply::text(format!("⚠️ пам'ять: {e}")),
+            };
+            match weather::location_from_facts(&facts) {
+                Some(c) => c,
+                None => {
+                    return Reply::text(
+                        "❓ Місто не збережене. Скажи, наприклад: \
+                         `/remember location: Київ` — або `/weather Київ`.",
+                    );
+                }
+            }
+        } else {
+            arg
+        };
+        let for_label = city.clone();
+        match weather::fetch_weather(&city).await {
+            Ok(body) => Reply::text(format!("🌦 {for_label}\n{body}")),
+            Err(e) => Reply::text(format!("⚠️ погода: {e}")),
+        }
+    }
+}
+
+// -------------------- /app --------------------
+
+use crate::modules::system::apps_control;
+
+pub struct AppCmd;
+
+#[async_trait]
+impl CommandHandler for AppCmd {
+    fn name(&self) -> &'static str {
+        "app"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати програмами macOS: відкрити, згорнути, закрити, список запущених."
+    }
+    fn usage(&self) -> &'static str {
+        "/app <open|hide|quit> <name> | /app running"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let sub = args.trim();
+        if sub.is_empty() {
+            return Reply::text(format!("✍️ Використання: {}", self.usage()));
+        }
+        // Running-list is the only sub without a name argument, so peel it
+        // off first before the verb/name split.
+        if sub.eq_ignore_ascii_case("running")
+            || sub.eq_ignore_ascii_case("list")
+            || sub.eq_ignore_ascii_case("ls")
+        {
+            return match tokio::task::spawn_blocking(apps_control::list_running_apps).await {
+                Ok(Ok(names)) if names.is_empty() => {
+                    Reply::text("🪟 Нічого переднього плану не запущено.")
+                }
+                Ok(Ok(names)) => {
+                    Reply::text(format!("🪟 Запущено: {}", names.join(", ")))
+                }
+                Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+            };
+        }
+
+        let mut parts = sub.splitn(2, char::is_whitespace);
+        let verb = parts.next().unwrap_or("").to_ascii_lowercase();
+        let name = parts.next().unwrap_or("").trim().to_string();
+        if name.is_empty() {
+            return Reply::text(format!(
+                "✍️ Треба ім'я програми. Використання: {}",
+                self.usage()
+            ));
+        }
+        match verb.as_str() {
+            "open" | "launch" | "focus" => {
+                let n = name.clone();
+                let result = tokio::task::spawn_blocking(move || apps_control::open_app(&n)).await;
+                match result {
+                    Ok(Ok(())) => Reply::text(format!("🚀 Відкрив: {name}")),
+                    Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                    Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                }
+            }
+            "hide" | "minimize" => {
+                let n = name.clone();
+                let result = tokio::task::spawn_blocking(move || apps_control::hide_app(&n)).await;
+                match result {
+                    Ok(Ok(())) => Reply::text(format!("👻 Згорнув: {name}")),
+                    Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                    Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                }
+            }
+            "quit" | "close" | "exit" => {
+                let n = name.clone();
+                let result = tokio::task::spawn_blocking(move || apps_control::quit_app(&n)).await;
+                match result {
+                    Ok(Ok(apps_control::QuitOutcome::Quit { resolved_name })) => {
+                        Reply::text(format!("🛑 Закрив: {resolved_name}"))
+                    }
+                    Ok(Ok(apps_control::QuitOutcome::NotRunning)) => Reply::text(format!(
+                        "ℹ️ `{name}` не запущений — нема чого закривати."
+                    )),
+                    Ok(Ok(apps_control::QuitOutcome::StillRunning { resolved_name })) => {
+                        // Most common cause is an unsaved-document dialog
+                        // blocking the Quit event. Report honestly so the
+                        // assistant doesn't falsely claim success.
+                        Reply::text(format!(
+                            "⚠️ `{resolved_name}` не закрився (можливо, діалог «зберегти»?). \
+                             Натисни `/app quit {resolved_name}` ще раз після відповіді на діалог."
+                        ))
+                    }
+                    Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                    Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                }
+            }
+            other => Reply::text(format!(
+                "❓ Невідомий підкоманда `{other}`.\nВикористання: {}",
+                self.usage()
+            )),
+        }
+    }
+}
+
+/// Tab IDs the frontend's module registry currently recognises. Kept in
+/// sync manually with `src/modules/*/index.tsx` — changes there must land
+/// here the same commit (see CLAUDE.md "Agent surface").
+pub const KNOWN_TABS: &[&str] = &[
+    "clipboard",
+    "translator",
+    "notes",
+    "ai",
+    "telegram",
+    "metronome",
+    "music",
+    "downloads",
+    "pomodoro",
+    "terminal",
+    "web",
+    "system",
+];
+
+pub struct NavigateCmd;
+
+#[async_trait]
+impl CommandHandler for NavigateCmd {
+    fn name(&self) -> &'static str {
+        "navigate"
+    }
+    fn description(&self) -> &'static str {
+        "Відкрити певну вкладку Stash. Без аргументу — список доступних."
+    }
+    fn usage(&self) -> &'static str {
+        "/navigate <tab>"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let wanted = args.trim().to_ascii_lowercase();
+        if wanted.is_empty() {
+            return Reply::text(format!(
+                "🗂 Доступні вкладки: {}\nВикористання: /navigate <tab>",
+                KNOWN_TABS.join(", ")
+            ));
+        }
+        if !KNOWN_TABS.contains(&wanted.as_str()) {
+            return Reply::text(format!(
+                "❓ Невідома вкладка `{wanted}`. Доступні: {}",
+                KNOWN_TABS.join(", ")
+            ));
+        }
+        reveal_tab(&ctx.app, &wanted);
+        Reply::text(format!("🗂 Відкрито вкладку: {wanted}"))
+    }
+}
+
+/// Emit `nav:activate` + show/focus the popup. The frontend shell listens
+/// and mounts the requested lazy tab inside `<Suspense>`; this is the
+/// same path used by `reveal_music_tab` and the `⌘⇧N` Notes shortcut.
+fn reveal_tab(app: &tauri::AppHandle, tab_id: &str) {
+    let _ = app.emit("nav:activate", tab_id);
+    if let Some(win) = app.get_webview_window("popup") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+// -------------------- /metronome --------------------
+
+/// Payload for the `metronome:remote` event. Frontend applies the patch
+/// (any `Some` field), then reacts to `action`.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MetronomeRemote {
+    pub action: Option<String>,
+    pub bpm: Option<u32>,
+    pub numerator: Option<u8>,
+    pub denominator: Option<u8>,
+    pub subdivision: Option<u8>,
+    pub sound: Option<String>,
+}
+
+pub struct MetronomeCmd;
+
+#[async_trait]
+impl CommandHandler for MetronomeCmd {
+    fn name(&self) -> &'static str {
+        "metronome"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати метрономом. Приклади: `start bpm=140 sig=6/8`, `stop`, `bpm=100`."
+    }
+    fn usage(&self) -> &'static str {
+        "/metronome [start|stop|toggle] [bpm=N] [sig=N/D] [sub=1..4] [sound=click|wood|beep]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let parsed = match parse_metronome_args(args) {
+            Ok(p) => p,
+            Err(e) => return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage())),
+        };
+        // Reveal + mount the metronome tab so the shell's listener is
+        // attached by the time we emit the remote payload. Two pieces of
+        // async work but both are best-effort — `nav:activate` handled by
+        // shell; sleep gives Suspense a moment to resolve the lazy chunk.
+        reveal_tab(&ctx.app, "metronome");
+        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+        let _ = ctx.app.emit("metronome:remote", &parsed);
+        Reply::text(format_metronome_reply(&parsed))
+    }
+}
+
+fn parse_metronome_args(args: &str) -> Result<MetronomeRemote, String> {
+    let mut out = MetronomeRemote::default();
+    for tok in args.split_whitespace() {
+        match tok.to_ascii_lowercase().as_str() {
+            "start" | "play" => out.action = Some("start".into()),
+            "stop" | "pause" => out.action = Some("stop".into()),
+            "toggle" => out.action = Some("toggle".into()),
+            "status" => out.action = Some("status".into()),
+            other => {
+                let (key, val) = other
+                    .split_once('=')
+                    .ok_or_else(|| format!("незрозумілий токен: `{other}`"))?;
+                match key {
+                    "bpm" => {
+                        let n: u32 = val
+                            .parse()
+                            .map_err(|_| format!("bpm має бути числом, отримано `{val}`"))?;
+                        if !(40..=240).contains(&n) {
+                            return Err(format!("bpm поза межами 40–240: {n}"));
+                        }
+                        out.bpm = Some(n);
+                    }
+                    "sig" | "time" => {
+                        let (num, den) = val
+                            .split_once('/')
+                            .ok_or_else(|| format!("sig очікує N/D, отримано `{val}`"))?;
+                        let n: u8 = num
+                            .parse()
+                            .map_err(|_| format!("numerator не число: `{num}`"))?;
+                        let d: u8 = den
+                            .parse()
+                            .map_err(|_| format!("denominator не число: `{den}`"))?;
+                        if !(1..=16).contains(&n) {
+                            return Err(format!("numerator поза 1–16: {n}"));
+                        }
+                        if !matches!(d, 2 | 4 | 8) {
+                            return Err(format!("denominator має бути 2/4/8, отримано {d}"));
+                        }
+                        out.numerator = Some(n);
+                        out.denominator = Some(d);
+                    }
+                    "sub" | "subdivision" => {
+                        let n: u8 = val
+                            .parse()
+                            .map_err(|_| format!("sub не число: `{val}`"))?;
+                        if !(1..=4).contains(&n) {
+                            return Err(format!("sub поза 1–4: {n}"));
+                        }
+                        out.subdivision = Some(n);
+                    }
+                    "sound" => {
+                        let v = val.to_ascii_lowercase();
+                        if !matches!(v.as_str(), "click" | "wood" | "beep") {
+                            return Err(format!("sound має бути click|wood|beep, отримано `{val}`"));
+                        }
+                        out.sound = Some(v);
+                    }
+                    _ => return Err(format!("невідомий параметр: `{key}`")),
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn format_metronome_reply(r: &MetronomeRemote) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(a) = &r.action {
+        parts.push(match a.as_str() {
+            "start" => "▶️ старт".into(),
+            "stop" => "⏸ стоп".into(),
+            "toggle" => "⏯ перемкнуто".into(),
+            "status" => "ℹ️ статус".into(),
+            other => other.into(),
+        });
+    }
+    if let Some(bpm) = r.bpm {
+        parts.push(format!("{bpm} BPM"));
+    }
+    if let (Some(n), Some(d)) = (r.numerator, r.denominator) {
+        parts.push(format!("{n}/{d}"));
+    }
+    if let Some(sub) = r.subdivision {
+        parts.push(format!("sub={sub}"));
+    }
+    if let Some(sound) = &r.sound {
+        parts.push(format!("звук={sound}"));
+    }
+    if parts.is_empty() {
+        "🥁 Метроном без змін.".to_string()
+    } else {
+        format!("🥁 Метроном: {}", parts.join(", "))
+    }
+}
+
+// -------------------- /pomodoro --------------------
+
+use crate::modules::pomodoro::commands::{start_session, stop_session};
+use crate::modules::pomodoro::engine::SessionStatus;
+use crate::modules::pomodoro::model::{Block, Posture};
+use crate::modules::pomodoro::state::PomodoroState;
+
+pub struct PomodoroCmd {
+    state: Arc<PomodoroState>,
+}
+
+impl PomodoroCmd {
+    pub fn new(state: Arc<PomodoroState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for PomodoroCmd {
+    fn name(&self) -> &'static str {
+        "pomodoro"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати таймером Pomodoro. Приклади: `start 25/sit 5/walk`, `stop`, `status`."
+    }
+    fn usage(&self) -> &'static str {
+        "/pomodoro [start <min>/<posture> …|stop|status]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let sub = args.trim();
+        // No args OR "status" → read-only snapshot. Safe without AppHandle.
+        if sub.is_empty() || sub.eq_ignore_ascii_case("status") {
+            return Reply::text(format_pomodoro_status(&self.state));
+        }
+        let mut parts = sub.splitn(2, char::is_whitespace);
+        let verb = parts.next().unwrap_or("").to_ascii_lowercase();
+        let rest = parts.next().unwrap_or("").trim();
+        match verb.as_str() {
+            "stop" | "cancel" | "end" => {
+                let was_running = {
+                    let core = match self.state.core.lock() {
+                        Ok(c) => c,
+                        Err(e) => return Reply::text(format!("⚠️ pomodoro: {e}")),
+                    };
+                    !core.is_idle()
+                };
+                if !was_running {
+                    return Reply::text("ℹ️ Pomodoro не запущено.");
+                }
+                let _ = stop_session(&ctx.app, &self.state);
+                Reply::text("⏹ Pomodoro зупинено.")
+            }
+            "start" | "begin" | "go" => {
+                let blocks = match parse_pomodoro_blocks(rest, now_ms()) {
+                    Ok(b) => b,
+                    Err(e) => return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage())),
+                };
+                reveal_tab(&ctx.app, "pomodoro");
+                match start_session(&ctx.app, &self.state, blocks.clone(), None) {
+                    Ok(snap) => {
+                        let total_min: u32 = snap
+                            .blocks
+                            .iter()
+                            .map(|b| b.duration_sec / 60)
+                            .sum();
+                        let summary = snap
+                            .blocks
+                            .iter()
+                            .map(|b| {
+                                format!(
+                                    "{}/{}",
+                                    b.duration_sec / 60,
+                                    posture_word(&b.posture)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            ;
+                        Reply::text(format!(
+                            "🍅 Стартував Pomodoro ({total_min} хв): {summary}"
+                        ))
+                    }
+                    Err(e) => Reply::text(format!("⚠️ pomodoro: {e}")),
+                }
+            }
+            other => Reply::text(format!(
+                "❓ Невідомий підкоманда `{other}`.\nВикористання: {}",
+                self.usage()
+            )),
+        }
+    }
+}
+
+fn format_pomodoro_status(state: &Arc<PomodoroState>) -> String {
+    let core = match state.core.lock() {
+        Ok(c) => c,
+        Err(e) => return format!("⚠️ pomodoro: {e}"),
+    };
+    let snap = core.snapshot();
+    match snap.status {
+        SessionStatus::Idle => "🍅 Pomodoro не активний.".to_string(),
+        status => {
+            let remaining_sec = (snap.remaining_ms / 1000).max(0);
+            let mins = remaining_sec / 60;
+            let secs = remaining_sec % 60;
+            let phase = snap
+                .blocks
+                .get(snap.current_idx)
+                .map(|b| {
+                    format!(
+                        "{} ({}/{})",
+                        b.name,
+                        snap.current_idx + 1,
+                        snap.blocks.len()
+                    )
+                })
+                .unwrap_or_else(|| "-".into());
+            let verb = match status {
+                SessionStatus::Running => "▶️",
+                SessionStatus::Paused => "⏸",
+                SessionStatus::Idle => "🍅",
+            };
+            format!("{verb} {phase} — лишилось {mins:02}:{secs:02}")
+        }
+    }
+}
+
+/// Parse `25/sit 5/walk 25/sit 10/walk` (minutes by default). Accepts
+/// explicit unit suffixes (`s`, `m`, `h`) so `90s/sit 25m/stand` works.
+pub(crate) fn parse_pomodoro_blocks(s: &str, now_ms: i64) -> Result<Vec<Block>, String> {
+    let tokens: Vec<&str> = s.split_whitespace().collect();
+    if tokens.is_empty() {
+        return Err("вкажи хоча б один блок у форматі `<тривалість>/<postura>`".into());
+    }
+    if tokens.len() > 20 {
+        return Err(format!("забагато блоків ({}), максимум 20", tokens.len()));
+    }
+    let mut blocks = Vec::with_capacity(tokens.len());
+    for (i, tok) in tokens.iter().enumerate() {
+        let (dur_str, posture_str) = tok
+            .split_once('/')
+            .ok_or_else(|| format!("блок {i} має бути `<тривалість>/<posture>`, отримано `{tok}`"))?;
+        let duration_sec = parse_duration_to_sec(dur_str)
+            .map_err(|e| format!("блок {i}: {e}"))?;
+        if duration_sec == 0 {
+            return Err(format!("блок {i}: тривалість має бути > 0"));
+        }
+        if duration_sec > 4 * 60 * 60 {
+            return Err(format!("блок {i}: тривалість перевищує 4 год"));
+        }
+        let posture = match posture_str.to_ascii_lowercase().as_str() {
+            "sit" => Posture::Sit,
+            "stand" => Posture::Stand,
+            "walk" => Posture::Walk,
+            other => return Err(format!("блок {i}: невідома posture `{other}` (sit|stand|walk)")),
+        };
+        let name = match posture {
+            Posture::Sit => "Focus".to_string(),
+            Posture::Stand => "Stand".to_string(),
+            Posture::Walk => "Walk".to_string(),
+        };
+        blocks.push(Block {
+            id: format!("cli-{now_ms}-{i}"),
+            name,
+            duration_sec,
+            posture,
+            mid_nudge_sec: None,
+        });
+    }
+    Ok(blocks)
+}
+
+fn parse_duration_to_sec(s: &str) -> Result<u32, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("порожня тривалість".into());
+    }
+    let (num_str, mul) = if let Some(stripped) = trimmed.strip_suffix('s') {
+        (stripped, 1u32)
+    } else if let Some(stripped) = trimmed.strip_suffix('m') {
+        (stripped, 60u32)
+    } else if let Some(stripped) = trimmed.strip_suffix('h') {
+        (stripped, 3600u32)
+    } else {
+        // bare number → minutes (the common pomodoro mental model)
+        (trimmed, 60u32)
+    };
+    let n: u32 = num_str
+        .parse()
+        .map_err(|_| format!("тривалість `{s}` не число"))?;
+    n.checked_mul(mul)
+        .ok_or_else(|| format!("тривалість `{s}` перевищує припустимий діапазон"))
+}
+
+fn posture_word(p: &Posture) -> &'static str {
+    match p {
+        Posture::Sit => "sit",
+        Posture::Stand => "stand",
+        Posture::Walk => "walk",
+    }
+}
+
+// -------------------- /ai --------------------
+
+/// `/ai <prompt>` — free-text turn against the assistant. Primary entry
+/// point for the CLI (`stash ai "…"`) and any non-Telegram transport that
+/// needs the LLM + tool-loop. Telegram's dispatcher already routes bare
+/// text through `handle_user_text`, but exposing it as a slash command
+/// means the CLI's thin slash-dispatcher can reach the assistant without
+/// a parallel code path.
+pub struct AiCmd {
+    state: Arc<TelegramState>,
+}
+
+impl AiCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for AiCmd {
+    fn name(&self) -> &'static str {
+        "ai"
+    }
+    fn description(&self) -> &'static str {
+        "Запит до AI-асистента (з повним доступом до tools і slash-команд)."
+    }
+    fn usage(&self) -> &'static str {
+        "/ai <запит>"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let prompt = args.trim();
+        if prompt.is_empty() {
+            return Reply::text("✍️ Використання: /ai <запит>");
+        }
+        match super::assistant::handle_user_text(&ctx.app, &self.state, prompt).await {
+            Ok(reply) => {
+                let body = reply.text.trim();
+                if body.is_empty() {
+                    Reply::text("🤷 AI нічого не повернув.")
+                } else if reply.truncated {
+                    Reply::text(format!("{body}\n\n(обрізано через ліміт глибини)"))
+                } else {
+                    Reply::text(body.to_string())
+                }
+            }
+            Err(e) => Reply::text(format!("⚠️ AI: {e}")),
+        }
+    }
+}
+
 async fn handle_power_cmd(
     timers: &Arc<PowerTimers>,
     kind: PowerKind,
@@ -1273,4 +2339,182 @@ fn kind_word(kind: PowerKind) -> &'static str {
         PowerKind::Sleep => "sleep",
         PowerKind::Shutdown => "shutdown",
     }
+}
+
+// -------------------- /dashboard --------------------
+
+/// Cockpit view over the key live signals in Stash. Read-only snapshot
+/// so re-tapping the Refresh button is always safe.
+pub struct DashboardCmd {
+    telegram: Arc<TelegramState>,
+}
+
+impl DashboardCmd {
+    pub fn new(telegram: Arc<TelegramState>) -> Self {
+        Self { telegram }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for DashboardCmd {
+    fn name(&self) -> &'static str {
+        "dashboard"
+    }
+    fn description(&self) -> &'static str {
+        "Cockpit: battery + pomodoro + clip + reminders одним екраном"
+    }
+    fn usage(&self) -> &'static str {
+        "/dashboard"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        // Dashboard is paginated: args="page=2" / "page=3" flip between
+        // layouts without rebuilding the snapshot text. Anything else
+        // (or empty) falls through to page 1.
+        let page = parse_dashboard_page(args);
+        let text = build_dashboard_text(&ctx, &self.telegram);
+        Reply {
+            text,
+            keyboard: Some(dashboard_keyboard(page)),
+            ..Default::default()
+        }
+    }
+}
+
+fn parse_dashboard_page(args: &str) -> u8 {
+    args.trim()
+        .strip_prefix("page=")
+        .and_then(|s| s.parse::<u8>().ok())
+        .map(|n| n.clamp(1, DASHBOARD_PAGES))
+        .unwrap_or(1)
+}
+
+fn build_dashboard_text(ctx: &Ctx, telegram: &Arc<TelegramState>) -> String {
+    let battery = match read_battery() {
+        BatterySnapshot::Present { percent, charging } => {
+            let icon = if charging { "🔌" } else { "🔋" };
+            let suffix = if charging { "⚡" } else { "" };
+            format!("{icon} {percent}%{suffix}")
+        }
+        BatterySnapshot::NoBattery => "🔌 AC".to_string(),
+        BatterySnapshot::Unknown => "🔋 —".to_string(),
+    };
+    let pomodoro = ctx
+        .app
+        .try_state::<Arc<PomodoroState>>()
+        .map(|s| format_pomodoro_status(s.inner()))
+        .unwrap_or_else(|| "🍅 —".to_string());
+    let clip = ctx
+        .app
+        .try_state::<Arc<ClipboardState>>()
+        .and_then(|s| s.repo.lock().ok().and_then(|r| r.list(1).ok()))
+        .map(|v| match v.first() {
+            None => "📋 порожньо".to_string(),
+            Some(it) if it.kind == "text" => {
+                let preview: String = it.content.chars().take(40).collect();
+                let preview = preview.replace('\n', " ");
+                let suffix = if it.content.chars().count() > 40 { "…" } else { "" };
+                format!("📋 \"{preview}{suffix}\"")
+            }
+            Some(it) => format!("📋 [{}]", it.kind),
+        })
+        .unwrap_or_else(|| "📋 —".to_string());
+    let reminders = {
+        let now = now_secs();
+        match telegram.repo.lock() {
+            Ok(r) => match r.list_active_reminders() {
+                Ok(items) if items.is_empty() => "⏰ немає".to_string(),
+                Ok(items) => items
+                    .iter()
+                    .min_by_key(|r| r.due_at)
+                    .map(|r| {
+                        let delta = (r.due_at - now).max(0);
+                        let when = if delta < 60 {
+                            "<1хв".to_string()
+                        } else if delta < 3600 {
+                            format!("{}хв", delta / 60)
+                        } else if delta < 86_400 {
+                            format!("{}г", delta / 3600)
+                        } else {
+                            format!("{}дн", delta / 86_400)
+                        };
+                        let label: String = r.text.chars().take(30).collect();
+                        format!("⏰ {} активних · next {} — {}", items.len(), when, label)
+                    })
+                    .unwrap_or_else(|| format!("⏰ {} активних", items.len())),
+                Err(e) => format!("⏰ ⚠️ {e}"),
+            },
+            Err(e) => format!("⏰ ⚠️ {e}"),
+        }
+    };
+    format!("🧭 *Stash cockpit*\n\n{battery}\n{pomodoro}\n{clip}\n{reminders}")
+}
+
+const DASHBOARD_PAGES: u8 = 3;
+
+fn dashboard_keyboard(page: u8) -> InlineKeyboard {
+    let mut rows: Vec<Vec<InlineButton>> = match page {
+        // Page 1 — primary actions that run a command inline.
+        1 => vec![
+            vec![
+                InlineButton::new("🍅 Pomodoro", "pomodoro"),
+                InlineButton::new("🥁 Metronome", "metronome"),
+                InlineButton::new("🎵 Music", "music"),
+            ],
+            vec![
+                InlineButton::new("🔋 Battery", "battery"),
+                InlineButton::new("📋 Clip", "clip"),
+                InlineButton::new("⏰ Reminders", "reminders"),
+            ],
+        ],
+        // Page 2 — more commands + quick power/capture actions.
+        2 => vec![
+            vec![
+                InlineButton::new("📝 Notes", "notes"),
+                InlineButton::new("🧠 Memory", "memory"),
+                InlineButton::new("📸 Shot", "screenshot"),
+            ],
+            vec![
+                InlineButton::new("💤 Sleep", "sleep"),
+                InlineButton::new("🌙 Display off", "display"),
+                InlineButton::new("❓ Help", "help"),
+            ],
+        ],
+        // Page 3 — jump to any of the 13 app tabs.
+        _ => vec![
+            vec![
+                InlineButton::new("📋 Clipboard", "navigate:clipboard"),
+                InlineButton::new("🌍 Translator", "navigate:translator"),
+                InlineButton::new("📝 Notes", "navigate:notes"),
+            ],
+            vec![
+                InlineButton::new("🤖 AI", "navigate:ai"),
+                InlineButton::new("✉️ Telegram", "navigate:telegram"),
+                InlineButton::new("🥁 Metronome", "navigate:metronome"),
+            ],
+            vec![
+                InlineButton::new("🎵 Music", "navigate:music"),
+                InlineButton::new("⬇️ Downloads", "navigate:downloads"),
+                InlineButton::new("🍅 Pomodoro", "navigate:pomodoro"),
+            ],
+            vec![
+                InlineButton::new("💻 Terminal", "navigate:terminal"),
+                InlineButton::new("🌐 Web", "navigate:web"),
+                InlineButton::new("⚙️ System", "navigate:system"),
+            ],
+            vec![InlineButton::new("🎙 Voice", "navigate:voice")],
+        ],
+    };
+    // Footer row is shared: Refresh self + paginate. Arrows wrap around
+    // so you can tap Next on the last page and land on page 1.
+    let prev_page = if page == 1 { DASHBOARD_PAGES } else { page - 1 };
+    let next_page = if page == DASHBOARD_PAGES { 1 } else { page + 1 };
+    rows.push(vec![
+        InlineButton::new("◀", format!("refresh:dashboard:page={prev_page}")),
+        InlineButton::new(
+            format!("{page}/{DASHBOARD_PAGES} 🔄"),
+            format!("refresh:dashboard:page={page}"),
+        ),
+        InlineButton::new("▶", format!("refresh:dashboard:page={next_page}")),
+    ]);
+    InlineKeyboard { rows }
 }

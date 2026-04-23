@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { MAX_TABS, type Tab } from '../types';
+import { MAX_TABS, type DropPosition, type Tab } from '../types';
 import { defaultTabLabel, tabLabel } from '../state/tabStorage';
 
 export type TabBarProps = {
@@ -9,6 +9,10 @@ export type TabBarProps = {
   /// Id of the tab currently under the drag pointer, or `''` when no
   /// drag is in progress. Driven by the shell's drag manager.
   dropOverTab: string;
+  /// Resolved drop zone for tab-on-tab drags (`'left' | 'right'`), used
+  /// to render the accent drop-line on the correct edge. `'center'` or
+  /// null suppresses the line (pane→tab drops paint the whole tab).
+  dropZone?: DropPosition | null;
   onActivate: (tabId: string) => void;
   onClose: (tabId: string) => void;
   onAdd: () => void;
@@ -30,6 +34,7 @@ export const TabBar = ({
   tabs,
   activeId,
   dropOverTab,
+  dropZone = null,
   onActivate,
   onClose,
   onAdd,
@@ -117,12 +122,16 @@ export const TabBar = ({
               onPointerDown={onTabDragStart(t.id, label)}
               className="group flex items-center gap-1.5 px-3 py-1 text-meta cursor-pointer select-none shrink-0"
               style={{
+                position: 'relative',
                 maxWidth: 180,
                 color: active
                   ? 'var(--color-text-primary, #e7e7ea)'
                   : 'var(--color-text-tertiary, rgba(255,255,255,0.55))',
                 background:
-                  dropOverTab === t.id
+                  // Pane→tab drops flood the whole tab (move-into-tab);
+                  // tab→tab drops use a thin edge line instead (handled
+                  // via the overlay div below).
+                  dropOverTab === t.id && dropZone === 'center'
                     ? 'var(--stash-accent)'
                     : active
                       ? 'rgba(255,255,255,0.05)'
@@ -181,6 +190,22 @@ export const TabBar = ({
                   {label}
                 </span>
               )}
+              {dropOverTab === t.id &&
+                (dropZone === 'left' || dropZone === 'right') && (
+                  <span
+                    aria-hidden
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      bottom: 0,
+                      [dropZone === 'left' ? 'left' : 'right']: -1,
+                      width: 2,
+                      background: 'var(--stash-accent)',
+                      boxShadow: '0 0 6px 0 rgba(var(--stash-accent-rgb), 0.6)',
+                      pointerEvents: 'none',
+                    }}
+                  />
+                )}
               {tabs.length > 1 && (
                 <button
                   type="button"
@@ -203,6 +228,28 @@ export const TabBar = ({
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={tabs.length >= MAX_TABS}
+          aria-label="New shell"
+          title={
+            tabs.length >= MAX_TABS
+              ? `Max ${MAX_TABS} tabs`
+              : 'New shell (open another terminal session)'
+          }
+          className="shrink-0 flex items-center justify-center t-tertiary hover:t-primary hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+          style={{
+            width: 28,
+            height: 'auto',
+            fontSize: 16,
+            lineHeight: 1,
+            alignSelf: 'stretch',
+          }}
+          data-testid="terminal-tab-new"
+        >
+          +
+        </button>
       </div>
       <div
         className="terminal-tabbar-fade terminal-tabbar-fade-left"
@@ -211,24 +258,7 @@ export const TabBar = ({
       <div
         className="terminal-tabbar-fade terminal-tabbar-fade-right"
         data-visible={fadeRight}
-        style={{ right: 32 }}
       />
-      <button
-        type="button"
-        onClick={onAdd}
-        disabled={tabs.length >= MAX_TABS}
-        aria-label="New shell"
-        title={
-          tabs.length >= MAX_TABS
-            ? `Max ${MAX_TABS} tabs`
-            : 'New shell (open another terminal session)'
-        }
-        className="shrink-0 px-3 py-1 t-tertiary hover:t-primary hover:bg-white/[0.06] disabled:opacity-40 disabled:cursor-not-allowed border-l hair"
-        style={{ fontSize: 14, lineHeight: 1 }}
-        data-testid="terminal-tab-new"
-      >
-        +
-      </button>
     </div>
   );
 };

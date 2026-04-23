@@ -21,6 +21,13 @@ export const tauriMockInit = `
     invoke: (cmd) =>
       Promise.resolve(cmd in commandResponses ? commandResponses[cmd] : null),
     plugins: {},
+    // getCurrentWindow/Webview read metadata.currentWindow/currentWebview
+    // synchronously; stub them so modules that subscribe to native drag-drop
+    // events (notes attachments, etc.) don't crash during mount.
+    metadata: {
+      currentWindow: { label: 'popup' },
+      currentWebview: { label: 'popup', windowLabel: 'popup' },
+    },
   };
 })();
 `;

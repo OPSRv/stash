@@ -11,5 +11,6 @@ pub mod system;
 pub mod telegram;
 pub mod terminal;
 pub mod translator;
+pub mod voice;
 pub mod webchat;
 pub mod whisper;

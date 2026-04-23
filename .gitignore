@@ -29,3 +29,6 @@ dist-ssr
 
 # Storybook build output
 storybook-static/
+
+# Vitest coverage reports
+coverage/

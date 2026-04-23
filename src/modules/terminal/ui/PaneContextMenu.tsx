@@ -8,6 +8,11 @@ export type PaneContextMenuProps = {
   hasSelection: boolean;
   canSplit: boolean;
   canClosePane: boolean;
+  /// True when toggling maximize makes sense (more than one leaf in
+  /// the tab). Hides the item entirely otherwise.
+  canMaximize: boolean;
+  /// Flips the label between Maximize / Restore.
+  maximized: boolean;
   onAction: (a: ContextMenuAction) => void;
   onClose: () => void;
 };
@@ -32,6 +37,8 @@ export const PaneContextMenu = ({
   hasSelection,
   canSplit,
   canClosePane,
+  canMaximize,
+  maximized,
   onAction,
   onClose,
 }: PaneContextMenuProps) => {
@@ -64,6 +71,16 @@ export const PaneContextMenu = ({
     { kind: 'sep' },
     { kind: 'item', label: 'Split pane right', hint: '⌘D', action: 'split-right', disabled: !canSplit },
     { kind: 'item', label: 'Split pane down', hint: '⌘⇧D', action: 'split-down', disabled: !canSplit },
+    ...(canMaximize
+      ? ([
+          {
+            kind: 'item',
+            label: maximized ? 'Restore layout' : 'Maximize pane',
+            hint: '⌘E',
+            action: 'maximize',
+          },
+        ] as Item[])
+      : []),
     { kind: 'sep' },
     { kind: 'item', label: 'Restart shell', action: 'restart' },
     { kind: 'item', label: 'Close pane', hint: '⌘W', action: 'close-pane', disabled: !canClosePane },

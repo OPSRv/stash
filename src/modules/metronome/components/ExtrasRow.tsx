@@ -1,4 +1,3 @@
-import { accent } from '../../../shared/theme/accent';
 import { Toggle } from '../../../shared/ui/Toggle';
 import {
   BPM_MAX,
@@ -47,7 +46,7 @@ const StepperCell = ({
   const bump = (dir: 1 | -1) => onChange(clamp(value + dir * step, min, max));
   return (
     <div
-      className="flex flex-col items-stretch rounded-md px-1.5 py-1 bg-white/[0.04] hover:bg-white/[0.06] transition-colors"
+      className="metro-step-cell flex flex-col items-stretch rounded-lg px-1.5 py-1"
       style={{ minWidth: width }}
       data-testid={testId}
       onWheel={(e) => {
@@ -196,12 +195,7 @@ export const ExtrasRow = ({ state, onPatch }: Props) => {
           type="button"
           onClick={saveCurrent}
           data-testid="preset-save"
-          className="shrink-0 text-meta font-medium px-2.5 py-1 rounded-md transition-colors"
-          style={{
-            background: accent(0.18),
-            color: accent(1),
-            boxShadow: `inset 0 0 0 1px ${accent(0.35)}`,
-          }}
+          className="metro-save-preset shrink-0"
         >
           + Save current
         </button>
@@ -212,7 +206,7 @@ export const ExtrasRow = ({ state, onPatch }: Props) => {
           {presets.map((p) => (
             <div
               key={p.id}
-              className="group inline-flex items-center gap-0.5 rounded-full bg-white/[0.06] hover:bg-white/[0.1] transition-colors"
+              className="metro-preset-chip group gap-0.5"
             >
               <button
                 type="button"

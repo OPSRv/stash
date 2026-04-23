@@ -108,6 +108,28 @@ describe('reorderServices', () => {
     expect(reorderServices(list, 'missing', 'a')).toBe(list);
     expect(reorderServices(list, 'a', 'missing')).toBe(list);
   });
+
+  test('side=after drops the source directly after the destination', () => {
+    expect(reorderServices([a, b, c], 'a', 'b', 'after').map((s) => s.id)).toEqual([
+      'b',
+      'a',
+      'c',
+    ]);
+    // Dropping onto the last item with side=after appends.
+    expect(reorderServices([a, b, c], 'a', 'c', 'after').map((s) => s.id)).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
+  });
+
+  test('returns the same list when a drop would not change order', () => {
+    const list = [a, b, c];
+    // `a` dropped 'before b' stays where it is → no-op.
+    expect(reorderServices(list, 'a', 'b', 'before')).toBe(list);
+    // `b` dropped 'after a' also stays where it is.
+    expect(reorderServices(list, 'b', 'a', 'after')).toBe(list);
+  });
 });
 
 describe('isEmbeddableUrl', () => {

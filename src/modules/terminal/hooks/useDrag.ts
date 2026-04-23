@@ -36,16 +36,26 @@ const findDropTarget = (
   return null;
 };
 
-/// Edge-aware zone detection for pane drop targets. Tab labels always
-/// resolve to `center` (they mean "move into this tab"). Exported for
-/// unit tests — the hook itself uses it internally.
+/// Edge-aware zone detection.
+/// - Tab-on-tab: left / right half decides insert-before vs insert-after
+///   so a drop-line indicator can be drawn on the correct edge. Still
+///   resolves to a single axis (horizontal tab strip).
+/// - Pane-on-tab: always `center` — pane drops onto a tab mean "move
+///   into this tab", no edge semantics.
+/// - Pane-on-pane: four-edge tiling (left/right/top/bottom) with a
+///   generous center zone for swaps.
 export const zoneFromPoint = (
   x: number,
   y: number,
   rect: DOMRect,
   kind: 'tab' | 'pane',
+  sourceKind: 'tab' | 'pane' = 'pane',
 ): DropPosition => {
-  if (kind === 'tab') return 'center';
+  if (kind === 'tab') {
+    if (sourceKind !== 'tab') return 'center';
+    const rx = (x - rect.left) / rect.width;
+    return rx < 0.5 ? 'left' : 'right';
+  }
   const rx = (x - rect.left) / rect.width;
   const ry = (y - rect.top) / rect.height;
   const EDGE = 0.2;
@@ -76,6 +86,7 @@ export const useDrag = (commitDrop: CommitDrop): UseDragReturn => {
       const startY = e.clientY;
       let active = false;
 
+      const sourceKind: 'tab' | 'pane' = source.startsWith('tab:') ? 'tab' : 'pane';
       const onMove = (ev: PointerEvent) => {
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
@@ -87,7 +98,7 @@ export const useDrag = (commitDrop: CommitDrop): UseDragReturn => {
         let targetId: string | null = null;
         if (hit) {
           const kind = hit.id.startsWith('tab:') ? 'tab' : 'pane';
-          zone = zoneFromPoint(ev.clientX, ev.clientY, hit.rect, kind);
+          zone = zoneFromPoint(ev.clientX, ev.clientY, hit.rect, kind, sourceKind);
           targetId = hit.id;
         }
         setDragState({
@@ -113,7 +124,7 @@ export const useDrag = (commitDrop: CommitDrop): UseDragReturn => {
         const hit = findDropTarget(ev.clientX, ev.clientY);
         if (!hit) return;
         const kind = hit.id.startsWith('tab:') ? 'tab' : 'pane';
-        const zone = zoneFromPoint(ev.clientX, ev.clientY, hit.rect, kind);
+        const zone = zoneFromPoint(ev.clientX, ev.clientY, hit.rect, kind, sourceKind);
         commitDrop(source, hit.id, zone);
       };
 

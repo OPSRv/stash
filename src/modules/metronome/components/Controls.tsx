@@ -21,20 +21,20 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
   const setNumerator = (v: number) => onPatch({ numerator: clampNum(v) });
 
   return (
-    <div className="flex items-center gap-4 px-4 py-2 border-t hair">
+    <div className="flex items-center gap-4 px-5 py-2.5 border-t hair">
       <div className="flex items-center gap-1" aria-label="Time signature">
         <button
           type="button"
           onClick={() => setNumerator(state.numerator - 1)}
           disabled={state.numerator <= NUMERATOR_MIN}
           aria-label="Decrease numerator"
-          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.04] disabled:opacity-30"
+          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.06] disabled:opacity-30 transition-colors"
         >
           −
         </button>
         <div
-          className="t-primary font-medium text-body tabular-nums text-center"
-          style={{ minWidth: 44 }}
+          className="t-primary font-semibold text-body tabular-nums text-center"
+          style={{ minWidth: 44, letterSpacing: '0.02em' }}
           aria-live="polite"
           data-testid="time-signature-label"
         >
@@ -45,7 +45,7 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
           onClick={() => setNumerator(state.numerator + 1)}
           disabled={state.numerator >= NUMERATOR_MAX}
           aria-label="Increase numerator"
-          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.04] disabled:opacity-30"
+          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.06] disabled:opacity-30 transition-colors"
         >
           +
         </button>
@@ -72,12 +72,7 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
               aria-label={s.title}
               title={s.title}
               onClick={() => onPatch({ subdivision: s.value })}
-              className={`px-2 h-7 rounded-md text-body transition-colors ${
-                on
-                  ? 't-primary bg-white/[0.08]'
-                  : 't-secondary hover:bg-white/[0.04]'
-              }`}
-              style={{ minWidth: 28 }}
+              className="metro-sub-btn px-2 text-body"
             >
               {s.label}
             </button>
@@ -93,18 +88,20 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
         options={SOUND_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
       />
       <div className="hair w-px h-6" />
-      <VolumeSlider
-        value={state.click_volume}
-        onChange={(v) => onPatch({ click_volume: v })}
-        label="Click"
-        testId="vol-click"
-      />
-      <VolumeSlider
-        value={state.accent_volume}
-        onChange={(v) => onPatch({ accent_volume: v })}
-        label="Accent"
-        testId="vol-accent"
-      />
+      <div className="flex items-center gap-4 ml-auto">
+        <VolumeSlider
+          value={state.click_volume}
+          onChange={(v) => onPatch({ click_volume: v })}
+          label="Click"
+          testId="vol-click"
+        />
+        <VolumeSlider
+          value={state.accent_volume}
+          onChange={(v) => onPatch({ accent_volume: v })}
+          label="Accent"
+          testId="vol-accent"
+        />
+      </div>
     </div>
   );
 };

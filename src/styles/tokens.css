@@ -180,6 +180,18 @@
     background: rgba(255, 255, 255, calc(var(--stash-pane-opacity-light) + 0.04));
   }
 
+  /* Context menu / popover surface — близько до непрозорого, щоб пункти
+   * читалися поверх будь-якого контенту (xterm scrollback, зображень
+   * у web-модулі) без компромісу на легкому блюрі. */
+  .stash-context-menu {
+    background: rgba(16, 18, 22, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .light .stash-context-menu {
+    background: rgba(246, 248, 251, 0.96);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+
   /* Modal surface — fully opaque so the chaotic content underneath doesn't
    * bleed through. The popup itself can be translucent (user setting), but a
    * modal that overlays it must obscure for legibility. Theme-aware. */
@@ -335,6 +347,17 @@
     top: 100%;
     transform: translate(-50%, 0);
   }
+  .tip-right > .tip-label {
+    left: 100%;
+    top: 50%;
+    transform: translate(0, -50%);
+  }
+  .tip-left > .tip-label {
+    left: auto;
+    right: 100%;
+    top: 50%;
+    transform: translate(0, -50%);
+  }
   .tip:hover > .tip-label,
   .tip:focus-within > .tip-label {
     opacity: 1;
@@ -346,6 +369,14 @@
   .tip-bottom:hover > .tip-label,
   .tip-bottom:focus-within > .tip-label {
     transform: translate(-50%, 6px);
+  }
+  .tip-right:hover > .tip-label,
+  .tip-right:focus-within > .tip-label {
+    transform: translate(6px, -50%);
+  }
+  .tip-left:hover > .tip-label,
+  .tip-left:focus-within > .tip-label {
+    transform: translate(-6px, -50%);
   }
   .light .tip > .tip-label {
     background: rgba(250, 250, 252, 0.98);
@@ -418,14 +449,14 @@
   }
 
   .select-popup {
-    background: #1f1f24;
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(16, 18, 22, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     box-shadow:
       0 12px 28px -8px rgba(0, 0, 0, 0.55),
       0 0 0 0.5px rgba(0, 0, 0, 0.6);
   }
   .light .select-popup {
-    background: #ffffff;
+    background: rgba(246, 248, 251, 0.97);
     border: 1px solid rgba(0, 0, 0, 0.08);
     box-shadow:
       0 12px 28px -8px rgba(30, 40, 60, 0.18),

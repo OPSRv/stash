@@ -48,6 +48,16 @@ export const TerminalShell = () => {
   });
   const [revision, setRevision] = useState(0);
   const bumpRevision = useCallback(() => setRevision((n) => n + 1), []);
+  /// Leaf id that temporarily takes over the whole tab (hides its
+  /// siblings via a full-cover overlay). Null → normal tiling. Toggled
+  /// by `⌘E` and by the pane context menu's "Maximize" item. Clears
+  /// automatically when the maximized leaf no longer exists in the
+  /// active tab (close, drag across tabs).
+  const [maximizedPane, setMaximizedPane] = useState<string | null>(null);
+  const maximizedPaneRef = useRef(maximizedPane);
+  useEffect(() => {
+    maximizedPaneRef.current = maximizedPane;
+  }, [maximizedPane]);
 
   // Refs kept in sync with state so the document-level keyboard
   // listener (bound once on mount) always sees current values.
@@ -83,6 +93,21 @@ export const TerminalShell = () => {
     const leaves = collectLeafIds(active.root);
     if (!leaves.includes(focusedPane)) setFocusedPane(leaves[0]);
   }, [tabs, activeId, focusedPane]);
+
+  // Auto-clear maximize when its pane no longer exists in the active
+  // tab (could have been closed or dragged elsewhere).
+  useEffect(() => {
+    if (!maximizedPane) return;
+    const active = tabs.find((t) => t.id === activeId);
+    if (!active || !collectLeafIds(active.root).includes(maximizedPane)) {
+      setMaximizedPane(null);
+    }
+  }, [tabs, activeId, maximizedPane]);
+
+  const toggleMaximize = useCallback((paneId: string) => {
+    setMaximizedPane((cur) => (cur === paneId ? null : paneId));
+    bumpRevision();
+  }, [bumpRevision]);
 
   // Suppress popup auto-hide once while the Terminal tab is mounted.
   // Shells (Claude Code especially) steal focus when children spawn;
@@ -186,7 +211,12 @@ export const TerminalShell = () => {
     (source: `tab:${string}` | `pane:${string}`, target: string, zone: DropPosition) => {
       if (source.startsWith('tab:') && target.startsWith('tab:')) {
         setTabs((prev) =>
-          reorderTabs(prev, source.slice('tab:'.length), target.slice('tab:'.length)),
+          reorderTabs(
+            prev,
+            source.slice('tab:'.length),
+            target.slice('tab:'.length),
+            zone,
+          ),
         );
         return;
       }
@@ -229,8 +259,11 @@ export const TerminalShell = () => {
   // never steal the keypress.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+      // macOS convention: Cmd is the chord modifier; Ctrl must pass
+      // through so the shell still receives ^C / ^Z / ^D / ^T etc.
+      // Treating `ctrlKey` as interchangeable with `metaKey` here would
+      // hijack those canonical terminal chords.
+      if (!e.metaKey) return;
       const key = e.key.toLowerCase();
 
       if (e.altKey && (key === 'arrowleft' || key === 'arrowright')) {
@@ -281,6 +314,16 @@ export const TerminalShell = () => {
         splitPane(curTab.id, focusedPaneRef.current, orientation);
         return;
       }
+      if (key === 'e' && !e.shiftKey) {
+        // ⌘E toggles maximize on the focused pane. ⌘⇧E is compose (pane-local).
+        const curTabs = tabsRef.current;
+        const curTab = curTabs.find((t) => t.id === activeIdRef.current);
+        if (!curTab || countLeaves(curTab.root) < 2) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleMaximize(focusedPaneRef.current);
+        return;
+      }
       if (key >= '1' && key <= '8') {
         const n = Number(key);
         const curTabs = tabsRef.current;
@@ -293,7 +336,7 @@ export const TerminalShell = () => {
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [addTab, closePane, closeTab, splitPane]);
+  }, [addTab, closePane, closeTab, splitPane, toggleMaximize]);
 
   return (
     <div className="h-full flex flex-col">
@@ -301,6 +344,11 @@ export const TerminalShell = () => {
         tabs={tabs}
         activeId={activeId}
         dropOverTab={dropOverTab}
+        dropZone={
+          dragState && dropOverTab && dragState.source.startsWith('tab:')
+            ? dragState.zone
+            : null
+        }
         onActivate={setActiveId}
         onClose={closeTab}
         onAdd={addTab}
@@ -319,6 +367,8 @@ export const TerminalShell = () => {
             onClosePane={(paneId) => closePane(t.id, paneId)}
             onRatios={(path, index, pct) => setRatios(t.id, path, index, pct)}
             onPaneDragStart={(pid, label) => beginDrag(`pane:${pid}`, label)}
+            maximizedPane={t.id === activeId ? maximizedPane : null}
+            onToggleMaximize={toggleMaximize}
             revision={revision}
           />
         ))}

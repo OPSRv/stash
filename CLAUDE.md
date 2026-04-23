@@ -30,6 +30,17 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
   Never eager-import the view at the top of `index.tsx` — it defeats code-splitting. `PopupShell` renders each visited tab inside `<Suspense>`, hiding inactive ones via `hidden` (state preserved; unopened tabs never mount). Hover on `TabButton` calls `preloadPopup()`.
 - **Rust**: mirror under `src-tauri/src/modules/<name>/`. Wire `<Name>State` as managed state and register all commands in `invoke_handler!` in `src-tauri/src/lib.rs`.
 
+## Agent surface (Telegram + CLI + voice popup)
+
+Telegram-бот та AI-асистент — **first-class surface** для кожного модуля, не опція. Будь-який новий функціонал (команда, таб, таймер, дія) **зобов'язаний** бути доступним через:
+
+1. **Slash-команду** в `src-tauri/src/modules/telegram/module_cmds.rs` (коли має сенс детерміністична швидка дія) та/або
+2. **LLM tool** у `src-tauri/src/modules/telegram/tools/stash.rs`, зареєстрований у `assistant.rs` → тоді асистент (Telegram, CLI через `stash ai "…"`, майбутній voice popup) може викликати дію з natural-language промпта.
+
+Єдина точка диспатчу асистента — `telegram::assistant::handle_user_text(app, state, prompt)`. Усі транспорти (Telegram, CLI, voice) ходять через неї — не дублювати LLM/tool-loop в окремих місцях.
+
+Tool має експонувати **повний функціонал таба**, а не фіксовані пресети: асистент сам мапить natural-language параметри (BPM, тривалість, розмір такту тощо) на args. Якщо додаєш нове поле в модуль — одночасно розширюй tool-схему.
+
 ## Communication
 
 - **Frontend → Rust**: module-local `api.ts` wrapper calls `invoke(...)`. Never call `invoke` directly from components.
@@ -57,3 +68,5 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
 - **Language**: never add Russian (`ru`) to locale/translator lists.
 - **No ad-hoc buttons/inputs**: route through `src/shared/ui/` primitives (`Button`, `Input`, `NumberInput`, `SearchInput`, `Textarea`, `Select`, `SegmentedControl`, `Checkbox`, `SelectionHeader`, `Toggle`, `TabButton`, `IconButton`, `ConfirmDialog`, `Modal`, `Drawer`, `StatCard`, `Toast`, `Cheatsheet`, `GlobalSearch`). No inline RGBA hex — use CSS variables or `accent(α)`.
 - **Text sizing via tokens only**: use `text-meta` / `text-body` / `text-title` / `text-heading`. Hard-coded `text-[11px]`/`[13px]`/`[15px]`/`[18px]` are forbidden in `src/modules/**` and `src/settings/**`. Shared primitives may keep magic values only when a token would break height invariants (e.g. `h-8`).
+- **Icon-only actions → `IconButton` + `title`, always**: every bare-icon control (reveal, remove, embed, copy, open-in-new, pin, etc.) goes through `src/shared/ui/IconButton.tsx`. Pass a human-readable `title` — it is wired to both `aria-label` and the shared CSS `Tooltip` (fade-in bubble), so users can hover to learn what the icon does. Never hand-roll a `<button>` with an SVG and no label. Never rely on the browser's native `title=""` attribute — the custom `Tooltip` is the project standard.
+- **Hover-reveal overlays use `group` / `group-hover:`**: when a row exposes controls only on hover (list rows, attachment cards, chat bubbles), the parent gets `group relative` and the controls wrapper gets `opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity`. Do NOT put `hover:opacity-100` directly on the controls — that requires hovering the invisible controls themselves, which users can't find. Canonical examples: `src/shared/ui/Row.tsx`, `src/shared/ui/Markdown.tsx`.

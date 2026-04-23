@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 
 import { Button } from '../../shared/ui/Button';
 import { Textarea } from '../../shared/ui/Textarea';
+import type { VoicePhase } from '../../shared/hooks/useVoiceRecorder';
 
 const LINE_HEIGHT = 20;
 const MIN_ROWS = 1;
@@ -16,6 +17,12 @@ type Props = {
   isStreaming: boolean;
   disabled?: boolean;
   placeholder?: string;
+  /** Voice input: when any of the three are provided the composer
+   *  renders a mic button next to Send. The hook + state live in the
+   *  parent (`AiShell`) so the composer stays a dumb render. */
+  voicePhase?: VoicePhase;
+  voiceError?: string;
+  onVoiceToggle?: () => void;
 };
 
 export const ChatComposer = ({
@@ -26,6 +33,9 @@ export const ChatComposer = ({
   isStreaming,
   disabled,
   placeholder,
+  voicePhase,
+  voiceError,
+  onVoiceToggle,
 }: Props) => {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -62,6 +72,13 @@ export const ChatComposer = ({
   };
 
   const canSend = !disabled && !isStreaming && value.trim().length > 0;
+  const voiceEnabled = !!onVoiceToggle;
+  const voiceBusy = voicePhase === 'transcribing';
+  const voiceRecording = voicePhase === 'recording';
+  // When the recorder is busy the button is read-only — transcription
+  // can't be cancelled mid-flight without losing the utterance. Other
+  // phases (idle / error / recording) are all valid click targets.
+  const voiceDisabled = !voiceEnabled || voiceBusy || disabled || isStreaming;
 
   return (
     <div
@@ -85,6 +102,62 @@ export const ChatComposer = ({
         }}
         aria-label="Chat input"
       />
+      {voiceEnabled ? (
+        <Button
+          aria-label={voiceRecording ? 'Stop recording' : 'Record voice'}
+          aria-pressed={voiceRecording}
+          title={
+            voiceError
+              ? voiceError
+              : voiceRecording
+              ? 'Stop (⌘⇧A)'
+              : voiceBusy
+              ? 'Transcribing…'
+              : 'Record voice (⌘⇧A)'
+          }
+          onClick={onVoiceToggle}
+          disabled={voiceDisabled}
+          variant="soft"
+          tone={voiceRecording ? 'danger' : voiceError ? 'danger' : 'accent'}
+          shape="square"
+          size="sm"
+        >
+          {voiceBusy ? (
+            // Three-dot transcribing indicator — the stop glyph would
+            // falsely suggest the action is cancellable.
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <circle cx="3" cy="7" r="1.2" fill="currentColor">
+                <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite" begin="0s" />
+              </circle>
+              <circle cx="7" cy="7" r="1.2" fill="currentColor">
+                <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite" begin="0.2s" />
+              </circle>
+              <circle cx="11" cy="7" r="1.2" fill="currentColor">
+                <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite" begin="0.4s" />
+              </circle>
+            </svg>
+          ) : voiceRecording ? (
+            // Filled square = recording in progress, press to stop. Matches
+            // the Stop-stream button above for mental consistency.
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <rect x="3" y="3" width="8" height="8" rx="1" fill="currentColor" />
+            </svg>
+          ) : (
+            // Classic microphone glyph.
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <rect x="5" y="1.5" width="4" height="7" rx="2" fill="currentColor" />
+              <path
+                d="M3 7a4 4 0 0 0 8 0"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                fill="none"
+                strokeLinecap="round"
+              />
+              <path d="M7 11v1.5M5.5 12.5h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          )}
+        </Button>
+      ) : null}
       {isStreaming ? (
         <Button
           aria-label="Stop"

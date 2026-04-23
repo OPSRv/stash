@@ -1,8 +1,9 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -12,6 +13,9 @@ use super::state::PtySession;
 
 #[derive(Clone, serde::Serialize)]
 pub struct DataPayload {
+    /// Pane-slot id this payload belongs to. Frontend filters on it so
+    /// one xterm instance doesn't receive another pane's bytes.
+    pub id: String,
     /// Raw PTY bytes, base64-encoded so binary sequences (cursor control,
     /// colours, UTF-8 multibyte) survive the IPC boundary intact.
     pub data: String,
@@ -19,7 +23,17 @@ pub struct DataPayload {
 
 #[derive(Clone, serde::Serialize)]
 pub struct ExitPayload {
+    pub id: String,
     pub code: Option<i32>,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct ProcPayload {
+    pub id: String,
+    /// Foreground process `comm` (e.g. "zsh", "claude", "vim"). Empty
+    /// string when the shell idle-prompt owns the foreground — the
+    /// frontend treats empty as "fallback to $SHELL label".
+    pub name: String,
 }
 
 /// Open a PTY, spawn the user's preferred shell inside it, and start a
@@ -27,6 +41,7 @@ pub struct ExitPayload {
 /// events. Returns a session handle to be stored in managed state.
 pub fn open_session(
     app: &AppHandle,
+    id: &str,
     cols: u16,
     rows: u16,
     cwd: Option<PathBuf>,
@@ -43,6 +58,7 @@ pub fn open_session(
     // Login shell so ~/.zprofile/.zshrc are loaded and Homebrew paths
     // (where `claude` usually lives) end up on $PATH.
     cmd.arg("-l");
+    let seeded_cwd: Option<String> = cwd.as_ref().and_then(|p| p.to_str().map(String::from));
     if let Some(dir) = cwd {
         cmd.cwd(dir);
     }
@@ -81,18 +97,31 @@ pub fn open_session(
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_r = shutdown.clone();
     let app_r = app.clone();
-    thread::spawn(move || reader_loop(app_r, reader_pty, shutdown_r));
+    let id_r = id.to_string();
+    thread::spawn(move || reader_loop(app_r, id_r, reader_pty, shutdown_r));
+
+    // Per-session foreground-process poller. Runs outside the reader
+    // thread so slow `ps` spawns can't stall the byte pipeline.
+    let proc_shutdown = Arc::new(AtomicBool::new(false));
+    let proc_shutdown_r = proc_shutdown.clone();
+    let app_p = app.clone();
+    let id_p = id.to_string();
+    let leader = pair.master.process_group_leader();
+    thread::spawn(move || proc_poll_loop(app_p, id_p, leader, proc_shutdown_r));
 
     Ok(PtySession {
         master: pair.master,
         writer,
         child,
         reader_shutdown: shutdown,
+        proc_shutdown,
+        last_cwd: Arc::new(Mutex::new(seeded_cwd)),
     })
 }
 
 fn reader_loop(
     app: AppHandle,
+    id: String,
     mut pty: Box<dyn Read + Send>,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -105,12 +134,78 @@ fn reader_loop(
             Ok(0) => break,
             Ok(n) => {
                 let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
-                let _ = app.emit("terminal:data", DataPayload { data: encoded });
+                let _ = app.emit(
+                    "terminal:data",
+                    DataPayload {
+                        id: id.clone(),
+                        data: encoded,
+                    },
+                );
             }
             Err(_) => break,
         }
     }
-    let _ = app.emit("terminal:exit", ExitPayload { code: None });
+    let _ = app.emit("terminal:exit", ExitPayload { id, code: None });
+}
+
+/// Poll `tcgetpgrp(master_fd)` (exposed via portable_pty's
+/// `process_group_leader`) every ~800 ms; when the foreground process
+/// changes, emit `terminal:proc` so the pane header can reflect
+/// whatever the user is actually running (`claude`, `vim`, `cargo`…).
+///
+/// We use `ps` rather than reading `/proc` so the code stays
+/// cross-platform friendly (even though Stash is macOS-first — `ps`
+/// also works on Linux for future ports).
+fn proc_poll_loop(
+    app: AppHandle,
+    id: String,
+    leader_pid: Option<i32>,
+    shutdown: Arc<AtomicBool>,
+) {
+    let mut last: String = String::new();
+    let tick = Duration::from_millis(800);
+    loop {
+        if shutdown.load(Ordering::SeqCst) {
+            break;
+        }
+        let name = leader_pid
+            .and_then(|pid| read_comm(pid))
+            .unwrap_or_default();
+        if name != last {
+            last = name.clone();
+            let _ = app.emit(
+                "terminal:proc",
+                ProcPayload {
+                    id: id.clone(),
+                    name,
+                },
+            );
+        }
+        thread::sleep(tick);
+    }
+}
+
+/// Return the `comm` (process basename) of the given pid by shelling
+/// out to `ps -p <pid> -o comm=`. Returns None on any error; callers
+/// treat that as "no current foreground process" and display the
+/// shell label instead.
+fn read_comm(pid: i32) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // `comm` can be an absolute path (macOS login shells); strip the
+    // directory so the header shows just the basename.
+    let basename = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    Some(basename.to_string())
 }
 
 /// Write user-typed bytes (already base64-encoded by the frontend) into

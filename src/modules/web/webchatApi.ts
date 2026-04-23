@@ -59,6 +59,15 @@ export const webchatCloseAll = (keep?: string | null): Promise<void> =>
 export const webchatTogglePlay = (service: string): Promise<void> =>
   invoke('webchat_toggle_play', { service });
 
+/// Payload of the `webchat:nav` Tauri event. Emitted by the injected
+/// script whenever the embedded webview's URL or document title changes
+/// (load, pushState/replaceState, hashchange, popstate, title mutation).
+export type WebchatNav = {
+  service: string;
+  url: string;
+  title: string;
+};
+
 export type WebchatNowPlaying = {
   service: string;
   playing: boolean;

@@ -4,11 +4,14 @@ import {
   deletePreset,
   editBlocks,
   getState,
+  getTelegramNotifyEnabled,
+  getTelegramPaired,
   listHistory,
   listPresets,
   pauseSession,
   resumeSession,
   savePreset,
+  setTelegramNotifyEnabled,
   skipTo,
   startSession,
   stopSession,
@@ -109,5 +112,45 @@ describe('pomodoro api', () => {
     expect(mockInvoke).toHaveBeenCalledWith('pomodoro_edit_blocks', {
       blocks: [sample],
     });
+  });
+
+  it('getTelegramNotifyEnabled reads the pomodoro flag from notification settings', async () => {
+    mockInvoke.mockResolvedValue({
+      pomodoro: true,
+      download_complete: false,
+      battery_low: false,
+      calendar: false,
+      calendar_lead_minutes: 5,
+      battery_threshold_pct: 20,
+    });
+    const enabled = await getTelegramNotifyEnabled();
+    expect(enabled).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledWith('telegram_get_notification_settings');
+  });
+
+  it('setTelegramNotifyEnabled preserves the rest of the settings payload', async () => {
+    const existing = {
+      pomodoro: true,
+      download_complete: true,
+      battery_low: false,
+      calendar: true,
+      calendar_lead_minutes: 10,
+      battery_threshold_pct: 15,
+    };
+    mockInvoke
+      .mockResolvedValueOnce(existing) // get
+      .mockResolvedValueOnce(undefined); // set
+    await setTelegramNotifyEnabled(false);
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'telegram_get_notification_settings');
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'telegram_set_notification_settings', {
+      settings: { ...existing, pomodoro: false },
+    });
+  });
+
+  it('getTelegramPaired returns true only when status kind is paired', async () => {
+    mockInvoke.mockResolvedValueOnce({ kind: 'paired', chat_id: 42 });
+    expect(await getTelegramPaired()).toBe(true);
+    mockInvoke.mockResolvedValueOnce({ kind: 'no_token' });
+    expect(await getTelegramPaired()).toBe(false);
   });
 });

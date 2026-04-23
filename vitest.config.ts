@@ -11,5 +11,20 @@ export default defineConfig({
     css: false,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     testTimeout: 10_000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.{test,spec}.{ts,tsx}',
+        'src/**/*.stories.tsx',
+        'src/**/*.d.ts',
+        'src/test/**',
+        'src/main.tsx',
+        'src/**/index.tsx',
+        'src/modules/registry.ts',
+      ],
+    },
   },
 });

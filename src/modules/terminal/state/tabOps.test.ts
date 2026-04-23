@@ -158,13 +158,30 @@ describe('tabOps / closeTab', () => {
 });
 
 describe('tabOps / reorderTabs', () => {
-  it('moves src into dst slot', () => {
-    const res = reorderTabs(
-      [t('tab-1', leaf('pane-1')), t('tab-2', leaf('pane-2')), t('tab-3', leaf('pane-3'))],
-      'tab-1',
-      'tab-3',
-    );
+  const three = () => [
+    t('tab-1', leaf('pane-1')),
+    t('tab-2', leaf('pane-2')),
+    t('tab-3', leaf('pane-3')),
+  ];
+
+  it('moves src into dst slot (centre / legacy default)', () => {
+    const res = reorderTabs(three(), 'tab-1', 'tab-3');
     expect(res.map((x) => x.id)).toEqual(['tab-2', 'tab-3', 'tab-1']);
+  });
+
+  it('inserts src before dst on left zone', () => {
+    const res = reorderTabs(three(), 'tab-1', 'tab-3', 'left');
+    expect(res.map((x) => x.id)).toEqual(['tab-2', 'tab-1', 'tab-3']);
+  });
+
+  it('inserts src after dst on right zone', () => {
+    const res = reorderTabs(three(), 'tab-1', 'tab-2', 'right');
+    expect(res.map((x) => x.id)).toEqual(['tab-2', 'tab-1', 'tab-3']);
+  });
+
+  it('handles reverse-direction insertion (src>dst)', () => {
+    const res = reorderTabs(three(), 'tab-3', 'tab-1', 'left');
+    expect(res.map((x) => x.id)).toEqual(['tab-3', 'tab-1', 'tab-2']);
   });
 });
 

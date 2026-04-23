@@ -90,12 +90,21 @@ pub fn pomodoro_start(
     blocks: Vec<Block>,
     preset_id: Option<i64>,
 ) -> Result<SessionSnapshot, String> {
+    start_session(&app, state.inner(), blocks, preset_id)
+}
+
+/// Shared start path used by the Tauri command and the telegram AI tool.
+/// Keeps history-writing + event-emission behaviour in a single place.
+pub fn start_session(
+    app: &AppHandle,
+    state: &Arc<PomodoroState>,
+    blocks: Vec<Block>,
+    preset_id: Option<i64>,
+) -> Result<SessionSnapshot, String> {
     if blocks.is_empty() {
         return Err("cannot start a session with no blocks".into());
     }
-    // Finalize any in-flight session first so history is clean if the user
-    // hits "Start" without explicitly stopping the previous run.
-    finalize_in_flight(&state);
+    finalize_in_flight(state);
     let now = now_ms();
     let snap = {
         let mut core = state.core.lock().unwrap();
@@ -109,7 +118,7 @@ pub fn pomodoro_start(
         .insert_session_start(preset_id, &blocks, now_sec())
         .map_err(|e| e.to_string())?;
     *state.active_session.lock().unwrap() = Some(sid);
-    emit_snapshot(&app, &snap);
+    emit_snapshot(app, &snap);
     Ok(snap)
 }
 
@@ -148,6 +157,10 @@ pub fn pomodoro_stop(
     app: AppHandle,
     state: State<'_, Arc<PomodoroState>>,
 ) -> Result<SessionSnapshot, String> {
+    Ok(stop_session(&app, state.inner()))
+}
+
+pub fn stop_session(app: &AppHandle, state: &Arc<PomodoroState>) -> SessionSnapshot {
     let now = now_ms();
     let (snap, completed_idx) = {
         let mut core = state.core.lock().unwrap();
@@ -155,9 +168,9 @@ pub fn pomodoro_stop(
         core.stop(now);
         (core.snapshot(), completed)
     };
-    finalize_active(&state, completed_idx);
-    emit_snapshot(&app, &snap);
-    Ok(snap)
+    finalize_active(state, completed_idx);
+    emit_snapshot(app, &snap);
+    snap
 }
 
 #[tauri::command]

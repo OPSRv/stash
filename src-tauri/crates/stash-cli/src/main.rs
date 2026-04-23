@@ -59,7 +59,9 @@ fn print_usage() {
          stash status\n  \
          stash battery\n  \
          stash note \"buy milk\"\n  \
-         stash clip\n\
+         stash metronome start bpm=140 sig=6/8\n  \
+         stash ai \"включи метроном на 120\"\n  \
+         stash \"включи метроном на 120\"   # unknown → auto-routes to /ai\n\
          \n\
          flags:\n  \
          --json        print the raw JSON response instead of text\n  \
@@ -67,6 +69,12 @@ fn print_usage() {
          --help,-h     print this help and exit\n"
     );
 }
+
+/// Error prefix the server uses for `unknown command: X`. Matching the
+/// full phrase (not just "unknown") keeps the fallback narrow — if a
+/// real command returns its own error text that happens to contain the
+/// word "unknown", we don't accidentally replay it against the LLM.
+const UNKNOWN_CMD_PREFIX: &str = "unknown command:";
 
 fn print_version() {
     println!("stash {}", env!("CARGO_PKG_VERSION"));
@@ -143,13 +151,6 @@ async fn main() -> ExitCode {
         .ok()
         .and_then(|p| p.into_os_string().into_string().ok());
 
-    let req = Request {
-        cmd,
-        args_text,
-        args: rest,
-        cwd,
-    };
-
     let path = match socket_path() {
         Some(p) => p,
         None => {
@@ -158,61 +159,54 @@ async fn main() -> ExitCode {
         }
     };
 
-    let stream = match tokio::time::timeout(
-        Duration::from_secs(2),
-        UnixStream::connect(&path),
-    )
-    .await
-    {
-        Ok(Ok(s)) => s,
-        Ok(Err(_)) | Err(_) => {
-            eprintln!("stash: Stash app is not running");
-            return ExitCode::from(2);
-        }
+    let initial = Request {
+        cmd: cmd.clone(),
+        args_text: args_text.clone(),
+        args: rest.clone(),
+        cwd: cwd.clone(),
     };
 
-    let (read_half, mut write_half) = stream.into_split();
-    let mut body = match serde_json::to_string(&req) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("stash: encode request: {e}");
-            return ExitCode::from(3);
-        }
-    };
-    body.push('\n');
-
-    if let Err(e) = write_half.write_all(body.as_bytes()).await {
-        eprintln!("stash: write: {e}");
-        return ExitCode::from(3);
-    }
-    // Closing our write half lets the server finish reading cleanly
-    // even if its read_line is still buffered.
-    let _ = write_half.shutdown().await;
-
-    let mut reader = BufReader::new(read_half);
-    let mut line = String::new();
-    match tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut line)).await {
-        Ok(Ok(0)) => {
-            eprintln!("stash: server closed connection without reply");
-            return ExitCode::from(3);
-        }
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => {
-            eprintln!("stash: read: {e}");
-            return ExitCode::from(3);
-        }
-        Err(_) => {
-            eprintln!("stash: server timed out");
-            return ExitCode::from(3);
-        }
-    }
-
-    let resp: Response = match serde_json::from_str(line.trim_end()) {
+    // First attempt: dispatch as a slash-command.
+    let (resp, raw_line) = match round_trip(&path, &initial).await {
         Ok(r) => r,
-        Err(e) => {
-            eprintln!("stash: invalid response: {e}");
-            return ExitCode::from(3);
+        Err(code) => return code,
+    };
+
+    // Fallback: if the server didn't recognise the command, replay the
+    // *whole* invocation as an `/ai` prompt. This is what makes
+    // `stash включи метроном` feel natural without pushing magic into
+    // the transport — the first hop is cheap, and falling back only on
+    // a verbatim "unknown command:" keeps typos from silently billing
+    // an LLM call on *every* error.
+    let is_unknown = !resp.ok
+        && cmd != "ai"
+        && resp
+            .error
+            .as_deref()
+            .map(|e| e.starts_with(UNKNOWN_CMD_PREFIX))
+            .unwrap_or(false);
+
+    let (resp, raw_line) = if is_unknown {
+        let mut prompt = cmd.clone();
+        if !args_text.is_empty() {
+            prompt.push(' ');
+            prompt.push_str(&args_text);
         }
+        let mut ai_args = Vec::with_capacity(rest.len() + 1);
+        ai_args.push(cmd);
+        ai_args.extend(rest);
+        let ai_req = Request {
+            cmd: "ai".into(),
+            args_text: prompt,
+            args: ai_args,
+            cwd,
+        };
+        match round_trip(&path, &ai_req).await {
+            Ok(r) => r,
+            Err(code) => return code,
+        }
+    } else {
+        (resp, raw_line)
     };
 
     // `--json` forwards the raw wire response for scripting, but the
@@ -220,7 +214,7 @@ async fn main() -> ExitCode {
     // parsing the payload themselves.
     if json_out {
         let mut out = std::io::stdout().lock();
-        let _ = out.write_all(line.as_bytes());
+        let _ = out.write_all(raw_line.as_bytes());
         return if resp.ok {
             ExitCode::SUCCESS
         } else {
@@ -240,6 +234,72 @@ async fn main() -> ExitCode {
         );
         ExitCode::from(1)
     }
+}
+
+/// Connect → send one request → read one response. Returns the parsed
+/// `Response` plus the raw line the server sent (needed for `--json`
+/// passthrough). On any transport or protocol error returns the exit
+/// code the caller should terminate with — `main` surfaces it verbatim.
+async fn round_trip(
+    path: &std::path::Path,
+    req: &Request,
+) -> Result<(Response, String), ExitCode> {
+    let stream = match tokio::time::timeout(
+        Duration::from_secs(2),
+        UnixStream::connect(path),
+    )
+    .await
+    {
+        Ok(Ok(s)) => s,
+        Ok(Err(_)) | Err(_) => {
+            eprintln!("stash: Stash app is not running");
+            return Err(ExitCode::from(2));
+        }
+    };
+
+    let (read_half, mut write_half) = stream.into_split();
+    let mut body = match serde_json::to_string(req) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("stash: encode request: {e}");
+            return Err(ExitCode::from(3));
+        }
+    };
+    body.push('\n');
+
+    if let Err(e) = write_half.write_all(body.as_bytes()).await {
+        eprintln!("stash: write: {e}");
+        return Err(ExitCode::from(3));
+    }
+    let _ = write_half.shutdown().await;
+
+    let mut reader = BufReader::new(read_half);
+    let mut line = String::new();
+    match tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut line)).await {
+        Ok(Ok(0)) => {
+            eprintln!("stash: server closed connection without reply");
+            return Err(ExitCode::from(3));
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            eprintln!("stash: read: {e}");
+            return Err(ExitCode::from(3));
+        }
+        Err(_) => {
+            eprintln!("stash: server timed out");
+            return Err(ExitCode::from(3));
+        }
+    }
+
+    let resp: Response = match serde_json::from_str(line.trim_end()) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("stash: invalid response: {e}");
+            return Err(ExitCode::from(3));
+        }
+    };
+
+    Ok((resp, line))
 }
 
 #[cfg(test)]

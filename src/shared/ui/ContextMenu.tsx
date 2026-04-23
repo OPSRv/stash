@@ -130,7 +130,7 @@ export const ContextMenu = ({ open, x, y, items, onClose, label }: ContextMenuPr
       role="menu"
       aria-label={label}
       tabIndex={-1}
-      className="fixed z-40 pane rounded-lg py-1.5 shadow-lg outline-none"
+      className="stash-context-menu fixed z-40 pane rounded-lg py-1.5 shadow-lg outline-none"
       style={{ left, top, width: MENU_WIDTH }}
     >
       {items.map((it, i) => {

@@ -218,6 +218,13 @@ export const MagicWandIcon = ({ size = 14, className }: IconProps) => (
   </svg>
 );
 
+export const RefreshIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+    <path d="M20 4v4h-4" />
+  </svg>
+);
+
 export const TrashIcon = ({ size = 14, className }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
     <path d="M4 7h16M10 11v6M14 11v6M9 7V4h6v3M6 7l1 13h10l1-13" />

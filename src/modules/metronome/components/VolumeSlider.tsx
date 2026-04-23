@@ -6,18 +6,19 @@ interface VolumeSliderProps {
 }
 
 /// Compact percentage slider used in the Metronome controls row.
-/// Name is specific (VolumeSlider) so the shared-ui `Slider` primitive, if
-/// one is added later, doesn't collide.
+/// Track fill is driven by a CSS var so the gradient follows the value.
 export const VolumeSlider = ({ value, onChange, label, testId }: VolumeSliderProps) => {
   const pct = Math.round(value * 100);
   return (
-    <label className="flex flex-col gap-0.5" style={{ width: 76 }}>
+    <label className="flex flex-col gap-1" style={{ width: 92 }}>
       <span
         className="flex items-baseline justify-between t-tertiary"
-        style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase' }}
+        style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 600 }}
       >
         <span>{label}</span>
-        <span className="font-mono">{pct}</span>
+        <span className="font-mono t-primary" style={{ fontSize: 11, letterSpacing: 0 }}>
+          {pct}
+        </span>
       </span>
       <input
         type="range"
@@ -27,8 +28,8 @@ export const VolumeSlider = ({ value, onChange, label, testId }: VolumeSliderPro
         onChange={(e) => onChange(Number(e.target.value) / 100)}
         data-testid={testId}
         aria-label={label}
-        className="metronome-slider"
-        style={{ width: '100%' }}
+        className="metro-slider"
+        style={{ width: '100%', ['--metro-pct' as string]: `${pct}%` }}
       />
     </label>
   );

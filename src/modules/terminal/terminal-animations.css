@@ -22,6 +22,37 @@
 
 .terminal-host .xterm-viewport {
   background: transparent !important;
+  /* Thinner scrollbar — matches Stash's 6 px global rule but slimmer
+     to keep terminal chrome minimal. Firefox honours scrollbar-width;
+     WebKit takes the pseudo-element rules below. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.light .terminal-host .xterm-viewport {
+  scrollbar-color: rgba(20, 22, 28, 0.22) transparent;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar {
+  width: 4px !important;
+  height: 4px !important;
+  background: transparent !important;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent !important;
+  border: 0 !important;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-radius: 99px !important;
+  border: 0 !important;
+}
+.terminal-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32) !important;
+}
+.light .terminal-host .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(20, 22, 28, 0.22) !important;
+}
+.light .terminal-host .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(20, 22, 28, 0.38) !important;
 }
 
 .terminal-host .xterm-screen {

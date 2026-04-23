@@ -1,0 +1,565 @@
+/* Pomodoro — космічний таймлайн-інтерфейс.
+ * Діляться ідеями з metronome.css (hero-glow, accent-pill, breath),
+ * але все namespace-нуто під `pom-*`. */
+
+.pom-root {
+  position: relative;
+  background:
+    radial-gradient(
+      120% 70% at 50% 0%,
+      rgba(var(--stash-accent-rgb), 0.1) 0%,
+      rgba(var(--stash-accent-rgb), 0.03) 40%,
+      transparent 70%
+    ),
+    radial-gradient(
+      90% 50% at 50% 100%,
+      rgba(var(--stash-accent-rgb), 0.06) 0%,
+      transparent 60%
+    );
+  isolation: isolate;
+}
+
+/* Hero-година: центральний великий таймер або ready-стейт.
+ * Фіксована висота, щоб перехід ready→running не зсував таймлайн. */
+.pom-hero {
+  position: relative;
+  min-height: 252px;
+}
+.pom-hero::before {
+  content: '';
+  position: absolute;
+  inset: -40px;
+  width: 560px;
+  height: 240px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(var(--stash-accent-rgb), 0.14) 0%,
+    rgba(var(--stash-accent-rgb), 0.04) 40%,
+    transparent 70%
+  );
+  filter: blur(24px);
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 0;
+}
+.pom-hero[data-running='true']::before {
+  animation: pom-breath 3.6s ease-in-out infinite;
+}
+
+@keyframes pom-breath {
+  0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.98); }
+  50%      { opacity: 0.95; transform: translate(-50%, -50%) scale(1.04); }
+}
+
+.pom-clock-digits {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.05em;
+  font-weight: 200;
+  font-size: 108px;
+  line-height: 0.95;
+  padding-right: 0.08em;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.98) 0%,
+    rgba(255, 255, 255, 0.82) 55%,
+    rgba(255, 255, 255, 0.62) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.light .pom-clock-digits {
+  background: linear-gradient(
+    180deg,
+    rgba(20, 22, 28, 0.95) 0%,
+    rgba(20, 22, 28, 0.78) 55%,
+    rgba(20, 22, 28, 0.55) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.pom-clock-paused { opacity: 0.75; }
+
+.pom-hero-label {
+  color: rgba(var(--stash-accent-rgb), 0.85);
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* Pill-кнопки (play/pause/stop/skip). */
+.pom-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: color 120ms, background-color 140ms, box-shadow 160ms, transform 120ms;
+}
+.light .pom-pill {
+  color: rgba(20, 22, 28, 0.72);
+  background: rgba(20, 22, 28, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 28, 0.08);
+}
+.pom-pill:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(var(--stash-accent-rgb), 0.16);
+  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.45);
+  transform: translateY(-1px);
+}
+.light .pom-pill:hover:not(:disabled) { color: rgba(20, 22, 28, 0.95); }
+.pom-pill:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.pom-pill-primary {
+  color: var(--stash-accent);
+  background: rgba(var(--stash-accent-rgb), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.45);
+}
+.pom-pill-primary:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(var(--stash-accent-rgb), 0.26);
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.6),
+    0 6px 20px -8px rgba(var(--stash-accent-rgb), 0.65);
+}
+.pom-pill-primary[data-running='true'] {
+  color: #fff;
+  background: var(--stash-accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 0 0 1px rgba(var(--stash-accent-rgb), 0.65),
+    0 10px 28px -8px rgba(var(--stash-accent-rgb), 0.85),
+    0 0 24px -2px rgba(var(--stash-accent-rgb), 0.6);
+  animation: pom-pill-breath 2.4s ease-in-out infinite;
+}
+@keyframes pom-pill-breath {
+  0%, 100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      0 0 0 1px rgba(var(--stash-accent-rgb), 0.6),
+      0 10px 28px -10px rgba(var(--stash-accent-rgb), 0.7),
+      0 0 18px -4px rgba(var(--stash-accent-rgb), 0.45);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.25),
+      0 0 0 1px rgba(var(--stash-accent-rgb), 0.72),
+      0 16px 36px -10px rgba(var(--stash-accent-rgb), 0.85),
+      0 0 32px -4px rgba(var(--stash-accent-rgb), 0.65);
+  }
+}
+.pom-pill-danger {
+  color: rgba(255, 120, 120, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+}
+.pom-pill-danger:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(239, 68, 68, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.55);
+}
+
+/* Icon-only pill (▶ ⏸ ⏭ ⏮ ⏹). */
+.pom-icon-pill {
+  width: 32px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+/* Таймлайн: горизонтальна смуга з блоками. */
+.pom-timeline-wrap {
+  position: relative;
+  padding: 10px 16px 14px;
+}
+.pom-timeline {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  height: 68px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 14px;
+  padding: 4px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(0, 0, 0, 0.2);
+  user-select: none;
+  touch-action: none;
+}
+.light .pom-timeline {
+  background: rgba(20, 22, 28, 0.03);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 28, 0.08);
+}
+
+/* Один блок — rounded прямокутник. Колір — посилка на posture token. */
+.pom-block {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 48px;
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  background: var(--pom-block-bg, rgba(255, 255, 255, 0.08));
+  box-shadow:
+    inset 0 0 0 1px var(--pom-block-border, rgba(255, 255, 255, 0.1)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  color: var(--pom-block-fg, rgba(255, 255, 255, 0.92));
+  transition: transform 140ms var(--easing-emphasized), box-shadow 180ms, opacity 180ms;
+  cursor: grab;
+  overflow: hidden;
+}
+.pom-block[data-posture='sit'] {
+  --pom-block-bg: linear-gradient(
+    160deg,
+    rgba(120, 140, 180, 0.3) 0%,
+    rgba(100, 120, 160, 0.18) 100%
+  );
+  --pom-block-border: rgba(160, 180, 220, 0.35);
+  --pom-block-fg: rgba(220, 230, 245, 0.95);
+}
+.pom-block[data-posture='stand'] {
+  --pom-block-bg: linear-gradient(
+    160deg,
+    rgba(90, 180, 130, 0.3) 0%,
+    rgba(70, 160, 110, 0.18) 100%
+  );
+  --pom-block-border: rgba(150, 220, 180, 0.4);
+  --pom-block-fg: rgba(210, 240, 225, 0.95);
+}
+.pom-block[data-posture='walk'] {
+  --pom-block-bg: linear-gradient(
+    160deg,
+    rgba(220, 150, 90, 0.3) 0%,
+    rgba(190, 130, 70, 0.18) 100%
+  );
+  --pom-block-border: rgba(240, 190, 130, 0.4);
+  --pom-block-fg: rgba(245, 220, 180, 0.95);
+}
+.pom-block:active { cursor: grabbing; }
+.pom-block:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--pom-block-border),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 6px 18px -6px rgba(0, 0, 0, 0.35);
+}
+.pom-block[data-selected='true'] {
+  box-shadow:
+    inset 0 0 0 1.5px rgba(var(--stash-accent-rgb), 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(var(--stash-accent-rgb), 0.35),
+    0 8px 24px -6px rgba(var(--stash-accent-rgb), 0.4);
+}
+.pom-block[data-dragging='true'] {
+  opacity: 0.7;
+  z-index: 2;
+  box-shadow:
+    inset 0 0 0 1.5px rgba(var(--stash-accent-rgb), 0.85),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 24px -6px rgba(0, 0, 0, 0.4);
+}
+
+/* Миттєві layout-зміни під час drag — без transform/opacity анімацій,
+ * інакше блоки «пливуть» у нову позицію й пойнтер ловить зворотні свопи. */
+.pom-timeline[data-dragging='true'] .pom-block,
+.pom-timeline[data-dragging='true'] .pom-block-progress::before {
+  transition: none;
+}
+
+.pom-block[data-state='done'] { opacity: 0.45; }
+.pom-block[data-state='current'] {
+  box-shadow:
+    inset 0 0 0 1.5px rgba(var(--stash-accent-rgb), 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 0 1px rgba(var(--stash-accent-rgb), 0.45),
+    0 10px 30px -6px rgba(var(--stash-accent-rgb), 0.55);
+  animation: pom-block-breath 3s ease-in-out infinite;
+}
+@keyframes pom-block-breath {
+  0%, 100% { filter: brightness(1); }
+  50%      { filter: brightness(1.12); }
+}
+
+.pom-block-name {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pom-block-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+/* Прогресовий fill всередині поточного блоку. */
+.pom-block-progress {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
+}
+.pom-block-progress::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--pom-progress, 0%);
+  background: linear-gradient(
+    90deg,
+    rgba(var(--stash-accent-rgb), 0.2) 0%,
+    rgba(var(--stash-accent-rgb), 0.28) 100%
+  );
+  transition: width 220ms linear;
+}
+
+/* Drop indicator — вертикальна accent-лінія куди впаде dragged блок. */
+.pom-drop-indicator {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--stash-accent-rgb), 0.95) 0%,
+    rgba(var(--stash-accent-rgb), 0.55) 100%
+  );
+  box-shadow:
+    0 0 0 1px rgba(var(--stash-accent-rgb), 0.35),
+    0 0 12px rgba(var(--stash-accent-rgb), 0.7);
+  pointer-events: none;
+  z-index: 4;
+  animation: stash-fade-in 120ms var(--easing-standard);
+}
+
+/* Resize handle справа. */
+.pom-resize {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  right: 0;
+  width: 8px;
+  cursor: ew-resize;
+  border-radius: 0 10px 10px 0;
+  opacity: 0;
+  transition: opacity 140ms, background-color 140ms;
+  z-index: 3;
+}
+.pom-block:hover .pom-resize,
+.pom-block[data-selected='true'] .pom-resize {
+  opacity: 0.7;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(var(--stash-accent-rgb), 0.35) 50%,
+    rgba(var(--stash-accent-rgb), 0.55) 100%
+  );
+}
+.pom-resize:hover { opacity: 1 !important; }
+
+/* Таймлайн ruler — хвилини знизу. */
+.pom-ruler {
+  margin-top: 6px;
+  height: 14px;
+  position: relative;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.32);
+  letter-spacing: 0.04em;
+}
+.light .pom-ruler { color: rgba(20, 22, 28, 0.38); }
+.pom-ruler-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.pom-ruler-tick::before {
+  content: '';
+  width: 1px;
+  height: 4px;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+/* Палітра (+ Sit / + Stand / + Walk). */
+.pom-palette {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 10px;
+}
+.pom-palette-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--pom-block-fg);
+  background: var(--pom-block-bg);
+  box-shadow: inset 0 0 0 1px var(--pom-block-border);
+  transition: transform 120ms, filter 140ms;
+}
+.pom-palette-btn:hover { transform: translateY(-1px); filter: brightness(1.1); }
+.pom-palette-btn[data-posture='sit'] {
+  --pom-block-bg: linear-gradient(160deg, rgba(120, 140, 180, 0.3), rgba(100, 120, 160, 0.18));
+  --pom-block-border: rgba(160, 180, 220, 0.35);
+  --pom-block-fg: rgba(220, 230, 245, 0.95);
+}
+.pom-palette-btn[data-posture='stand'] {
+  --pom-block-bg: linear-gradient(160deg, rgba(90, 180, 130, 0.3), rgba(70, 160, 110, 0.18));
+  --pom-block-border: rgba(150, 220, 180, 0.4);
+  --pom-block-fg: rgba(210, 240, 225, 0.95);
+}
+.pom-palette-btn[data-posture='walk'] {
+  --pom-block-bg: linear-gradient(160deg, rgba(220, 150, 90, 0.3), rgba(190, 130, 70, 0.18));
+  --pom-block-border: rgba(240, 190, 130, 0.4);
+  --pom-block-fg: rgba(245, 220, 180, 0.95);
+}
+
+/* Inline-попап редагування блоку. */
+.pom-block-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 240px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(28, 30, 36, 0.96);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 18px 38px -10px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: stash-pop-in 180ms var(--easing-emphasized);
+}
+.light .pom-block-popover {
+  background: rgba(252, 252, 254, 0.96);
+  box-shadow:
+    0 0 0 1px rgba(20, 22, 28, 0.08),
+    0 18px 38px -10px rgba(30, 40, 60, 0.25);
+}
+
+/* Presets: рядок чипсів + «+ Save». */
+.pom-presets-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.pom-preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: background-color 140ms, box-shadow 160ms, transform 120ms;
+}
+.light .pom-preset-chip {
+  color: rgba(20, 22, 28, 0.78);
+  background: rgba(20, 22, 28, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(20, 22, 28, 0.08);
+}
+.pom-preset-chip:hover {
+  background: rgba(var(--stash-accent-rgb), 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.35);
+  transform: translateY(-1px);
+}
+.pom-preset-chip[data-active='true'] {
+  color: #fff;
+  background: rgba(var(--stash-accent-rgb), 0.22);
+  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.55);
+}
+
+.pom-save-pill {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--stash-accent);
+  background: rgba(var(--stash-accent-rgb), 0.14);
+  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.42);
+  transition: background-color 140ms, box-shadow 160ms, transform 120ms;
+}
+.pom-save-pill:hover:not(:disabled) {
+  background: rgba(var(--stash-accent-rgb), 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.6),
+    0 6px 18px -6px rgba(var(--stash-accent-rgb), 0.5);
+  transform: translateY(-1px);
+}
+.pom-save-pill:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Name input стилізуємо мінімально — прозоре, підкреслення при фокусі. */
+.pom-name-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 2px 0;
+  outline: none;
+  transition: border-color 140ms;
+  min-width: 120px;
+}
+.light .pom-name-input { color: rgba(20, 22, 28, 0.95); }
+.pom-name-input:focus { border-color: rgba(var(--stash-accent-rgb), 0.6); }
+.pom-name-input::placeholder { color: rgba(255, 255, 255, 0.32); }
+.light .pom-name-input::placeholder { color: rgba(20, 22, 28, 0.38); }
+
+/* Banner (transition hint). */
+.pom-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(var(--stash-accent-rgb), 0.14);
+  box-shadow: 0 -1px 0 rgba(var(--stash-accent-rgb), 0.35) inset;
+  animation: stash-fade-in 220ms var(--easing-standard);
+}

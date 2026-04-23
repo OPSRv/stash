@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -16,12 +17,15 @@ import { useVoiceRecorder } from '../../shared/hooks/useVoiceRecorder';
 
 import {
   ptyClose,
+  ptyGetCwd,
   ptyOpen,
   ptyResize,
+  ptySetCwd,
   ptyWrite,
   terminalSavePasteBlob,
   type DataPayload,
   type ExitPayload,
+  type ProcPayload,
 } from './api';
 import {
   decodeBase64,
@@ -58,6 +62,11 @@ export type TerminalPaneProps = {
   /// Pointer-down on the pane's drag handle. Shell's drag manager
   /// opens a pointermove/up machine from there.
   onPaneDragStart?: (e: React.PointerEvent) => void;
+  /// Toggle full-tab zoom (maximize). Undefined when there's only one
+  /// leaf in the tab (nothing to zoom against).
+  onToggleMaximize?: () => void;
+  /// True while this pane is the zoom target.
+  maximized?: boolean;
 };
 
 /// xterm-backed terminal pane. One persistent PTY session per id, kept
@@ -71,6 +80,8 @@ export const TerminalPane = ({
   onSplit,
   onClosePane,
   onPaneDragStart,
+  onToggleMaximize,
+  maximized = false,
 }: TerminalPaneProps) => {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -81,6 +92,13 @@ export const TerminalPane = ({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const [dead, setDead] = useState(false);
+  /// Live CWD reported by the shell via OSC 7. Seeded empty; filled on
+  /// first sequence and kept in sync with every subsequent one. Used by
+  /// the header label and forwarded to Rust on Restart.
+  const [cwd, setCwd] = useState<string>('');
+  /// Live foreground process name (claude, vim, cargo…) pushed by the
+  /// Rust poller. Empty string → shell idle prompt.
+  const [procName, setProcName] = useState<string>('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selection, setSelection] = useState('');
@@ -89,6 +107,11 @@ export const TerminalPane = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(
     null,
   );
+  /// True while an OS drag is hovering over this pane. Drives the drop
+  /// overlay. Tauri intercepts native file drops at the webview level,
+  /// so the browser's HTMLElement drop events never fire — we subscribe
+  /// via `getCurrentWebview().onDragDropEvent` instead.
+  const [fileDragOver, setFileDragOver] = useState(false);
   // Pane width drives responsive header. Thresholds:
   //   > 520 px — full header with snippet chips
   //   360-520 — hide snippets, keep button labels
@@ -130,6 +153,24 @@ export const TerminalPane = ({
     termRef.current = term;
     fitRef.current = fit;
     searchRef.current = search;
+
+    // OSC 7 — shells announce cwd via `ESC ] 7 ; file://<host><path> BEL`
+    // after every chdir (zsh/bash/fish with the usual chpwd hooks). Parse
+    // it here and push to both local state (for the header label) and
+    // Rust (so Restart respawns in the same directory).
+    term.parser.registerOscHandler(7, (data) => {
+      try {
+        const url = new URL(data);
+        if (url.protocol === 'file:') {
+          const path = decodeURIComponent(url.pathname);
+          setCwd(path);
+          ptySetCwd(id, path).catch(() => {});
+        }
+      } catch {
+        /* malformed OSC 7 — ignore */
+      }
+      return false; // let xterm keep default processing
+    });
 
     term.onData((data) => {
       ptyWrite(id, encodeBase64(data)).catch(() => {});
@@ -174,7 +215,8 @@ export const TerminalPane = ({
     const host = hostRef.current;
     if (!host) return;
     const stop = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
+      // Cmd only — Ctrl chords (^C/^D/^Z/^W) must reach the shell.
+      const mod = e.metaKey;
       if (mod && e.key === 'k') {
         e.preventDefault();
         termRef.current?.clear();
@@ -235,7 +277,7 @@ export const TerminalPane = ({
     return () => observer.disconnect();
   }, []);
 
-  // PTY data/exit bus filtered by this pane's id.
+  // PTY data/exit/proc bus filtered by this pane's id.
   useEffect(() => {
     const unData = listen<DataPayload>('terminal:data', (e) => {
       if (e.payload.id !== id) return;
@@ -246,9 +288,14 @@ export const TerminalPane = ({
       if (e.payload.id !== id) return;
       setDead(true);
     });
+    const unProc = listen<ProcPayload>('terminal:proc', (e) => {
+      if (e.payload.id !== id) return;
+      setProcName(e.payload.name);
+    });
     return () => {
       unData.then((fn) => fn()).catch(() => {});
       unExit.then((fn) => fn()).catch(() => {});
+      unProc.then((fn) => fn()).catch(() => {});
     };
   }, [id]);
 
@@ -334,18 +381,24 @@ export const TerminalPane = ({
   );
 
   const restart = useCallback(async () => {
+    // Reach into Rust first — it remembers the last cwd announced via
+    // OSC 7 even after we close the session. Falls back to local state
+    // (shells that never emit OSC 7) and finally to $HOME on the Rust
+    // side.
+    const remembered = await ptyGetCwd(id).catch(() => null);
+    const fallback = cwd || remembered || null;
     await ptyClose(id).catch(() => {});
     termRef.current?.clear();
     if (termRef.current && fitRef.current) {
       try {
-        await ptyOpen(id, termRef.current.cols, termRef.current.rows);
+        await ptyOpen(id, termRef.current.cols, termRef.current.rows, fallback);
         setDead(false);
         termRef.current.focus();
       } catch (e) {
         termRef.current.write(`\r\n\x1b[31mrestart failed: ${String(e)}\x1b[0m\r\n`);
       }
     }
-  }, [id]);
+  }, [id, cwd]);
 
   const runSearch = useCallback(
     (direction: 'next' | 'prev', query?: string) => {
@@ -390,6 +443,22 @@ export const TerminalPane = ({
     },
   });
 
+  /// Insert a shell-ready `@{path}` reference per dropped file into the
+  /// composer, opening it if necessary. Finder drops already hand us an
+  /// absolute path, so we skip the save-to-tmp round-trip that
+  /// clipboard paste needs.
+  const attachPaths = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) return;
+      if (!composeOpen) setComposeOpen(true);
+      // Quote paths containing whitespace so the shell can consume them
+      // verbatim when the user hits Enter.
+      const tokens = paths.map((p) => (/\s/.test(p) ? `@'${p}'` : `@${p}`));
+      insertAtCursor(`${tokens.join(' ')} `);
+    },
+    [composeOpen, insertAtCursor],
+  );
+
   const attachFileBlob = useCallback(
     async (blob: Blob, filename?: string) => {
       if (!blob || blob.size === 0) return;
@@ -409,6 +478,63 @@ export const TerminalPane = ({
     },
     [insertAtCursor, composeOpen],
   );
+
+  // OS drag-drop (Finder → pane). Tauri's WKWebView intercepts native
+  // drop events, so we hook into its drag-drop bridge and route the
+  // drop to whichever pane sits under the cursor. Position from Tauri
+  // is physical pixels; divide by DPR to compare with the browser's
+  // logical rect. Listener stays alive for the pane's lifetime; the
+  // guard below ignores drops when the pane is hidden (other tab) or
+  // the cursor isn't over it (sibling pane in the same split).
+  const attachPathsRef = useRef(attachPaths);
+  useEffect(() => {
+    attachPathsRef.current = attachPaths;
+  }, [attachPaths]);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+
+    const insideThisPane = (px: number, py: number): boolean => {
+      const el = paneRootRef.current;
+      if (!el) return false;
+      if (el.offsetParent === null) return false; // hidden tab
+      const rect = el.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const x = px / dpr;
+      const y = py / dpr;
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === 'enter') {
+          if (p.paths.length === 0) return;
+          setFileDragOver(insideThisPane(p.position.x, p.position.y));
+        } else if (p.type === 'over') {
+          setFileDragOver(insideThisPane(p.position.x, p.position.y));
+        } else if (p.type === 'leave') {
+          setFileDragOver(false);
+        } else if (p.type === 'drop') {
+          setFileDragOver(false);
+          if (p.paths.length === 0) return;
+          if (!insideThisPane(p.position.x, p.position.y)) return;
+          attachPathsRef.current(p.paths);
+        }
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* not running under Tauri (e.g. Storybook / tests) */
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   const sendCompose = useCallback(
     async (submit: boolean) => {
@@ -434,8 +560,17 @@ export const TerminalPane = ({
 
   const statusLabel = useMemo(() => {
     if (dead) return 'shell exited';
-    return '$SHELL';
-  }, [dead]);
+    // Foreground process wins — far more useful than "$SHELL" when the
+    // user is running claude / vim / cargo. Fall back to a compact CWD
+    // basename, then to "shell" when nothing is known yet.
+    if (procName) return procName;
+    if (cwd) {
+      const home = '/Users/';
+      const base = cwd.split('/').filter(Boolean).pop() ?? cwd;
+      return cwd.startsWith(home) ? `~/${base}` : base;
+    }
+    return 'shell';
+  }, [dead, procName, cwd]);
 
   const runContextAction = useCallback(
     (action: ContextMenuAction) => {
@@ -484,8 +619,7 @@ export const TerminalPane = ({
           onSplit?.('column');
           break;
         case 'maximize':
-          // Needs a cross-pane registry from the shell to hide siblings;
-          // surfaced in the menu as a placeholder for the follow-up task.
+          onToggleMaximize?.();
           break;
         case 'restart':
           void restart();
@@ -524,6 +658,14 @@ export const TerminalPane = ({
         minHeight: 0,
         position: 'relative',
         overflow: 'hidden',
+        // Focus ring: a subtle accent inset on the active pane so
+        // keyboard input has an obvious destination in split layouts.
+        // Inactive panes keep a 1 px neutral divider so siblings read
+        // as separate surfaces rather than one continuous blur.
+        boxShadow: active
+          ? 'inset 0 0 0 1.5px rgba(var(--stash-accent-rgb), 0.55)'
+          : 'inset 0 0 0 1px rgba(255, 255, 255, 0.05)',
+        transition: 'box-shadow 140ms var(--easing-standard)',
       }}
     >
       <PaneHeader
@@ -551,6 +693,8 @@ export const TerminalPane = ({
         onFind={() => setSearchOpen((v) => !v)}
         onRestart={restart}
         onSplit={onSplit}
+        onToggleMaximize={onToggleMaximize}
+        maximized={maximized}
         onClosePane={onClosePane}
         onPaneDragStart={onPaneDragStart}
       />
@@ -625,6 +769,31 @@ export const TerminalPane = ({
           className="terminal-host"
           style={{ position: 'absolute', inset: 0 }}
         />
+        {fileDragOver && (
+          <div
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+            style={{
+              background: accent(0.1),
+              border: `2px dashed ${accent(0.7)}`,
+              borderRadius: 6,
+              zIndex: 10,
+            }}
+          >
+            <div
+              className="text-body font-medium"
+              style={{
+                color: 'var(--stash-accent)',
+                background: 'rgba(20, 22, 28, 0.7)',
+                padding: '6px 12px',
+                borderRadius: 6,
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+              }}
+            >
+              Drop files → attach to prompt
+            </div>
+          </div>
+        )}
       </div>
       {contextMenu && (
         <PaneContextMenu
@@ -633,6 +802,8 @@ export const TerminalPane = ({
           hasSelection={!!selection.trim()}
           canSplit={!!onSplit}
           canClosePane={!!onClosePane}
+          canMaximize={!!onToggleMaximize}
+          maximized={maximized}
           onAction={runContextAction}
           onClose={() => setContextMenu(null)}
         />

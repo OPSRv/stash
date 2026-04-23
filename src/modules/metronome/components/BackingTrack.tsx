@@ -171,8 +171,13 @@ export const BackingTrack = ({ volume, onVolume }: Props) => {
             step={0.1}
             value={currentTime}
             onChange={onSeek}
-            className="metronome-slider"
-            style={{ flex: '0 0 200px' }}
+            className="metro-slider"
+            style={{
+              flex: '0 0 200px',
+              ['--metro-pct' as string]: `${Math.round(
+                (currentTime / Math.max(0.01, duration)) * 100,
+              )}%`,
+            }}
             aria-label="Track position"
           />
           <span className="t-tertiary text-meta font-mono">
@@ -184,8 +189,8 @@ export const BackingTrack = ({ volume, onVolume }: Props) => {
             max={100}
             value={Math.round(volume * 100)}
             onChange={(e) => onVolume(Number(e.target.value) / 100)}
-            className="metronome-slider"
-            style={{ width: 60 }}
+            className="metro-slider"
+            style={{ width: 60, ['--metro-pct' as string]: `${Math.round(volume * 100)}%` }}
             aria-label="Track volume"
           />
           <IconButton onClick={close} title="Close track">

@@ -79,4 +79,10 @@ Run every box green before cutting a release:
 - `tauri.conf.json` ships with a restrictive CSP; embedded webviews (music, webchat) run in separate child webviews and are not constrained by it.
 - Rust commands validate user-supplied URLs (`http`/`https` allowlist) before handing them to `yt-dlp` / `WebviewUrl::External`.
 - `opener` capabilities target `$HOME/**` because clipboard history and filesystem scanners may reference any user file; all `open_path` calls originate from explicit user action.
-- API keys are Keychain-only in release; the `aiApiKeys` plaintext fallback in `settings.json` exists solely for debug builds of unsigned binaries.
+- **API keys storage — threat model.** Keys land in two places:
+  - **Keychain** (`com.stash.ai`, `com.stash.telegram`) — primary store for the Rust side. The telegram LLM path reads keys exclusively from here in release.
+  - **`settings.json` under `$APPDATA`** — plaintext. The frontend AI chat (`AiShell`, notes Polish/Translate) reads keys from this file and passes them to the Vercel AI SDK directly. This is a deliberate trade-off for a **single-user desktop app** on macOS:
+    - `$APPDATA` is a 0600 user-scoped directory — other local users can't read it.
+    - It's excluded from iCloud Drive. Time Machine backups are the only leak vector, and that's the user's own machine.
+    - Peer tools (VS Code, Cursor, Raycast, Claude Desktop) store API keys the same way. Keychain would marginally help *casual inspection* and *TM backups*, but wouldn't stop a compromised app bundle or any process with user-level file read.
+  - A full refactor to Rust-proxied streaming (keys never in JS) was considered and **rejected for v0.1**: 1–2 days of work to re-implement SSE parsing for 3 providers, re-port abort handling, and rewrite tests — for a threat model that mostly doesn't apply to a desktop menubar app. Revisit if Stash ever grows a multi-user or web-accessible surface.

@@ -223,6 +223,83 @@ fn stash_version_flag_prints_version_and_exits_zero() {
 }
 
 #[test]
+fn stash_retries_unknown_command_as_ai_prompt() {
+    // Unknown-command → automatic `/ai` replay. Verifies the full flow:
+    // first request surfaces "unknown command:" error, client reconnects
+    // and sends a second request with `cmd:"ai"` carrying the original
+    // tokens joined as the prompt.
+    let dir = tempdir();
+    let sock = dir.path().join("ipc.sock");
+    let listener = UnixListener::bind(&sock).unwrap();
+
+    let server = thread::spawn(move || {
+        // First hop: reject with the recognised prefix.
+        let (mut s1, _) = listener.accept().unwrap();
+        let mut r1 = BufReader::new(s1.try_clone().unwrap());
+        let mut line1 = String::new();
+        r1.read_line(&mut line1).unwrap();
+        assert!(line1.contains("\"cmd\":\"включи\""), "first line: {line1}");
+        s1.write_all(b"{\"ok\":false,\"error\":\"unknown command: \xd0\xb2\xd0\xba\xd0\xbb\xd1\x8e\xd1\x87\xd0\xb8\"}\n")
+            .unwrap();
+        drop(s1);
+
+        // Second hop: the client should now send `/ai` with the full
+        // argv folded into args_text.
+        let (mut s2, _) = listener.accept().unwrap();
+        let mut r2 = BufReader::new(s2.try_clone().unwrap());
+        let mut line2 = String::new();
+        r2.read_line(&mut line2).unwrap();
+        assert!(line2.contains("\"cmd\":\"ai\""), "second line: {line2}");
+        assert!(
+            line2.contains("включи") && line2.contains("метроном"),
+            "second line did not carry original prompt: {line2}"
+        );
+        s2.write_all(b"{\"ok\":true,\"text\":\"done\"}\n").unwrap();
+    });
+
+    let output = Command::new(cargo_bin_path())
+        .args(["включи", "метроном"])
+        .env("STASH_IPC_SOCK", &sock)
+        .output()
+        .unwrap();
+    server.join().unwrap();
+
+    assert_eq!(output.status.code(), Some(0), "stderr: {:?}", output.stderr);
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "done");
+}
+
+#[test]
+fn stash_does_not_fallback_to_ai_when_ai_itself_errors() {
+    // Guard against the infinite-retry trap: if the assistant slash-cmd
+    // itself returns an unknown-command error, we must surface that
+    // error instead of looping forever.
+    let dir = tempdir();
+    let sock = dir.path().join("ipc.sock");
+    let listener = UnixListener::bind(&sock).unwrap();
+
+    let server = thread::spawn(move || {
+        let (mut s, _) = listener.accept().unwrap();
+        let mut r = BufReader::new(s.try_clone().unwrap());
+        let mut line = String::new();
+        r.read_line(&mut line).unwrap();
+        assert!(line.contains("\"cmd\":\"ai\""), "line: {line}");
+        s.write_all(b"{\"ok\":false,\"error\":\"unknown command: ai\"}\n")
+            .unwrap();
+    });
+
+    let output = Command::new(cargo_bin_path())
+        .args(["ai", "hello"])
+        .env("STASH_IPC_SOCK", &sock)
+        .output()
+        .unwrap();
+    server.join().unwrap();
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown command"), "stderr: {stderr}");
+}
+
+#[test]
 fn stash_missing_command_exits_three_as_usage_error() {
     // Usage error is distinct from "app not running" (2) and "command
     // failed" (1) so scripts can tell them apart.

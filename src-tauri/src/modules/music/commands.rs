@@ -190,18 +190,27 @@ pub fn music_status(app: AppHandle) -> Result<MusicStatus, String> {
 }
 
 fn click_in_webview(app: &AppHandle, selector: &str) -> Result<(), String> {
-    let wv = app
-        .webviews()
-        .get(LABEL)
-        .cloned()
-        .ok_or_else(|| "music webview not attached".to_string())?;
     // Injected JS is plain click() — YouTube Music exposes the player bar
     // controls as real buttons, so a synthetic click drives them reliably.
     let script = format!(
         "(function(){{var el=document.querySelector({sel});if(el)el.click();}})();",
         sel = json_quote(selector)
     );
-    wv.eval(&script).map_err(|e| e.to_string())?;
+    run_in_webview(app, &script)
+}
+
+/// Evaluate arbitrary JS inside the attached music webview. Returns
+/// `"music webview not attached"` on absence so the caller can decide
+/// whether to auto-reveal the tab. Values returned from the script are
+/// not surfaced back here — `wv.eval` is fire-and-forget — so the
+/// script must self-contain its decision making.
+fn run_in_webview(app: &AppHandle, script: &str) -> Result<(), String> {
+    let wv = app
+        .webviews()
+        .get(LABEL)
+        .cloned()
+        .ok_or_else(|| "music webview not attached".to_string())?;
+    wv.eval(script).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -225,7 +234,31 @@ fn json_quote(s: &str) -> String {
 
 #[tauri::command]
 pub fn music_play_pause(app: AppHandle) -> Result<(), String> {
-    click_in_webview(&app, "#play-pause-button")
+    // Cascade: the player-bar toggle only exists once a track is loaded
+    // (i.e. after the user has picked something at least once). On a
+    // cold home page we fall back to clicking the first Quick-Picks /
+    // shelf play button, then the underlying <video> element as a last
+    // resort. This makes `/music play` actually start *some* music on a
+    // fresh session — which is what users mean when they say it.
+    run_in_webview(
+        &app,
+        r#"(function(){
+            function clickIf(el){ if(!el) return false; el.click(); return true; }
+            var bar = document.querySelector('#play-pause-button');
+            if (bar && !bar.disabled && bar.offsetParent) { bar.click(); return 'bar'; }
+            var shelfSel = [
+                'ytmusic-shelf-renderer ytmusic-responsive-list-item-renderer [aria-label^="Play"]',
+                'ytmusic-carousel-shelf-renderer ytmusic-two-row-item-renderer [aria-label^="Play"]',
+                'ytmusic-carousel-shelf-renderer ytmusic-responsive-list-item-renderer [aria-label^="Play"]',
+                'ytmusic-grid-renderer [aria-label^="Play"]'
+            ].join(',');
+            var shelf = document.querySelector(shelfSel);
+            if (clickIf(shelf)) return 'shelf';
+            var vid = document.querySelector('video');
+            if (vid && vid.readyState > 0) { vid.play().catch(function(){}); return 'video'; }
+            return 'none';
+        })();"#,
+    )
 }
 
 #[tauri::command]

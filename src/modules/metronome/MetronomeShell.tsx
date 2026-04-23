@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { accent } from '../../shared/theme/accent';
+import { listen } from '@tauri-apps/api/event';
 import { PauseIcon, PlayIcon } from '../../shared/ui/icons';
+import './metronome.css';
 import { metronomeGetState, metronomeSaveState } from './api';
-import { BPM_MAX, BPM_MIN, DEFAULT_STATE, TIME_SIGNATURES, type MetronomeState } from './metronome.constants';
+import { BPM_MAX, BPM_MIN, DEFAULT_STATE, SOUND_PRESETS, TIME_SIGNATURES, type MetronomeState, type SoundId } from './metronome.constants';
+
+type MetronomeRemote = {
+  action?: 'start' | 'stop' | 'toggle' | 'status' | null;
+  bpm?: number | null;
+  numerator?: number | null;
+  denominator?: number | null;
+  subdivision?: number | null;
+  sound?: string | null;
+};
 import { BpmDial } from './components/BpmDial';
 import { BeatStrip } from './components/BeatStrip';
 import { Controls } from './components/Controls';
@@ -95,6 +105,45 @@ export const MetronomeShell = () => {
     });
   }, []);
 
+  // Remote control from the assistant / CLI. Agent surface (CLAUDE.md) —
+  // any new user-facing metronome knob MUST be reachable from here so the
+  // assistant can drive it; keep this listener's switch in sync with
+  // `parse_metronome_args` on the Rust side.
+  useEffect(() => {
+    const unlisten = listen<MetronomeRemote>('metronome:remote', (e) => {
+      const p = e.payload ?? {};
+      const patchFields: Partial<MetronomeState> = {};
+      if (typeof p.bpm === 'number') patchFields.bpm = clampBpm(p.bpm);
+      if (typeof p.numerator === 'number') patchFields.numerator = p.numerator;
+      if (typeof p.denominator === 'number' && (p.denominator === 2 || p.denominator === 4 || p.denominator === 8)) {
+        patchFields.denominator = p.denominator;
+      }
+      if (typeof p.subdivision === 'number' && p.subdivision >= 1 && p.subdivision <= 4) {
+        patchFields.subdivision = p.subdivision as 1 | 2 | 3 | 4;
+      }
+      if (typeof p.sound === 'string' && SOUND_PRESETS.some((s) => s.id === p.sound)) {
+        patchFields.sound = p.sound as SoundId;
+      }
+      if (Object.keys(patchFields).length > 0) patch(patchFields);
+      switch (p.action) {
+        case 'start':
+          if (!engine.isPlaying) engine.start();
+          break;
+        case 'stop':
+          if (engine.isPlaying) engine.stop();
+          break;
+        case 'toggle':
+          engine.toggle();
+          break;
+        default:
+          break;
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, [engine, patch]);
+
   // Keyboard shortcuts (only when no input is focused).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -151,26 +200,11 @@ export const MetronomeShell = () => {
 
   return (
     <div className="h-full w-full flex flex-col">
-      <div className="flex-1 flex items-center justify-center gap-6 px-6 py-2 min-h-0 overflow-hidden">
-        <button
-          type="button"
-          onClick={engine.toggle}
-          aria-label={engine.isPlaying ? 'Pause metronome' : 'Play metronome'}
-          aria-pressed={engine.isPlaying}
-          className="rounded-2xl flex items-center justify-center transition-all shrink-0"
-          style={{
-            width: 52,
-            height: 52,
-            background: engine.isPlaying ? accent(1) : accent(0.15),
-            color: engine.isPlaying ? '#fff' : accent(1),
-            boxShadow: engine.isPlaying
-              ? `0 8px 24px -6px ${accent(0.55)}`
-              : `inset 0 0 0 1px ${accent(0.35)}`,
-          }}
-        >
-          {engine.isPlaying ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
-        </button>
-        <div className="flex flex-col items-center gap-2">
+      <div
+        className="metro-hero flex-1 flex items-center justify-center min-h-0 overflow-hidden"
+        data-playing={engine.isPlaying}
+      >
+        <div className="flex flex-col items-center gap-3 relative z-10">
           <BpmDial
             bpm={state.bpm}
             onChange={setBpm}
@@ -184,17 +218,28 @@ export const MetronomeShell = () => {
             activeBeat={activeBeat}
             onToggleAccent={toggleAccent}
           />
-          <button
-            type="button"
-            onClick={tap}
-            className="seg t-secondary hover:t-primary px-4 py-1 rounded-md text-meta font-medium tracking-wider"
-            style={{ minWidth: 200 }}
-            data-testid="tap-tempo"
-          >
-            TAP
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={engine.toggle}
+              aria-label={engine.isPlaying ? 'Pause metronome' : 'Play metronome'}
+              aria-pressed={engine.isPlaying}
+              data-playing={engine.isPlaying}
+              className="metro-tap metro-tap-play"
+            >
+              {engine.isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
+              <span>{engine.isPlaying ? 'STOP' : 'PLAY'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={tap}
+              className="metro-tap"
+              data-testid="tap-tempo"
+            >
+              TAP
+            </button>
+          </div>
         </div>
-        <div style={{ width: 52 }} aria-hidden className="shrink-0" />
       </div>
       <Controls state={state} onPatch={patch} />
       <ExtrasRow state={state} onPatch={patch} />

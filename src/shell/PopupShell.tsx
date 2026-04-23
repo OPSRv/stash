@@ -70,10 +70,25 @@ export const PopupShell = () => {
 
   // Position the active-tab underline. Uses layout effect so the indicator
   // moves on the same paint as the highlight changes — no flash on switch.
+  // The active tab animates its width (label expands from 0 to full) over
+  // ~200ms, so we keep re-measuring via rAF until the transition settles,
+  // otherwise the underline would stick to the collapsed-width snapshot.
   useLayoutEffect(() => {
     const el = tabRefs.current.get(activeId);
     if (!el) return;
-    setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+    const measure = () =>
+      setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+    measure();
+    const start = performance.now();
+    let raf = 0;
+    const tick = () => {
+      measure();
+      if (performance.now() - start < 300) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, [activeId]);
 
   // Restore persisted popup size on first mount. Tauri's window defaults to
@@ -489,7 +504,12 @@ export const PopupShell = () => {
             left: 0,
             transform: `translateX(${indicator.left}px)`,
             width: indicator.width,
-            transition: 'transform 200ms var(--easing-emphasized), width 200ms var(--easing-emphasized), opacity 150ms ease',
+            // Position (transform) uses CSS transition to sweep smoothly
+            // between tabs. Width is driven frame-by-frame by the rAF loop
+            // above so it hugs the active tab's content edge while it
+            // expands — transitioning width here would lag a frame behind
+            // every measurement and feel sluggish.
+            transition: 'transform 260ms var(--easing-emphasized), opacity 150ms ease',
             opacity: indicator.width > 0 ? 1 : 0,
           }}
         />

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{oneshot, Mutex};
 
 use super::keyring::{SecretStore, ACCOUNT_CHAT_ID};
@@ -317,9 +317,12 @@ async fn handle_update(
         DispatchAction::Drop => return,
         DispatchAction::ReplyPaired { .. } => {
             let _ = app.emit("telegram:paired", chat_id);
-            state
-                .sender
-                .enqueue(chat_id, "✅ Сполучено зі Stash. /help — список команд.");
+            let welcome = build_welcome_message(app);
+            state.sender.enqueue_with_keyboard(
+                chat_id,
+                welcome,
+                Some(super::commands_registry::quick_actions_keyboard()),
+            );
         }
         DispatchAction::ReplyReject { .. } => {
             state.sender.enqueue(chat_id, "❌ Невірний код.");
@@ -340,6 +343,10 @@ async fn handle_update(
         }
         DispatchAction::RunCommand { name, args, .. } => {
             if let Some(handler) = state.find_command(&name) {
+                // Best-effort "typing…" for the 5s Telegram window. Fast
+                // commands clear it as soon as the reply lands; slow ones
+                // (/screenshot, /summarize) get a visible indicator.
+                send_typing(bot, chat_id).await;
                 let reply = handler
                     .handle(
                         crate::modules::telegram::commands_registry::Ctx { app: app.clone() },
@@ -350,9 +357,8 @@ async fn handle_update(
                     .sender
                     .enqueue_full(chat_id, reply.text, reply.keyboard, reply.documents);
             } else {
-                state
-                    .sender
-                    .enqueue(chat_id, format!("❓ Невідома команда: /{name}"));
+                let (text, keyboard) = build_unknown_command_reply(state, &name);
+                state.sender.enqueue_with_keyboard(chat_id, text, keyboard);
             }
         }
         DispatchAction::IngestText { text, .. } => {
@@ -378,6 +384,7 @@ async fn handle_update(
             // configured. Any missing-piece error (no key, no model,
             // provider not supported) falls back to the inbox so the
             // message isn't silently swallowed.
+            send_typing(bot, chat_id).await;
             match super::assistant::handle_user_text(app, state, &text).await {
                 Ok(reply) => {
                     let suffix = if reply.truncated {
@@ -666,10 +673,19 @@ async fn handle_callback(
         return;
     }
 
+    // "refresh:<cmd>[ rest]" — run the command and *edit* the source
+    // message in place instead of sending a fresh one. Lets the Dashboard
+    // (and other live cards) behave like a cockpit that updates rather
+    // than a stack of stale snapshots.
+    let (is_refresh, dispatch_data) = match data.strip_prefix("refresh:") {
+        Some(rest) => (true, rest.to_string()),
+        None => (false, data.clone()),
+    };
+
     // "ns:action[:arg]" — dispatch to a registered command named `ns`.
-    let (ns, action) = match data.split_once(':') {
+    let (ns, action) = match dispatch_data.split_once(':') {
         Some((a, b)) => (a.to_string(), b.to_string()),
-        None => (data.clone(), String::new()),
+        None => (dispatch_data.clone(), String::new()),
     };
 
     let reply = if let Some(handler) = state.find_command(&ns) {
@@ -689,9 +705,25 @@ async fn handle_callback(
     let _ = bot.answer_callback_query(q.id).await;
 
     if let Some(reply) = reply {
-        state
-            .sender
-            .enqueue_with_keyboard(user_id, reply.text, reply.keyboard);
+        // Edit-in-place path: reuse the originating message instead of
+        // sending a new one. Only applies when the callback asked for it
+        // AND we actually know which message to edit (q.message is present).
+        if is_refresh && reply.documents.is_empty() {
+            if let Some(src) = q.message.as_ref() {
+                let msg_id = src.id();
+                edit_message(bot, user_id, msg_id, &reply.text, &reply.keyboard).await;
+                return;
+            }
+        }
+        // Forward any attachments a handler emits (e.g. /screenshot)
+        // so the "Again" button actually delivers the PNG, not just the
+        // text caption.
+        state.sender.enqueue_full(
+            user_id,
+            reply.text,
+            reply.keyboard,
+            reply.documents,
+        );
     }
 }
 
@@ -715,6 +747,137 @@ pub async fn publish_bot_commands(bot: &teloxide::Bot, state: &TelegramState) {
     } else {
         tracing::info!("published bot commands to Telegram");
     }
+}
+
+/// Edit an existing bot message in place — used by `refresh:*` callbacks so
+/// a Dashboard card updates itself rather than stacking stale snapshots.
+/// Best-effort: a network error or a message Telegram rejects (too old /
+/// from a different bot) falls through to a log line; we'd rather leave
+/// the old card visible than spam a fresh one without asking.
+async fn edit_message(
+    bot: &teloxide::Bot,
+    chat_id: i64,
+    message_id: teloxide::types::MessageId,
+    text: &str,
+    keyboard: &Option<super::commands_registry::InlineKeyboard>,
+) {
+    use teloxide::prelude::*;
+    use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
+    // Plain text to match how `sender` posts fresh messages — neither
+    // uses parse_mode, so edits render identically to the original.
+    if let Err(e) = bot
+        .edit_message_text(ChatId(chat_id), message_id, text)
+        .await
+    {
+        tracing::debug!(error = %e, "editMessageText failed");
+        return;
+    }
+    if let Some(kb) = keyboard {
+        let rows: Vec<Vec<InlineKeyboardButton>> = kb
+            .rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|b| InlineKeyboardButton::callback(b.text.clone(), b.callback_data.clone()))
+                    .collect()
+            })
+            .collect();
+        let markup = InlineKeyboardMarkup::new(rows);
+        if let Err(e) = bot
+            .edit_message_reply_markup(ChatId(chat_id), message_id)
+            .reply_markup(markup)
+            .await
+        {
+            tracing::debug!(error = %e, "editMessageReplyMarkup failed");
+        }
+    }
+}
+
+/// Fire Telegram's "typing…" indicator for the current chat. Best-effort
+/// — a network hiccup here must never block the actual reply. Telegram
+/// auto-dismisses the indicator after 5s or when any message arrives.
+async fn send_typing(bot: &teloxide::Bot, chat_id: i64) {
+    use teloxide::prelude::*;
+    use teloxide::types::{ChatAction, ChatId};
+    if let Err(e) = bot.send_chat_action(ChatId(chat_id), ChatAction::Typing).await {
+        tracing::debug!(error = %e, "sendChatAction(typing) failed");
+    }
+}
+
+/// Build the suggestion-aware reply for a slash-command the registry
+/// didn't recognise. Returns plain text + optional button row, so the
+/// user can tap the most likely intended command instead of re-typing.
+fn build_unknown_command_reply(
+    state: &Arc<TelegramState>,
+    typed: &str,
+) -> (String, Option<super::commands_registry::InlineKeyboard>) {
+    use super::commands_registry::{suggest_commands, InlineButton, InlineKeyboard};
+    let names: Vec<&'static str> = {
+        let reg = match state.commands.read() {
+            Ok(r) => r,
+            Err(_) => return (format!("❓ Невідома команда: /{typed}"), None),
+        };
+        reg.enumerate().into_iter().map(|h| h.name()).collect()
+    };
+    let suggestions = suggest_commands(typed, &names, 3);
+    if suggestions.is_empty() {
+        return (
+            format!("❓ Невідома команда: /{typed}\n_Натисни `/` — побачиш повний список._"),
+            None,
+        );
+    }
+    let list = suggestions
+        .iter()
+        .map(|s| format!("/{s}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let text = format!("❓ /{typed} не знайшов. Може: {list}?");
+    let row: Vec<InlineButton> = suggestions
+        .iter()
+        .map(|s| InlineButton::new(format!("/{s}"), s.clone()))
+        .collect();
+    (text, Some(InlineKeyboard { rows: vec![row] }))
+}
+
+/// Compose the post-pairing welcome: a snapshot line for "look, Stash is
+/// alive and here's what I already know" + a nudge toward /help. The
+/// quick-actions keyboard is attached separately at the call site.
+fn build_welcome_message(app: &AppHandle) -> String {
+    use super::module_cmds::{read_battery, BatterySnapshot};
+    let battery = match read_battery() {
+        BatterySnapshot::Present { percent, charging } => {
+            let icon = if charging { "🔌" } else { "🔋" };
+            format!("{icon} {percent}%")
+        }
+        BatterySnapshot::NoBattery => "🔌 AC".to_string(),
+        BatterySnapshot::Unknown => "🔋 —".to_string(),
+    };
+    let clips = app
+        .try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>()
+        .and_then(|s| s.repo.lock().ok().and_then(|r| r.list(1).ok()))
+        .map(|v| {
+            if v.is_empty() {
+                "📋 порожньо".to_string()
+            } else {
+                "📋 ready".to_string()
+            }
+        })
+        .unwrap_or_else(|| "📋 —".to_string());
+    let pomodoro = app
+        .try_state::<Arc<crate::modules::pomodoro::state::PomodoroState>>()
+        .and_then(|s| s.core.lock().ok().map(|c| c.snapshot()))
+        .map(|snap| match snap.status {
+            crate::modules::pomodoro::engine::SessionStatus::Idle => "🍅 idle".to_string(),
+            crate::modules::pomodoro::engine::SessionStatus::Running => {
+                let mins = (snap.remaining_ms / 60_000).max(0);
+                format!("🍅 {mins}m left")
+            }
+            crate::modules::pomodoro::engine::SessionStatus::Paused => "🍅 paused".to_string(),
+        })
+        .unwrap_or_else(|| "🍅 —".to_string());
+    format!(
+        "✅ *Stash online*\n{battery} · {clips} · {pomodoro}\n\nНатисни `/` щоб побачити всі команди, або скористайся кнопками нижче."
+    )
 }
 
 #[cfg(test)]

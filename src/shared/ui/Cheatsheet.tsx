@@ -66,6 +66,29 @@ const downloadsShortcuts: ShortcutGroup = {
   ],
 };
 
+const terminalShortcuts: ShortcutGroup = {
+  title: 'Terminal',
+  items: [
+    { keys: ['⌘T'], label: 'New shell tab' },
+    { keys: ['⌘W'], label: 'Close pane (or tab if last pane)' },
+    { keys: ['⌘D'], label: 'Split pane right' },
+    { keys: ['⌘⇧D'], label: 'Split pane down' },
+    { keys: ['⌘E'], label: 'Maximize / restore pane' },
+    { keys: ['⌘1', '…', '⌘8'], label: 'Switch to shell tab N' },
+    { keys: ['⌘⌥←', '⌘⌥→'], label: 'Cycle focus between panes' },
+    { keys: ['⌘K'], label: 'Clear scrollback' },
+    { keys: ['⌘F'], label: 'Search scrollback' },
+    { keys: ['⌘⇧E'], label: 'Toggle compose prompt' },
+    { keys: ['⌘C'], label: 'Copy selection (or ^C if no selection)' },
+    { keys: ['⌘V'], label: 'Paste' },
+    { keys: ['↵'], label: 'Compose: send + submit' },
+    { keys: ['⇧↵'], label: 'Compose: newline' },
+    { keys: ['⌥↵'], label: 'Compose: insert without submitting' },
+    { keys: ['Esc'], label: 'Compose: back to terminal' },
+    { keys: ['Drag pane'], label: 'Drop on edge → tile; on centre → swap' },
+  ],
+};
+
 export const Cheatsheet = ({
   open,
   onClose,
@@ -96,6 +119,7 @@ export const Cheatsheet = ({
   if (!tab || tab === 'web') groups.push(webShortcuts);
   if (!tab || tab === 'downloads') groups.push(downloadsShortcuts);
   if (!tab || tab === 'metronome') groups.push(metronomeShortcuts);
+  if (!tab || tab === 'terminal') groups.push(terminalShortcuts);
 
   return (
     <div

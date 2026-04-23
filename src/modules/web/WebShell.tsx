@@ -12,7 +12,7 @@ import { EmbeddedWebChat } from './EmbeddedWebChat';
 import { Favicon } from './Favicon';
 import { useWebServices } from './useWebServices';
 import { isEmbeddableUrl, reorderServices } from './webServiceUtils';
-import { webchatClose, webchatHideAll } from './webchatApi';
+import { webchatClose, webchatHideAll, type WebchatNav } from './webchatApi';
 
 /// MIME type we use for drag-reordering tabs so we don't collide with the
 /// `text/uri-list` drop target on the same tab bar (which opens the add
@@ -334,6 +334,31 @@ export const WebShell = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [closeService, storedActive, toggleCollapsed, activeService, copyServiceUrl]);
 
+  // Per-service live URL/title, mirrored from `webchat:nav`. Drives the
+  // sidebar favicon + tooltip so each tab row reflects the page the
+  // user is actually on (after navigation inside the webview) rather
+  // than the home URL captured when the tab was added.
+  const [navMap, setNavMap] = useState<Record<string, { url: string; title: string }>>({});
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+    listen<WebchatNav>('webchat:nav', (evt) => {
+      const p = evt.payload;
+      if (!p || !p.service) return;
+      setNavMap((prev) => {
+        const cur = prev[p.service];
+        if (cur && cur.url === p.url && cur.title === p.title) return prev;
+        return { ...prev, [p.service]: { url: p.url || cur?.url || '', title: p.title || cur?.title || '' } };
+      });
+    })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   // Per-service loading state → drives the favicon pulse. Mirrors the
   // subscription inside `EmbeddedWebChat`; two subscribers to the same
   // Tauri event is fine and keeps the sidebar decoupled from the main view.
@@ -354,16 +379,27 @@ export const WebShell = () => {
   }, []);
 
   const [dragId, setDragId] = useState<string | null>(null);
+  /// Current drop target under the cursor. `side` is 'before'|'after'
+  /// depending on whether the pointer is in the top or bottom half of
+  /// the target (or left/right for horizontal tile grid). Used to
+  /// render an insertion-line indicator so the user can see exactly
+  /// where the drop will land.
+  const [dropTarget, setDropTarget] = useState<{ id: string; side: 'before' | 'after' } | null>(null);
 
   const handleReorder = useCallback(
-    async (fromId: string, toId: string) => {
-      // Only reorder within the same section — cross-section drops are a
-      // no-op; users should toggle pin to move a tab between sections.
+    async (fromId: string, toId: string, side: 'before' | 'after' = 'before') => {
       const from = services.find((s) => s.id === fromId);
       const to = services.find((s) => s.id === toId);
       if (!from || !to) return;
-      if (!!from.pinned !== !!to.pinned) return;
-      const next = reorderServices(services, fromId, toId);
+      // Cross-section drop → flip pin on the dragged tab to match the
+      // target section, then reorder. Lets users move a tab between
+      // Pinned and Tabs with a single drag instead of forcing them
+      // through the context menu.
+      const adjusted: WebChatService[] =
+        !!from.pinned !== !!to.pinned
+          ? services.map((s) => (s.id === fromId ? { ...s, pinned: to.pinned } : s))
+          : services;
+      const next = reorderServices(adjusted, fromId, toId, side);
       if (next === services) return;
       await persistServices(next, 'reorder tabs');
     },
@@ -450,7 +486,16 @@ export const WebShell = () => {
     const beingDragged = dragId === s.id;
     const loading = !!loadingMap[s.id];
     const stale = isStale(s);
-    const labelTitle = collapsed ? `${s.label} — double-click to rename` : 'Double-click to rename';
+    const nav = navMap[s.id];
+    const faviconUrl = nav?.url || s.url;
+    const labelTitle = collapsed
+      ? `${s.label} — double-click to rename`
+      : nav?.title
+        ? `${nav.title} — double-click to rename`
+        : 'Double-click to rename';
+
+    const isDropTarget = dropTarget?.id === s.id && dragId && dragId !== s.id;
+    const indicatorSide = isDropTarget ? dropTarget.side : null;
 
     return (
       <div
@@ -462,28 +507,44 @@ export const WebShell = () => {
           e.dataTransfer.setData(TAB_DRAG_MIME, s.id);
           e.dataTransfer.setData('text/plain', s.id);
         }}
-        onDragEnd={() => setDragId(null)}
+        onDragEnd={() => {
+          setDragId(null);
+          setDropTarget(null);
+        }}
         onDragOver={(e) => {
-          if (Array.from(e.dataTransfer.types).includes(TAB_DRAG_MIME)) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.dataTransfer.dropEffect = 'move';
-          }
+          if (!Array.from(e.dataTransfer.types).includes(TAB_DRAG_MIME)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = 'move';
+          const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+          const side: 'before' | 'after' =
+            e.clientY - rect.top < rect.height / 2 ? 'before' : 'after';
+          setDropTarget((prev) =>
+            prev && prev.id === s.id && prev.side === side ? prev : { id: s.id, side },
+          );
+        }}
+        onDragLeave={(e) => {
+          // Only clear when the pointer truly leaves this row (and not
+          // onto one of its children) so the indicator doesn't flicker.
+          if ((e.currentTarget as HTMLDivElement).contains(e.relatedTarget as Node)) return;
+          setDropTarget((prev) => (prev?.id === s.id ? null : prev));
         }}
         onDrop={(e) => {
           const from = e.dataTransfer.getData(TAB_DRAG_MIME);
+          const side = dropTarget?.id === s.id ? dropTarget.side : 'before';
+          setDragId(null);
+          setDropTarget(null);
           if (!from || from === s.id) return;
           e.preventDefault();
           e.stopPropagation();
-          setDragId(null);
-          handleReorder(from, s.id).catch(() => {});
+          handleReorder(from, s.id, side).catch(() => {});
         }}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setContextMenu({ id: s.id, x: e.clientX, y: e.clientY });
         }}
-        className={`group flex items-center rounded-md transition-all ${
+        className={`group relative flex items-center rounded-md transition-all ${
           active ? 'bg-white/[0.10]' : 'hover:bg-white/[0.04]'
         } ${beingDragged ? 'opacity-50' : ''} ${stale && !active ? 'opacity-60' : ''}`}
       >
@@ -523,7 +584,7 @@ export const WebShell = () => {
             aria-label={collapsed ? s.label : undefined}
           >
             <span className="relative shrink-0 inline-flex items-center justify-center w-[14px] h-[14px]">
-              <Favicon url={s.url} label={s.label} size={14} />
+              <Favicon url={faviconUrl} label={s.label} size={14} />
               {loading && (
                 <span
                   aria-hidden="true"
@@ -580,6 +641,18 @@ export const WebShell = () => {
               ×
             </button>
           </>
+        )}
+        {indicatorSide && (
+          <span
+            aria-hidden="true"
+            className="absolute left-1 right-1 h-0.5 rounded-full pointer-events-none"
+            style={{
+              background: accent(0.95),
+              boxShadow: `0 0 6px ${accent(0.6)}`,
+              top: indicatorSide === 'before' ? -1 : undefined,
+              bottom: indicatorSide === 'after' ? -1 : undefined,
+            }}
+          />
         )}
       </div>
     );
@@ -774,23 +847,85 @@ export const WebShell = () => {
                 </div>
               )}
               {services.map((s) => {
-                let host = s.url;
+                const nav = navMap[s.id];
+                const effectiveUrl = nav?.url || s.url;
+                let host = effectiveUrl;
                 try {
-                  host = new URL(s.url).hostname;
+                  host = new URL(effectiveUrl).hostname;
                 } catch {
                   // keep raw URL on parse failure
                 }
+                const beingDragged = dragId === s.id;
+                const isDropTarget = dropTarget?.id === s.id && dragId && dragId !== s.id;
+                const indicatorSide = isDropTarget ? dropTarget.side : null;
                 return (
                   <button
                     key={s.id}
                     type="button"
+                    draggable
                     onClick={() => setActive(s.id)}
-                    className="group flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:bg-white/[0.04] transition-colors text-center"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setContextMenu({ id: s.id, x: e.clientX, y: e.clientY });
+                    }}
+                    onDragStart={(e) => {
+                      setDragId(s.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData(TAB_DRAG_MIME, s.id);
+                      e.dataTransfer.setData('text/plain', s.id);
+                    }}
+                    onDragEnd={() => {
+                      setDragId(null);
+                      setDropTarget(null);
+                    }}
+                    onDragOver={(e) => {
+                      if (!Array.from(e.dataTransfer.types).includes(TAB_DRAG_MIME)) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      // Tiles are a horizontal grid row — split on X, not Y.
+                      const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                      const side: 'before' | 'after' =
+                        e.clientX - rect.left < rect.width / 2 ? 'before' : 'after';
+                      setDropTarget((prev) =>
+                        prev && prev.id === s.id && prev.side === side
+                          ? prev
+                          : { id: s.id, side },
+                      );
+                    }}
+                    onDragLeave={(e) => {
+                      if ((e.currentTarget as HTMLButtonElement).contains(e.relatedTarget as Node))
+                        return;
+                      setDropTarget((prev) => (prev?.id === s.id ? null : prev));
+                    }}
+                    onDrop={(e) => {
+                      const from = e.dataTransfer.getData(TAB_DRAG_MIME);
+                      const side = dropTarget?.id === s.id ? dropTarget.side : 'before';
+                      setDragId(null);
+                      setDropTarget(null);
+                      if (!from || from === s.id) return;
+                      e.preventDefault();
+                      handleReorder(from, s.id, side).catch(() => {});
+                    }}
+                    className={`group relative flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:bg-white/[0.04] transition-colors text-center ${
+                      beingDragged ? 'opacity-50' : ''
+                    }`}
                     style={{ background: 'var(--color-surface)' }}
                   >
-                    <Favicon url={s.url} label={s.label} size={40} className="!rounded-md" />
+                    <Favicon url={effectiveUrl} label={s.label} size={40} className="!rounded-md" />
                     <div className="t-primary text-body font-medium">{s.label}</div>
                     <div className="t-tertiary text-meta truncate max-w-full">{host}</div>
+                    {indicatorSide && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute top-1 bottom-1 w-0.5 rounded-full pointer-events-none"
+                        style={{
+                          background: accent(0.95),
+                          boxShadow: `0 0 6px ${accent(0.6)}`,
+                          left: indicatorSide === 'before' ? -2 : undefined,
+                          right: indicatorSide === 'after' ? -2 : undefined,
+                        }}
+                      />
+                    )}
                   </button>
                 );
               })}

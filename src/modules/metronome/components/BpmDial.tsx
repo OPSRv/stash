@@ -11,14 +11,16 @@ type Props = {
   isPlaying: boolean;
 };
 
-const SIZE = 240;
-const STROKE = 3;
-const RADIUS = SIZE / 2 - 18;
-/** Sweep angle of the BPM arc. 270° feels generous and keeps the bottom open
- *  for the beat strip + tap bar. */
-const SWEEP = 270;
-/** Start at 7 o'clock, sweep clockwise through 5 o'clock. */
-const START_DEG = 135;
+const SIZE = 288;
+const STROKE = 5;
+const RADIUS = SIZE / 2 - 24;
+const TICK_RADIUS = RADIUS + 10;
+/** Sweep angle of the BPM arc. 260° lишає місце зверху для хедера-темпу. */
+const SWEEP = 260;
+/** Start at ~7:30, sweep clockwise through ~4:30. */
+const START_DEG = 140;
+
+const TICK_COUNT = 60;
 
 const clamp = (v: number) => Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(v)));
 
@@ -42,6 +44,9 @@ export const BpmDial = ({ bpm, onChange, pulseSeq, pulseAccent, isPlaying }: Pro
   const trackPath = arcPath(cx, cy, RADIUS, START_DEG, START_DEG + SWEEP);
   const fillPath = arcPath(cx, cy, RADIUS, START_DEG, endDeg);
 
+  // Позиція «бульбашки»-хедлайна на кінці заповненої дуги.
+  const head = polar(cx, cy, RADIUS, endDeg);
+
   const [pulseKey, setPulseKey] = useState(0);
   useEffect(() => {
     if (pulseSeq === 0) return;
@@ -57,11 +62,10 @@ export const BpmDial = ({ bpm, onChange, pulseSeq, pulseAccent, isPlaying }: Pro
     const rect = svg.getBoundingClientRect();
     const x = clientX - rect.left - cx;
     const y = clientY - rect.top - cy;
-    const angle = (Math.atan2(y, x) * 180) / Math.PI + 90; // 0 = top, increases clockwise
+    const angle = (Math.atan2(y, x) * 180) / Math.PI + 90;
     let rel = angle - START_DEG;
     if (rel < 0) rel += 360;
     if (rel > SWEEP) {
-      // Snap to whichever endpoint is closer when the cursor leaves the arc.
       rel = rel - SWEEP < 360 - rel ? SWEEP : 0;
     }
     return clamp(BPM_MIN + (rel / SWEEP) * (BPM_MAX - BPM_MIN));
@@ -89,12 +93,17 @@ export const BpmDial = ({ bpm, onChange, pulseSeq, pulseAccent, isPlaying }: Pro
     onChange(clamp(bpm + (e.deltaY < 0 ? step : -step)));
   };
 
+  const gradId = 'metro-arc-grad';
+  const filterId = 'metro-arc-glow';
+
   return (
     <div
-      className="relative select-none"
+      className="metro-dial-wrap relative select-none"
       style={{ width: SIZE, height: SIZE }}
+      data-playing={isPlaying}
       data-testid="bpm-dial"
     >
+      <div className="metro-dial-glow" aria-hidden />
       <svg
         ref={svgRef}
         width={SIZE}
@@ -105,9 +114,49 @@ export const BpmDial = ({ bpm, onChange, pulseSeq, pulseAccent, isPlaying }: Pro
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onWheel={onWheel}
-        className="cursor-grab active:cursor-grabbing"
-        style={{ touchAction: 'none' }}
+        className="cursor-grab active:cursor-grabbing relative"
+        style={{ touchAction: 'none', zIndex: 1 }}
       >
+        <defs>
+          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={accent(0.55)} />
+            <stop offset="55%" stopColor={accent(1)} />
+            <stop offset="100%" stopColor={accent(0.85)} />
+          </linearGradient>
+          <filter id={filterId} x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* Обертальне кільце тіків — «годинникова» космічна деталь. */}
+        <g
+          className={`metro-ticks ${isPlaying ? '' : 'metro-ticks-paused'}`}
+          style={{ transformOrigin: `${cx}px ${cy}px` }}
+        >
+          {Array.from({ length: TICK_COUNT }, (_, i) => {
+            const deg = (i / TICK_COUNT) * 360;
+            const p1 = polar(cx, cy, TICK_RADIUS, deg);
+            const p2 = polar(cx, cy, TICK_RADIUS + (i % 5 === 0 ? 5 : 2.5), deg);
+            return (
+              <line
+                key={i}
+                x1={p1.x}
+                y1={p1.y}
+                x2={p2.x}
+                y2={p2.y}
+                stroke={i % 5 === 0 ? accent(0.5) : 'rgba(255,255,255,0.12)'}
+                strokeWidth={i % 5 === 0 ? 1.2 : 0.6}
+                strokeLinecap="round"
+              />
+            );
+          })}
+        </g>
+
+        {/* Базовий трек дуги */}
         <path
           d={trackPath}
           fill="none"
@@ -115,56 +164,67 @@ export const BpmDial = ({ bpm, onChange, pulseSeq, pulseAccent, isPlaying }: Pro
           strokeWidth={STROKE}
           strokeLinecap="round"
         />
+        {/* Заповнена дуга з градієнтом */}
         <path
           d={fillPath}
           fill="none"
-          stroke={accent(isPlaying ? 0.95 : 0.8)}
+          stroke={`url(#${gradId})`}
           strokeWidth={STROKE}
           strokeLinecap="round"
+          filter={isPlaying ? `url(#${filterId})` : undefined}
           style={{ transition: 'd 200ms cubic-bezier(0.2,0,0,1)' }}
         />
-        {/* Pulse ring */}
+        {/* «Бульбашка» на кінці дуги — hint, що можна тягнути. */}
+        <circle
+          cx={head.x}
+          cy={head.y}
+          r={6}
+          fill="#fff"
+          style={{ filter: `drop-shadow(0 0 6px ${accent(0.9)})` }}
+        />
+        <circle
+          cx={head.x}
+          cy={head.y}
+          r={3}
+          fill={accent(1)}
+        />
+
+        {/* Пульс-кільце на кожен beat */}
         {pulseKey > 0 && (
           <circle
             key={pulseKey}
             cx={cx}
             cy={cy}
-            r={RADIUS - 6}
+            r={RADIUS - 8}
             fill="none"
-            stroke={accent(pulseAccent ? 0.9 : 0.55)}
-            strokeWidth={pulseAccent ? 2 : 1.5}
+            stroke={accent(pulseAccent ? 0.95 : 0.6)}
+            strokeWidth={pulseAccent ? 2.5 : 1.5}
             style={{
               transformOrigin: '50% 50%',
-              animation: `metronome-pulse ${pulseAccent ? 220 : 180}ms ease-out forwards`,
+              animation: `metronome-pulse ${pulseAccent ? 260 : 200}ms ease-out forwards`,
             }}
           />
         )}
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
         <div
-          className="t-primary font-light"
+          className="metro-bpm-num"
           style={{
-            fontSize: 80,
-            lineHeight: 1,
-            fontVariantNumeric: 'tabular-nums',
-            letterSpacing: '-0.04em',
+            fontSize: 108,
+            lineHeight: 0.95,
+            fontWeight: 200,
           }}
         >
           {bpm}
         </div>
+        <div className="metro-tempo-label mt-1">{tempoName(bpm)}</div>
         <div
-          className="t-tertiary mt-2"
-          style={{ fontSize: 11, letterSpacing: '0.18em', textTransform: 'uppercase' }}
+          className="t-tertiary"
+          style={{ fontSize: 9, letterSpacing: '0.22em', textTransform: 'uppercase', marginTop: 4 }}
         >
-          {tempoName(bpm)}
+          BPM
         </div>
       </div>
-      <style>{`
-        @keyframes metronome-pulse {
-          from { opacity: 0.85; transform: scale(1); }
-          to { opacity: 0; transform: scale(1.06); }
-        }
-      `}</style>
     </div>
   );
 };

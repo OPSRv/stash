@@ -236,10 +236,10 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
         {items.map((a) => (
           <li
             key={a.id}
-            className="relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center"
+            className="group relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center"
           >
             <AttachmentBody item={a} />
-            <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 focus-within:opacity-100 hover:opacity-100 transition-opacity">
+            <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
               {onEmbedMarkdown && (
                 <IconButton
                   title="Embed in note body as markdown"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -58,6 +58,26 @@ import {
   type Note,
   type NoteSummary,
 } from './api';
+
+const RailButton = ({
+  onClick,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  children: ReactNode;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-label={title}
+    title={title}
+    className="ring-focus w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors t-secondary hover:t-primary"
+  >
+    {children}
+  </button>
+);
 
 const iso = (ts: number) => {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - ts);
@@ -823,42 +843,22 @@ export const NotesShell = () => {
           }`}
           aria-hidden={!sidebarCollapsed}
         >
-          <IconButton
-            onClick={() => setSidebarCollapsed(false)}
-            title="Expand notes list"
-            stopPropagation={false}
-          >
+          <RailButton onClick={() => setSidebarCollapsed(false)} title="Expand notes list">
             <PanelLeftIcon size={14} />
-          </IconButton>
-          <IconButton
-            onClick={newNote}
-            title="New note (⌘N)"
-            stopPropagation={false}
-          >
+          </RailButton>
+          <RailButton onClick={newNote} title="New note (⌘N)">
             <PencilIcon size={13} />
-          </IconButton>
-          <IconButton
-            onClick={openRecorderForNew}
-            title="New voice note"
-            stopPropagation={false}
-          >
+          </RailButton>
+          <RailButton onClick={openRecorderForNew} title="New voice note">
             <MicIcon size={13} />
-          </IconButton>
-          <IconButton
-            onClick={expandSidebarAndFocusSearch}
-            title="Search notes"
-            stopPropagation={false}
-          >
+          </RailButton>
+          <RailButton onClick={expandSidebarAndFocusSearch} title="Search notes">
             <SearchIcon size={13} />
-          </IconButton>
+          </RailButton>
           <div className="flex-1" />
-          <IconButton
-            onClick={onImport}
-            title="Import .md"
-            stopPropagation={false}
-          >
+          <RailButton onClick={onImport} title="Import .md">
             <UploadIcon size={13} />
-          </IconButton>
+          </RailButton>
         </div>
         <div
           className={`absolute inset-y-0 left-0 w-[220px] flex flex-col transition-opacity duration-150 ${

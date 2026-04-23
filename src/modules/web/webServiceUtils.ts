@@ -58,11 +58,14 @@ export const clampZoom = (value: number): number => {
 
 /// Pure move-one-item helper used by the tab drag-reorder UI. Returns the
 /// same list instance when the operation would be a no-op so React can skip
-/// an unnecessary re-render.
+/// an unnecessary re-render. `side` controls whether the source lands in
+/// front of or after the target — the sidebar + Home tiles pick it from
+/// the pointer's position relative to the target's midline.
 export const reorderServices = <T extends { id: string }>(
   list: readonly T[],
   fromId: string,
   toId: string,
+  side: 'before' | 'after' = 'before',
 ): T[] => {
   if (fromId === toId) return list as T[];
   const from = list.findIndex((s) => s.id === fromId);
@@ -70,8 +73,16 @@ export const reorderServices = <T extends { id: string }>(
   if (from === -1 || to === -1) return list as T[];
   const next = list.slice();
   const [moved] = next.splice(from, 1);
-  next.splice(to, 0, moved);
-  return next;
+  // After removal, the target's index shifts by one if we took an item
+  // from before it. Re-resolve on the mutated list so both 'before' and
+  // 'after' land on the correct slot.
+  const newTargetIdx = next.findIndex((s) => s.id === toId);
+  const insertAt = newTargetIdx + (side === 'after' ? 1 : 0);
+  next.splice(insertAt, 0, moved);
+  // When the move is a no-op (e.g. dropping just after its previous
+  // neighbour) return the original list so React skips a render.
+  const changed = next.some((s, i) => s.id !== list[i]?.id);
+  return changed ? next : (list as T[]);
 };
 
 /// Minimal URL validator: must parse AND use http/https. Anything else

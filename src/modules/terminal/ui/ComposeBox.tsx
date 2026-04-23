@@ -1,6 +1,12 @@
 import { forwardRef, useState } from 'react';
 
 import { Button } from '../../../shared/ui/Button';
+import {
+  MicIcon,
+  SendToAiIcon,
+  StopCircleIcon,
+  TrashIcon,
+} from '../../../shared/ui/icons';
 import type { UseVoiceRecorder } from '../../../shared/hooks/useVoiceRecorder';
 
 export type ComposeBoxProps = {
@@ -33,7 +39,7 @@ export type ComposeBoxProps = {
 /// border on the textarea.
 export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
   function ComposeBox(
-    { value, onChange, onSend, onFileAttach, onEscape, voice, compact },
+    { value, onChange, onSend, onFileAttach, onEscape, voice },
     ref,
   ) {
     const [dragOver, setDragOver] = useState(false);
@@ -51,7 +57,7 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
           // reads as frosted-glass chrome over the tinted terminal
           // backdrop instead of a flat grey slab, while still being
           // opaque enough that xterm scrollback can't bleed through.
-          background: 'rgba(28, 28, 32, 0.45)',
+          background: 'rgba(16, 18, 22, 0.6)',
           backdropFilter: 'blur(18px) saturate(1.4)',
           WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
         }}
@@ -85,23 +91,11 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
         data-testid="terminal-compose"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="t-tertiary text-meta shrink-0">Compose</span>
-          {!compact && (
-            <span
-              className="t-tertiary text-meta"
-              style={{
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                minWidth: 0,
-              }}
-            >
-              · Enter send · ⇧Enter newline · paste / drop any file · Esc back
-            </span>
-          )}
+          <span className="t-tertiary text-meta shrink-0 select-none">
+            Compose
+          </span>
           {voice.phase === 'recording' && (
             <span
-              className="terminal-rec-dot"
               aria-hidden
               style={{
                 width: 8,
@@ -112,8 +106,12 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
             />
           )}
           {voice.phase === 'error' && voice.error && (
-            <span className="t-danger text-meta" title={voice.error}>
-              ⚠️ mic
+            <span
+              className="t-tertiary text-meta"
+              title={voice.error}
+              style={{ color: 'var(--color-warning-fg)' }}
+            >
+              ⚠ mic
             </span>
           )}
           <div className="flex-1" />
@@ -135,49 +133,32 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
                 voice.phase === 'recording' ? 'Stop recording' : 'Record voice'
               }
             >
-              {voice.phase === 'recording'
-                ? compact
-                  ? '⏹'
-                  : '⏹ Stop'
-                : voice.busy
-                  ? compact
-                    ? '…'
-                    : '… Transcribe'
-                  : compact
-                    ? '🎙'
-                    : '🎙 Record'}
+              {voice.phase === 'recording' ? (
+                <StopCircleIcon size={13} />
+              ) : (
+                <MicIcon size={13} />
+              )}
             </Button>
-            {!compact && (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => onChange('')}
-                disabled={!value}
-              >
-                Clear
-              </Button>
-            )}
-            {!compact && (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => void onSend(false)}
-                disabled={!value}
-                title="Insert into prompt without submitting"
-              >
-                Insert
-              </Button>
-            )}
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => onChange('')}
+              disabled={!value}
+              title="Clear prompt"
+              aria-label="Clear"
+            >
+              <TrashIcon size={13} />
+            </Button>
             <Button
               size="xs"
               variant="soft"
               tone="accent"
               onClick={() => void onSend(true)}
               disabled={!value}
-              title="Paste + submit with Enter"
+              title="Paste + submit with Enter (Insert without submit: ⌥Enter)"
               aria-label="Send"
             >
-              {compact ? '➤' : 'Send'}
+              <SendToAiIcon size={13} />
             </Button>
           </div>
         </div>
@@ -204,7 +185,13 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
             // listener — otherwise ⌘K would clear the shell while
             // typing here.
             e.stopPropagation();
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && e.altKey) {
+              // Opt+Enter = insert without submitting. Keeps the user
+              // in compose so they can iterate on the prompt before
+              // committing with plain Enter.
+              e.preventDefault();
+              void onSend(false);
+            } else if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
               void onSend(true);
             } else if (e.key === 'Escape') {
@@ -212,15 +199,14 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
               onEscape();
             }
           }}
-          placeholder="Multi-line prompt. Enter = send · Shift+Enter = newline · Esc = back to terminal."
+          placeholder="Message · ⏎ send · ⇧⏎ newline · ⌥⏎ insert · Esc back"
           rows={5}
           className="w-full resize-none rounded-md px-2 py-1.5 text-body font-mono outline-none t-primary"
           style={{
-            // Slightly recessed against the frosted compose strip so the
-            // textarea reads as an input field, not a flat continuation
-            // of the strip. Semi-transparent lets the chrome blur show
-            // through subtly instead of punching a hard black rectangle.
-            background: 'rgba(0, 0, 0, 0.15)',
+            // Darker recess against the frosted compose strip so the
+            // textarea reads as a proper input field. Still translucent
+            // enough that the popup blur shows through subtly.
+            background: 'rgba(0, 0, 0, 0.28)',
             border: dragOver
               ? '1px solid var(--stash-accent)'
               : '1px solid var(--color-border-hair, rgba(255,255,255,0.08))',

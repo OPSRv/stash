@@ -156,6 +156,7 @@ use modules::whisper::{
     },
     state::WhisperStateHandle,
 };
+use modules::voice::commands::{voice_ask, voice_transcribe};
 use modules::notes::{
     commands::{
         notes_add_attachment, notes_create, notes_delete, notes_get, notes_list,
@@ -197,7 +198,10 @@ use modules::system::commands::{
     system_sleep_displays, system_sleep_now,
     system_toggle_launch_agent, system_trash_path,
 };
-use modules::terminal::commands::{pty_close, pty_open, pty_resize, pty_write};
+use modules::terminal::commands::{
+    pty_close, pty_get_cwd, pty_open, pty_resize, pty_set_cwd, pty_write,
+    terminal_save_paste_blob,
+};
 use modules::terminal::state::TerminalState;
 use modules::webchat::commands::{
     webchat_back, webchat_close, webchat_close_all, webchat_current_url, webchat_embed,
@@ -249,6 +253,7 @@ pub fn run() {
                 let mut state = String::new();
                 let mut key = String::new();
                 let mut shift = false;
+                let mut nav_url = String::new();
                 for pair in q.split('&') {
                     let mut it = pair.splitn(2, '=');
                     let k = it.next().unwrap_or("");
@@ -264,6 +269,7 @@ pub fn run() {
                         "state" => state = decoded,
                         "key" => key = decoded,
                         "shift" => shift = decoded == "1",
+                        "url" => nav_url = decoded,
                         _ => {}
                     }
                 }
@@ -287,6 +293,19 @@ pub fn run() {
                                 "service": service,
                                 "key": key,
                                 "shift": shift,
+                            }),
+                        );
+                    }
+                    // Live navigation ticks — URL + document title. Powers
+                    // the address bar + favicon so they match the actual
+                    // page the user is on rather than the home URL.
+                    "nav" => {
+                        let _ = app.emit(
+                            "webchat:nav",
+                            serde_json::json!({
+                                "service": service,
+                                "url": nav_url,
+                                "title": title.clone(),
                             }),
                         );
                     }
@@ -359,6 +378,23 @@ pub fn run() {
                             // `emit` stays on the AppHandle so child webviews
                             // also receive it. Pass the tab payload first.
                             let _ = app.emit("nav:activate", "notes");
+                            let pos_state = app.state::<Arc<PopupPositionState>>();
+                            position_popup(&win, &pos_state);
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    } else if shortcut
+                        .matches(mods, tauri_plugin_global_shortcut::Code::KeyA)
+                    {
+                        // Open AI tab and kick off voice recording via
+                        // the composer's mic hook. `voice:activate` is
+                        // still a richer signal than raw nav — AiShell
+                        // uses it to start recording only when the shell
+                        // is mounted, so the user doesn't have to aim at
+                        // the mic button.
+                        if let Some(win) = resolve_popup(app) {
+                            let _ = app.emit("nav:activate", "ai");
+                            let _ = app.emit("voice:activate", true);
                             let pos_state = app.state::<Arc<PopupPositionState>>();
                             position_popup(&win, &pos_state);
                             let _ = win.show();
@@ -444,6 +480,8 @@ pub fn run() {
             whisper_set_active,
             whisper_get_active,
             whisper_transcribe_path,
+            voice_transcribe,
+            voice_ask,
             global_search,
             system_list_processes,
             system_kill_process,
@@ -506,6 +544,9 @@ pub fn run() {
             pty_write,
             pty_resize,
             pty_close,
+            pty_set_cwd,
+            pty_get_cwd,
+            terminal_save_paste_blob,
             ai_list_sessions,
             ai_create_session,
             ai_find_session_by_context,
@@ -738,7 +779,10 @@ pub fn run() {
                 modules::telegram::module_cmds::ClipCmd::new(Arc::clone(&shared_repo)),
             );
             telegram_state.register_command(
-                modules::telegram::module_cmds::NoteCmd::new(notes_repo_for_telegram),
+                modules::telegram::module_cmds::NoteCmd::new(Arc::clone(&notes_repo_for_telegram)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::NotesListCmd::new(notes_repo_for_telegram),
             );
             telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
             telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
@@ -775,6 +819,22 @@ pub fn run() {
             );
             telegram_state.register_command(
                 modules::telegram::module_cmds::ShutdownCmd::new(Arc::clone(&power_timers)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::DashboardCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(modules::telegram::module_cmds::AppCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::FocusCmd);
+            telegram_state.register_command(
+                modules::telegram::module_cmds::WeatherCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(modules::telegram::module_cmds::NavigateCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::MetronomeCmd);
+            telegram_state.register_command(
+                modules::telegram::module_cmds::PomodoroCmd::new(Arc::clone(&pomodoro_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::module_cmds::AiCmd::new(Arc::clone(&telegram_state)),
             );
 
             // Outbound watchers — battery + calendar + reminders ticker.
@@ -849,8 +909,10 @@ pub fn run() {
                 let mods = Some(Modifiers::SUPER | Modifiers::SHIFT);
                 let toggle = Shortcut::new(mods, Code::KeyV);
                 let notes = Shortcut::new(mods, Code::KeyN);
+                let voice = Shortcut::new(mods, Code::KeyA);
                 app.global_shortcut().register(toggle)?;
                 app.global_shortcut().register(notes)?;
+                app.global_shortcut().register(voice)?;
             }
 
             let auto_hide = Arc::new(PopupAutoHide(AtomicBool::new(true)));

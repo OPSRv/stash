@@ -29,6 +29,11 @@ export type TabContentProps = {
     paneId: string,
     label: string,
   ) => (e: React.PointerEvent) => void;
+  /// Leaf id currently maximized inside this tab (null → normal tiling).
+  /// Siblings stay mounted so their PTY/xterm state survives the zoom.
+  maximizedPane: string | null;
+  /// Enter/exit zoom from a pane's context menu.
+  onToggleMaximize: (paneId: string) => void;
   /// Bumped by the shell on every layout change so the child panes
   /// can re-fit and fire SIGWINCH to alt-screen TUIs.
   revision: number;
@@ -47,6 +52,8 @@ export const TabContent = ({
   onClosePane,
   onRatios,
   onPaneDragStart,
+  maximizedPane,
+  onToggleMaximize,
   revision,
 }: TabContentProps) => {
   const leafCount = countLeaves(tab.root);
@@ -55,6 +62,7 @@ export const TabContent = ({
 
   const render = (node: PaneNode, path: number[]): React.ReactNode => {
     if (node.kind === 'leaf') {
+      const isMaximized = maximizedPane === node.id;
       return (
         <TerminalPane
           id={node.id}
@@ -67,29 +75,44 @@ export const TabContent = ({
           }
           onClosePane={isSplit ? () => onClosePane(node.id) : undefined}
           onPaneDragStart={onPaneDragStart(node.id, `Pane ${node.id}`)}
+          onToggleMaximize={isSplit ? () => onToggleMaximize(node.id) : undefined}
+          maximized={isMaximized}
         />
       );
     }
 
     const items: React.ReactNode[] = [];
+    const maximizedLiveInChild = node.children.map((c) =>
+      maximizedPane ? collectLeafIds(c).includes(maximizedPane) : false,
+    );
     for (let i = 0; i < node.children.length; i++) {
       const childPath = [...path, i];
       const leafIdsInChild = collectLeafIds(node.children[i]).join('-');
-      items.push(
-        <div
-          key={`c-${i}-${leafIdsInChild}`}
-          style={{
-            // Ratio-driven weighted growth. `flex-grow: ratio` plus
-            // `flex-basis: 0` means the splitters (fixed 4px) take their
-            // exact space first and children divide the remainder
-            // proportionally — so ratios don't drift as splitters appear.
+      const hostsMaximized = maximizedLiveInChild[i];
+      // When the zoom target lives in this subtree, its wrapper takes
+      // full size via absolute overlay so the rest of the layout can
+      // relax — siblings stay mounted underneath but their sizes are
+      // whatever the flex fallback gives (xterm ignores hidden hosts
+      // via ResizeObserver anyway).
+      const style: React.CSSProperties = hostsMaximized
+        ? {
+            position: 'absolute',
+            inset: 0,
+            zIndex: 20,
+            display: 'flex',
+            flexDirection: 'column',
+            minWidth: 0,
+            minHeight: 0,
+          }
+        : {
             flex: `${node.ratios[i]} 1 0`,
             display: 'flex',
             flexDirection: 'column',
             minWidth: 0,
             minHeight: 0,
-          }}
-        >
+          };
+      items.push(
+        <div key={`c-${i}-${leafIdsInChild}`} style={style}>
           {render(node.children[i], childPath)}
         </div>,
       );
@@ -112,6 +135,7 @@ export const TabContent = ({
           flex: 1,
           minWidth: 0,
           minHeight: 0,
+          position: 'relative',
         }}
       >
         {items}

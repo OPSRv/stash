@@ -3,8 +3,11 @@ import type { ReactNode } from 'react';
 type TooltipProps = {
   label?: string;
   children: ReactNode;
-  /** Vertical side to anchor the bubble. Defaults to 'top'. */
-  side?: 'top' | 'bottom';
+  /** Side to anchor the bubble. Defaults to 'top'. Use 'right'/'left' when the
+   *  trigger sits near a horizontal edge of its container (e.g. a collapsed
+   *  sidebar rail) — top/bottom bubbles clip there because they center on the
+   *  trigger. */
+  side?: 'top' | 'bottom' | 'left' | 'right';
 };
 
 /** CSS-only hover/focus tooltip. Renders the trigger as a positioned wrapper
