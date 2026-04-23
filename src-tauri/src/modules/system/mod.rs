@@ -1,6 +1,8 @@
 pub mod apps_control;
 pub mod battery;
 pub mod focus;
+#[cfg(target_os = "macos")]
+pub mod frontmost;
 pub mod reminders_bridge;
 pub mod weather;
 pub mod caches;

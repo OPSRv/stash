@@ -19,6 +19,52 @@ use super::trash_bins::{self, TrashBin};
 use super::uninstaller::{self, Application, Leftover};
 use std::path::PathBuf;
 
+#[cfg(target_os = "macos")]
+use super::frontmost::{self, FrontmostApp};
+
+/// Return the currently-frontmost macOS app. `None` is valid — during
+/// login-window transitions the system briefly has no active app.
+/// Cross-platform stub returns `Ok(None)` so frontend callers don't
+/// have to branch on platform.
+#[tauri::command]
+pub async fn system_frontmost_app() -> Result<Option<FrontmostAppDto>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        Ok(frontmost::current().map(Into::into))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(None)
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(serde::Serialize)]
+pub struct FrontmostAppDto {
+    pub bundle_id: Option<String>,
+    pub name: String,
+    pub pid: i32,
+}
+
+#[cfg(target_os = "macos")]
+impl From<FrontmostApp> for FrontmostAppDto {
+    fn from(f: FrontmostApp) -> Self {
+        Self {
+            bundle_id: f.bundle_id,
+            name: f.name,
+            pid: f.pid,
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[derive(serde::Serialize)]
+pub struct FrontmostAppDto {
+    pub bundle_id: Option<String>,
+    pub name: String,
+    pub pid: i32,
+}
+
 fn resolve_home() -> Result<PathBuf, String> {
     dirs_next::home_dir().ok_or_else(|| "no home dir".to_string())
 }
