@@ -7,6 +7,13 @@
   height: 100%;
   overflow: hidden;
   padding: 6px 8px;
+  /* Subtle tint over the translucent popup — not a solid-black panel.
+     xterm's canvas stays transparent on top so the blurred vibrancy
+     shows through. */
+  background: rgba(255, 255, 255, 0.025);
+}
+.light .terminal-host {
+  background: rgba(20, 22, 28, 0.03);
 }
 
 .terminal-host .xterm {
@@ -32,4 +39,59 @@
 
 .terminal-dead-banner {
   animation: terminal-dead-in var(--duration-fast) var(--easing-standard) both;
+}
+
+/* Horizontal tab strip — hide native scrollbar, let wheel/trackpad scroll. */
+.terminal-tabbar-scroll {
+  scrollbar-width: none;
+}
+.terminal-tabbar-scroll::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Fade edge hint when tabs overflow. Pointer-events: none so the fade
+   never eats clicks on tabs underneath. */
+.terminal-tabbar-fade {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms var(--easing-standard);
+}
+.terminal-tabbar-fade[data-visible='true'] {
+  opacity: 1;
+}
+.terminal-tabbar-fade-left {
+  left: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(10, 10, 14, 0.55) 0%,
+    rgba(10, 10, 14, 0) 100%
+  );
+}
+.terminal-tabbar-fade-right {
+  right: 0;
+  background: linear-gradient(
+    270deg,
+    rgba(10, 10, 14, 0.55) 0%,
+    rgba(10, 10, 14, 0) 100%
+  );
+}
+.light .terminal-tabbar-fade-left {
+  background: linear-gradient(
+    90deg,
+    rgba(246, 247, 249, 0.75) 0%,
+    rgba(246, 247, 249, 0) 100%
+  );
+}
+.light .terminal-tabbar-fade-right {
+  background: linear-gradient(
+    270deg,
+    rgba(246, 247, 249, 0.75) 0%,
+    rgba(246, 247, 249, 0) 100%
+  );
 }

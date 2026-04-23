@@ -8,28 +8,39 @@ describe('terminal api', () => {
     vi.mocked(invoke).mockResolvedValue(null);
   });
 
-  it('ptyOpen invokes pty_open with cols/rows', async () => {
-    await ptyOpen(120, 40);
-    expect(invoke).toHaveBeenCalledWith('pty_open', { cols: 120, rows: 40 });
+  it('ptyOpen invokes pty_open with id + cols/rows', async () => {
+    await ptyOpen('pane-1', 120, 40);
+    expect(invoke).toHaveBeenCalledWith('pty_open', {
+      id: 'pane-1',
+      cols: 120,
+      rows: 40,
+    });
   });
 
-  it('ptyWrite invokes pty_write with the data string', async () => {
-    await ptyWrite('ls\n');
-    expect(invoke).toHaveBeenCalledWith('pty_write', { data: 'ls\n' });
+  it('ptyWrite forwards id + data', async () => {
+    await ptyWrite('pane-2', 'ls\n');
+    expect(invoke).toHaveBeenCalledWith('pty_write', {
+      id: 'pane-2',
+      data: 'ls\n',
+    });
   });
 
-  it('ptyResize invokes pty_resize with cols/rows', async () => {
-    await ptyResize(80, 24);
-    expect(invoke).toHaveBeenCalledWith('pty_resize', { cols: 80, rows: 24 });
+  it('ptyResize forwards id + cols/rows', async () => {
+    await ptyResize('pane-1', 80, 24);
+    expect(invoke).toHaveBeenCalledWith('pty_resize', {
+      id: 'pane-1',
+      cols: 80,
+      rows: 24,
+    });
   });
 
-  it('ptyClose invokes pty_close with no args', async () => {
-    await ptyClose();
-    expect(invoke).toHaveBeenCalledWith('pty_close');
+  it('ptyClose forwards the id', async () => {
+    await ptyClose('pane-3');
+    expect(invoke).toHaveBeenCalledWith('pty_close', { id: 'pane-3' });
   });
 
   it('propagates invoke rejections', async () => {
     vi.mocked(invoke).mockRejectedValueOnce(new Error('pty busy'));
-    await expect(ptyOpen(80, 24)).rejects.toThrow('pty busy');
+    await expect(ptyOpen('pane-1', 80, 24)).rejects.toThrow('pty busy');
   });
 });
