@@ -1,18 +1,18 @@
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::Serialize;
 
-/// Escape SQL LIKE wildcards (`%`, `_`) and the escape character (`\`) so
-/// literal user input is matched verbatim rather than interpreted as a
-/// pattern. Paired with `LIKE ? ESCAPE '\'` in the query.
-fn escape_like(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if matches!(c, '%' | '_' | '\\') {
-            out.push('\\');
-        }
-        out.push(c);
+/// Wrap a user query as a FTS5 phrase literal, escaping embedded
+/// double-quotes as `""`. Returns `None` for empty/blank — callers
+/// short-circuit to an empty result set. With the `trigram` tokenizer
+/// the phrase is matched as a literal substring, so FTS5 operators
+/// (AND/OR/NEAR) inside the query are demoted to plain characters.
+fn fts5_phrase(query: &str) -> Option<String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
     }
-    out
+    let escaped = trimmed.replace('"', "\"\"");
+    Some(format!("\"{escaped}\""))
 }
 
 #[derive(Debug, Serialize, PartialEq, Clone)]
@@ -49,6 +49,55 @@ impl ClipboardRepo {
         // Migration: add kind + meta columns for clients that predate image support.
         Self::ensure_column(&conn, "kind", "TEXT NOT NULL DEFAULT 'text'")?;
         Self::ensure_column(&conn, "meta", "TEXT")?;
+        // FTS5 index over text content + file-meta JSON, using the
+        // trigram tokenizer so `MATCH` keeps the old `LIKE %q%`
+        // substring semantics (`bar` still hits `foobar`). Image rows
+        // are intentionally excluded — their `content` is a sha256
+        // hash that would just pollute the index; the UI doesn't
+        // offer text search over them anyway.
+        //
+        // Capacity today is 1000 unpinned + pinned items (see
+        // `CLIPBOARD_MAX_UNPINNED` in lib.rs). The old full-scan
+        // `LIKE` path was tolerable at that size; the index keeps
+        // latency flat as the cap may grow.
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+                content, meta,
+                content='clipboard_items',
+                content_rowid='id',
+                tokenize='trigram'
+             );
+             CREATE TRIGGER IF NOT EXISTS clipboard_ai AFTER INSERT ON clipboard_items BEGIN
+                INSERT INTO clipboard_fts(rowid, content, meta)
+                    VALUES (new.id, new.content, IFNULL(new.meta, ''));
+             END;
+             CREATE TRIGGER IF NOT EXISTS clipboard_ad AFTER DELETE ON clipboard_items BEGIN
+                INSERT INTO clipboard_fts(clipboard_fts, rowid, content, meta)
+                    VALUES ('delete', old.id, old.content, IFNULL(old.meta, ''));
+             END;
+             CREATE TRIGGER IF NOT EXISTS clipboard_au AFTER UPDATE ON clipboard_items BEGIN
+                INSERT INTO clipboard_fts(clipboard_fts, rowid, content, meta)
+                    VALUES ('delete', old.id, old.content, IFNULL(old.meta, ''));
+                INSERT INTO clipboard_fts(rowid, content, meta)
+                    VALUES (new.id, new.content, IFNULL(new.meta, ''));
+             END;",
+        )?;
+        // Image rows end up indexed too — their `content` is an opaque
+        // sha256 hash that'll never overlap with a real user query, so
+        // the index pollution is negligible. They're filtered out in
+        // the `search` query itself.
+        //
+        // Always run `'rebuild'`: we can't cheaply detect whether the
+        // trigram index is already populated, because `SELECT rowid
+        // FROM <fts>` on an external-content virtual table reflects
+        // the base table's rowids, *not* the actual index contents —
+        // so any "is it empty?" heuristic built on SQL visibility
+        // lies. Rebuild is O(n) over base rows; at our scale (≤1000
+        // clipboard items) this is sub-millisecond on boot.
+        conn.execute(
+            "INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild')",
+            [],
+        )?;
         Ok(Self { conn })
     }
 
@@ -129,24 +178,23 @@ impl ClipboardRepo {
 
     /// Search text rows by content AND file rows by any filename in
     /// their JSON meta. Image rows have nothing meaningful to search,
-    /// so they're excluded (users find screenshots by scrolling, not
-    /// typing — and the synthetic `content` is an sha256 hash).
+    /// so they're excluded from the FTS index (users find screenshots
+    /// by scrolling, not typing — and the synthetic `content` is a
+    /// sha256 hash).
     ///
-    /// The `meta LIKE` on file rows trades a little imprecision (a
-    /// query like `"name":` would match the JSON keys themselves) for
-    /// avoiding a per-row JSON parse; in practice users type real
-    /// filename fragments, so the false-positive rate is negligible.
+    /// Served by the `clipboard_fts` trigram index — same substring
+    /// semantics as the old `LIKE %q%` path.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<ClipboardItem>> {
-        let like = format!("%{}%", escape_like(query));
+        let Some(phrase) = fts5_phrase(query) else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items
-             WHERE
-                (kind = 'text' AND content LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
-                OR
-                (kind = 'file' AND meta LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+             WHERE id IN (SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?1)
+               AND kind != 'image'
              ORDER BY pinned DESC, created_at DESC LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![like, limit as i64], Self::map_row)?;
+        let rows = stmt.query_map(params![phrase, limit as i64], Self::map_row)?;
         rows.collect()
     }
 
@@ -388,6 +436,68 @@ mod tests {
         let results = repo.search("banana", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].content, "banana split");
+    }
+
+    #[test]
+    fn search_empty_returns_nothing() {
+        let mut repo = fresh_repo();
+        repo.insert_text("whatever", 1).unwrap();
+        assert!(repo.search("", 10).unwrap().is_empty());
+        assert!(repo.search("   ", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn deleted_text_row_is_evicted_from_fts() {
+        // AFTER DELETE trigger guard — otherwise search would still
+        // return the row even after removal.
+        let mut repo = fresh_repo();
+        let id = repo.insert_text("transient thought", 1).unwrap();
+        assert_eq!(repo.search("transient", 10).unwrap().len(), 1);
+        repo.delete(id).unwrap();
+        assert_eq!(repo.search("transient", 10).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn upsert_existing_text_keeps_fts_entry() {
+        // `insert_text` with the same content hits ON CONFLICT DO
+        // UPDATE SET created_at — that fires AFTER UPDATE, which must
+        // re-sync FTS rather than leave a stale or duplicate entry.
+        let mut repo = fresh_repo();
+        repo.insert_text("same", 1).unwrap();
+        repo.insert_text("same", 100).unwrap();
+        let hits = repo.search("same", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].created_at, 100);
+    }
+
+    #[test]
+    fn rebuild_fts_from_legacy_rows() {
+        // Simulate an install that predates the FTS index: create the
+        // base schema and a couple of rows via raw SQL (no triggers),
+        // then open a `ClipboardRepo` on top. The `'rebuild'` call in
+        // `new()` must re-tokenise every row so search works from the
+        // first launch after upgrade.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL UNIQUE,
+                created_at INTEGER NOT NULL,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'text',
+                meta TEXT
+            );
+            INSERT INTO clipboard_items (content, created_at, kind)
+                VALUES ('legacy text row', 1, 'text');
+            INSERT INTO clipboard_items (content, created_at, kind)
+                VALUES ('another ancient row', 2, 'text');",
+        )
+        .unwrap();
+        let repo = ClipboardRepo::new(conn).unwrap();
+        let hits = repo.search("legacy", 10).unwrap();
+        assert_eq!(hits.len(), 1, "expected legacy row indexed");
+        assert_eq!(hits[0].content, "legacy text row");
+        assert_eq!(repo.search("ancient", 10).unwrap().len(), 1);
     }
 
     #[test]

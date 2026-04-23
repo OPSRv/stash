@@ -1,17 +1,21 @@
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::Serialize;
 
-/// Escape SQL LIKE wildcards so user input matches literally. Paired with
-/// `LIKE ? ESCAPE '\'` in the query.
-fn escape_like(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if matches!(c, '%' | '_' | '\\') {
-            out.push('\\');
-        }
-        out.push(c);
+/// Wrap a user query as a FTS5 phrase literal, escaping any embedded
+/// double-quote as `""` (FTS5 phrase-escape, not SQL). Returns `None`
+/// when the query is empty after trimming — callers use that to short-
+/// circuit to an empty result set.
+///
+/// The trigram tokenizer treats the phrase content as a raw substring
+/// search, so we don't have to strip AND/OR/NEAR keywords or other
+/// FTS5 operators — the outer double-quotes demote them to literals.
+fn fts5_phrase(query: &str) -> Option<String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
     }
-    out
+    let escaped = trimmed.replace('"', "\"\"");
+    Some(format!("\"{escaped}\""))
 }
 
 /// A file attached to a note. The `file_path` is absolute and points
@@ -121,6 +125,47 @@ impl NotesRepo {
                 [],
             )?;
         }
+        // FTS5 index over title + body. Uses the `trigram` tokenizer so
+        // `MATCH` has the same *substring* semantics as the old
+        // `LIKE %q%` path — a query for `bar` still hits `foobar`. This
+        // keeps migrating users' muscle memory (and our tests) intact
+        // while cutting full-scan cost on large note collections.
+        //
+        // External-content mode: the virtual table stores only the
+        // trigram index, not a second copy of title/body. Triggers
+        // below keep it in sync on INSERT/UPDATE/DELETE.
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+                title, body,
+                content='notes',
+                content_rowid='id',
+                tokenize='trigram'
+             );
+             CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
+                INSERT INTO notes_fts(rowid, title, body)
+                    VALUES (new.id, new.title, new.body);
+             END;
+             CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
+                INSERT INTO notes_fts(notes_fts, rowid, title, body)
+                    VALUES('delete', old.id, old.title, old.body);
+             END;
+             CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
+                INSERT INTO notes_fts(notes_fts, rowid, title, body)
+                    VALUES('delete', old.id, old.title, old.body);
+                INSERT INTO notes_fts(rowid, title, body)
+                    VALUES (new.id, new.title, new.body);
+             END;",
+        )?;
+        // Always run `'rebuild'` — it's the only reliable way to
+        // populate an external-content FTS5 index. A "is it empty?"
+        // check via `SELECT rowid FROM notes_fts` lies: that query
+        // reads rowids from the *base* table (notes), not the index,
+        // so we can't detect whether the trigram tokens are actually
+        // stored. Rebuild is O(n) on boot; at our scale it's trivial.
+        conn.execute(
+            "INSERT INTO notes_fts(notes_fts) VALUES('rebuild')",
+            [],
+        )?;
         Ok(Self { conn })
     }
 
@@ -179,31 +224,41 @@ impl NotesRepo {
         rows.collect()
     }
 
-    /// Case-insensitive LIKE search over title + body.
+    /// Substring search across title + body, served by the trigram
+    /// FTS5 index (see `notes_fts` in `new`). Matches the user-visible
+    /// behaviour of the old `LIKE %q%` path — a query for `bar` still
+    /// hits `foobar` — but avoids the full-table scan on large
+    /// collections. An empty or blank query returns `Vec::new()` (no
+    /// point scanning the whole FTS index for "match everything").
     pub fn search(&self, query: &str) -> Result<Vec<Note>> {
-        let like = format!("%{}%", escape_like(query.trim()));
+        let Some(phrase) = fts5_phrase(query) else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare(
             "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms, pinned
              FROM notes
-             WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-                OR body  LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+             WHERE id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?1)
              ORDER BY pinned DESC, updated_at DESC",
         )?;
-        let rows = stmt.query_map(params![like], Self::map_row)?;
+        let rows = stmt.query_map(params![phrase], Self::map_row)?;
         rows.collect()
     }
 
     pub fn search_summaries(&self, query: &str) -> Result<Vec<NoteSummary>> {
-        let like = format!("%{}%", escape_like(query.trim()));
+        let Some(phrase) = fts5_phrase(query) else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare(
             "SELECT id, title, substr(body, 1, ?2) AS preview,
                     created_at, updated_at, audio_path, audio_duration_ms, pinned
              FROM notes
-             WHERE title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
-                OR body  LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+             WHERE id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?1)
              ORDER BY pinned DESC, updated_at DESC",
         )?;
-        let rows = stmt.query_map(params![like, LIST_PREVIEW_CHARS as i64], Self::map_summary)?;
+        let rows = stmt.query_map(
+            params![phrase, LIST_PREVIEW_CHARS as i64],
+            Self::map_summary,
+        )?;
         rows.collect()
     }
 
@@ -374,6 +429,45 @@ mod tests {
         assert_eq!(hits[0].title, "foo_bar");
         let pct = repo.search("50%").unwrap();
         assert_eq!(pct.len(), 0);
+    }
+
+    #[test]
+    fn search_empty_returns_nothing() {
+        let mut repo = fresh();
+        repo.create("anything", "something", 1).unwrap();
+        assert!(repo.search("").unwrap().is_empty());
+        assert!(repo.search("   ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_substring_matches_inside_token() {
+        // Trigram FTS5 preserves old LIKE %q% behaviour: a query in the
+        // *middle* of a longer word still matches.
+        let mut repo = fresh();
+        repo.create("", "refactoring", 1).unwrap();
+        let hits = repo.search("actor").unwrap();
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn update_resyncs_fts_index() {
+        // Regression guard for the AFTER UPDATE trigger. Without the
+        // delete+insert pair, search would still find the old body.
+        let mut repo = fresh();
+        let id = repo.create("t", "meeting at noon", 1).unwrap();
+        assert_eq!(repo.search("meeting").unwrap().len(), 1);
+        repo.update(id, "t", "lunch at one", 2).unwrap();
+        assert_eq!(repo.search("meeting").unwrap().len(), 0);
+        assert_eq!(repo.search("lunch").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn delete_also_removes_from_fts() {
+        let mut repo = fresh();
+        let id = repo.create("gone", "ghostly contents", 1).unwrap();
+        assert_eq!(repo.search("ghostly").unwrap().len(), 1);
+        repo.delete(id).unwrap();
+        assert_eq!(repo.search("ghostly").unwrap().len(), 0);
     }
 
     #[test]
