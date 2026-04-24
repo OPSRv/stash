@@ -249,6 +249,22 @@ pub fn run() {
         // relaunch after update). Without this, each relaunch would
         // create a second tray icon, fight for the ⌘⇧V global shortcut,
         // and open a second SQLite connection to the same db file.
+        // Auto-update plumbing. The plugins are only registered when the
+        // updater's public key has been configured — runtime init would
+        // otherwise panic on the empty `pubkey` field. To turn this on:
+        //   1. `npx @tauri-apps/cli signer generate -w ~/.tauri/stash.key`
+        //   2. Paste the printed public key into `tauri.conf.json` →
+        //      `plugins.updater.pubkey`.
+        //   3. Add the private key's file contents + its password to the
+        //      repo secrets `TAURI_SIGNING_PRIVATE_KEY` and
+        //      `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` so the `nightly` /
+        //      `release` workflows sign their artifacts.
+        // Once the pubkey is present, the two `.plugin(...)` lines below
+        // can be uncommented — no other code change is required because
+        // the capability and Cargo deps are already wired in.
+        //
+        // .plugin(tauri_plugin_updater::Builder::new().build())
+        // .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             use tauri::Manager;
             if let Some(win) = resolve_popup(app) {

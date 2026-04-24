@@ -1,0 +1,47 @@
+name: Pages
+
+# Deploys the landing page in `landing/project/` to GitHub Pages on every
+# push to main that touches the landing, plus a manual-dispatch trigger for
+# re-deploys without a code change.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'landing/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage site
+        run: |
+          mkdir -p _site
+          cp -R landing/project/* _site/
+          # GitHub Pages expects index.html at the site root.
+          if [ -f _site/Landing.html ] && [ ! -f _site/index.html ]; then
+            mv _site/Landing.html _site/index.html
+          fi
+          # Prevent Jekyll from hiding files that start with _.
+          touch _site/.nojekyll
+      - uses: actions/configure-pages@v4
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

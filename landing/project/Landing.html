@@ -1,0 +1,1872 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stash — menubar hub for small tasks</title>
+<meta name="description" content="A compact 920×520 menu bar popup with 13 built-in modules: clipboard, notes, translator, AI chat, Pomodoro, metronome, terminal, video downloader and more. No accounts. No cloud. No telemetry." />
+<meta property="og:title" content="Stash — menubar hub for small tasks" />
+<meta property="og:description" content="Thirteen utilities. One icon in your menubar. macOS 13+, Tauri 2, offline-first." />
+<meta property="og:type" content="website" />
+<link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #0A0B0E;
+    --bg-1: #14161B;
+    --bg-2: #1A1C21;
+    --bg-3: #23262D;
+    --ink-hi: #F2F3F5;
+    --ink:    #C8CBD1;
+    --ink-lo: #7A7F89;
+    --ink-xlo:#4B4F58;
+    --line:   rgba(255,255,255,0.08);
+    --line-2: rgba(255,255,255,0.14);
+    --blue:   #2F7AE5;
+    --blue-2: #5FA0FF;
+    --blue-3: #7FB3FF;
+    --grad-blue: linear-gradient(135deg,#5FA0FF 0%, #2F7AE5 55%, #1e5fc0 100%);
+    --grad-glass: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.005));
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg-0);
+    color: var(--ink);
+    font-family: 'Manrope', -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+    line-height: 1.5;
+    letter-spacing: -0.005em;
+  }
+  body::before {
+    content:''; position:fixed; inset:0; z-index:-2;
+    background:
+      radial-gradient(1200px 800px at 15% -10%, rgba(47,122,229,.18), transparent 60%),
+      radial-gradient(1000px 700px at 85% 5%, rgba(47,122,229,.08), transparent 60%),
+      radial-gradient(900px 600px at 50% 110%, rgba(47,122,229,.10), transparent 60%),
+      linear-gradient(180deg,#0B0C10 0%, #0D0E11 40%, #0A0B0E 100%);
+    pointer-events: none;
+  }
+  body::after {
+    content:''; position:fixed; inset:0; z-index:-1; pointer-events:none;
+    background-image: radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 3px 3px;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,.6), rgba(0,0,0,.3));
+    opacity: .6;
+  }
+  /* full-bleed grid */
+  .grid-bg {
+    position: fixed; inset:0; z-index:-1; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px);
+    background-size: 80px 80px;
+    mask-image: radial-gradient(circle at 50% 30%, black 0%, transparent 80%);
+    -webkit-mask-image: radial-gradient(circle at 50% 30%, black 0%, transparent 80%);
+  }
+
+  #aura {
+    position: fixed; left: 0; top: 0; width: 520px; height: 520px;
+    transform: translate(-50%,-50%);
+    border-radius: 50%;
+    pointer-events: none; z-index: 0;
+    background: radial-gradient(closest-side, rgba(95,160,255,.12), rgba(47,122,229,0) 70%);
+    opacity: 0; transition: opacity .4s ease;
+    mix-blend-mode: screen;
+  }
+  body.aura-on #aura { opacity: 1; }
+
+  h1,h2,h3,h4 { color: var(--ink-hi); letter-spacing: -0.02em; font-weight: 600; }
+  h1 { font-weight: 700; letter-spacing: -0.035em; line-height: 1.02; }
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: rgba(47,122,229,.35); color: #fff; }
+
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .serif { font-family: 'Instrument Serif', serif; font-style: italic; font-weight: 400; letter-spacing: -0.01em; }
+
+  kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 22px; height: 24px; padding: 0 6px;
+    background: linear-gradient(180deg, #2a2e36, #1d2027);
+    border: 1px solid var(--line-2);
+    border-bottom-color: rgba(0,0,0,0.6);
+    border-radius: 6px;
+    color: var(--ink-hi);
+    font: 500 12px/1 'JetBrains Mono', monospace;
+    box-shadow: 0 2px 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  kbd.lg { min-width: 34px; height: 36px; font-size: 14px; border-radius: 8px; padding: 0 10px;}
+
+  /* NAV */
+  nav.topbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 32px;
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    background: linear-gradient(180deg, rgba(13,14,17,.72), rgba(13,14,17,.2));
+    border-bottom: 1px solid transparent;
+    transition: border-color .3s ease, background .3s ease, padding .3s ease;
+  }
+  nav.topbar.scrolled {
+    padding: 12px 32px;
+    border-bottom-color: var(--line);
+    background: linear-gradient(180deg, rgba(13,14,17,.88), rgba(13,14,17,.55));
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-logo { width: 28px; height: 28px; border-radius: 7px; box-shadow: 0 4px 14px rgba(47,122,229,.22); transition: transform .4s cubic-bezier(.2,.8,.2,1);}
+  .brand:hover .brand-logo { transform: rotate(-8deg) scale(1.06); }
+  .brand-name { font-weight: 600; color: var(--ink-hi); font-size: 16px; letter-spacing: -0.01em; }
+  .nav-links { display: flex; gap: 28px; font-size: 14px; color: var(--ink-lo); }
+  .nav-links a { transition: color .2s ease; position: relative;}
+  .nav-links a::after{
+    content:''; position:absolute; left:0; right:0; bottom:-4px; height:1px;
+    background: var(--blue-2); transform-origin: left; transform: scaleX(0);
+    transition: transform .3s cubic-bezier(.2,.8,.2,1);
+  }
+  .nav-links a:hover { color: var(--ink-hi); }
+  .nav-links a:hover::after{ transform: scaleX(1); }
+  @media (max-width: 720px) { .nav-links { display: none; } }
+  .nav-cta {
+    padding: 8px 14px; border-radius: 10px;
+    background: rgba(47,122,229,.14);
+    border: 1px solid rgba(47,122,229,.3);
+    color: var(--ink-hi); font-size: 13px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: all .2s ease;
+  }
+  .nav-cta:hover { background: rgba(47,122,229,.22); border-color: rgba(47,122,229,.55); transform: translateY(-1px); }
+
+  /* ===== HERO ===== */
+  .hero {
+    position: relative; min-height: 100vh;
+    display: grid; place-items: center;
+    padding: 130px 24px 80px;
+    overflow: hidden;
+  }
+  .hero-inner { max-width: 1200px; width: 100%; position: relative; z-index: 2; display: grid; gap: 40px; }
+
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 6px 12px 6px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--line-2);
+    background: rgba(255,255,255,0.02);
+    font-size: 12px; color: var(--ink);
+    width: fit-content; margin: 0 auto;
+    letter-spacing: 0.02em;
+  }
+  .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,.18);
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { opacity: 1 } 50% { opacity: .5 } }
+
+  .h1-wrap { text-align: center; }
+  h1.mega {
+    font-size: clamp(44px, 8.2vw, 124px);
+    line-height: .96;
+    letter-spacing: -0.045em;
+    font-weight: 700;
+    color: var(--ink-hi);
+    margin: 0;
+  }
+  h1.mega .accent {
+    background: linear-gradient(180deg,#7FB3FF 0%, #2F7AE5 85%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  h1.mega .sub {
+    display: block;
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--ink-lo);
+    font-size: .46em;
+    letter-spacing: -0.01em;
+    margin-top: 16px;
+  }
+
+  /* word-by-word reveal — default visible; JS adds .go on hero-inner to run entrance */
+  .reveal-word { display: inline-block; opacity: 1; transform: translateY(0); }
+  .hero-inner.go .reveal-word { animation: wordRise .9s cubic-bezier(.2,.85,.2,1) backwards; }
+  @keyframes wordRise { from { opacity: 0; transform: translateY(0.4em);} to { opacity: 1; transform: translateY(0);} }
+
+  .hero-lede {
+    font-size: clamp(16px, 1.6vw, 19px);
+    color: var(--ink);
+    max-width: 660px; margin: 0 auto;
+    text-align: center;
+    text-wrap: pretty;
+  }
+  .hero-lede strong { color: var(--ink-hi); font-weight: 500; }
+
+  .hero-ctas {
+    display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 22px;
+    border-radius: 12px;
+    font-size: 15px; font-weight: 500;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform .2s ease, box-shadow .25s ease, background .2s ease, border-color .2s ease;
+    position: relative;
+    user-select: none;
+    font-family: inherit;
+  }
+  .btn-primary {
+    background: var(--grad-blue);
+    color: #fff;
+    box-shadow: 0 10px 30px -8px rgba(47,122,229,.55), inset 0 1px 0 rgba(255,255,255,.18);
+    overflow: hidden;
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 18px 40px -8px rgba(47,122,229,.7), inset 0 1px 0 rgba(255,255,255,.22); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary .btn-shine{
+    position:absolute; top:0; bottom:0; width:40%;
+    background: linear-gradient(100deg, transparent 10%, rgba(255,255,255,.28) 50%, transparent 90%);
+    transform: translateX(-150%) skewX(-20deg);
+    animation: shine 3.8s ease-in-out infinite 1.2s;
+    pointer-events: none;
+  }
+  @keyframes shine { 0%{transform:translateX(-150%) skewX(-20deg);} 60%{transform:translateX(350%) skewX(-20deg);} 100%{transform:translateX(350%) skewX(-20deg);} }
+
+  .btn-ghost {
+    background: rgba(255,255,255,0.03);
+    border-color: var(--line-2);
+    color: var(--ink-hi);
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,.22); }
+  .btn .chev { transition: transform .25s ease; }
+  .btn:hover .chev { transform: translateX(3px); }
+
+  .kbd-hint {
+    text-align:center; font-size: 13px; color: var(--ink-lo);
+    display: flex; gap: 8px; align-items: center; justify-content: center;
+  }
+
+  /* ===== STAGE: macOS desktop with menubar + Stash popup (all SVG/HTML, no images) ===== */
+  .stage {
+    position: relative; margin: 32px auto 0;
+    max-width: 1100px; aspect-ratio: 16/9.6;
+    perspective: 1800px;
+  }
+  .desktop {
+    position: absolute; inset: 0;
+    border-radius: 22px;
+    background:
+      radial-gradient(1200px 500px at 50% 0%, rgba(47,122,229,.18), transparent 60%),
+      linear-gradient(160deg,#1d2230 0%, #0c0e14 100%);
+    border: 1px solid var(--line-2);
+    box-shadow:
+      0 40px 120px -40px rgba(0,0,0,.9),
+      0 1px 0 rgba(255,255,255,.04) inset,
+      0 0 0 1px rgba(0,0,0,.6);
+    overflow: hidden;
+    transform: rotateX(8deg) rotateY(-1deg);
+    transform-origin: 50% 90%;
+    transition: transform .3s ease;
+  }
+  /* animated wallpaper blobs */
+  .wallpaper {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 20% 30%, rgba(47,122,229,.22), transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(140,100,255,.16), transparent 40%),
+      linear-gradient(160deg,#101420 0%, #070910 100%);
+  }
+  .blob {
+    position: absolute; width: 280px; height: 280px; border-radius: 50%;
+    filter: blur(60px); opacity: .55; mix-blend-mode: screen;
+    animation: blobFloat 22s ease-in-out infinite;
+  }
+  .blob.b1 { background: #2F7AE5; left: 8%; top: 18%; }
+  .blob.b2 { background: #7B61FF; right: 10%; top: 38%; animation-duration: 28s; animation-delay: -6s;}
+  .blob.b3 { background: #4ade80; right: 28%; top: 62%; animation-duration: 32s; animation-delay: -12s; opacity: .25;}
+  @keyframes blobFloat {
+    0%, 100% { transform: translate(0,0) scale(1);}
+    33% { transform: translate(40px,-30px) scale(1.1);}
+    66% { transform: translate(-30px,40px) scale(.92);}
+  }
+
+  /* macOS menubar */
+  .menubar {
+    position: absolute; top: 0; left: 0; right: 0; height: 26px;
+    background: rgba(18,20,26,0.7);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(255,255,255,.05);
+    display: flex; align-items: center;
+    padding: 0 12px;
+    font-size: 12px; color: #d6d7db; z-index: 3;
+    gap: 14px;
+  }
+  .menu-item { color: #d6d7db; opacity: .85; }
+  .menu-item.bold { font-weight: 600; color: #fff; opacity: 1;}
+  .menu-spacer { flex: 1; }
+  .menu-right { display: flex; align-items: center; gap: 14px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #d6d7db; opacity: .85;}
+  .menu-stash {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 6px; border-radius: 5px;
+    transition: background .2s ease;
+  }
+  .menu-stash.on { background: rgba(47,122,229,.22); }
+  .menu-stash-icon { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto;}
+  .menu-clock { font-variant-numeric: tabular-nums; }
+
+  /* Stash popup */
+  .popup {
+    position: absolute;
+    top: 36px; right: 56px;
+    width: 64%; aspect-ratio: 920/520;
+    max-width: 700px;
+    border-radius: 16px;
+    overflow: hidden;
+    background: rgba(16,18,23,.86);
+    backdrop-filter: blur(22px) saturate(150%);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    border: 1px solid rgba(255,255,255,.1);
+    box-shadow:
+      0 30px 80px rgba(0,0,0,.7),
+      0 0 0 1px rgba(0,0,0,.4),
+      inset 0 1px 0 rgba(255,255,255,.06);
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transform-origin: 90% -10%;
+    transition: opacity .45s cubic-bezier(.2,.8,.2,1), transform .5s cubic-bezier(.2,.8,.2,1);
+    z-index: 4;
+  }
+  .popup.closing { opacity: 0; transform: translateY(-14px) scale(.96); }
+  .popup::before {
+    content:''; position:absolute; top:-6px; right: 28px; width: 12px; height: 12px;
+    background: rgba(16,18,23,.9);
+    border-left: 1px solid rgba(255,255,255,.1);
+    border-top: 1px solid rgba(255,255,255,.1);
+    transform: rotate(45deg);
+  }
+  .popup-inner {
+    position: absolute; inset: 0;
+    display: grid; grid-template-columns: 44px 1fr;
+  }
+  .popup-tabs {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 4px; padding: 8px 4px;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    background: rgba(0,0,0,.18);
+  }
+  .ptab {
+    width: 32px; height: 32px; border-radius: 8px;
+    display: grid; place-items: center;
+    color: #8790a0;
+    transition: all .2s ease;
+    cursor: pointer;
+  }
+  .ptab svg { width: 16px; height: 16px; }
+  .ptab.active { background: rgba(47,122,229,.22); color: #bcd6ff; box-shadow: inset 0 0 0 1px rgba(47,122,229,.4); }
+  .ptab:hover { color: #e4e7ed; }
+  .popup-body {
+    position: relative; overflow: hidden;
+    background: linear-gradient(180deg, rgba(20,22,27,.4), rgba(13,14,17,.5));
+  }
+  .popup-screen {
+    position: absolute; inset: 0;
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .35s ease, transform .4s ease;
+    padding: 14px;
+    display: flex; flex-direction: column;
+  }
+  .popup-screen.on { opacity: 1; transform: translateY(0); }
+
+  /* shared mini ui */
+  .mini-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 12px;
+  }
+  .mini-title { color: #e4e7ed; font-size: 13px; font-weight: 600; letter-spacing: -.01em;}
+  .mini-search {
+    flex: 1; margin-left: 12px;
+    height: 24px; border-radius: 6px;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06);
+    display: flex; align-items: center; gap: 6px; padding: 0 8px;
+    font-size: 11px; color: var(--ink-lo);
+  }
+  .mini-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: 7px;
+    background: rgba(255,255,255,.025);
+    border: 1px solid rgba(255,255,255,.04);
+    font-size: 11.5px; color: var(--ink);
+    margin-bottom: 5px;
+  }
+  .mini-row .pin { color: var(--blue-2); }
+  .mini-row .dim { color: var(--ink-xlo); margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10px;}
+
+  /* stage kbd */
+  .stage-kbd {
+    position: absolute;
+    bottom: -22px;
+    left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--ink-lo);
+    background: rgba(13,14,17,.85);
+    padding: 8px 14px; border-radius: 10px;
+    border: 1px solid var(--line-2);
+    backdrop-filter: blur(8px);
+  }
+  .stage-kbd kbd.pulse { animation: kbdPulse 3.6s ease-in-out infinite; }
+  .stage-kbd kbd.pulse:nth-child(2){ animation-delay: .15s;}
+  .stage-kbd kbd.pulse:nth-child(3){ animation-delay: .3s;}
+  @keyframes kbdPulse {
+    0%, 40%, 100% { transform: translateY(0); box-shadow: 0 2px 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06); }
+    42% { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06), 0 0 20px rgba(47,122,229,.7);}
+    48% { transform: translateY(0); }
+  }
+
+  /* floating side icons orbiting hero stage */
+  .float-icons { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+  .float-icon {
+    position: absolute; width: 44px; height: 44px;
+    background: linear-gradient(180deg, rgba(35,38,45,.8), rgba(20,22,27,.8));
+    border: 1px solid var(--line-2);
+    border-radius: 12px;
+    display: grid; place-items: center;
+    color: var(--blue-2);
+    box-shadow: 0 14px 30px -10px rgba(0,0,0,.6);
+    backdrop-filter: blur(8px);
+    animation: orbFloat 8s ease-in-out infinite;
+  }
+  .float-icon svg { width: 22px; height: 22px; }
+  @keyframes orbFloat {
+    0%,100% { transform: translateY(0) rotate(0); }
+    50% { transform: translateY(-12px) rotate(2deg); }
+  }
+
+  /* ===== SECTIONS ===== */
+  section { position: relative; padding: 120px 24px; }
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  .section-head { display: grid; gap: 16px; margin-bottom: 60px; max-width: 760px; }
+  .section-tag {
+    display: inline-flex; align-items: center; gap: 10px;
+    font: 500 12px/1 'JetBrains Mono', monospace;
+    color: var(--blue-2);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .section-tag::before { content:''; width: 24px; height: 1px; background: var(--blue); }
+  h2.section-title {
+    font-size: clamp(32px, 4.6vw, 60px);
+    letter-spacing: -0.035em;
+    line-height: 1.04;
+    margin: 0;
+  }
+  h2.section-title .serif { color: var(--ink-lo); }
+  .section-lede { font-size: 18px; color: var(--ink); max-width: 620px; text-wrap: pretty; }
+
+  /* ===== PHILOSOPHY ===== */
+  .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media (max-width: 900px) { .pillars { grid-template-columns: 1fr; } }
+  .pillar {
+    position: relative;
+    border: 1px solid var(--line);
+    background: var(--grad-glass);
+    border-radius: 20px;
+    padding: 26px 26px 28px;
+    overflow: hidden;
+    transition: transform .3s ease, border-color .3s ease;
+    min-height: 260px;
+  }
+  .pillar:hover { transform: translateY(-4px); border-color: rgba(47,122,229,.3); }
+  .pillar::before {
+    content:''; position: absolute; inset: -1px;
+    border-radius: inherit;
+    background: radial-gradient(400px 200px at var(--mx,50%) var(--my,0%), rgba(47,122,229,.18), transparent 70%);
+    opacity: 0; transition: opacity .3s ease; z-index: 0; pointer-events: none;
+  }
+  .pillar:hover::before { opacity: 1; }
+  .pillar > * { position: relative; z-index: 1; }
+  .pillar-num {
+    font-family: 'Instrument Serif', serif; font-style: italic;
+    font-size: 56px; color: var(--blue); letter-spacing: -.04em;
+    line-height: 1; margin-bottom: 10px;
+  }
+  .pillar-svg { position: absolute; right: 12px; top: 12px; width: 86px; height: 86px; opacity: .55; transition: opacity .3s ease, transform .4s ease;}
+  .pillar:hover .pillar-svg { opacity: 1; transform: scale(1.06); }
+  .pillar h3 { font-size: 22px; margin: 0 0 8px; }
+  .pillar p { margin: 0; color: var(--ink-lo); font-size: 15px; }
+
+  /* ===== SHOWCASE: animated SVG mockups for modules ===== */
+  .showcase {
+    display: grid; grid-template-columns: 280px 1fr; gap: 32px;
+    align-items: start;
+  }
+  @media (max-width: 900px) { .showcase { grid-template-columns: 1fr; } }
+  .showcase-list { display: grid; gap: 4px; }
+  .shitem {
+    position: relative;
+    padding: 14px 16px 14px 22px;
+    border-radius: 12px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all .25s ease;
+    display: grid; grid-template-columns: 22px 1fr auto; gap: 12px; align-items: center;
+  }
+  .shitem:hover { background: rgba(255,255,255,.025); }
+  .shitem.active {
+    background: rgba(47,122,229,.08);
+    border-color: rgba(47,122,229,.28);
+  }
+  .shitem .ico { width: 22px; height: 22px; display:grid; place-items:center; color: var(--ink-lo); transition: color .2s; }
+  .shitem.active .ico { color: var(--blue-2); }
+  .shitem strong { color: var(--ink-hi); font-weight: 500; font-size: 15px; display: block; letter-spacing: -.01em;}
+  .shitem span { color: var(--ink-lo); font-size: 12.5px; }
+  .shitem .mkbd {
+    font: 500 10px/1 'JetBrains Mono', monospace;
+    color: var(--ink-xlo);
+    padding: 4px 6px; border-radius: 4px;
+    border: 1px solid var(--line);
+    background: rgba(0,0,0,.2);
+  }
+  .shitem.active .mkbd { color: var(--blue-2); border-color: rgba(47,122,229,.3);}
+  .shitem .bar {
+    position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 18px; border-radius: 2px; background: var(--blue);
+    opacity: 0; transition: all .25s ease;
+  }
+  .shitem.active .bar { opacity: 1; height: 28px; }
+
+  .showcase-preview {
+    position: relative; border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid var(--line-2);
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,.7);
+    aspect-ratio: 16/9.6;
+    background: linear-gradient(160deg,#15171c,#0a0b0e);
+  }
+  .preview-chrome {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 36px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 14px;
+    background: linear-gradient(180deg, rgba(0,0,0,.5), rgba(0,0,0,0));
+    z-index: 5;
+  }
+  .dot-mac { width: 11px; height: 11px; border-radius: 50%; transition: filter .2s ease;}
+  .dot-mac.r { background: #FF5F57; }
+  .dot-mac.y { background: #FEBB2E; }
+  .dot-mac.g { background: #28C840; }
+  .preview-chrome:hover .dot-mac { filter: brightness(1.15);}
+  .preview-chrome .ch-title {
+    margin-left: 10px; font: 500 12px/1 'JetBrains Mono', monospace;
+    color: #8a92a0; letter-spacing: .04em;
+  }
+  .preview-frame { position: absolute; inset: 36px 0 0 0; }
+  .preview-shot {
+    position: absolute; inset: 0;
+    opacity: 0; transform: scale(1.01);
+    transition: opacity .5s cubic-bezier(.2,.8,.2,1), transform .6s cubic-bezier(.2,.8,.2,1);
+    padding: 18px 24px;
+    overflow: hidden;
+  }
+  .preview-shot.on { opacity: 1; transform: scale(1); }
+
+  /* ====== mock components for SVG showcases ====== */
+  .mk-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 9px;
+    background: rgba(255,255,255,.025);
+    border: 1px solid var(--line);
+    margin-bottom: 7px;
+    font-size: 13px; color: var(--ink);
+  }
+  .mk-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+  .mk-row .meta { font: 500 10px/1 'JetBrains Mono', monospace; color: var(--ink-xlo); }
+  .mk-row.pin { border-color: rgba(47,122,229,.4); background: rgba(47,122,229,.06); }
+  .mk-pill {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 8px; border-radius:999px; font-size:11px;
+    background: rgba(47,122,229,.14); color: var(--blue-2);
+    border: 1px solid rgba(47,122,229,.28);
+  }
+  .mk-progress {
+    height: 4px; border-radius: 999px;
+    background: rgba(255,255,255,.06); overflow: hidden;
+    position: relative;
+  }
+  .mk-progress::before{
+    content:''; position:absolute; left:0; top:0; bottom:0; width: var(--p,40%);
+    background: linear-gradient(90deg, var(--blue), var(--blue-3));
+    box-shadow: 0 0 12px rgba(47,122,229,.5);
+    border-radius: inherit;
+    animation: barGrow 2.4s cubic-bezier(.2,.8,.2,1) infinite alternate;
+  }
+  @keyframes barGrow { from { width: 12%;} to { width: var(--p, 80%);} }
+
+  /* metronome */
+  .metronome { display: grid; place-items: center; height: 100%;}
+  .metronome svg { width: 70%; max-width: 420px; height: auto; }
+  .met-pendulum { transform-origin: 200px 290px; animation: tick 0.6s cubic-bezier(.45,0,.55,1) infinite alternate;}
+  @keyframes tick { from { transform: rotate(-22deg);} to { transform: rotate(22deg);}}
+  .met-bpm { font: 600 28px/1 'JetBrains Mono', monospace; fill: #fff; }
+
+  /* AI chat blocks */
+  .ai-bubble {
+    padding: 10px 14px; border-radius: 14px; max-width: 85%;
+    font-size: 13px; color: var(--ink); margin-bottom: 8px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,.02);
+    line-height: 1.45;
+  }
+  .ai-bubble.you {
+    margin-left: auto; background: rgba(47,122,229,.14);
+    border-color: rgba(47,122,229,.3); color: #d8e6ff;
+  }
+  .typing { display: inline-flex; gap: 3px; padding: 0 4px;}
+  .typing span { width: 5px; height: 5px; border-radius: 50%; background: var(--blue-2); animation: typing 1.4s infinite ease-in-out; }
+  .typing span:nth-child(2){ animation-delay: .2s;}
+  .typing span:nth-child(3){ animation-delay: .4s;}
+  @keyframes typing { 0%,60%,100% { opacity: .3; transform: translateY(0);} 30% { opacity: 1; transform: translateY(-3px);}}
+
+  /* terminal */
+  .term {
+    background: #0a0b0e; border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px;
+    font: 500 12px/1.55 'JetBrains Mono', monospace;
+    color: #d6d7db; height: 100%;
+  }
+  .term .pr { color: var(--blue-2); }
+  .term .ok { color: #4ade80; }
+  .term .dim { color: var(--ink-xlo); }
+  .cursor-blink { display:inline-block; width: 7px; height: 14px; background: #d6d7db; vertical-align: -2px; margin-left: 2px; animation: blink 1s step-end infinite;}
+  @keyframes blink { 50% { opacity: 0;}}
+
+  /* ===== ALL MODULES GRID ===== */
+  .modgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 12px;
+  }
+  .mod {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    background: rgba(255,255,255,0.015);
+    transition: transform .25s ease, border-color .25s ease, background .25s ease;
+    display: grid; gap: 8px;
+    min-height: 140px;
+    overflow: hidden;
+  }
+  .mod::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(135deg, var(--mod-glow, rgba(47,122,229,.14)), transparent 55%);
+    opacity: 0; transition: opacity .3s ease;
+  }
+  .mod:hover { transform: translateY(-3px); border-color: rgba(47,122,229,.35); }
+  .mod:hover::before { opacity: 1; }
+  .mod > * { position: relative; }
+  .mod-icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: rgba(47,122,229,.14); border: 1px solid rgba(47,122,229,.28); color: var(--blue-2);}
+  .mod-icon svg { width: 18px; height: 18px; }
+  .mod h4 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink-hi); letter-spacing: -0.01em; }
+  .mod p { margin: 0; font-size: 13px; color: var(--ink-lo); line-height: 1.5; }
+  .mod .mkbd {
+    position: absolute; top: 14px; right: 14px;
+    font: 500 10px/1 'JetBrains Mono', monospace;
+    color: var(--ink-xlo); letter-spacing: .06em;
+    opacity: 0; transition: opacity .25s ease;
+  }
+  .mod:hover .mkbd { opacity: 1; }
+
+  /* ===== STATS ===== */
+  .stats-strip {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--line);
+  }
+  @media (max-width: 720px) { .stats-strip { grid-template-columns: repeat(2, 1fr); } }
+  .stat {
+    padding: 28px 24px;
+    background: linear-gradient(180deg, rgba(20,22,27,.8), rgba(13,14,17,.8));
+    display: grid; gap: 6px; align-content: start;
+    position: relative; overflow: hidden;
+  }
+  .stat .val {
+    font: 600 44px/1 'Manrope', system-ui;
+    color: var(--ink-hi); letter-spacing: -0.04em;
+    background: linear-gradient(180deg,#fff,#9eb6ff);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .lbl { font-size: 13px; color: var(--ink-lo); }
+  .stat .sub { font: 500 11px/1 'JetBrains Mono', monospace; color: var(--ink-xlo); letter-spacing: .06em; text-transform: uppercase; margin-top: 4px; }
+  .stat-spark { position: absolute; right: 12px; bottom: 12px; opacity: .35;}
+
+  /* ===== SHORTCUTS ===== */
+  .shortcuts { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 720px) { .shortcuts { grid-template-columns: 1fr; } }
+  .shortcut {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 22px;
+    border: 1px solid var(--line);
+    background: var(--grad-glass);
+    border-radius: 14px;
+    transition: border-color .25s ease, transform .25s ease;
+    cursor: pointer;
+  }
+  .shortcut:hover { border-color: rgba(47,122,229,.35); transform: translateY(-2px); }
+  .shortcut:hover .keys kbd { box-shadow: 0 0 14px rgba(47,122,229,.4), 0 2px 0 rgba(0,0,0,.5);}
+  .shortcut .desc { color: var(--ink-hi); font-size: 15px; font-weight: 500; }
+  .shortcut .desc small { display:block; color: var(--ink-lo); font-weight: 400; font-size: 13px; margin-top: 2px; }
+  .shortcut .keys { display: flex; gap: 6px; }
+  .shortcut .keys kbd { transition: box-shadow .25s ease; }
+
+  /* ===== CTA ===== */
+  .cta-wrap {
+    position: relative; text-align: center;
+    padding: 88px 24px;
+    border: 1px solid var(--line-2);
+    border-radius: 28px;
+    background:
+      radial-gradient(600px 300px at 50% 120%, rgba(47,122,229,.22), transparent 70%),
+      linear-gradient(180deg, rgba(20,22,27,.8), rgba(13,14,17,.6));
+    overflow: hidden;
+  }
+  .cta-wrap > * { position: relative; z-index: 2; }
+  .cta-wrap h2 { font-size: clamp(36px,5.2vw,68px); margin: 0 0 12px; letter-spacing: -0.035em; }
+  .cta-wrap p { color: var(--ink); max-width: 520px; margin: 0 auto 32px; font-size: 17px; }
+
+  .cta-orbits { position: absolute; inset: 0; pointer-events: none; opacity: .5; z-index: 1;}
+  .orbit { position: absolute; top: 50%; left: 50%; border: 1px solid rgba(95,160,255,.12); border-radius: 50%; transform: translate(-50%,-50%); }
+  .orbit.o1 { width: 620px; height: 620px; animation: spin 50s linear infinite; }
+  .orbit.o2 { width: 820px; height: 820px; animation: spin 80s linear infinite reverse; }
+  .orbit.o3 { width: 1100px; height: 1100px; animation: spin 120s linear infinite;}
+  .orbit .satellite {
+    position: absolute; top: 0; left: 50%; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--blue); box-shadow: 0 0 24px var(--blue); transform: translate(-50%,-50%);
+  }
+  @keyframes spin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+  .cta-logo {
+    width: 96px; height: 96px; border-radius: 22px;
+    margin: 0 auto 24px;
+    box-shadow: 0 20px 60px rgba(47,122,229,.45);
+    animation: ctaFloat 6s ease-in-out infinite;
+  }
+  @keyframes ctaFloat { 0%,100%{ transform: translateY(0) rotate(0);} 50%{ transform: translateY(-8px) rotate(2deg);}}
+
+  /* ===== FOOTER ===== */
+  footer {
+    padding: 60px 24px 48px;
+    border-top: 1px solid var(--line);
+    margin-top: 80px;
+  }
+  .foot {
+    max-width: 1200px; margin: 0 auto;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 24px;
+    align-items: center;
+    font-size: 13px; color: var(--ink-lo);
+  }
+  .foot-brand { display: flex; align-items: center; gap: 10px;}
+  .foot-brand img { width: 28px; height: 28px; border-radius: 7px; }
+  .foot-links { display: flex; gap: 22px; }
+  .foot-links a { transition: color .2s ease;}
+  .foot-links a:hover { color: var(--ink-hi); }
+  .made { font-size: 12px; color: var(--ink-xlo); }
+
+  /* ===== REVEAL ANIMATIONS ===== */
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity .8s cubic-bezier(.2,.8,.2,1), transform .9s cubic-bezier(.2,.8,.2,1); }
+  .reveal.in { opacity: 1; transform: translateY(0); }
+  .reveal.d1 { transition-delay: .08s; }
+  .reveal.d2 { transition-delay: .16s; }
+  .reveal.d3 { transition-delay: .24s; }
+  .reveal.d4 { transition-delay: .32s; }
+
+  /* hero entrance — default is final/visible; JS adds .go to trigger the entrance */
+  .hero-inner > .anim { opacity: 1; transform: translateY(0); }
+  .hero-inner.go > .anim { animation: rise .9s cubic-bezier(.2,.8,.2,1) backwards; }
+  .hero-inner.go > .anim:nth-child(1) { animation-delay: .05s; }
+  .hero-inner.go > .anim:nth-child(2) { animation-delay: .15s; }
+  .hero-inner.go > .anim:nth-child(3) { animation-delay: .3s; }
+  .hero-inner.go > .anim:nth-child(4) { animation-delay: .42s; }
+  .hero-inner.go > .anim:nth-child(5) { animation-delay: .52s; }
+  .hero-inner.go > .anim:nth-child(6) { animation-delay: .62s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(28px);} to { opacity: 1; transform: translateY(0);} }
+
+  /* marquee strip */
+  .marquee {
+    overflow: hidden;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 18px 0;
+    background: rgba(0,0,0,0.2);
+    margin-top: 70px;
+    mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+  }
+  .marquee-track {
+    display: flex; gap: 40px;
+    width: max-content;
+    animation: slide 40s linear infinite;
+    color: var(--ink-lo);
+    font: 500 14px/1 'JetBrains Mono', monospace;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .marquee-track span { display: inline-flex; align-items: center; gap: 10px; }
+  .marquee-track span::before{ content:''; width:4px; height:4px; background: var(--blue); border-radius: 50%; box-shadow: 0 0 8px var(--blue);}
+  @keyframes slide { to { transform: translateX(-50%);} }
+
+  /* falling SVG icons in CTA */
+  .cta-icons {
+    position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: hidden;
+  }
+  .cta-icons svg {
+    position: absolute; opacity: .14;
+    animation: drift 16s linear infinite;
+  }
+  @keyframes drift {
+    from { transform: translateY(-50px) rotate(-10deg); opacity: 0;}
+    20% { opacity: .18;}
+    80% { opacity: .14;}
+    to { transform: translateY(120vh) rotate(20deg); opacity: 0;}
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div id="aura"></div>
+
+<!-- Reusable SVG icon defs -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="ic-clipboard" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 4h6a1 1 0 0 1 1 1v1H8V5a1 1 0 0 1 1-1Zm-3 2h12v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V6Zm4 7h6m-6 4h4"/></symbol>
+    <symbol id="ic-download" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M12 4v11m0 0 4-4m-4 4-4-4M5 18h14"/></symbol>
+    <symbol id="ic-notes" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M5 4h11l3 3v13H5zM9 11h7m-7 4h5"/></symbol>
+    <symbol id="ic-translate" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M3 5h10M8 4v2m-3 0c.5 4 2.5 7 6 8m-1-4c2 3 5 5 8 5m-9 5 4-9 4 9m-7-2h6"/></symbol>
+    <symbol id="ic-ai" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="m12 3 1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5zM6 16l.8 2.2L9 19l-2.2.8L6 22l-.8-2.2L3 19l2.2-.8zm12 0 .6 1.6L20 18l-1.4.4L18 20l-.6-1.6L16 18l1.4-.4z"/></symbol>
+    <symbol id="ic-web" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="ic-tg" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="m22 3-9 17-2-7L3 11z"/></symbol>
+    <symbol id="ic-music" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="17" cy="16" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="ic-metro" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M7 21 12 3l5 18zM9 14h6m-2-11v15"/></symbol>
+    <symbol id="ic-pomo" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M12 13V8m-2-6h4M9 4l3-1 3 1"/></symbol>
+    <symbol id="ic-term" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="m7 10 3 3-3 3m6 0h4"/></symbol>
+    <symbol id="ic-system" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M8 21h8M12 17v4"/></symbol>
+    <symbol id="ic-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .67.39 1.27 1 1.51H21a2 2 0 0 1 0 4h-.09c-.61.24-1 .84-1 1.51z"/></symbol>
+    <symbol id="ic-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="ic-pin" viewBox="0 0 24 24"><path fill="currentColor" d="M16.06 2 22 7.94l-4.24 4.24-1.41-1.41-4.95 4.95L8 12.34l-4.95 4.95L2 16.24l4.95-4.95-3.39-3.39 4.95-4.95 1.41 1.41 4.95-4.95z" opacity=".9"/></symbol>
+    <symbol id="ic-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 11V7a4 4 0 0 1 8 0v4" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
+    <symbol id="ic-bolt" viewBox="0 0 24 24"><path fill="currentColor" d="M13 2 3 14h7l-1 8 10-12h-7z"/></symbol>
+    <symbol id="ic-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="m5 12 5 5L20 7"/></symbol>
+    <symbol id="ic-play" viewBox="0 0 24 24"><path fill="currentColor" d="M7 4v16l13-8z"/></symbol>
+    <symbol id="ic-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+    <symbol id="ic-img" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="9" cy="10" r="1.5" fill="currentColor"/><path d="m3 18 5-5 5 5 3-3 5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
+    <symbol id="ic-arrow" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6"/></symbol>
+    <symbol id="ic-gh" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/></symbol>
+    <symbol id="ic-folder" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="ic-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></symbol>
+    <symbol id="ic-stack" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5M3 18l9 5 9-5"/></symbol>
+  </defs>
+</svg>
+
+<nav class="topbar" id="topbar">
+  <a href="#" class="brand">
+    <img src="assets/logo.svg" alt="Stash" class="brand-logo" />
+    <span class="brand-name">Stash</span>
+  </a>
+  <div class="nav-links">
+    <a href="#modules">Modules</a>
+    <a href="#philosophy">Philosophy</a>
+    <a href="#shortcuts">Shortcuts</a>
+    <a href="#download">Download</a>
+  </div>
+  <a href="#download" class="nav-cta">
+    <svg width="13" height="13"><use href="#ic-download"/></svg>
+    Download — free
+  </a>
+</nav>
+
+<!-- ================== HERO ================== -->
+<header class="hero">
+  <div class="hero-inner" id="heroInner">
+
+    <div class="eyebrow anim">
+      <span class="dot"></span>
+      <span>macOS 13+ · Tauri 2 · Offline-first · v0.1.0</span>
+    </div>
+
+    <div class="h1-wrap anim">
+      <h1 class="mega" id="mega">
+        <span class="reveal-word" style="animation-delay:.15s">Thirteen</span>
+        <span class="reveal-word" style="animation-delay:.25s">utilities.</span><br/>
+        <span class="reveal-word accent" style="animation-delay:.4s">One</span>
+        <span class="reveal-word accent" style="animation-delay:.5s">icon</span>
+        <span class="sub reveal-word" style="animation-delay:.7s">in your menu bar.</span>
+      </h1>
+    </div>
+
+    <p class="hero-lede anim">
+      Stash is a compact <strong>920 × 520</strong> popup that lives in your menu bar and opens with a single shortcut. Clipboard, notes, translator, AI, Pomodoro, metronome, terminal, video downloader — all at hand, <strong>no accounts, no cloud</strong>.
+    </p>
+
+    <div class="hero-ctas anim">
+      <a href="#download" class="btn btn-primary">
+        <span class="btn-shine"></span>
+        <svg width="16" height="16"><use href="#ic-download"/></svg>
+        Download for macOS
+        <span class="mono" style="opacity:.7; font-size:12px; margin-left: 6px;">·  free</span>
+      </a>
+      <a href="#modules" class="btn btn-ghost">
+        Browse modules
+        <svg class="chev" width="16" height="16"><use href="#ic-arrow"/></svg>
+      </a>
+    </div>
+
+    <div class="kbd-hint anim">
+      <span>press</span>
+      <kbd>⌘</kbd><kbd>⇧</kbd><kbd>V</kbd>
+      <span>— and Stash is right there</span>
+    </div>
+
+    <!-- ============ MENUBAR STAGE ============ -->
+    <div class="anim">
+    <div class="stage" id="stage">
+      <div class="desktop" id="desktop">
+        <div class="wallpaper">
+          <div class="blob b1"></div>
+          <div class="blob b2"></div>
+          <div class="blob b3"></div>
+        </div>
+
+        <!-- floating mini icons -->
+        <div class="float-icons">
+          <div class="float-icon" style="left:5%; top:35%; animation-delay:-1s;"><svg><use href="#ic-clipboard"/></svg></div>
+          <div class="float-icon" style="left:9%; top:62%; animation-delay:-3s;"><svg><use href="#ic-notes"/></svg></div>
+          <div class="float-icon" style="right:5%; top:30%; animation-delay:-2s;"><svg><use href="#ic-metro"/></svg></div>
+          <div class="float-icon" style="right:8%; top:60%; animation-delay:-5s;"><svg><use href="#ic-tg"/></svg></div>
+        </div>
+
+        <!-- menubar -->
+        <div class="menubar">
+          <span class="menu-item bold">Finder</span>
+          <span class="menu-item">File</span>
+          <span class="menu-item">Edit</span>
+          <span class="menu-item">View</span>
+          <span class="menu-item">Go</span>
+          <span class="menu-item">Window</span>
+          <span class="menu-item">Help</span>
+          <div class="menu-spacer"></div>
+          <div class="menu-right">
+            <div class="menu-stash on" id="menuStash" title="Stash">
+              <img class="menu-stash-icon" src="assets/logo.svg" alt=""/>
+            </div>
+            <span style="opacity:.6">100%</span>
+            <span class="menu-clock" id="menuClock">12:04</span>
+          </div>
+        </div>
+
+        <!-- Stash popup with all-SVG mockups -->
+        <div class="popup" id="popup">
+          <div class="popup-inner">
+            <div class="popup-tabs" id="popupTabs">
+              <div class="ptab active" data-i="0" title="Clipboard"><svg><use href="#ic-clipboard"/></svg></div>
+              <div class="ptab" data-i="1" title="Downloader"><svg><use href="#ic-download"/></svg></div>
+              <div class="ptab" data-i="2" title="Notes"><svg><use href="#ic-notes"/></svg></div>
+              <div class="ptab" data-i="3" title="AI"><svg><use href="#ic-ai"/></svg></div>
+              <div class="ptab" data-i="4" title="Telegram"><svg><use href="#ic-tg"/></svg></div>
+              <div class="ptab" data-i="5" title="Metronome"><svg><use href="#ic-metro"/></svg></div>
+              <div class="ptab" data-i="6" title="Terminal"><svg><use href="#ic-term"/></svg></div>
+            </div>
+            <div class="popup-body" id="popupBody">
+
+              <!-- 0 Clipboard -->
+              <div class="popup-screen on" data-i="0">
+                <div class="mini-head">
+                  <div class="mini-title">Clipboard</div>
+                  <div class="mini-search">
+                    <svg width="11" height="11" style="color:var(--ink-xlo)"><use href="#ic-search"/></svg>
+                    Search history…
+                  </div>
+                </div>
+                <div class="mini-row" style="border-color: rgba(47,122,229,.4); background: rgba(47,122,229,.06);">
+                  <svg width="12" height="12" style="color:var(--blue-2)"><use href="#ic-pin"/></svg>
+                  <span class="grow">https://youtube.com/watch?v=dQw4w9WgXcQ</span>
+                  <span class="dim">URL · 2 min</span>
+                </div>
+                <div class="mini-row">
+                  <svg width="12" height="12" style="color:var(--ink-xlo)"><use href="#ic-clipboard"/></svg>
+                  <span class="grow">npm install @tauri-apps/api</span>
+                  <span class="dim">code · 5 min</span>
+                </div>
+                <div class="mini-row">
+                  <svg width="12" height="12" style="color:var(--ink-xlo)"><use href="#ic-clipboard"/></svg>
+                  <span class="grow">Thanks for the quick reply!</span>
+                  <span class="dim">text · 12 min</span>
+                </div>
+                <div class="mini-row">
+                  <svg width="12" height="12" style="color:var(--ink-xlo)"><use href="#ic-clipboard"/></svg>
+                  <span class="grow">/Users/me/projects/stash/src</span>
+                  <span class="dim">path · 18 min</span>
+                </div>
+              </div>
+
+              <!-- 1 Downloader -->
+              <div class="popup-screen" data-i="1">
+                <div class="mini-head">
+                  <div class="mini-title">Downloader</div>
+                  <div class="mk-pill"><svg width="10" height="10"><use href="#ic-download"/></svg> 2 queued</div>
+                </div>
+                <div class="mini-row" style="display:block; padding: 12px;">
+                  <div style="display:flex; gap:10px; align-items:center; margin-bottom: 8px;">
+                    <div style="width:46px;height:34px;border-radius:5px;background:linear-gradient(135deg,#FF0033,#9b0020);position:relative;overflow:hidden;">
+                      <svg style="position:absolute;inset:0;margin:auto;width:14px;height:14px;color:#fff" viewBox="0 0 24 24"><use href="#ic-play"/></svg>
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                      <div style="color:var(--ink-hi); font-weight: 500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Lex Fridman Podcast #420 · Full</div>
+                      <div style="font-size:10px; color:var(--ink-xlo); font-family:'JetBrains Mono', monospace; margin-top:2px;">1080p · mp4 · 1.2 GB</div>
+                    </div>
+                    <span class="mk-pill" style="background: rgba(74,222,128,.14); border-color: rgba(74,222,128,.3); color:#4ade80;">68%</span>
+                  </div>
+                  <div class="mk-progress" style="--p: 68%;"></div>
+                </div>
+                <div class="mini-row" style="display:block; padding: 12px;">
+                  <div style="display:flex; gap:10px; align-items:center; margin-bottom: 8px;">
+                    <div style="width:46px;height:34px;border-radius:5px;background:linear-gradient(135deg,#1DB954,#0f5d2a);position:relative;overflow:hidden;">
+                      <svg style="position:absolute;inset:0;margin:auto;width:14px;height:14px;color:#fff"><use href="#ic-music"/></svg>
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                      <div style="color:var(--ink-hi); font-weight: 500;">Lo-fi beats · 2h mix</div>
+                      <div style="font-size:10px; color:var(--ink-xlo); font-family:'JetBrains Mono', monospace; margin-top:2px;">320kbps · mp3 · 280 MB</div>
+                    </div>
+                    <span class="mk-pill" style="background: rgba(255,180,90,.14); border-color: rgba(255,180,90,.3); color:#ffb45a;">23%</span>
+                  </div>
+                  <div class="mk-progress" style="--p: 23%;"></div>
+                </div>
+                <div style="margin-top:auto; display:flex; gap:6px; padding-top:10px;">
+                  <div style="font-size:11px; color:var(--ink-xlo);">📋 URL detected in clipboard — </div>
+                  <div style="font-size:11px; color:var(--blue-2); cursor:pointer;">add to queue →</div>
+                </div>
+              </div>
+
+              <!-- 2 Notes -->
+              <div class="popup-screen" data-i="2">
+                <div class="mini-head">
+                  <div class="mini-title">Notes</div>
+                  <div style="display:flex;gap:6px;">
+                    <div class="mk-pill"><svg width="10" height="10"><use href="#ic-img"/></svg></div>
+                    <div class="mk-pill"><svg width="10" height="10"><use href="#ic-mic"/></svg></div>
+                    <div class="mk-pill"><svg width="10" height="10"><use href="#ic-ai"/></svg> AI</div>
+                  </div>
+                </div>
+                <div style="display:grid; grid-template-columns: 100px 1fr; gap: 10px; flex:1;">
+                  <div style="display:grid; gap:4px; align-content:start;">
+                    <div style="padding: 7px 9px; background: rgba(47,122,229,.14); border-radius: 6px; font-size: 11px; color: #d8e6ff; border-left: 2px solid var(--blue);">Stash ideas</div>
+                    <div style="padding: 7px 9px; font-size: 11px; color: var(--ink-lo);">Shopping</div>
+                    <div style="padding: 7px 9px; font-size: 11px; color: var(--ink-lo);">Books 2026</div>
+                    <div style="padding: 7px 9px; font-size: 11px; color: var(--ink-lo);">Meditation</div>
+                  </div>
+                  <div style="background: rgba(0,0,0,.2); border-radius: 8px; padding: 12px; font-size: 11.5px; color: var(--ink); border: 1px solid var(--line);">
+                    <div style="color: var(--ink-hi); font-weight: 600; margin-bottom: 6px; font-size: 13px;">Stash ideas</div>
+                    <div style="color: var(--ink); margin-bottom: 6px;"># Weekly plan</div>
+                    <div style="margin-bottom: 4px;">• voice transcribe via Whisper</div>
+                    <div style="margin-bottom: 4px;">• OG preview in Telegram inbox</div>
+                    <div style="margin-bottom: 8px;">• new <span class="mono" style="background:rgba(47,122,229,.18);padding:1px 5px; border-radius:3px; color:var(--blue-2)">/remind</span> tool</div>
+                    <div style="display:inline-flex; align-items:center; gap:6px; padding: 5px 8px; background: rgba(47,122,229,.1); border: 1px solid rgba(47,122,229,.3); border-radius: 6px; font-size: 10.5px; color: var(--blue-2);">
+                      <svg width="10" height="10"><use href="#ic-mic"/></svg> voice-memo · 0:34
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3 AI -->
+              <div class="popup-screen" data-i="3">
+                <div class="mini-head">
+                  <div class="mini-title">AI Chat <span style="color:var(--ink-xlo);font-weight:400;font-size:11px;">· Claude Sonnet 4.5</span></div>
+                  <div class="mk-pill" style="background:rgba(74,222,128,.14); color:#4ade80; border-color:rgba(74,222,128,.3);">● online</div>
+                </div>
+                <div style="flex:1; overflow: hidden; display:flex; flex-direction:column; gap:0;">
+                  <div class="ai-bubble you">How do I convert OGG/Opus to WAV in Rust without external ffmpeg?</div>
+                  <div class="ai-bubble">Use the <span class="mono" style="background:rgba(47,122,229,.18);padding:1px 5px;border-radius:3px;color:var(--blue-2)">audiopus_sys</span> crate + <span class="mono" style="background:rgba(47,122,229,.18);padding:1px 5px;border-radius:3px;color:var(--blue-2)">ogg::PacketReader</span> to parse the container. Pure Rust, no cdylib dependencies.</div>
+                  <div class="ai-bubble you">Show an example</div>
+                  <div class="ai-bubble"><span class="typing"><span></span><span></span><span></span></span></div>
+                </div>
+                <div style="margin-top: 6px; padding: 8px 10px; background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: 8px; display:flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-xlo);">
+                  <svg width="13" height="13" style="color:var(--blue-2)"><use href="#ic-bolt"/></svg>
+                  Ask anything…
+                  <span class="mono" style="margin-left:auto; font-size:10px;">⏎</span>
+                </div>
+              </div>
+
+              <!-- 4 Telegram -->
+              <div class="popup-screen" data-i="4">
+                <div class="mini-head">
+                  <div class="mini-title">Telegram <span style="color:var(--ink-xlo);font-weight:400;font-size:11px;">· @stash_personal_bot</span></div>
+                  <div class="mk-pill">3 new</div>
+                </div>
+                <div class="mini-row">
+                  <div style="width:28px;height:28px;border-radius:50%; background: linear-gradient(135deg,#5FA0FF,#2F7AE5); display:grid; place-items:center; color:#fff; font-weight:600; font-size:11px;">A</div>
+                  <div class="grow" style="display:grid;">
+                    <div style="font-size: 12px; color: var(--ink-hi);">Andriy</div>
+                    <div style="font-size: 11px; color: var(--ink-lo);">📎 voice · 0:42 → transcribed</div>
+                  </div>
+                  <span class="dim">14:02</span>
+                </div>
+                <div class="mini-row" style="display:block; padding: 12px;">
+                  <div style="display:flex; gap:10px; margin-bottom: 8px;">
+                    <div style="width:80px; height:46px; border-radius:6px; background: linear-gradient(135deg,#FF0033,#9b0020); position:relative; overflow:hidden; flex-shrink:0;">
+                      <svg style="position:absolute;inset:0;margin:auto;width:18px;height:18px;color:#fff"><use href="#ic-play"/></svg>
+                    </div>
+                    <div style="flex:1; min-width:0;">
+                      <div style="font-size: 12px; color: var(--ink-hi); font-weight:500;">YouTube · The future of menubar apps</div>
+                      <div style="font-size: 10px; color: var(--ink-lo); margin-top:2px;">12 min · from @max</div>
+                      <div style="margin-top: 4px; font-size: 10px; color: var(--blue-2); cursor:pointer;">⤓ Download →</div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mini-row">
+                  <svg width="14" height="14" style="color:var(--blue-2)"><use href="#ic-tg"/></svg>
+                  <span class="grow mono" style="font-size:11px;">/remind 20m drink water</span>
+                  <span class="dim">14:01</span>
+                </div>
+              </div>
+
+              <!-- 5 Metronome -->
+              <div class="popup-screen" data-i="5">
+                <div class="mini-head">
+                  <div class="mini-title">Metronome</div>
+                  <div class="mk-pill">4 / 4</div>
+                </div>
+                <div class="metronome">
+                  <svg viewBox="0 0 400 340" style="overflow:visible;">
+                    <defs>
+                      <linearGradient id="metBody" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" stop-color="#23262d"/>
+                        <stop offset="1" stop-color="#0f1116"/>
+                      </linearGradient>
+                    </defs>
+                    <!-- body -->
+                    <polygon points="200,30 280,290 120,290" fill="url(#metBody)" stroke="rgba(255,255,255,.08)"/>
+                    <!-- bpm window -->
+                    <rect x="155" y="240" width="90" height="34" rx="6" fill="#0a0b0e" stroke="rgba(47,122,229,.4)"/>
+                    <text x="200" y="263" text-anchor="middle" class="met-bpm">120</text>
+                    <text x="200" y="280" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7a7f89">BPM</text>
+                    <!-- pendulum -->
+                    <g class="met-pendulum">
+                      <line x1="200" y1="290" x2="200" y2="80" stroke="#5FA0FF" stroke-width="2.5" stroke-linecap="round"/>
+                      <circle cx="200" cy="120" r="14" fill="#2F7AE5" stroke="#7FB3FF" stroke-width="2"/>
+                    </g>
+                    <!-- pivot -->
+                    <circle cx="200" cy="290" r="6" fill="#7FB3FF"/>
+                    <!-- beat lights -->
+                    <g>
+                      <circle cx="155" cy="60" r="6" fill="#2F7AE5">
+                        <animate attributeName="opacity" values="1;0.2;0.2;0.2" dur="1.2s" repeatCount="indefinite"/>
+                      </circle>
+                      <circle cx="180" cy="60" r="6" fill="#3a3f48">
+                        <animate attributeName="fill" values="#3a3f48;#5FA0FF;#3a3f48;#3a3f48" dur="1.2s" repeatCount="indefinite"/>
+                      </circle>
+                      <circle cx="205" cy="60" r="6" fill="#3a3f48">
+                        <animate attributeName="fill" values="#3a3f48;#3a3f48;#5FA0FF;#3a3f48" dur="1.2s" repeatCount="indefinite"/>
+                      </circle>
+                      <circle cx="230" cy="60" r="6" fill="#3a3f48">
+                        <animate attributeName="fill" values="#3a3f48;#3a3f48;#3a3f48;#5FA0FF" dur="1.2s" repeatCount="indefinite"/>
+                      </circle>
+                    </g>
+                  </svg>
+                </div>
+              </div>
+
+              <!-- 6 Terminal -->
+              <div class="popup-screen" data-i="6">
+                <div class="mini-head">
+                  <div class="mini-title">Terminal <span style="color:var(--ink-xlo);font-weight:400;font-size:11px;">· ~/projects/stash</span></div>
+                  <div class="mk-pill"><svg width="10" height="10"><use href="#ic-ai"/></svg> Claude Code</div>
+                </div>
+                <div class="term">
+                  <div><span class="pr">~/stash &gt;</span> <span>cargo test --package stash-core</span></div>
+                  <div class="dim">running 414 tests...</div>
+                  <div class="dim">test telegram::assistant::voice_transcribe ... <span class="ok">ok</span></div>
+                  <div class="dim">test downloader::yt_dlp::detect_url ... <span class="ok">ok</span></div>
+                  <div class="dim">test clipboard::history::pin_unpin ... <span class="ok">ok</span></div>
+                  <div><span class="ok">test result: ok. 414 passed; 0 failed; 0 ignored</span></div>
+                  <div style="margin-top:6px;"><span class="pr">~/stash &gt;</span> <span class="cursor-blink"></span></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage-kbd">
+        <kbd class="pulse">⌘</kbd>
+        <kbd class="pulse">⇧</kbd>
+        <kbd class="pulse">V</kbd>
+        <span style="color:var(--ink-xlo)">·</span>
+        <span>show / hide</span>
+      </div>
+    </div>
+    </div>
+
+  </div>
+</header>
+
+<!-- ================ MARQUEE ================ -->
+<div class="marquee">
+  <div class="marquee-track">
+    <span>Clipboard</span><span>Notes</span><span>Translator</span><span>AI Chat</span>
+    <span>Web</span><span>Telegram</span><span>Downloader</span><span>Music</span>
+    <span>Metronome</span><span>Pomodoro</span><span>Terminal</span><span>System</span>
+    <span>Settings</span>
+    <span>Clipboard</span><span>Notes</span><span>Translator</span><span>AI Chat</span>
+    <span>Web</span><span>Telegram</span><span>Downloader</span><span>Music</span>
+    <span>Metronome</span><span>Pomodoro</span><span>Terminal</span><span>System</span>
+    <span>Settings</span>
+  </div>
+</div>
+
+<!-- ================ PHILOSOPHY ================ -->
+<section id="philosophy">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="section-tag">01 · Philosophy</div>
+      <h2 class="section-title">A deliberate <span class="serif">«Frankenstein»</span><br/>beats a zoo of dock apps.</h2>
+      <p class="section-lede">A real day isn't one full-screen app. It's a dozen tiny actions a minute: translate, copy, grab a video, start a timer. Stash gives them a single address.</p>
+    </div>
+
+    <div class="pillars">
+      <div class="pillar reveal d1">
+        <svg class="pillar-svg" viewBox="0 0 100 100">
+          <defs><linearGradient id="pg1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5FA0FF"/><stop offset="1" stop-color="#2F7AE5"/></linearGradient></defs>
+          <circle cx="50" cy="50" r="32" fill="none" stroke="url(#pg1)" stroke-width="1.5" opacity=".5">
+            <animate attributeName="r" values="28;34;28" dur="4s" repeatCount="indefinite"/>
+          </circle>
+          <circle cx="50" cy="50" r="22" fill="none" stroke="url(#pg1)" stroke-width="1.5" opacity=".7"/>
+          <circle cx="50" cy="50" r="6" fill="url(#pg1)"/>
+          <circle cx="82" cy="50" r="3" fill="#7FB3FF"><animate attributeName="cx" values="82;50;18;50;82" dur="6s" repeatCount="indefinite"/><animate attributeName="cy" values="50;82;50;18;50" dur="6s" repeatCount="indefinite"/></circle>
+        </svg>
+        <div class="pillar-num">I.</div>
+        <h3>UI / UX</h3>
+        <p>Predictable interactions, instant feedback, proper focus management, light and dark themes, reduced-motion and a11y from day one.</p>
+      </div>
+      <div class="pillar reveal d2">
+        <svg class="pillar-svg" viewBox="0 0 100 100">
+          <g fill="none" stroke="#5FA0FF" stroke-width="1.5" opacity=".7">
+            <rect x="14" y="14" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" repeatCount="indefinite"/></rect>
+            <rect x="40" y="14" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" begin=".5s" repeatCount="indefinite"/></rect>
+            <rect x="66" y="14" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" begin="1s" repeatCount="indefinite"/></rect>
+            <rect x="14" y="40" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" begin="1.5s" repeatCount="indefinite"/></rect>
+            <rect x="40" y="40" width="22" height="22" rx="4" fill="#2F7AE5" fill-opacity=".4"/>
+            <rect x="66" y="40" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" begin=".7s" repeatCount="indefinite"/></rect>
+            <rect x="14" y="66" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" begin="1.2s" repeatCount="indefinite"/></rect>
+            <rect x="40" y="66" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" begin="2s" repeatCount="indefinite"/></rect>
+            <rect x="66" y="66" width="22" height="22" rx="4"><animate attributeName="opacity" values=".4;1;.4" dur="3s" begin=".3s" repeatCount="indefinite"/></rect>
+          </g>
+        </svg>
+        <div class="pillar-num">II.</div>
+        <h3>Modularity</h3>
+        <p>Every module is standalone — its own <span class="mono" style="font-size:13px;color:var(--ink)">api.ts</span>, its own tests, its own lazy popup. No cross-module imports, no shared state.</p>
+      </div>
+      <div class="pillar reveal d3">
+        <svg class="pillar-svg" viewBox="0 0 100 100">
+          <path d="M 55 12 L 30 52 L 50 52 L 42 88 L 70 44 L 50 44 Z" fill="url(#pg2)" stroke="#7FB3FF" stroke-width="1">
+            <animate attributeName="opacity" values="1;.6;1" dur="1.2s" repeatCount="indefinite"/>
+          </path>
+          <defs><linearGradient id="pg2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7FB3FF"/><stop offset="1" stop-color="#2F7AE5"/></linearGradient></defs>
+        </svg>
+        <div class="pillar-num">III.</div>
+        <h3>Performance</h3>
+        <p>Lazy tabs, hover-prefetching, nothing heavy on the popup-open path. The popup opens before you can blink.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================ MODULES SHOWCASE ================ -->
+<section id="modules">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="section-tag">02 · 13 modules</div>
+      <h2 class="section-title">Pick a module — <span class="serif">peek inside.</span></h2>
+      <p class="section-lede">Click a row on the left. The popup updates just like it does inside Stash.</p>
+    </div>
+
+    <div class="showcase">
+      <div class="showcase-list" id="showList"></div>
+      <div class="showcase-preview reveal">
+        <div class="preview-chrome">
+          <div class="dot-mac r"></div><div class="dot-mac y"></div><div class="dot-mac g"></div>
+          <div class="ch-title" id="chromeTitle">stash · clipboard</div>
+        </div>
+        <div class="preview-frame" id="previewFrame"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================ STATS ================ -->
+<section>
+  <div class="container">
+    <div class="stats-strip reveal">
+      <div class="stat">
+        <div class="val"><span data-count="13">0</span></div>
+        <div class="lbl">modules in one popup</div>
+        <div class="sub">core</div>
+        <svg class="stat-spark" width="60" height="22" viewBox="0 0 60 22"><polyline points="0,18 10,14 18,16 26,8 36,12 44,5 52,9 60,3" fill="none" stroke="#5FA0FF" stroke-width="1.5"/></svg>
+      </div>
+      <div class="stat">
+        <div class="val"><span data-count="1078">0</span></div>
+        <div class="lbl">tests (Rust + frontend)</div>
+        <div class="sub">stability</div>
+        <svg class="stat-spark" width="60" height="22" viewBox="0 0 60 22"><polyline points="0,20 8,16 16,18 24,12 32,8 40,10 48,4 60,2" fill="none" stroke="#4ade80" stroke-width="1.5"/></svg>
+      </div>
+      <div class="stat">
+        <div class="val">0</div>
+        <div class="lbl">accounts, telemetry, cloud</div>
+        <div class="sub">privacy</div>
+        <svg class="stat-spark" width="40" height="22" viewBox="0 0 40 22" style="color:#5FA0FF"><use href="#ic-lock"/></svg>
+      </div>
+      <div class="stat">
+        <div class="val">920<span style="color:var(--ink-xlo); font-weight:400;">×</span>520</div>
+        <div class="lbl">popup size — that's it</div>
+        <div class="sub">footprint</div>
+        <svg class="stat-spark" width="40" height="22" viewBox="0 0 40 22"><rect x="2" y="6" width="36" height="14" rx="2" fill="none" stroke="#5FA0FF" stroke-width="1.5"/><line x1="2" y1="10" x2="38" y2="10" stroke="#5FA0FF" stroke-width="1"/></svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================ ALL MODULES GRID ================ -->
+<section>
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="section-tag">03 · Registry</div>
+      <h2 class="section-title">Every tab — <span class="serif">its own tiny app.</span></h2>
+    </div>
+
+    <div class="modgrid" id="modGrid"></div>
+  </div>
+</section>
+
+<!-- ================ SHORTCUTS ================ -->
+<section id="shortcuts">
+  <div class="container">
+    <div class="section-head reveal">
+      <div class="section-tag">04 · Keyboard</div>
+      <h2 class="section-title">Hands stay <span class="serif">on the keyboard.</span></h2>
+      <p class="section-lede">Stash is built for people who'd rather not chase the cursor. Everything important has a shortcut.</p>
+    </div>
+
+    <div class="shortcuts">
+      <div class="shortcut reveal d1">
+        <div class="desc">Show / hide the popup <small>globally, from any app</small></div>
+        <div class="keys"><kbd class="lg">⌘</kbd><kbd class="lg">⇧</kbd><kbd class="lg">V</kbd></div>
+      </div>
+      <div class="shortcut reveal d1">
+        <div class="desc">Switch tabs <small>1..9 — in the order of active modules</small></div>
+        <div class="keys"><kbd class="lg">⌘</kbd><kbd class="lg">⌥</kbd><kbd class="lg">1–9</kbd></div>
+      </div>
+      <div class="shortcut reveal d2">
+        <div class="desc">Global search across modules <small>one window — everything in the app</small></div>
+        <div class="keys"><kbd class="lg">⌘</kbd><kbd class="lg">K</kbd></div>
+      </div>
+      <div class="shortcut reveal d2">
+        <div class="desc">Shortcut cheatsheet <small>a cheat sheet that doesn't hide</small></div>
+        <div class="keys"><kbd class="lg">⌘</kbd><kbd class="lg">/</kbd></div>
+      </div>
+      <div class="shortcut reveal d3">
+        <div class="desc">Repeat the last action <small>copy again, translate again, one more download</small></div>
+        <div class="keys"><kbd class="lg">⌘</kbd><kbd class="lg">⏎</kbd></div>
+      </div>
+      <div class="shortcut reveal d3">
+        <div class="desc">Hide and get back to work <small>the window won't steal focus longer than needed</small></div>
+        <div class="keys"><kbd class="lg">Esc</kbd></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================ CTA / DOWNLOAD ================ -->
+<section id="download">
+  <div class="container">
+    <div class="cta-wrap reveal">
+      <div class="cta-orbits">
+        <div class="orbit o1"><div class="satellite"></div></div>
+        <div class="orbit o2"><div class="satellite" style="background:#7FB3FF; box-shadow:0 0 24px #7FB3FF"></div></div>
+        <div class="orbit o3"><div class="satellite"></div></div>
+      </div>
+      <div class="cta-icons" id="ctaIcons"></div>
+      <img src="assets/logo.svg" alt="" class="cta-logo" />
+      <h2>Download Stash. <span class="serif" style="color:var(--ink-lo)">Then forget it's there.</span></h2>
+      <p>Free. macOS 13 Ventura and up. Universal (Apple Silicon + Intel). No account.</p>
+      <div style="display:flex; gap: 14px; justify-content:center; flex-wrap: wrap;">
+        <a href="https://github.com/OPSRv/stash/releases/latest/download/Stash_universal.dmg" class="btn btn-primary" id="dlBtn">
+          <span class="btn-shine"></span>
+          <svg width="18" height="18"><use href="#ic-download"/></svg>
+          Stash · latest macOS build
+          <span class="mono" style="opacity:.75; font-size:12px; margin-left: 4px;">.dmg</span>
+        </a>
+        <a href="https://github.com/OPSRv/stash" class="btn btn-ghost">
+          <svg width="16" height="16"><use href="#ic-gh"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <div style="margin-top: 26px; display:flex; gap: 22px; justify-content: center; flex-wrap: wrap; font-size: 13px; color: var(--ink-lo);">
+        <span style="display:inline-flex; align-items:center; gap:6px;"><svg width="13" height="13" style="color:#4ade80"><use href="#ic-check"/></svg>Apple Silicon</span>
+        <span style="display:inline-flex; align-items:center; gap:6px;"><svg width="13" height="13" style="color:#4ade80"><use href="#ic-check"/></svg>Intel</span>
+        <span style="display:inline-flex; align-items:center; gap:6px;"><svg width="13" height="13" style="color:#4ade80"><use href="#ic-check"/></svg>0 telemetry</span>
+        <span style="display:inline-flex; align-items:center; gap:6px;"><svg width="13" height="13" style="color:#4ade80"><use href="#ic-check"/></svg>100% offline</span>
+        <span style="display:inline-flex; align-items:center; gap:6px;"><svg width="13" height="13" style="color:#4ade80"><use href="#ic-check"/></svg>Open source</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="foot">
+    <div class="foot-brand">
+      <img src="assets/logo.svg" alt=""/>
+      <span>Stash · v0.1.0</span>
+    </div>
+    <div class="foot-links">
+      <a href="#modules">Modules</a>
+      <a href="#shortcuts">Shortcuts</a>
+      <a href="#download">Download</a>
+      <a href="https://github.com/OPSRv/stash">GitHub</a>
+    </div>
+    <div class="made">Made with ☕, 🦀 and a lot of care for the user's nerves.</div>
+  </div>
+</footer>
+
+<script>
+// ============== MODULES DATA ==============
+const MODULES = [
+  { id:'clipboard',  icon:'#ic-clipboard', title:'Clipboard',  kbd:'⌘⌥1', short:'Clipboard history', long:'Clipboard history with search, pins, and one-click re-copy. Autodetects URLs and offers them to Downloader.', glow:'rgba(47,122,229,.18)', shotIdx: 0 },
+  { id:'downloads',  icon:'#ic-download',  title:'Downloader', kbd:'⌘⌥2', short:'YouTube, TikTok, X…', long:'yt-dlp under the hood. Video and audio from YouTube and other sources, thumbnails, queue, done-notifications. Autodetects URLs from the clipboard.', glow:'rgba(255,80,90,.18)', shotIdx: 1 },
+  { id:'notes',      icon:'#ic-notes',     title:'Notes',      kbd:'⌘⌥3', short:'Markdown + AI',  long:'Markdown editor with inline audio, images, arbitrary drag-and-drop attachments, Mermaid diagrams, and an AI chat scoped to each note. One click — send to Telegram.', glow:'rgba(180,180,180,.16)', shotIdx: 2 },
+  { id:'translator', icon:'#ic-translate', title:'Translator', kbd:'⌘⌥4', short:'Instant translation', long:'Fast cross-language translation straight from the popup, with query history. Hot-swap between DeepL, Google, or a local model.', glow:'rgba(255,180,90,.16)', shotIdx: 3 },
+  { id:'ai',         icon:'#ic-ai',        title:'AI',         kbd:'⌘⌥5', short:'Claude / GPT / Gemini', long:'Chat with an LLM — OpenAI, Anthropic, Gemini — for everyday questions, explanations, text generation. Streaming, context, templates.', glow:'rgba(180,120,255,.18)', shotIdx: 3 },
+  { id:'web',        icon:'#ic-web',       title:'Web',        kbd:'⌘⌥6', short:'Embedded chats',  long:'Embedded web chats (ChatGPT, Claude, Gemini) with a light Arc-style sidebar and coloured favicons.', glow:'rgba(47,122,229,.18)', shotIdx: 4 },
+  { id:'telegram',   icon:'#ic-tg',        title:'Telegram',   kbd:'⌘⌥7', short:'Your own bot + inbox', long:'Your own bot paired with Stash. Inbox for text / photo / video / voice. Local Whisper transcribes voice notes. Slash commands and AI tools work from Telegram and from the CLI.', glow:'rgba(80,170,255,.18)', shotIdx: 4 },
+  { id:'music',      icon:'#ic-music',     title:'Music',      kbd:'⌘⌥8', short:'Local player', long:'Local audio player for background music — no switching to Spotify, no ads.', glow:'rgba(255,100,170,.16)', shotIdx: 5 },
+  { id:'metronome',  icon:'#ic-metro',     title:'Metronome',  kbd:'⌘⌥9', short:'BPM trainer', long:'Metronome with adjustable tempo, time signature, trainer mode (BPM ramps over time) and backing-track playback.', glow:'rgba(80,200,220,.16)', shotIdx: 5 },
+  { id:'pomodoro',   icon:'#ic-pomo',      title:'Pomodoro',   kbd:'',     short:'Timer with history', long:'Pomodoro timer with custom presets, session history, and notifications in Stash + Telegram.', glow:'rgba(255,120,100,.18)', shotIdx: 6 },
+  { id:'terminal',   icon:'#ic-term',      title:'Terminal',   kbd:'',     short:'portable-pty', long:'Embedded terminal for quick commands without switching to iTerm. Split panes inherit cwd, ⌘+/⌘− scale the font, and the «Claude Code» button starts an agent session in two clicks.', glow:'rgba(100,220,180,.14)', shotIdx: 6 },
+  { id:'system',     icon:'#ic-system',    title:'System',     kbd:'',     short:'Trash, duplicates, battery', long:'System utilities: trash browser grouped by volume, duplicate finder, battery stats.', glow:'rgba(47,122,229,.18)', shotIdx: 6 },
+  { id:'settings',   icon:'#ic-settings',  title:'Settings',   kbd:'',     short:'Shortcuts, theme, configs', long:'Global shortcuts, theme / accent / panel opacity, language, autostart, per-module configs.', glow:'rgba(180,180,180,.14)', shotIdx: 6 },
+];
+
+// ============== SHOWCASE ==============
+const showList = document.getElementById('showList');
+const previewFrame = document.getElementById('previewFrame');
+const chromeTitle = document.getElementById('chromeTitle');
+
+// Build showcase mock screens that mirror the popup screens
+const SHOWCASE_SCREENS = [
+  // 0: Clipboard
+  () => `
+    <div class="mini-head"><div class="mini-title" style="font-size:15px;">Clipboard</div>
+      <div class="mini-search" style="height:28px;font-size:12px;"><svg width="13" height="13" style="color:var(--ink-xlo)"><use href="#ic-search"/></svg> Search history…</div>
+    </div>
+    <div class="mk-row pin">
+      <svg width="14" height="14" style="color:var(--blue-2)"><use href="#ic-pin"/></svg>
+      <span class="grow">https://youtube.com/watch?v=dQw4w9WgXcQ</span>
+      <span class="meta">URL · 2 min</span>
+    </div>
+    <div class="mk-row"><svg width="14" height="14" style="color:var(--ink-xlo)"><use href="#ic-clipboard"/></svg><span class="grow mono" style="font-size:12px;">npm install @tauri-apps/api</span><span class="meta">code · 5 min</span></div>
+    <div class="mk-row"><svg width="14" height="14" style="color:var(--ink-xlo)"><use href="#ic-clipboard"/></svg><span class="grow">Thanks for the quick reply, I'll attach the file after lunch.</span><span class="meta">text · 12 min</span></div>
+    <div class="mk-row"><svg width="14" height="14" style="color:var(--ink-xlo)"><use href="#ic-clipboard"/></svg><span class="grow mono" style="font-size:12px;">/Users/me/projects/stash/src</span><span class="meta">path · 18 min</span></div>
+    <div class="mk-row"><svg width="14" height="14" style="color:var(--ink-xlo)"><use href="#ic-clipboard"/></svg><span class="grow">vova.kovalenko@gmail.com</span><span class="meta">email · 1h</span></div>
+  `,
+  // 1: Downloader
+  () => `
+    <div class="mini-head"><div class="mini-title" style="font-size:15px;">Downloader</div>
+      <div style="display:flex; gap:6px;"><div class="mk-pill" style="background:rgba(255,180,90,.14); border-color:rgba(255,180,90,.3); color:#ffb45a;">2 queued</div><div class="mk-pill">+ add</div></div>
+    </div>
+    <div class="mk-row" style="display:block;">
+      <div style="display:flex; gap:12px; align-items:center; margin-bottom: 10px;">
+        <div style="width:60px;height:42px;border-radius:6px;background:linear-gradient(135deg,#FF0033,#9b0020);position:relative;overflow:hidden; display:grid; place-items:center;">
+          <svg style="width:18px;height:18px;color:#fff"><use href="#ic-play"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="color:var(--ink-hi); font-weight:500;">Lex Fridman Podcast #420 · Full episode</div>
+          <div style="font-size:11px; color:var(--ink-xlo); font-family:'JetBrains Mono', monospace; margin-top:3px;">1080p · mp4 · 1.2 GB · 12:34 / 18:00 left</div>
+        </div>
+        <span class="mk-pill" style="background: rgba(74,222,128,.14); border-color: rgba(74,222,128,.3); color:#4ade80;">68%</span>
+      </div>
+      <div class="mk-progress" style="--p: 68%;"></div>
+    </div>
+    <div class="mk-row" style="display:block;">
+      <div style="display:flex; gap:12px; align-items:center; margin-bottom: 10px;">
+        <div style="width:60px;height:42px;border-radius:6px;background:linear-gradient(135deg,#1DB954,#0f5d2a);position:relative;overflow:hidden; display:grid; place-items:center;">
+          <svg style="width:18px;height:18px;color:#fff"><use href="#ic-music"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="color:var(--ink-hi); font-weight:500;">Lo-fi beats · 2h focus mix</div>
+          <div style="font-size:11px; color:var(--ink-xlo); font-family:'JetBrains Mono', monospace; margin-top:3px;">320kbps · mp3 · 280 MB</div>
+        </div>
+        <span class="mk-pill" style="background: rgba(255,180,90,.14); border-color: rgba(255,180,90,.3); color:#ffb45a;">23%</span>
+      </div>
+      <div class="mk-progress" style="--p: 30%;"></div>
+    </div>
+    <div style="display:flex; gap:8px; padding:12px; border:1px dashed rgba(47,122,229,.3); border-radius:9px; align-items:center; margin-top: 4px;">
+      <svg width="14" height="14" style="color:var(--blue-2)"><use href="#ic-clipboard"/></svg>
+      <span style="font-size:12px; color:var(--ink);">URL detected in clipboard: <span class="mono" style="color:var(--ink-hi)">tiktok.com/@vp/video/72…</span></span>
+      <span style="font-size:12px; color:var(--blue-2); margin-left:auto; cursor:pointer;">add →</span>
+    </div>
+  `,
+  // 2: Notes
+  () => `
+    <div class="mini-head"><div class="mini-title" style="font-size:15px;">Notes</div>
+      <div style="display:flex;gap:6px;">
+        <div class="mk-pill"><svg width="11" height="11"><use href="#ic-img"/></svg></div>
+        <div class="mk-pill"><svg width="11" height="11"><use href="#ic-mic"/></svg></div>
+        <div class="mk-pill"><svg width="11" height="11"><use href="#ic-ai"/></svg> AI</div>
+        <div class="mk-pill"><svg width="11" height="11"><use href="#ic-tg"/></svg> Send</div>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns: 140px 1fr; gap: 12px; flex:1;">
+      <div style="display:grid; gap:4px; align-content:start;">
+        <div style="padding: 9px 11px; background: rgba(47,122,229,.14); border-radius: 7px; font-size: 12px; color: #d8e6ff; border-left: 2px solid var(--blue);">Stash ideas</div>
+        <div style="padding: 9px 11px; font-size: 12px; color: var(--ink-lo);">Shopping</div>
+        <div style="padding: 9px 11px; font-size: 12px; color: var(--ink-lo);">Books 2026</div>
+        <div style="padding: 9px 11px; font-size: 12px; color: var(--ink-lo);">Meditation</div>
+        <div style="padding: 9px 11px; font-size: 12px; color: var(--ink-lo);">Work notes</div>
+        <div style="padding: 9px 11px; font-size: 12px; color: var(--ink-xlo);">+ new note</div>
+      </div>
+      <div style="background: rgba(0,0,0,.2); border-radius: 9px; padding: 14px; font-size: 13px; color: var(--ink); border: 1px solid var(--line);">
+        <div style="color: var(--ink-hi); font-weight: 600; margin-bottom: 8px; font-size: 14px;">Stash ideas</div>
+        <div style="color: var(--ink-hi); margin-bottom: 6px; font-weight:600;"># Weekly plan</div>
+        <div style="margin-bottom: 5px; padding-left:12px;">• voice transcribe via Whisper</div>
+        <div style="margin-bottom: 5px; padding-left:12px;">• OG preview in Telegram inbox</div>
+        <div style="margin-bottom: 10px; padding-left:12px;">• new <span class="mono" style="background:rgba(47,122,229,.18);padding:1px 5px; border-radius:3px; color:var(--blue-2)">/remind</span> tool</div>
+        <div style="display:inline-flex; align-items:center; gap:8px; padding: 7px 10px; background: rgba(47,122,229,.1); border: 1px solid rgba(47,122,229,.3); border-radius: 7px; font-size: 11.5px; color: var(--blue-2);">
+          <svg width="12" height="12"><use href="#ic-mic"/></svg> voice-memo · 0:34
+          <svg width="60" height="14" viewBox="0 0 60 14" style="margin-left:4px;">
+            ${Array.from({length:14}).map((_,i)=>`<rect x="${i*4}" y="${4+Math.sin(i)*2}" width="2" height="${6+Math.abs(Math.sin(i*1.3))*4}" fill="currentColor" rx="1"/>`).join('')}
+          </svg>
+        </div>
+      </div>
+    </div>
+  `,
+  // 3: Translator
+  () => `
+    <div class="mini-head"><div class="mini-title" style="font-size:15px;">Translator</div>
+      <div style="display:flex; gap:6px; align-items:center; font-size:12px; color: var(--ink-lo);">
+        <span class="mk-pill" style="background: rgba(255,255,255,.04); color: var(--ink-hi);">🇺🇦 UK</span>
+        <span>→</span>
+        <span class="mk-pill">🇬🇧 EN</span>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px; flex:1;">
+      <div style="padding: 14px; background: rgba(255,255,255,.02); border: 1px solid var(--line); border-radius: 10px; font-size: 14px; color: var(--ink);">
+        <div style="font: 500 10px/1 'JetBrains Mono', monospace; color:var(--ink-xlo); letter-spacing:.06em; text-transform:uppercase; margin-bottom: 10px;">Ukrainian</div>
+        Better one compact box of tools at hand than a zoo of apps in your dock.
+      </div>
+      <div style="padding: 14px; background: rgba(47,122,229,.06); border: 1px solid rgba(47,122,229,.28); border-radius: 10px; font-size: 14px; color: #d8e6ff;">
+        <div style="font: 500 10px/1 'JetBrains Mono', monospace; color:var(--blue-2); letter-spacing:.06em; text-transform:uppercase; margin-bottom: 10px;">English</div>
+        Better one compact box of tools at hand than a zoo of apps in the dock.<span class="cursor-blink" style="background:var(--blue-2);"></span>
+      </div>
+    </div>
+    <div style="margin-top: 10px; display:flex; justify-content:space-between; align-items:center; font-size: 11.5px; color: var(--ink-xlo);">
+      <span>History: 47 translations today</span>
+      <span class="mono">⌘⏎ translate</span>
+    </div>
+  `,
+  // 4: Telegram
+  () => `
+    <div class="mini-head"><div class="mini-title" style="font-size:15px;">Telegram <span style="color:var(--ink-xlo);font-weight:400;font-size:12px;">· @stash_personal_bot</span></div>
+      <div class="mk-pill" style="background:rgba(74,222,128,.14); color:#4ade80; border-color:rgba(74,222,128,.3);">3 new</div>
+    </div>
+    <div class="mk-row">
+      <div style="width:32px;height:32px;border-radius:50%; background: linear-gradient(135deg,#5FA0FF,#2F7AE5); display:grid; place-items:center; color:#fff; font-weight:600; font-size:12px;">A</div>
+      <div class="grow" style="display:grid;">
+        <div style="font-size: 13px; color: var(--ink-hi); font-weight: 500;">Andriy</div>
+        <div style="display:inline-flex; align-items:center; gap:8px; margin-top:3px;">
+          <svg width="12" height="12" style="color:var(--blue-2)"><use href="#ic-mic"/></svg>
+          <svg width="80" height="14" viewBox="0 0 80 14">${Array.from({length:20}).map((_,i)=>`<rect x="${i*4}" y="${5+Math.sin(i*0.7)*2}" width="2" height="${4+Math.abs(Math.sin(i*1.5))*5}" fill="#5FA0FF" rx="1"/>`).join('')}</svg>
+          <span style="font-size:11px; color:var(--ink-lo); font-family:'JetBrains Mono', monospace;">0:42</span>
+        </div>
+        <div style="font-size: 11.5px; color: var(--ink-lo); margin-top: 4px; font-style: italic;">"Check out this bit about menu-bar apps on YouTube — sending it"</div>
+      </div>
+      <span class="meta">14:02</span>
+    </div>
+    <div class="mk-row" style="display:block;">
+      <div style="display:flex; gap:12px; margin-bottom: 8px;">
+        <div style="width:90px; height:54px; border-radius:7px; background: linear-gradient(135deg,#FF0033,#9b0020); position:relative; overflow:hidden; flex-shrink:0; display:grid; place-items:center;">
+          <svg style="width:22px;height:22px;color:#fff"><use href="#ic-play"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size: 13px; color: var(--ink-hi); font-weight:500;">YouTube · The future of menubar apps</div>
+          <div style="font-size: 11px; color: var(--ink-lo); margin-top:3px;">12 min · from @max_kovbasiuk</div>
+          <div style="margin-top: 8px; display:inline-flex; gap: 8px; align-items:center; font-size: 11.5px; color: var(--blue-2); cursor:pointer;">
+            <svg width="12" height="12"><use href="#ic-download"/></svg> Download via Downloader →
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mk-row">
+      <svg width="14" height="14" style="color:var(--blue-2)"><use href="#ic-tg"/></svg>
+      <span class="grow mono" style="font-size:12px;">/remind 20m drink water</span>
+      <span class="meta">14:01</span>
+    </div>
+  `,
+  // 5: Metronome
+  () => `
+    <div class="mini-head"><div class="mini-title" style="font-size:15px;">Metronome</div>
+      <div style="display:flex; gap:6px;"><div class="mk-pill">4 / 4</div><div class="mk-pill" style="background:rgba(74,222,128,.14); color:#4ade80; border-color:rgba(74,222,128,.3);">● running</div></div>
+    </div>
+    <div class="metronome" style="flex:1;">
+      <svg viewBox="0 0 400 340" style="overflow:visible; width:100%; max-width:380px;">
+        <defs>
+          <linearGradient id="metBody2" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#23262d"/>
+            <stop offset="1" stop-color="#0f1116"/>
+          </linearGradient>
+        </defs>
+        <polygon points="200,30 280,290 120,290" fill="url(#metBody2)" stroke="rgba(255,255,255,.08)"/>
+        <rect x="155" y="240" width="90" height="36" rx="7" fill="#0a0b0e" stroke="rgba(47,122,229,.4)"/>
+        <text x="200" y="263" text-anchor="middle" class="met-bpm">120</text>
+        <text x="200" y="280" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7a7f89">BPM</text>
+        <g class="met-pendulum">
+          <line x1="200" y1="290" x2="200" y2="80" stroke="#5FA0FF" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="200" cy="120" r="14" fill="#2F7AE5" stroke="#7FB3FF" stroke-width="2"/>
+        </g>
+        <circle cx="200" cy="290" r="7" fill="#7FB3FF"/>
+        <g>
+          <circle cx="155" cy="60" r="7" fill="#2F7AE5"><animate attributeName="opacity" values="1;0.2;0.2;0.2" dur="1.2s" repeatCount="indefinite"/></circle>
+          <circle cx="180" cy="60" r="7" fill="#3a3f48"><animate attributeName="fill" values="#3a3f48;#5FA0FF;#3a3f48;#3a3f48" dur="1.2s" repeatCount="indefinite"/></circle>
+          <circle cx="205" cy="60" r="7" fill="#3a3f48"><animate attributeName="fill" values="#3a3f48;#3a3f48;#5FA0FF;#3a3f48" dur="1.2s" repeatCount="indefinite"/></circle>
+          <circle cx="230" cy="60" r="7" fill="#3a3f48"><animate attributeName="fill" values="#3a3f48;#3a3f48;#3a3f48;#5FA0FF" dur="1.2s" repeatCount="indefinite"/></circle>
+        </g>
+      </svg>
+    </div>
+  `,
+  // 6: Terminal
+  () => `
+    <div class="mini-head"><div class="mini-title" style="font-size:15px;">Terminal <span style="color:var(--ink-xlo);font-weight:400;font-size:12px;">· ~/projects/stash</span></div>
+      <div class="mk-pill"><svg width="11" height="11"><use href="#ic-ai"/></svg> Claude Code</div>
+    </div>
+    <div class="term" style="flex:1; font-size: 13px;">
+      <div><span class="pr">~/stash &gt;</span> <span>cargo test --package stash-core</span></div>
+      <div class="dim">running 414 tests…</div>
+      <div class="dim">test telegram::assistant::voice_transcribe ... <span class="ok">ok</span></div>
+      <div class="dim">test downloader::yt_dlp::detect_url ... <span class="ok">ok</span></div>
+      <div class="dim">test clipboard::history::pin_unpin ... <span class="ok">ok</span></div>
+      <div class="dim">test notes::editor::markdown_render ... <span class="ok">ok</span></div>
+      <div class="dim">test metronome::scheduler::tempo_ramp ... <span class="ok">ok</span></div>
+      <div><span class="ok">test result: ok. 414 passed; 0 failed; 0 ignored; 0 measured</span></div>
+      <div style="margin-top:8px;"><span class="pr">~/stash &gt;</span> <span>stash ai "remind me in 20 minutes to drink water"</span></div>
+      <div class="dim">→ Reminder set: <span style="color:var(--ink-hi)">"drink water"</span> at <span class="ok">14:23</span></div>
+      <div style="margin-top:8px;"><span class="pr">~/stash &gt;</span> <span class="cursor-blink"></span></div>
+    </div>
+  `,
+];
+
+const SHOWCASE = MODULES.slice(0, 7);
+SHOWCASE.forEach((m, i) => {
+  const el = document.createElement('div');
+  el.className = 'shitem' + (i===0 ? ' active' : '');
+  el.dataset.i = i;
+  el.innerHTML = `
+    <span class="bar"></span>
+    <div class="ico"><svg width="18" height="18"><use href="${m.icon}"/></svg></div>
+    <div>
+      <strong>${m.title}</strong>
+      <span>${m.short}</span>
+    </div>
+    <div class="mkbd">${m.kbd || '·'}</div>
+  `;
+  el.addEventListener('click', () => { setShowcase(i); scIdx = i; });
+  el.addEventListener('mouseenter', () => setShowcase(i));
+  showList.appendChild(el);
+
+  const shot = document.createElement('div');
+  shot.className = 'preview-shot' + (i===0 ? ' on' : '');
+  shot.dataset.i = i;
+  shot.innerHTML = SHOWCASE_SCREENS[i]();
+  previewFrame.appendChild(shot);
+});
+
+function setShowcase(i) {
+  document.querySelectorAll('#showList .shitem').forEach(e => e.classList.toggle('active', +e.dataset.i === i));
+  document.querySelectorAll('#previewFrame .preview-shot').forEach(e => e.classList.toggle('on', +e.dataset.i === i));
+  const m = SHOWCASE[i];
+  chromeTitle.textContent = `stash · ${m.id}`;
+}
+
+// auto-rotate
+let scIdx = 0;
+let scTimer = null;
+let scPaused = false;
+function startShowcase() {
+  clearInterval(scTimer);
+  scTimer = setInterval(() => {
+    if (scPaused) return;
+    scIdx = (scIdx + 1) % SHOWCASE.length;
+    setShowcase(scIdx);
+  }, 3200);
+}
+const slEl = document.querySelector('.showcase-list');
+slEl.addEventListener('mouseenter', () => scPaused = true);
+slEl.addEventListener('mouseleave', () => scPaused = false);
+startShowcase();
+
+// ============== MOD GRID ==============
+const modGrid = document.getElementById('modGrid');
+MODULES.forEach(m => {
+  const el = document.createElement('div');
+  el.className = 'mod';
+  el.style.setProperty('--mod-glow', m.glow);
+  el.innerHTML = `
+    ${m.kbd ? `<div class="mkbd">${m.kbd}</div>` : ''}
+    <div class="mod-icon"><svg><use href="${m.icon}"/></svg></div>
+    <h4>${m.title}</h4>
+    <p>${m.long}</p>
+  `;
+  modGrid.appendChild(el);
+});
+
+// ============== HERO ENTRANCE TRIGGER ==============
+requestAnimationFrame(() => {
+  const hi = document.getElementById('heroInner');
+  if (hi) hi.classList.add('go');
+});
+
+// ============== HERO POPUP DEMO (auto-cycle tabs) ==============
+const popupTabs = document.querySelectorAll('#popupTabs .ptab');
+const popupScreens = document.querySelectorAll('#popupBody .popup-screen');
+let hpIdx = 0;
+function setHeroTab(i) {
+  hpIdx = i;
+  popupTabs.forEach(t => t.classList.toggle('active', +t.dataset.i === i));
+  popupScreens.forEach(s => s.classList.toggle('on', +s.dataset.i === i));
+}
+popupTabs.forEach(t => t.addEventListener('click', () => setHeroTab(+t.dataset.i)));
+setInterval(() => {
+  setHeroTab((hpIdx + 1) % popupTabs.length);
+}, 3600);
+
+// menubar live clock
+function updateClock() {
+  const d = new Date();
+  document.getElementById('menuClock').textContent =
+    String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+updateClock(); setInterval(updateClock, 30000);
+
+// ============== NAV SCROLL STATE ==============
+const topbar = document.getElementById('topbar');
+window.addEventListener('scroll', () => {
+  topbar.classList.toggle('scrolled', window.scrollY > 12);
+}, { passive: true });
+
+// ============== CURSOR AURA ==============
+const aura = document.getElementById('aura');
+window.addEventListener('pointermove', (e) => {
+  aura.style.left = e.clientX + 'px';
+  aura.style.top  = e.clientY + 'px';
+  document.body.classList.add('aura-on');
+}, { passive: true });
+window.addEventListener('pointerleave', () => document.body.classList.remove('aura-on'));
+
+// ============== PILLAR RADIAL HOVER ==============
+document.querySelectorAll('.pillar').forEach(p => {
+  p.addEventListener('pointermove', e => {
+    const r = p.getBoundingClientRect();
+    p.style.setProperty('--mx', ((e.clientX - r.left)/r.width*100)+'%');
+    p.style.setProperty('--my', ((e.clientY - r.top)/r.height*100)+'%');
+  });
+});
+
+// ============== REVEAL ON SCROLL ==============
+const io = new IntersectionObserver((entries) => {
+  entries.forEach(en => { if (en.isIntersecting) en.target.classList.add('in'); });
+}, { threshold: 0.12 });
+document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+
+// ============== COUNT-UP ==============
+const cio = new IntersectionObserver((ents) => {
+  ents.forEach(en => {
+    if (!en.isIntersecting) return;
+    const el = en.target;
+    const target = +el.dataset.count;
+    const dur = 1400; const start = performance.now();
+    function tick(t) {
+      const p = Math.min(1, (t - start)/dur);
+      const eased = 1 - Math.pow(1-p, 3);
+      el.textContent = Math.round(target * eased).toLocaleString('en-US');
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+    cio.unobserve(el);
+  });
+}, { threshold: 0.6 });
+document.querySelectorAll('[data-count]').forEach(el => cio.observe(el));
+
+// ============== DESKTOP PARALLAX TILT ==============
+const desktop = document.getElementById('desktop');
+const stage = document.getElementById('stage');
+stage.addEventListener('pointermove', (e) => {
+  const r = stage.getBoundingClientRect();
+  const x = (e.clientX - r.left) / r.width - .5;
+  const y = (e.clientY - r.top) / r.height - .5;
+  desktop.style.transform = `rotateX(${8 - y*6}deg) rotateY(${-1 + x*6}deg)`;
+});
+stage.addEventListener('pointerleave', () => { desktop.style.transform = ''; });
+
+// ============== KEYBOARD: Cmd+Shift+V on page replays popup ==============
+window.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'V' || e.key === 'v')) {
+    e.preventDefault();
+    const pop = document.getElementById('popup');
+    pop.classList.add('closing');
+    setTimeout(() => pop.classList.remove('closing'), 200);
+    document.getElementById('stage').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+});
+
+// ============== DOWNLOAD BUTTON tactile feedback ==============
+const dl = document.getElementById('dlBtn');
+if (dl) dl.addEventListener('click', () => {
+  // Purely a tactile flash — navigation must still reach the release asset.
+  dl.style.transition = 'transform .15s ease';
+  dl.style.transform = 'scale(.96)';
+  setTimeout(() => { dl.style.transform = ''; }, 180);
+});
+
+// ============== CTA falling icons (decorative) ==============
+const ctaIcons = document.getElementById('ctaIcons');
+const ctaIconList = ['#ic-clipboard','#ic-notes','#ic-translate','#ic-ai','#ic-tg','#ic-music','#ic-metro','#ic-pomo','#ic-term','#ic-download','#ic-system','#ic-web'];
+for (let i = 0; i < 16; i++) {
+  const ico = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttributeNS('http://www.w3.org/1999/xlink', 'href', ctaIconList[i % ctaIconList.length]);
+  ico.appendChild(use);
+  ico.setAttribute('width', 24 + Math.random()*16);
+  ico.setAttribute('height', 24 + Math.random()*16);
+  ico.style.left = (Math.random()*100) + '%';
+  ico.style.top = '-50px';
+  ico.style.color = '#5FA0FF';
+  ico.style.animationDuration = (10 + Math.random()*12) + 's';
+  ico.style.animationDelay = (Math.random()*-10) + 's';
+  ctaIcons.appendChild(ico);
+}
+</script>
+
+</body>
+</html>

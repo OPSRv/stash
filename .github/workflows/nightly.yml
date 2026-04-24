@@ -1,0 +1,142 @@
+name: Nightly
+
+# Rolling macOS build on every push to main. Publishes to the `nightly`
+# GitHub Release (overwriting its asset) so the in-app updater's manifest
+# can point at a stable URL that always serves the newest commit. Also
+# refreshes `latest.json` next to the DMG — that's what Tauri's updater
+# polls to decide whether a newer build is available.
+#
+# Tag-cut releases live in `release.yml`; this workflow is the "canary"
+# lane for people tracking main between tags.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'landing/**'
+      - 'docs/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  macos-universal:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Derive version string
+        id: ver
+        run: |
+          BASE=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          SHORT=$(git rev-parse --short HEAD)
+          echo "version=${BASE}-nightly+${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
+
+      - name: Build universal macOS bundle
+        env:
+          # Tauri's updater plugin signs artifacts when these are set.
+          # Leave blank here — users who want signed auto-updates set
+          # repo secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --target universal-apple-darwin
+
+      - name: Stage artifacts
+        id: stage
+        run: |
+          set -e
+          BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
+          mkdir -p release-assets
+          for f in "$BUNDLE"/dmg/*.dmg; do
+            cp "$f" "release-assets/Stash_universal.dmg"
+            break
+          done
+          if compgen -G "$BUNDLE/macos/*.app.tar.gz" > /dev/null; then
+            for f in "$BUNDLE"/macos/*.app.tar.gz; do
+              cp "$f" "release-assets/Stash_universal.app.tar.gz"
+              break
+            done
+          fi
+          # Pick up the updater signature Tauri emits when signing is
+          # configured. Silently skipped when no private key is set.
+          if compgen -G "$BUNDLE/macos/*.app.tar.gz.sig" > /dev/null; then
+            for f in "$BUNDLE"/macos/*.app.tar.gz.sig; do
+              cp "$f" "release-assets/Stash_universal.app.tar.gz.sig"
+              break
+            done
+          fi
+          ls -la release-assets
+
+      - name: Write updater manifest (latest.json)
+        run: |
+          set -e
+          VERSION="${{ steps.ver.outputs.version }}"
+          PUBDATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          DL_BASE="https://github.com/${{ github.repository }}/releases/download/nightly"
+          if [ -f release-assets/Stash_universal.app.tar.gz.sig ]; then
+            SIG=$(cat release-assets/Stash_universal.app.tar.gz.sig)
+          else
+            SIG=""
+          fi
+          cat > release-assets/latest.json <<JSON
+          {
+            "version": "${VERSION}",
+            "pub_date": "${PUBDATE}",
+            "notes": "Rolling nightly build from main (${{ steps.ver.outputs.short }}).",
+            "platforms": {
+              "darwin-x86_64": {
+                "signature": "${SIG}",
+                "url": "${DL_BASE}/Stash_universal.app.tar.gz"
+              },
+              "darwin-aarch64": {
+                "signature": "${SIG}",
+                "url": "${DL_BASE}/Stash_universal.app.tar.gz"
+              }
+            }
+          }
+          JSON
+          cat release-assets/latest.json
+
+      - name: Publish / refresh nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly (main)
+          body: |
+            Rolling build from the tip of `main`.
+            Commit: ${{ github.sha }}
+            Updated: ${{ steps.ver.outputs.version }}
+          prerelease: true
+          make_latest: false
+          files: |
+            release-assets/Stash_universal.dmg
+            release-assets/Stash_universal.app.tar.gz
+            release-assets/Stash_universal.app.tar.gz.sig
+            release-assets/latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

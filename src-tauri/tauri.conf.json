@@ -52,5 +52,13 @@
     "resources": {
       "target/release/stash": "bin/stash"
     }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/OPSRv/stash/releases/download/nightly/latest.json"
+      ],
+      "pubkey": ""
+    }
   }
 }
