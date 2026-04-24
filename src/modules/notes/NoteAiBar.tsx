@@ -29,6 +29,9 @@ const SYSTEM_PROMPT = [
   'Preserve any section the user did not ask to change verbatim, including whitespace, headings, lists, and embeds like ![…](…).',
   'If the user asks to rewrite a specific paragraph, replace only that paragraph and keep the rest byte-identical.',
   "If the note is empty, produce a coherent note body that answers the user's instruction.",
+  'If the user asks for a chart, graph, diagram, or data visualisation, use a Mermaid block (```mermaid … ```) with a supported diagram type:',
+  'flowchart / graph TD / graph LR, sequenceDiagram, classDiagram, stateDiagram-v2, erDiagram, journey, gantt, pie, gitGraph, mindmap, timeline, xychart-beta.',
+  'Never invent a custom chart syntax or reach for an external image — the note renderer only understands Mermaid.',
 ].join(' ');
 
 const buildUserMessage = (title: string, body: string, instruction: string): string => {

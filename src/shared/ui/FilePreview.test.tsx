@@ -81,7 +81,7 @@ describe('FilePreview textual kinds', () => {
     // first mount; that chunk can take >1 s under parallel test load.
     await waitFor(
       () => {
-        const pre = scope!.querySelector('pre');
+        const pre = scope!.querySelector('pre code');
         expect(pre?.className ?? '').toContain('language-typescript');
       },
       { timeout: 5000 },

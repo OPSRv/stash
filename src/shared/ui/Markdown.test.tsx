@@ -1,8 +1,14 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { writeText as tauriWriteText } from '@tauri-apps/plugin-clipboard-manager';
 
 import { Markdown } from './Markdown';
+
+vi.mock('./MermaidBlock', () => ({
+  MermaidBlock: ({ source }: { source: string }) => (
+    <div data-testid="mermaid-stub">{source}</div>
+  ),
+}));
 
 const mockedWriteText = vi.mocked(tauriWriteText);
 
@@ -57,6 +63,18 @@ describe('Markdown', () => {
     }
     const okLink = screen.getByRole('link', { name: 'ok' });
     expect(okLink.getAttribute('href')).toBe('https://example.com');
+  });
+
+  test('renders mermaid fences via MermaidBlock with the raw diagram source', async () => {
+    const source = '```mermaid\ngraph TD\n  A --> B\n```';
+    render(<Markdown source={source} codeCopy />);
+    // Suspense boundary resolves synchronously once the lazy module is
+    // replaced by a stub.
+    const node = await waitFor(() => screen.getByTestId('mermaid-stub'));
+    expect(node.textContent).toBe('graph TD\n  A --> B');
+    // The copy button is code-block-scoped — mermaid blocks should not
+    // also grow a copy button since they render as SVG, not code.
+    expect(screen.queryByRole('button', { name: 'Copy code' })).toBeNull();
   });
 
   test('does not warn when unmounted before copy-reset timeout fires', async () => {

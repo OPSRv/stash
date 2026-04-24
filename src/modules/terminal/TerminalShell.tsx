@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
-import { ptyClose } from './api';
+import { ptyClose, ptyGetCwd } from './api';
 import { useDrag } from './hooks/useDrag';
 import {
   allLeafIds,
+  clampFontSize,
+  DEFAULT_FONT_SIZE,
   loadStoredActive,
+  loadStoredFontSize,
   loadStoredTabs,
   newPaneId,
   newTabId,
+  saveFontSize,
   saveTabs,
   tabLabel,
 } from './state/tabStorage';
@@ -48,6 +52,26 @@ export const TerminalShell = () => {
   });
   const [revision, setRevision] = useState(0);
   const bumpRevision = useCallback(() => setRevision((n) => n + 1), []);
+  /// Seed cwd for panes created via split, keyed by new pane id.
+  /// Populated in `splitPane`, read by `TabContent` to feed each
+  /// `TerminalPane`'s `initialCwd` prop on its very first boot.
+  /// Entries are one-shot: a pane only uses its seed once.
+  const initialCwdsRef = useRef<Map<string, string>>(new Map());
+  const getInitialCwd = useCallback(
+    (paneId: string) => initialCwdsRef.current.get(paneId),
+    [],
+  );
+  /// Terminal font size shared by every pane. Persisted so users don't
+  /// have to re-adjust after reopening the popup. ⌘+/⌘−/⌘0 mutate this
+  /// from the keyboard handler below.
+  const [fontSize, setFontSize] = useState<number>(loadStoredFontSize);
+  useEffect(() => {
+    saveFontSize(fontSize);
+  }, [fontSize]);
+  const bumpFontSize = useCallback((delta: number) => {
+    setFontSize((prev) => clampFontSize(prev + delta));
+  }, []);
+  const resetFontSize = useCallback(() => setFontSize(DEFAULT_FONT_SIZE), []);
   /// Leaf id that temporarily takes over the whole tab (hides its
   /// siblings via a full-cover overlay). Null → normal tiling. Toggled
   /// by `⌘E` and by the pane context menu's "Maximize" item. Clears
@@ -146,7 +170,10 @@ export const TerminalShell = () => {
       const next = closeTabOp(prev, tabId);
       if (next === prev) return prev;
       // Kill each pane's PTY so its shell child exits with the UI.
-      for (const p of collectLeafIds(target.root)) ptyClose(p).catch(() => {});
+      for (const p of collectLeafIds(target.root)) {
+        ptyClose(p).catch(() => {});
+        initialCwdsRef.current.delete(p);
+      }
       if (tabId === activeIdRef.current) {
         const idx = prev.findIndex((t) => t.id === tabId);
         const fallback = next[Math.max(0, idx - 1)] ?? next[0];
@@ -157,7 +184,12 @@ export const TerminalShell = () => {
   }, []);
 
   const splitPane = useCallback(
-    (tabId: string, paneId: string, orientation: Orientation) => {
+    (
+      tabId: string,
+      paneId: string,
+      orientation: Orientation,
+      sourceCwd?: string,
+    ) => {
       setTabs((prev) => {
         const { tabs: next, newPaneId: created } = splitPaneOp(
           prev,
@@ -165,7 +197,12 @@ export const TerminalShell = () => {
           paneId,
           orientation,
         );
-        if (next !== prev && created) setFocusedPane(created);
+        if (next !== prev && created) {
+          if (sourceCwd && sourceCwd.trim().length > 0) {
+            initialCwdsRef.current.set(created, sourceCwd);
+          }
+          setFocusedPane(created);
+        }
         return next;
       });
       bumpRevision();
@@ -179,6 +216,7 @@ export const TerminalShell = () => {
         const next = closePaneOp(prev, tabId, paneId);
         if (next === prev) return prev;
         ptyClose(paneId).catch(() => {});
+        initialCwdsRef.current.delete(paneId);
         const target = next.find((t) => t.id === tabId);
         if (target) {
           const leaves = collectLeafIds(target.root);
@@ -318,7 +356,15 @@ export const TerminalShell = () => {
         e.preventDefault();
         e.stopPropagation();
         const orientation: Orientation = e.shiftKey ? 'column' : 'row';
-        splitPane(curTab.id, focusedPaneRef.current, orientation);
+        const sourcePane = focusedPaneRef.current;
+        // Rust is authoritative for cwd (OSC 7 → last_cwd). Fetch
+        // before mutating state so the new pane inherits the exact
+        // directory the focused shell is in right now.
+        ptyGetCwd(sourcePane)
+          .catch(() => null)
+          .then((cwd) => {
+            splitPane(curTab.id, sourcePane, orientation, cwd ?? undefined);
+          });
         return;
       }
       if (key === 'e' && !e.shiftKey) {
@@ -329,6 +375,27 @@ export const TerminalShell = () => {
         e.preventDefault();
         e.stopPropagation();
         toggleMaximize(focusedPaneRef.current);
+        return;
+      }
+      // ⌘+ / ⌘= / ⌘− / ⌘0 — terminal font size. macOS produces `=` for
+      // the plus key without shift, and `+` with shift; accept both so
+      // the chord works regardless of which the user presses.
+      if (key === '=' || key === '+') {
+        e.preventDefault();
+        e.stopPropagation();
+        bumpFontSize(1);
+        return;
+      }
+      if (key === '-' || key === '_') {
+        e.preventDefault();
+        e.stopPropagation();
+        bumpFontSize(-1);
+        return;
+      }
+      if (key === '0') {
+        e.preventDefault();
+        e.stopPropagation();
+        resetFontSize();
         return;
       }
       if (key >= '1' && key <= '8') {
@@ -343,7 +410,7 @@ export const TerminalShell = () => {
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
-  }, [addTab, closePane, closeTab, splitPane, toggleMaximize]);
+  }, [addTab, closePane, closeTab, splitPane, toggleMaximize, bumpFontSize, resetFontSize]);
 
   return (
     <div className="h-full flex flex-col">
@@ -370,7 +437,11 @@ export const TerminalShell = () => {
             visible={t.id === activeId}
             focusedPane={focusedPane}
             setFocusedPane={setFocusedPane}
-            onSplit={(paneId, orientation) => splitPane(t.id, paneId, orientation)}
+            onSplit={(paneId, orientation, sourceCwd) =>
+              splitPane(t.id, paneId, orientation, sourceCwd)
+            }
+            getInitialCwd={getInitialCwd}
+            fontSize={fontSize}
             onClosePane={(paneId) => closePane(t.id, paneId)}
             onRatios={(path, index, pct) => setRatios(t.id, path, index, pct)}
             onPaneDragStart={(pid, label) => beginDrag(`pane:${pid}`, label)}

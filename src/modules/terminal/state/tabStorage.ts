@@ -19,6 +19,35 @@ import { collectLeafIds, countLeaves, isValidNode, leaf } from './paneTree';
 export const TABS_STORAGE_KEY = 'stash.terminal.tabs.v3';
 export const LEGACY_TABS_STORAGE_KEY = 'stash.terminal.tabs.v2';
 export const ACTIVE_TAB_STORAGE_KEY = 'stash.terminal.activeTab';
+export const FONT_SIZE_STORAGE_KEY = 'stash.terminal.fontSize';
+
+/// Font-size bounds. Below 8 the built-in xterm canvas renderer clips
+/// glyphs; above 28 the pane header loses grid space for content.
+export const MIN_FONT_SIZE = 8;
+export const MAX_FONT_SIZE = 28;
+export const DEFAULT_FONT_SIZE = 12;
+
+export const clampFontSize = (n: number): number =>
+  Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(n)));
+
+export const loadStoredFontSize = (): number => {
+  try {
+    const raw = window.localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+    const n = raw ? Number(raw) : NaN;
+    if (Number.isFinite(n)) return clampFontSize(n);
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_FONT_SIZE;
+};
+
+export const saveFontSize = (n: number): void => {
+  try {
+    window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(clampFontSize(n)));
+  } catch {
+    /* ignore */
+  }
+};
 
 export const newTabId = (existing: Set<string>): string => {
   let n = 1;

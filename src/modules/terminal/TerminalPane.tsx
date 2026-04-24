@@ -55,7 +55,14 @@ export type TerminalPaneProps = {
   layoutRevision: number;
   /// Split controls rendered in the header. `undefined` when the
   /// tab has already reached the pane cap (→ button is hidden).
-  onSplit?: (orientation: Orientation) => void;
+  /// `sourceCwd` is this pane's live cwd (from OSC 7) so the new
+  /// sibling can spawn in the same directory.
+  onSplit?: (orientation: Orientation, sourceCwd: string) => void;
+  /// Directory the PTY should spawn in on the initial boot. Set by
+  /// the shell for panes created via split so they inherit the
+  /// source pane's cwd. Ignored on restart (Rust remembers the
+  /// last OSC 7 itself).
+  initialCwd?: string | null;
   /// Close control — `undefined` when this is the sole pane of a tab
   /// (the tab-bar × handles that case).
   onClosePane?: () => void;
@@ -67,6 +74,10 @@ export type TerminalPaneProps = {
   onToggleMaximize?: () => void;
   /// True while this pane is the zoom target.
   maximized?: boolean;
+  /// xterm font size in pixels. Driven by the shell-level ⌘+/⌘−/⌘0
+  /// shortcuts. Re-applied live — the pane refits after each change
+  /// so the PTY sees a fresh SIGWINCH.
+  fontSize: number;
 };
 
 /// xterm-backed terminal pane. One persistent PTY session per id, kept
@@ -82,7 +93,13 @@ export const TerminalPane = ({
   onPaneDragStart,
   onToggleMaximize,
   maximized = false,
+  initialCwd,
+  fontSize,
 }: TerminalPaneProps) => {
+  // Captured once — subsequent prop changes must not re-seed the PTY
+  // (Rust's pty_open is a resize on an existing session, but keeping
+  // the semantic local guards against future refactors).
+  const initialCwdRef = useRef<string | null>(initialCwd ?? null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -130,7 +147,7 @@ export const TerminalPane = ({
     const term = new Terminal({
       fontFamily:
         "'SF Mono', ui-monospace, Menlo, 'Liberation Mono', monospace",
-      fontSize: 12,
+      fontSize,
       lineHeight: 1.25,
       cursorBlink: true,
       scrollback: 5000,
@@ -188,7 +205,7 @@ export const TerminalPane = ({
     });
 
     try {
-      await ptyOpen(id, term.cols, term.rows);
+      await ptyOpen(id, term.cols, term.rows, initialCwdRef.current);
       setDead(false);
     } catch (e) {
       term.write(`\r\n\x1b[31mterminal: ${String(e)}\x1b[0m\r\n`);
@@ -347,6 +364,17 @@ export const TerminalPane = ({
     }, 40);
     return () => clearTimeout(t);
   }, [layoutRevision]);
+
+  // Live font-size updates (⌘+ / ⌘− / ⌘0). Refit after each change so
+  // the PTY sees an accurate cols/rows — TUIs like vim / less depend
+  // on SIGWINCH landing promptly after a resize.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    if (term.options.fontSize === fontSize) return;
+    term.options.fontSize = fontSize;
+    requestAnimationFrame(() => fitRef.current?.fit());
+  }, [fontSize]);
 
   // --- snippets + commands ------------------------------------------
   const [snippets, setSnippets] = useState<
@@ -636,10 +664,10 @@ export const TerminalPane = ({
           requestAnimationFrame(() => composeRef.current?.focus());
           break;
         case 'split-right':
-          onSplit?.('row');
+          onSplit?.('row', cwd);
           break;
         case 'split-down':
-          onSplit?.('column');
+          onSplit?.('column', cwd);
           break;
         case 'maximize':
           onToggleMaximize?.();
@@ -652,7 +680,7 @@ export const TerminalPane = ({
           break;
       }
     },
-    [onSplit, onClosePane, restart],
+    [onSplit, onClosePane, restart, cwd],
   );
 
   return (
@@ -715,7 +743,7 @@ export const TerminalPane = ({
         }}
         onFind={() => setSearchOpen((v) => !v)}
         onRestart={restart}
-        onSplit={onSplit}
+        onSplit={onSplit ? (orientation) => onSplit(orientation, cwd) : undefined}
         onToggleMaximize={onToggleMaximize}
         maximized={maximized}
         onClosePane={onClosePane}

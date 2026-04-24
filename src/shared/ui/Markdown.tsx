@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -91,6 +99,81 @@ const baseAnchor: Components['a'] = ({ href, children, ...rest }) => {
   );
 };
 
+const MermaidLazy = lazy(() =>
+  import('./MermaidBlock').then((m) => ({ default: m.MermaidBlock })),
+);
+
+const MermaidSuspense = ({ source }: { source: string }) => (
+  <Suspense
+    fallback={
+      <div className="md-mermaid-loading t-tertiary text-meta py-2">
+        rendering diagram…
+      </div>
+    }
+  >
+    <MermaidLazy source={source} />
+  </Suspense>
+);
+
+// Loose hast shapes — avoids pulling `@types/hast` just for one plugin.
+type HastText = { type: 'text'; value: string };
+type HastElement = {
+  type: 'element';
+  tagName: string;
+  properties?: Record<string, unknown> & { className?: unknown };
+  children: HastNode[];
+};
+type HastRoot = { type: 'root'; children: HastNode[] };
+type HastNode = HastElement | HastText | HastRoot | { type: string; [k: string]: unknown };
+
+const hasMermaidClass = (cls: unknown): boolean => {
+  if (typeof cls === 'string') return cls.split(/\s+/).includes('language-mermaid');
+  if (Array.isArray(cls)) return cls.some((c) => c === 'language-mermaid');
+  return false;
+};
+
+const collectText = (node: HastNode): string => {
+  if (!node || typeof node !== 'object') return '';
+  if ((node as HastText).type === 'text') return (node as HastText).value;
+  const children = (node as HastElement).children;
+  if (Array.isArray(children)) return children.map(collectText).join('');
+  return '';
+};
+
+/// Replace each `<pre><code class="language-mermaid">…</code></pre>`
+/// with a marker `<div data-mermaid-source="…">` BEFORE rehype-highlight
+/// runs. This preserves the raw diagram text (rehype-highlight would
+/// otherwise shatter it into token spans, which drops newlines in
+/// non-highlighted languages like mermaid) and lets the React-side
+/// override render it as SVG.
+const rehypeMermaid = () => (tree: HastRoot) => {
+  const walk = (nodes: HastNode[]) => {
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      if (n && (n as HastElement).type === 'element') {
+        const el = n as HastElement;
+        if (el.tagName === 'pre') {
+          const codeEl = el.children?.find(
+            (c) => (c as HastElement).type === 'element' && (c as HastElement).tagName === 'code',
+          ) as HastElement | undefined;
+          if (codeEl && hasMermaidClass(codeEl.properties?.className)) {
+            const raw = collectText(codeEl).replace(/\n$/, '');
+            nodes[i] = {
+              type: 'element',
+              tagName: 'div',
+              properties: { 'data-mermaid-source': raw },
+              children: [],
+            };
+            continue;
+          }
+        }
+        if (Array.isArray(el.children)) walk(el.children);
+      }
+    }
+  };
+  walk(tree.children);
+};
+
 const CodeBlock = ({
   children,
   className,
@@ -136,8 +219,8 @@ const CodeBlock = ({
       >
         {copied ? 'Copied' : 'Copy'}
       </button>
-      <pre className={className}>
-        <code ref={codeRef} {...rest}>
+      <pre>
+        <code ref={codeRef} className={className} {...rest}>
           {children}
         </code>
       </pre>
@@ -152,13 +235,20 @@ const CodeBlock = ({
 export const Markdown = ({ source, className, codeCopy, components }: MarkdownProps) => {
   const merged: Components = useMemo(() => {
     const base: Components = { a: baseAnchor };
+    // ```mermaid fences are rewritten by `rehypeMermaid` into a
+    // `<div data-mermaid-source="…">` marker (see plugin) so the
+    // diagram source survives rehype-highlight untouched. Intercept
+    // that marker here and hand it to the lazy SVG renderer.
+    base.div = ({ children, ...rest }) => {
+      const src = (rest as { 'data-mermaid-source'?: unknown })['data-mermaid-source'];
+      if (typeof src === 'string') return <MermaidSuspense source={src} />;
+      return <div {...rest}>{children}</div>;
+    };
     if (codeCopy) {
       // react-markdown passes `inline` only for `` `x` ``; fenced blocks come
       // through as the nested <pre><code>, so we replace `pre` with our
       // copy-enabled wrapper and leave inline code untouched.
       base.pre = ({ children }) => {
-        // Extract language class from the inner code element so
-        // rehype-highlight's classes are preserved on the <pre>.
         const child = Array.isArray(children) ? children[0] : children;
         const codeProps =
           child && typeof child === 'object' && 'props' in child
@@ -184,7 +274,10 @@ export const Markdown = ({ source, className, codeCopy, components }: MarkdownPr
     <div className={rootClass}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeHighlight, { languages: HLJS_LANGUAGES }]]}
+        rehypePlugins={[
+          rehypeMermaid,
+          [rehypeHighlight, { languages: HLJS_LANGUAGES, ignoreMissing: true }],
+        ]}
         components={merged}
       >
         {source}

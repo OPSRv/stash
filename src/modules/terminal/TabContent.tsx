@@ -17,7 +17,13 @@ export type TabContentProps = {
   setFocusedPane: (id: string) => void;
   /// Split a specific pane along `orientation`, creating a new leaf
   /// adjacent to it. The shell validates the leaf cap before acting.
-  onSplit: (paneId: string, orientation: Orientation) => void;
+  /// `sourceCwd` is the live cwd of the pane requesting the split so
+  /// the new sibling's PTY can spawn in the same directory.
+  onSplit: (paneId: string, orientation: Orientation, sourceCwd: string) => void;
+  /// Returns the seed cwd for a pane id (set by the shell when the
+  /// pane was created via split), or undefined for panes restored
+  /// from persisted state.
+  getInitialCwd: (paneId: string) => string | undefined;
   onClosePane: (paneId: string) => void;
   /// Commit a splitter drag: rewrite ratios of the split at `path`,
   /// shifting the boundary between sibling `index` and `index + 1` to
@@ -37,6 +43,9 @@ export type TabContentProps = {
   /// Bumped by the shell on every layout change so the child panes
   /// can re-fit and fire SIGWINCH to alt-screen TUIs.
   revision: number;
+  /// xterm font size for every pane, driven by the shell's
+  /// ⌘+/⌘−/⌘0 shortcuts.
+  fontSize: number;
 };
 
 /// Renders a tab's pane tree. Each Split node becomes a flex container
@@ -55,6 +64,8 @@ export const TabContent = ({
   maximizedPane,
   onToggleMaximize,
   revision,
+  getInitialCwd,
+  fontSize,
 }: TabContentProps) => {
   const leafCount = countLeaves(tab.root);
   const canSplit = leafCount < MAX_PANES_PER_TAB;
@@ -71,12 +82,17 @@ export const TabContent = ({
           onFocus={() => setFocusedPane(node.id)}
           layoutRevision={revision}
           onSplit={
-            canSplit ? (orientation) => onSplit(node.id, orientation) : undefined
+            canSplit
+              ? (orientation, sourceCwd) =>
+                  onSplit(node.id, orientation, sourceCwd)
+              : undefined
           }
           onClosePane={isSplit ? () => onClosePane(node.id) : undefined}
           onPaneDragStart={onPaneDragStart(node.id, `Pane ${node.id}`)}
           onToggleMaximize={isSplit ? () => onToggleMaximize(node.id) : undefined}
           maximized={isMaximized}
+          initialCwd={getInitialCwd(node.id)}
+          fontSize={fontSize}
         />
       );
     }

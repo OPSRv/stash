@@ -182,7 +182,7 @@ export const MarkdownPreview = ({ source, onToggleCheckbox }: Props) => {
 
   return (
     <div className="notes-md">
-      <LazyMarkdown source={source} components={components} />
+      <LazyMarkdown source={source} components={components} codeCopy />
     </div>
   );
 };

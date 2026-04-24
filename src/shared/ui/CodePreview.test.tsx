@@ -10,7 +10,7 @@ describe('CodePreview', () => {
     );
     await waitFor(
       () => {
-        const pre = container.querySelector('pre');
+        const pre = container.querySelector('pre code');
         expect(pre?.className ?? '').toContain('language-javascript');
       },
       { timeout: 5000 },
@@ -23,7 +23,7 @@ describe('CodePreview', () => {
     );
     await waitFor(
       () => {
-        const pre = container.querySelector('pre');
+        const pre = container.querySelector('pre code');
         expect(pre?.className ?? '').toContain('language-typescript');
       },
       { timeout: 5000 },
@@ -41,7 +41,7 @@ describe('CodePreview', () => {
     const { container } = render(<CodePreview code={'hello'} />);
     await waitFor(
       () => {
-        const pre = container.querySelector('pre');
+        const pre = container.querySelector('pre code');
         expect(pre?.className ?? '').toContain('language-plaintext');
       },
       { timeout: 5000 },
