@@ -5,10 +5,67 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Stash — menubar hub for small tasks</title>
 <meta name="description" content="A compact 920×520 menu bar popup with 13 built-in modules: clipboard, notes, translator, AI chat, Pomodoro, metronome, terminal, video downloader and more. No accounts. No cloud. No telemetry." />
+<meta name="author" content="OPSRv" />
+<meta name="theme-color" content="#0A0B0E" />
+<meta name="color-scheme" content="dark light" />
+<meta name="robots" content="index,follow" />
+<link rel="canonical" href="https://opsrv.github.io/stash/" />
+
+<!-- Open Graph (Facebook / LinkedIn / Telegram / Discord preview) -->
+<meta property="og:site_name" content="Stash" />
 <meta property="og:title" content="Stash — menubar hub for small tasks" />
-<meta property="og:description" content="Thirteen utilities. One icon in your menubar. macOS 13+, Tauri 2, offline-first." />
+<meta property="og:description" content="Thirteen utilities. One icon in your menu bar. macOS 13+, Tauri 2, offline-first. Clipboard, notes, translator, AI, Pomodoro, metronome, terminal, video downloader — all at hand, no accounts, no cloud." />
 <meta property="og:type" content="website" />
+<meta property="og:url" content="https://opsrv.github.io/stash/" />
+<meta property="og:image" content="https://opsrv.github.io/stash/assets/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:type" content="image/png" />
+<meta property="og:image:alt" content="Stash — thirteen utilities, one icon in your menu bar." />
+<meta property="og:locale" content="en_US" />
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Stash — menubar hub for small tasks" />
+<meta name="twitter:description" content="Thirteen utilities. One icon in your menu bar. macOS 13+, Tauri 2, offline-first." />
+<meta name="twitter:image" content="https://opsrv.github.io/stash/assets/og-image.png" />
+<meta name="twitter:image:alt" content="Stash — thirteen utilities, one icon in your menu bar." />
+
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
+<link rel="apple-touch-icon" href="assets/logo.svg" />
+
+<!-- Structured data: helps Google/DDG render rich results for the app. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Stash",
+  "applicationCategory": "DesktopApplication",
+  "operatingSystem": "macOS 13+",
+  "description": "A compact 920×520 menu bar popup with 13 built-in modules: clipboard, notes, translator, AI, Pomodoro, metronome, terminal, video downloader, and more. Offline-first, no accounts, no telemetry.",
+  "url": "https://opsrv.github.io/stash/",
+  "downloadUrl": "https://github.com/OPSRv/stash/releases/latest/download/Stash_universal.dmg",
+  "softwareVersion": "0.1.0",
+  "image": "https://opsrv.github.io/stash/assets/og-image.png",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "OPSRv" },
+  "license": "https://github.com/OPSRv/stash/blob/main/LICENSE",
+  "featureList": [
+    "Clipboard history with search and pins",
+    "Markdown notes with AI and Mermaid diagrams",
+    "Translator (DeepL / Google / local)",
+    "AI chat (OpenAI / Anthropic / Gemini)",
+    "Embedded web chats",
+    "Telegram bot with voice transcription",
+    "YouTube / TikTok downloader (yt-dlp)",
+    "Local audio player",
+    "Metronome with trainer mode",
+    "Pomodoro timer",
+    "Embedded terminal",
+    "System utilities (trash, duplicates, battery)"
+  ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Async font load: `media="print"` takes the stylesheet off the critical
