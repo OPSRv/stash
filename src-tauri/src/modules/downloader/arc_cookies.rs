@@ -35,6 +35,7 @@ fn arc_safe_storage_password() -> Result<String, String> {
 
 fn derive_key(password: &str) -> Result<[u8; 16], String> {
     let mut key = [0u8; 16];
+    // Chromium standard KDF — fixed params from the Chrome/Arc storage spec, not our choice.
     pbkdf2::<Hmac<Sha1>>(password.as_bytes(), b"saltysalt", 1003, &mut key)
         .map_err(|e| format!("pbkdf2: {e}"))?;
     Ok(key)
@@ -151,7 +152,7 @@ pub fn export_to_netscape(profile_dir: &Path, out_path: &Path) -> Result<(), Str
     if exported == 0 {
         return Err(format!("no cookies decrypted from Arc profile (0/{total})"));
     }
-    eprintln!("[arc_cookies] exported {exported}/{total} cookies");
+    tracing::debug!("[arc_cookies] exported {exported}/{total} cookies");
     Ok(())
 }
 

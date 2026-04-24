@@ -5,11 +5,24 @@ use std::process::Command;
 /// tolerates modest rates. Production deployments should swap this for DeepL
 /// or Apple Translation (see roadmap), but it is zero-config and keeps the
 /// feature shippable today.
+fn is_valid_lang(s: &str) -> bool {
+    s == "auto"
+        || (!s.is_empty()
+            && s.len() <= 16
+            && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
 pub fn translate_via_google(text: &str, from: &str, to: &str) -> Result<String, String> {
     if text.is_empty() {
         return Ok(String::new());
     }
     let from = if from.is_empty() { "auto" } else { from };
+    if !is_valid_lang(from) {
+        return Err(format!("invalid source language code: {from:?}"));
+    }
+    if !is_valid_lang(to) {
+        return Err(format!("invalid target language code: {to:?}"));
+    }
     let url = format!(
         "https://translate.googleapis.com/translate_a/single\
          ?client=gtx&sl={from}&tl={to}&dt=t&q={}",

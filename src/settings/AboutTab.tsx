@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { getVersion } from '@tauri-apps/api/app';
 import { Button } from '../shared/ui/Button';
 import { Card } from '../shared/ui/Card';
 import { Kbd } from '../shared/ui/Kbd';
@@ -7,7 +8,6 @@ import { ytDlpVersion } from '../modules/downloader/api';
 import { accent } from '../shared/theme/accent';
 import logoUrl from '../../logo.svg?url';
 
-const APP_VERSION = '0.1.0';
 const GITHUB_URL = 'https://github.com/OPSRv/stash';
 
 const pillars = [
@@ -32,10 +32,12 @@ const openUrl = (url: string) => {
 };
 
 export const AboutTab = () => {
+  const [version, setVersion] = useState('…');
   const [ytVersion, setYtVersion] = useState<string | null>(null);
   const [sentReport, setSentReport] = useState<string | null>(null);
 
   useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
     ytDlpVersion()
       .then((v) => setYtVersion(v.installed))
       .catch(() => {});
@@ -90,7 +92,7 @@ export const AboutTab = () => {
                   color: 'rgb(var(--stash-accent-rgb))',
                 }}
               >
-                v{APP_VERSION}
+                v{version}
               </span>
             </div>
             <div className="t-secondary text-meta mt-0.5">

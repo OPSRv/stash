@@ -6,6 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
+use tracing::debug;
 
 #[derive(Clone)]
 pub struct JobSpawnArgs {
@@ -220,7 +221,7 @@ pub fn spawn_download(
     let stderr_buf_for_thread = Arc::clone(&stderr_buf);
     std::thread::spawn(move || {
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            eprintln!("[yt-dlp:{job_id}] {line}");
+            debug!("[yt-dlp:{job_id}] {line}");
             let mut q = stderr_buf_for_thread.lock().unwrap();
             if q.len() == 32 {
                 q.pop_front();
@@ -324,7 +325,7 @@ pub fn spawn_download(
                         if let Err(e) =
                             retry_download(app_retry.clone(), state_retry, &yt_dlp_retry, job_id)
                         {
-                            eprintln!("[yt-dlp:{job_id}] no-cookies retry failed: {e}");
+                            debug!("[yt-dlp:{job_id}] no-cookies retry failed: {e}");
                             let _ = app_retry.emit(
                                 "downloader:failed",
                                 serde_json::json!({ "id": job_id }),
@@ -355,7 +356,7 @@ pub fn spawn_download(
                         if let Err(e) =
                             retry_download(app_retry.clone(), state_retry, &yt_dlp_retry, job_id)
                         {
-                            eprintln!("[yt-dlp:{job_id}] auto-retry failed: {e}");
+                            debug!("[yt-dlp:{job_id}] auto-retry failed: {e}");
                             let _ = app_retry.emit(
                                 "downloader:failed",
                                 serde_json::json!({ "id": job_id }),
@@ -401,7 +402,7 @@ pub fn drain_queue(app: AppHandle, state: Arc<RunnerState>, yt_dlp: &Path) {
             spec.height,
             &spec.kind,
         ) {
-            eprintln!("[downloader] drain_queue spawn failed for {id}: {e}");
+            debug!("[downloader] drain_queue spawn failed for {id}: {e}");
         }
     }
 }

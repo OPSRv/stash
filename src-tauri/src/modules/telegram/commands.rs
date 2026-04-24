@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use rand::rngs::OsRng;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -133,7 +134,7 @@ pub async fn telegram_start_pairing(
     let Some(token) = state.secrets.get(ACCOUNT_BOT_TOKEN)? else {
         return Err("Paste a bot token first".into());
     };
-    let code = pairing::generate_code(&mut rand::thread_rng());
+    let code = pairing::generate_code(&mut OsRng);
     let new_state = pairing::start_pairing(code, now_secs());
     *state.pairing.lock().unwrap() = new_state.clone();
 

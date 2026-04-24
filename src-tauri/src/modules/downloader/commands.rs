@@ -460,7 +460,7 @@ pub fn dl_set_cookies_browser(
             match super::arc_cookies::export_default(&cookies_dir) {
                 Ok(path) => Some(format!("file:{}", path.display())),
                 Err(e) => {
-                    eprintln!("[downloader] arc cookies export failed: {e}");
+                    tracing::debug!("[downloader] arc cookies export failed: {e}");
                     return Err(format!("Arc cookies export failed: {e}"));
                 }
             }

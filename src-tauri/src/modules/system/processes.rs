@@ -86,12 +86,36 @@ pub fn list_processes() -> Result<Vec<ProcessInfo>, String> {
     Ok(stdout.lines().filter_map(parse_ps_line).collect())
 }
 
+fn current_user() -> String {
+    std::env::var("USER").unwrap_or_else(|_| {
+        Command::new("whoami")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default()
+    })
+}
+
 /// Send SIGTERM (polite, default) or SIGKILL (force) to `pid`. We refuse
 /// PIDs ≤ 1 so a stray invocation cannot target init or the whole process
 /// group.
 pub fn kill_process(pid: i32, force: bool) -> Result<(), String> {
     if pid <= 1 {
         return Err("refusing to kill pid <= 1".into());
+    }
+    // Verify the process is owned by the current user before signalling.
+    let me = current_user();
+    if !me.is_empty() {
+        if let Ok(out) = Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "user="])
+            .output()
+        {
+            let owner = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !owner.is_empty() && owner != me {
+                return Err(format!("refusing to kill pid {pid}: not owned by current user"));
+            }
+        }
     }
     let sig = if force { libc::SIGKILL } else { libc::SIGTERM };
     let rc = unsafe { libc::kill(pid, sig) };

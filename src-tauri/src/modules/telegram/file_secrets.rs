@@ -27,7 +27,7 @@ use hmac::Hmac;
 use pbkdf2::pbkdf2;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha1::Sha1;
+use sha2::Sha256;
 
 use super::keyring::SecretStore;
 
@@ -138,7 +138,7 @@ fn derive_key() -> Result<[u8; 16], String> {
     // yield a decryptable secret on another host.
     let host = hostname();
     let mut key = [0u8; 16];
-    pbkdf2::<Hmac<Sha1>>(host.as_bytes(), b"stash-telegram", 1000, &mut key)
+    pbkdf2::<Hmac<Sha256>>(host.as_bytes(), b"stash-telegram", 260_000, &mut key)
         .map_err(|e| format!("pbkdf2: {e}"))?;
     Ok(key)
 }
