@@ -25,6 +25,14 @@ fn to_string_err<T, E: std::fmt::Display>(r: Result<T, E>) -> Result<T, String> 
 
 fn emit_snapshot(app: &AppHandle, snap: &SessionSnapshot) {
     let _ = app.emit("pomodoro:state", snap);
+    // Mirror every state change into the tray title synchronously
+    // so stop/pause/skip reflect instantly — the driver's 500 ms
+    // tick loop would otherwise leave a stale `MM:SS` up top for
+    // half a second after the user explicitly ended the session.
+    crate::tray::set_title(
+        app,
+        super::driver::format_tray_title(snap).as_deref(),
+    );
 }
 
 // --- Presets -----------------------------------------------------------
