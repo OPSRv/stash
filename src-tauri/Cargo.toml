@@ -86,6 +86,13 @@ window-vibrancy = "0.6"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
 objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication"] }
+# Safe NSWindow → NSPanel conversion. The naive `object_setClass` from
+# wry's NSWindow subclass (464 B) to stock NSPanel (456 B) is UB, and
+# objc2 aborts at runtime when it sees mismatched instance sizes. This
+# crate builds a custom NSPanel subclass with ivars sized to match
+# wry's, making the isa-swizzle safe. Pinned to the v2.1 branch
+# (tauri 2.8+ / objc2 0.6 graph); no crates.io release yet.
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
 
 # Release profile tuned for a snappy menubar tool: LTO + a single codegen unit
 # give a measurable runtime speedup (loops / iterator chains inline better) in

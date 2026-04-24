@@ -1,5 +1,7 @@
 mod backup;
 mod modules;
+#[cfg(target_os = "macos")]
+mod nspanel;
 mod tray;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -371,6 +373,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init());
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_nspanel::init());
+    }
 
     #[cfg(desktop)]
     {
@@ -955,6 +962,18 @@ pub fn run() {
                         Some(14.0),
                     ) {
                         eprintln!("[stash] apply_vibrancy failed: {e}");
+                    }
+                    // Subclass the popup NSWindow to a non-activating
+                    // NSPanel so toggling the popup doesn't pull focus
+                    // out of the user's current app. See `nspanel.rs`
+                    // for the full rationale. Must run after Tauri has
+                    // created the NSWindow (we're inside the `Some(win)`
+                    // branch) and before the blur-hide handler is
+                    // attached — conversion swaps the isa pointer,
+                    // and we want the subsequent `on_window_event`
+                    // closure to see the panel behaviour.
+                    if let Err(e) = nspanel::convert_popup(&win) {
+                        tracing::warn!(error = %e, "nspanel: convert_popup failed");
                     }
                 }
 
