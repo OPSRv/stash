@@ -101,6 +101,17 @@
     --grad-glass: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.005));
   }
   * { box-sizing: border-box; }
+  html {
+    /* Smooth anchor-link scrolling; honours the user's OS-level
+       reduced-motion preference via the @media block further down. */
+    scroll-behavior: smooth;
+    /* Firefox thin dark scrollbar. */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,0.18) transparent;
+    /* Anchors with fixed-nav offset land below the topbar instead of
+       under it, so jumping to #modules / #shortcuts feels intentional. */
+    scroll-padding-top: 80px;
+  }
   html, body {
     margin: 0; padding: 0;
     background: var(--bg-0);
@@ -111,6 +122,40 @@
     overflow-x: hidden;
     line-height: 1.5;
     letter-spacing: -0.005em;
+  }
+  /* WebKit / Blink thin dark scrollbar — tuned for a dark background,
+     fades in on hover. `-webkit-scrollbar*` is still the only path on
+     Safari; Firefox uses the standard `scrollbar-*` props above. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+    background: transparent;
+  }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.12);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 10px;
+    transition: background .2s ease;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.24);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  ::-webkit-scrollbar-corner { background: transparent; }
+  /* Respect OS-level reduced-motion: disable smooth scroll, intro
+     reveal, marquee, and any infinite SVG animations so the page
+     stops flashing for vestibular-sensitive users. */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+    }
+    .reveal { opacity: 1 !important; transform: none !important; }
   }
   body::before {
     content:''; position:fixed; inset:0; z-index:-2;
@@ -342,7 +387,10 @@
     overflow: hidden;
     transform: rotateX(8deg) rotateY(-1deg);
     transform-origin: 50% 90%;
-    transition: transform .3s ease;
+    transition: transform .4s cubic-bezier(.2,.8,.2,1);
+    /* Promote to its own compositor layer — the tilt transform then
+       runs on the GPU instead of triggering paint on every frame. */
+    will-change: transform;
   }
   /* animated wallpaper blobs */
   .wallpaper {
