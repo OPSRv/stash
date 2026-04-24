@@ -117,7 +117,12 @@ fn parse_argv(mut argv: Vec<String>) -> Parsed {
             }
         }
     }
-    Parsed { json_out, show_help, show_version, rest }
+    Parsed {
+        json_out,
+        show_help,
+        show_version,
+        rest,
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -240,15 +245,8 @@ async fn main() -> ExitCode {
 /// `Response` plus the raw line the server sent (needed for `--json`
 /// passthrough). On any transport or protocol error returns the exit
 /// code the caller should terminate with — `main` surfaces it verbatim.
-async fn round_trip(
-    path: &std::path::Path,
-    req: &Request,
-) -> Result<(Response, String), ExitCode> {
-    let stream = match tokio::time::timeout(
-        Duration::from_secs(2),
-        UnixStream::connect(path),
-    )
-    .await
+async fn round_trip(path: &std::path::Path, req: &Request) -> Result<(Response, String), ExitCode> {
+    let stream = match tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(path)).await
     {
         Ok(Ok(s)) => s,
         Ok(Err(_)) | Err(_) => {
@@ -317,10 +315,7 @@ mod tests {
     fn parse_argv_does_not_strip_flags_from_command_args() {
         // `--json` inside the command payload must survive — otherwise
         // `stash note "think about --json"` silently corrupts the note.
-        let p = parse_argv(vec![
-            "note".into(),
-            "think about --json design".into(),
-        ]);
+        let p = parse_argv(vec!["note".into(), "think about --json design".into()]);
         assert!(!p.json_out);
         assert_eq!(p.rest, vec!["note", "think about --json design"]);
     }
@@ -340,11 +335,7 @@ mod tests {
 
     #[test]
     fn parse_argv_double_dash_terminates_flag_parsing() {
-        let p = parse_argv(vec![
-            "--".into(),
-            "--version".into(),
-            "arg".into(),
-        ]);
+        let p = parse_argv(vec!["--".into(), "--version".into(), "arg".into()]);
         assert!(!p.show_version);
         assert_eq!(p.rest, vec!["--version", "arg"]);
     }

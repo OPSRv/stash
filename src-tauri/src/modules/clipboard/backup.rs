@@ -67,4 +67,3 @@ impl ModuleBackup for Provider {
         Ok(report)
     }
 }
-

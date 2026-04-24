@@ -1,5 +1,5 @@
-pub mod backup;
 pub mod arc_cookies;
+pub mod backup;
 pub mod commands;
 pub mod detector;
 pub mod installer;

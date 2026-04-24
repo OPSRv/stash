@@ -114,10 +114,7 @@ impl NotesRepo {
             conn.execute("ALTER TABLE notes ADD COLUMN audio_path TEXT", [])?;
         }
         if !cols.iter().any(|c| c == "audio_duration_ms") {
-            conn.execute(
-                "ALTER TABLE notes ADD COLUMN audio_duration_ms INTEGER",
-                [],
-            )?;
+            conn.execute("ALTER TABLE notes ADD COLUMN audio_duration_ms INTEGER", [])?;
         }
         if !cols.iter().any(|c| c == "pinned") {
             conn.execute(
@@ -162,10 +159,7 @@ impl NotesRepo {
         // reads rowids from the *base* table (notes), not the index,
         // so we can't detect whether the trigram tokens are actually
         // stored. Rebuild is O(n) on boot; at our scale it's trivial.
-        conn.execute(
-            "INSERT INTO notes_fts(notes_fts) VALUES('rebuild')",
-            [],
-        )?;
+        conn.execute("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')", [])?;
         Ok(Self { conn })
     }
 
@@ -277,7 +271,14 @@ impl NotesRepo {
             "INSERT INTO note_attachments
                  (note_id, file_path, original_name, mime_type, size_bytes, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![note_id, file_path, original_name, mime_type, size_bytes, now],
+            params![
+                note_id,
+                file_path,
+                original_name,
+                mime_type,
+                size_bytes,
+                now
+            ],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -543,8 +544,10 @@ mod tests {
     fn deleting_note_cascades_attachments() {
         let mut repo = fresh();
         let note = repo.create("n", "", 1).unwrap();
-        repo.add_attachment(note, "/tmp/a", "a", None, None, 1).unwrap();
-        repo.add_attachment(note, "/tmp/b", "b", None, None, 2).unwrap();
+        repo.add_attachment(note, "/tmp/a", "a", None, None, 1)
+            .unwrap();
+        repo.add_attachment(note, "/tmp/b", "b", None, None, 2)
+            .unwrap();
         repo.delete(note).unwrap();
         assert!(repo.list_attachments(note).unwrap().is_empty());
     }

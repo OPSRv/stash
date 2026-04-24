@@ -22,7 +22,11 @@ pub struct OpenAiClient {
 }
 
 impl OpenAiClient {
-    pub fn new(base_url: impl Into<String>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             http: reqwest::Client::new(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
@@ -224,10 +228,7 @@ mod tests {
     #[test]
     fn to_wire_encodes_messages_and_tools() {
         let req = LlmRequest {
-            messages: vec![
-                ChatMessage::system("be helpful"),
-                ChatMessage::user("hi"),
-            ],
+            messages: vec![ChatMessage::system("be helpful"), ChatMessage::user("hi")],
             tools: vec![ToolSpec {
                 name: "get_battery".into(),
                 description: "Return battery percent + charging state.".into(),

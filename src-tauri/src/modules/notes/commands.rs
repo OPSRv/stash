@@ -92,11 +92,7 @@ pub fn notes_update(
 }
 
 #[tauri::command]
-pub fn notes_set_pinned(
-    state: State<'_, NotesState>,
-    id: i64,
-    pinned: bool,
-) -> Result<(), String> {
+pub fn notes_set_pinned(state: State<'_, NotesState>, id: i64, pinned: bool) -> Result<(), String> {
     to_string_err(state.repo.lock().unwrap().set_pinned(id, pinned))
 }
 
@@ -452,10 +448,7 @@ pub fn notes_save_image_file(app: tauri::AppHandle, path: String) -> Result<Stri
 /// the inline markdown image embed, which references files by absolute
 /// path from `![alt](…)`. Same scope guard as `notes_read_audio_path`.
 #[tauri::command]
-pub fn notes_read_image_path(
-    app: tauri::AppHandle,
-    path: String,
-) -> Result<Vec<u8>, String> {
+pub fn notes_read_image_path(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
     let base = image_dir(&app)?;
     let p = Path::new(&path);
     let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
@@ -474,10 +467,7 @@ pub fn notes_read_image_path(
 /// guard against a tampered note body coaxing the app into reading other
 /// locations on disk.
 #[tauri::command]
-pub fn notes_read_audio_path(
-    app: tauri::AppHandle,
-    path: String,
-) -> Result<Vec<u8>, String> {
+pub fn notes_read_audio_path(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
     let base = audio_dir(&app)?;
     let p = Path::new(&path);
     let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());

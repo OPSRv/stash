@@ -71,8 +71,7 @@ pub fn parse_vm_stat(text: &str, total_bytes: u64) -> (u64, u64) {
             purgeable_pages = v;
         }
     }
-    let available =
-        (free_pages + inactive_pages + speculative_pages + purgeable_pages) * page_size;
+    let available = (free_pages + inactive_pages + speculative_pages + purgeable_pages) * page_size;
     (total_bytes, available.min(total_bytes))
 }
 
@@ -90,7 +89,11 @@ fn physical_memsize() -> u64 {
         .unwrap_or(0)
 }
 
-fn memory_stats() -> (u64 /* used */, u64 /* total */, f32 /* pressure% */) {
+fn memory_stats() -> (
+    u64, /* used */
+    u64, /* total */
+    f32, /* pressure% */
+) {
     let total = physical_memsize();
     if total == 0 {
         return (0, 0, 0.0);
@@ -128,9 +131,18 @@ fn parse_top_snapshot(text: &str) -> (f32, f32, f32, f32, u64, u32) {
             }
         } else if let Some(rest) = l.strip_prefix("Load Avg: ") {
             let mut parts = rest.split(',');
-            load1 = parts.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
-            load5 = parts.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
-            load15 = parts.next().and_then(|s| s.trim().parse().ok()).unwrap_or(0.0);
+            load1 = parts
+                .next()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0.0);
+            load5 = parts
+                .next()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0.0);
+            load15 = parts
+                .next()
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0.0);
         } else if let Some(rest) = l.strip_prefix("CPU usage: ") {
             // `x% user, y% sys, z% idle` → cpu = user + sys.
             let mut user = 0.0f32;
@@ -152,7 +164,10 @@ fn parse_top_snapshot(text: &str) -> (f32, f32, f32, f32, u64, u32) {
     }
     // Uptime from sysctl is orders of magnitude more reliable than parsing
     // top's header, which changes format between macOS releases.
-    if let Ok(out) = Command::new("sysctl").args(["-n", "kern.boottime"]).output() {
+    if let Ok(out) = Command::new("sysctl")
+        .args(["-n", "kern.boottime"])
+        .output()
+    {
         let s = String::from_utf8_lossy(&out.stdout);
         // { sec = 1700000000, usec = 0 } Mon Nov 13 12:00:00 2023
         if let Some(sec_str) = s.split("sec = ").nth(1) {
@@ -172,7 +187,10 @@ fn parse_top_snapshot(text: &str) -> (f32, f32, f32, f32, u64, u32) {
 
 fn primary_interface() -> Option<String> {
     // `route -n get default` — look for the "interface: enX" line.
-    let out = Command::new("route").args(["-n", "get", "default"]).output().ok()?;
+    let out = Command::new("route")
+        .args(["-n", "get", "default"])
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -241,10 +259,7 @@ fn is_internal_iface(name: &str) -> bool {
         "awdl", // AirDrop / AirPlay Wireless Direct Link
         "llw",  // low-latency WLAN (Sidecar)
         "anpi", // Apple Network Probe Interface
-        "ipsec",
-        "gif",
-        "stf",
-        "ap",   // Wi-Fi hotspot bridge (ap1, ap0)
+        "ipsec", "gif", "stf", "ap", // Wi-Fi hotspot bridge (ap1, ap0)
         "bridge",
         "utun", // Continuity / iCloud Private Relay — always present,
                 // almost never the user's conscious "VPN". Real consumer
@@ -296,7 +311,8 @@ fn list_interfaces(primary: Option<&str>) -> Vec<NetIface> {
         _ => return Vec::new(),
     };
     let s = String::from_utf8_lossy(&out.stdout);
-    let mut by_name: std::collections::BTreeMap<String, NetIface> = std::collections::BTreeMap::new();
+    let mut by_name: std::collections::BTreeMap<String, NetIface> =
+        std::collections::BTreeMap::new();
     for (idx, line) in s.lines().enumerate() {
         if idx == 0 {
             continue;
@@ -545,5 +561,4 @@ mod tests {
         assert!((parse_ping_stdout(sample).unwrap() - 3.142).abs() < 0.01);
         assert!(parse_ping_stdout("no match here").is_none());
     }
-
 }

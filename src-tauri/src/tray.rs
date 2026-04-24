@@ -116,12 +116,7 @@ pub fn read_music_snapshot(state: &TrayState) -> PlayerSnapshot {
 /// Forward a scraped YT-Music status into tray state. Returns `true` when
 /// the snapshot actually changed, so the caller can skip rebuilding the
 /// native menu on the noisy 2 s polling cadence.
-pub fn on_music_nowplaying(
-    app: &AppHandle,
-    playing: bool,
-    title: String,
-    artist: String,
-) -> bool {
+pub fn on_music_nowplaying(app: &AppHandle, playing: bool, title: String, artist: String) -> bool {
     let state = match app.try_state::<Arc<TrayState>>() {
         Some(s) => s,
         None => return false,
@@ -161,9 +156,11 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
 
     let tray_icon = {
         let bytes = include_bytes!("../icons/tray.png");
-        Image::from_bytes(bytes)
-            .ok()
-            .unwrap_or_else(|| app.default_window_icon().expect("tray icon missing from bundle").clone())
+        Image::from_bytes(bytes).ok().unwrap_or_else(|| {
+            app.default_window_icon()
+                .expect("tray icon missing from bundle")
+                .clone()
+        })
     };
     TrayIconBuilder::with_id("main")
         .icon(tray_icon)
@@ -276,7 +273,14 @@ fn rebuild(app: &AppHandle) {
     let icons = state.player_icons.lock().unwrap().clone();
     let artwork = state.artwork.lock().unwrap().clone();
     let pomodoro_paused = *state.pomodoro_paused.lock().unwrap();
-    let menu = match build_menu(app, &modules, &music, &icons, artwork.as_deref(), pomodoro_paused) {
+    let menu = match build_menu(
+        app,
+        &modules,
+        &music,
+        &icons,
+        artwork.as_deref(),
+        pomodoro_paused,
+    ) {
         Ok(m) => m,
         Err(err) => {
             tracing::warn!(error = %err, "tray: rebuild failed");
@@ -308,7 +312,13 @@ fn build_menu(
         if music.is_active() {
             menu.append(&PredefinedMenuItem::separator(app)?)?;
         }
-        let resume = MenuItem::with_id(app, "pomodoro:resume", "Resume Pomodoro", true, None::<&str>)?;
+        let resume = MenuItem::with_id(
+            app,
+            "pomodoro:resume",
+            "Resume Pomodoro",
+            true,
+            None::<&str>,
+        )?;
         menu.append(&resume)?;
     }
 
@@ -377,7 +387,13 @@ fn append_music_block(
         menu.append(&title)?;
     }
 
-    append_transport(app, menu, "player:music:prev", "Previous Track", &icons.prev)?;
+    append_transport(
+        app,
+        menu,
+        "player:music:prev",
+        "Previous Track",
+        &icons.prev,
+    )?;
     let (play_id, play_label, play_icon) = if music.playing {
         ("player:music:play", "Pause", &icons.pause)
     } else {

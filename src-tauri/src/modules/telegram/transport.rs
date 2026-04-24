@@ -18,11 +18,21 @@ use super::state::TelegramState;
 pub enum DispatchAction {
     /// Silently drop — no reply, no log.
     Drop,
-    ReplyPaired { chat_id: i64 },
-    ReplyReject { chat_id: i64 },
-    ReplyExpired { chat_id: i64 },
-    ReplyAlreadyPaired { chat_id: i64 },
-    ReplyAborted { chat_id: i64 },
+    ReplyPaired {
+        chat_id: i64,
+    },
+    ReplyReject {
+        chat_id: i64,
+    },
+    ReplyExpired {
+        chat_id: i64,
+    },
+    ReplyAlreadyPaired {
+        chat_id: i64,
+    },
+    ReplyAborted {
+        chat_id: i64,
+    },
     /// Paired user sent a slash-command. Dispatcher couldn't call the
     /// async handler itself (it is sync + pure), so it surfaces the name
     /// and args for `handle_update` to resolve against the registry.
@@ -33,7 +43,10 @@ pub enum DispatchAction {
     },
     /// Paired user sent plain text. Phase 1.5 pipes this into the inbox;
     /// for now the caller drops it.
-    IngestText { chat_id: i64, text: String },
+    IngestText {
+        chat_id: i64,
+        text: String,
+    },
 }
 
 /// Parse an inbound text message + chat_id into a dispatcher action while
@@ -59,9 +72,7 @@ pub fn dispatch_text(
     match pairing_state {
         PairingState::Unconfigured => DispatchAction::Drop,
         PairingState::Pairing { .. } => DispatchAction::Drop,
-        PairingState::Paired {
-            chat_id: allowed,
-        } => {
+        PairingState::Paired { chat_id: allowed } => {
             if *allowed != chat_id {
                 // Allowlist: messages from any other chat are silently
                 // dropped so a leaked token can't learn about us.
@@ -328,9 +339,10 @@ async fn handle_update(
             state.sender.enqueue(chat_id, "❌ Невірний код.");
         }
         DispatchAction::ReplyExpired { .. } => {
-            state
-                .sender
-                .enqueue(chat_id, "⚠️ Код парування прострочений — почни знову у Stash.");
+            state.sender.enqueue(
+                chat_id,
+                "⚠️ Код парування прострочений — почни знову у Stash.",
+            );
         }
         DispatchAction::ReplyAlreadyPaired { .. } => {
             state.sender.enqueue(chat_id, "✅ Уже сполучено зі Stash.");
@@ -404,10 +416,9 @@ async fn handle_update(
                         // assistant failure so the user knows why
                         // there's no AI reply, but don't pretend we're
                         // "saving" something twice.
-                        state.sender.enqueue(
-                            chat_id,
-                            format!("🤖 ⚠️ Асистент недоступний ({e})."),
-                        );
+                        state
+                            .sender
+                            .enqueue(chat_id, format!("🤖 ⚠️ Асистент недоступний ({e})."));
                     } else {
                         let msg_id = msg.id.0 as i64;
                         let received_at = now;
@@ -510,9 +521,10 @@ async fn handle_media(
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(error = %e, "inbox: could not create day dir");
-            state
-                .sender
-                .enqueue(chat_id, "⚠️ Не вдалося створити папку інбокса — переглянь лог Stash.");
+            state.sender.enqueue(
+                chat_id,
+                "⚠️ Не вдалося створити папку інбокса — переглянь лог Stash.",
+            );
             return;
         }
     };
@@ -522,9 +534,10 @@ async fn handle_media(
         Err(e) => {
             tracing::warn!(error = %e, "inbox: download failed");
             let _ = std::fs::remove_file(&abs); // partial file, best-effort cleanup
-            state
-                .sender
-                .enqueue(chat_id, "⚠️ Завантаження з Telegram не вдалося — переглянь лог Stash.");
+            state.sender.enqueue(
+                chat_id,
+                "⚠️ Завантаження з Telegram не вдалося — переглянь лог Stash.",
+            );
             return;
         }
     };
@@ -609,8 +622,8 @@ async fn handle_media(
                     // but only when the user actually wants AI replies
                     // on voice notes. Toggle lives in Settings →
                     // Telegram → AI Prompt (`reply_on_voice`).
-                    let reply_enabled = super::settings::AiSettings::load(&state_for_task)
-                        .reply_on_voice;
+                    let reply_enabled =
+                        super::settings::AiSettings::load(&state_for_task).reply_on_voice;
                     if reply_enabled {
                         match super::assistant::handle_user_text(
                             &app_for_task,
@@ -718,12 +731,9 @@ async fn handle_callback(
         // Forward any attachments a handler emits (e.g. /screenshot)
         // so the "Again" button actually delivers the PNG, not just the
         // text caption.
-        state.sender.enqueue_full(
-            user_id,
-            reply.text,
-            reply.keyboard,
-            reply.documents,
-        );
+        state
+            .sender
+            .enqueue_full(user_id, reply.text, reply.keyboard, reply.documents);
     }
 }
 
@@ -778,7 +788,9 @@ async fn edit_message(
             .iter()
             .map(|row| {
                 row.iter()
-                    .map(|b| InlineKeyboardButton::callback(b.text.clone(), b.callback_data.clone()))
+                    .map(|b| {
+                        InlineKeyboardButton::callback(b.text.clone(), b.callback_data.clone())
+                    })
                     .collect()
             })
             .collect();
@@ -799,7 +811,10 @@ async fn edit_message(
 async fn send_typing(bot: &teloxide::Bot, chat_id: i64) {
     use teloxide::prelude::*;
     use teloxide::types::{ChatAction, ChatId};
-    if let Err(e) = bot.send_chat_action(ChatId(chat_id), ChatAction::Typing).await {
+    if let Err(e) = bot
+        .send_chat_action(ChatId(chat_id), ChatAction::Typing)
+        .await
+    {
         tracing::debug!(error = %e, "sendChatAction(typing) failed");
     }
 }

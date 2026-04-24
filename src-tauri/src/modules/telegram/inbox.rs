@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use teloxide::net::Download;
 use teloxide::prelude::*;
-use teloxide::types::{Message, MessageKind, MediaKind};
+use teloxide::types::{MediaKind, Message, MessageKind};
 use uuid::Uuid;
 
 use super::state::TelegramState;
@@ -172,8 +172,15 @@ fn ymd_from_days(days: i64) -> (i64, u32, u32) {
 #[derive(Debug)]
 pub enum CapVerdict {
     Ok,
-    OverPerFile { limit: u64, size: u64 },
-    OverPerDay { limit: u64, used: u64, attempted: u64 },
+    OverPerFile {
+        limit: u64,
+        size: u64,
+    },
+    OverPerDay {
+        limit: u64,
+        used: u64,
+        attempted: u64,
+    },
     Unknown,
 }
 
@@ -214,11 +221,7 @@ pub fn target_paths(
 /// Download the file via the Bot API, streaming into the destination path.
 /// Returns the number of bytes written. Uses `tokio::fs` so we never block
 /// the reactor.
-pub async fn download_to(
-    bot: &Bot,
-    file_id: &str,
-    dest_abs: &Path,
-) -> Result<u64, String> {
+pub async fn download_to(bot: &Bot, file_id: &str, dest_abs: &Path) -> Result<u64, String> {
     let file = bot
         .get_file(file_id)
         .await
@@ -235,10 +238,7 @@ pub async fn download_to(
 }
 
 /// Read today's byte counter from the kv table; missing = 0.
-pub fn today_used_bytes(
-    state: &TelegramState,
-    day: &str,
-) -> u64 {
+pub fn today_used_bytes(state: &TelegramState, day: &str) -> u64 {
     let key = format!("inbox_bytes_{day}");
     state
         .repo
@@ -250,11 +250,7 @@ pub fn today_used_bytes(
 }
 
 /// Add `n` bytes to today's counter (upsert the kv row).
-pub fn bump_used_bytes(
-    state: &TelegramState,
-    day: &str,
-    extra: u64,
-) {
+pub fn bump_used_bytes(state: &TelegramState, day: &str, extra: u64) {
     let key = format!("inbox_bytes_{day}");
     let current = today_used_bytes(state, day);
     let next = current.saturating_add(extra);

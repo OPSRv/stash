@@ -1,12 +1,12 @@
 use super::battery::{self, BatteryHealth};
 use super::caches::{self, CacheEntry};
 use super::cancel;
-use super::docker::{self, DockerStatus, PruneResult};
 use super::dashboard::{self, DashboardMetrics};
 use super::disk_hogs::{
     self, IosBackup, MailAttachmentsBucket, Screenshot, TmSnapshot, XcodeSimulator,
 };
 use super::displays::{self, DisplayDevice, DisplayInfo};
+use super::docker::{self, DockerStatus, PruneResult};
 use super::duplicates::{self, DuplicateGroup};
 use super::large_files::{self, ScanSummary};
 use super::launch_agents::{self, LaunchAgent};
@@ -197,11 +197,9 @@ pub async fn system_list_caches() -> Result<Vec<CacheEntry>, String> {
 #[tauri::command]
 pub async fn system_list_launch_agents() -> Result<Vec<LaunchAgent>, String> {
     let home = resolve_home()?;
-    tauri::async_runtime::spawn_blocking(move || {
-        Ok::<_, String>(launch_agents::list_agents(&home))
-    })
-    .await
-    .map_err(|e| format!("join: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || Ok::<_, String>(launch_agents::list_agents(&home)))
+        .await
+        .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
@@ -280,17 +278,21 @@ pub async fn system_scan_node_modules(root: String) -> Result<Vec<NodeModulesEnt
 #[tauri::command]
 pub async fn system_list_screenshots() -> Result<Vec<Screenshot>, String> {
     let home = resolve_home()?;
-    tauri::async_runtime::spawn_blocking(move || Ok::<_, String>(disk_hogs::list_screenshots(&home)))
-        .await
-        .map_err(|e| format!("join: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok::<_, String>(disk_hogs::list_screenshots(&home))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]
 pub async fn system_list_ios_backups() -> Result<Vec<IosBackup>, String> {
     let home = resolve_home()?;
-    tauri::async_runtime::spawn_blocking(move || Ok::<_, String>(disk_hogs::list_ios_backups(&home)))
-        .await
-        .map_err(|e| format!("join: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok::<_, String>(disk_hogs::list_ios_backups(&home))
+    })
+    .await
+    .map_err(|e| format!("join: {e}"))?
 }
 
 #[tauri::command]

@@ -1,4 +1,7 @@
-use crate::modules::translator::{engine, repo::{TranslationRow, TranslationsRepo}};
+use crate::modules::translator::{
+    engine,
+    repo::{TranslationRow, TranslationsRepo},
+};
 use serde::Serialize;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -116,9 +119,7 @@ impl TranslatorState {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs() as i64)
                     .unwrap_or(0);
-                if let Err(e) =
-                    repo.insert(&t.original, &t.translated, &t.from, &t.to, now)
-                {
+                if let Err(e) = repo.insert(&t.original, &t.translated, &t.from, &t.to, now) {
                     tracing::warn!(error = %e, "translator: history insert failed");
                 }
             }
@@ -143,10 +144,11 @@ pub async fn translator_run(
     let to_c = to.clone();
     let text_c = text.clone();
     let from_for_move = from_c.clone();
-    let translated =
-        tauri::async_runtime::spawn_blocking(move || engine::translate_via_google(&text_c, &from_for_move, &to_c))
-            .await
-            .map_err(|e| e.to_string())??;
+    let translated = tauri::async_runtime::spawn_blocking(move || {
+        engine::translate_via_google(&text_c, &from_for_move, &to_c)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(Translation {
         original: text,
         translated,
@@ -218,7 +220,11 @@ pub fn translator_set_settings(
 ) -> Result<(), String> {
     let mut s = state.settings.lock().unwrap();
     s.enabled = enabled;
-    s.target = if target.is_empty() { "uk".into() } else { target };
+    s.target = if target.is_empty() {
+        "uk".into()
+    } else {
+        target
+    };
     if let Some(n) = min_chars {
         s.min_chars = n.max(1);
     }
@@ -248,7 +254,14 @@ mod tests {
             r.insert("Hello there", "Привіт там", "auto", "uk", 100)
                 .unwrap();
         }
-        let list = state.repo.lock().unwrap().as_ref().unwrap().list(10).unwrap();
+        let list = state
+            .repo
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .list(10)
+            .unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].original, "Hello there");
         assert_eq!(list[0].translated, "Привіт там");
@@ -261,7 +274,14 @@ mod tests {
         // enabled defaults to false
         let out = state.auto_translate("Hello there friend");
         assert!(out.is_none());
-        let list = state.repo.lock().unwrap().as_ref().unwrap().list(10).unwrap();
+        let list = state
+            .repo
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .list(10)
+            .unwrap();
         assert!(list.is_empty());
     }
 

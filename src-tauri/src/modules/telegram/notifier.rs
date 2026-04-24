@@ -30,7 +30,7 @@ pub enum Category {
 impl Category {
     fn cooldown(self) -> Duration {
         match self {
-            Category::Pomodoro => Duration::from_secs(2),       // burst-safe only
+            Category::Pomodoro => Duration::from_secs(2), // burst-safe only
             Category::BatteryLow => Duration::from_secs(60 * 60),
             Category::DownloadComplete => Duration::from_secs(2),
             Category::Calendar => Duration::from_secs(60),

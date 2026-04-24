@@ -189,6 +189,9 @@ mod tests {
     #[test]
     fn llm_error_display_is_human_readable() {
         assert_eq!(format!("{}", LlmError::Auth), "invalid or missing API key");
-        assert_eq!(format!("{}", LlmError::RateLimit), "rate limited by provider");
+        assert_eq!(
+            format!("{}", LlmError::RateLimit),
+            "rate limited by provider"
+        );
     }
 }

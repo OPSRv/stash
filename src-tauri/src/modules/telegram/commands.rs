@@ -1,6 +1,6 @@
+use rand::rngs::OsRng;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use rand::rngs::OsRng;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
@@ -31,13 +31,12 @@ pub enum ConnectionStatus {
 }
 
 /// Pure helper — unit-testable without Tauri `State`.
-pub(super) fn compute_status(
-    has_token: bool,
-    pairing_state: &PairingState,
-) -> ConnectionStatus {
+pub(super) fn compute_status(has_token: bool, pairing_state: &PairingState) -> ConnectionStatus {
     match pairing_state {
         PairingState::Paired { chat_id } => ConnectionStatus::Paired { chat_id: *chat_id },
-        PairingState::Pairing { code, expires_at, .. } => ConnectionStatus::Pairing {
+        PairingState::Pairing {
+            code, expires_at, ..
+        } => ConnectionStatus::Pairing {
             code: code.clone(),
             expires_at: *expires_at,
         },
@@ -49,20 +48,13 @@ pub(super) fn compute_status(
 /// Validate a token by calling `getMe` on the Telegram Bot API. A failing
 /// validation returns `Err` so the command layer can refuse to persist a
 /// bad token — per design §5.1 (token validation policy).
-pub(super) async fn validate_token(
-    client: &reqwest::Client,
-    token: &str,
-) -> Result<(), String> {
+pub(super) async fn validate_token(client: &reqwest::Client, token: &str) -> Result<(), String> {
     let url = format!("https://api.telegram.org/bot{token}/getMe");
     tracing::info!("validating bot token");
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| {
-            tracing::warn!(error = %e, "getMe network error");
-            format!("network: {e}")
-        })?;
+    let resp = client.get(&url).send().await.map_err(|e| {
+        tracing::warn!(error = %e, "getMe network error");
+        format!("network: {e}")
+    })?;
     if !resp.status().is_success() {
         return Err(format!(
             "Telegram rejected the token (HTTP {})",
@@ -70,8 +62,7 @@ pub(super) async fn validate_token(
         ));
     }
     let text = resp.text().await.map_err(|e| format!("read: {e}"))?;
-    let body: serde_json::Value =
-        serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))?;
+    let body: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("parse: {e}"))?;
     if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
         Ok(())
     } else {
@@ -100,9 +91,7 @@ pub async fn telegram_set_token(
 }
 
 #[tauri::command]
-pub async fn telegram_clear_token(
-    state: State<'_, Arc<TelegramState>>,
-) -> Result<(), String> {
+pub async fn telegram_clear_token(state: State<'_, Arc<TelegramState>>) -> Result<(), String> {
     state.transport.stop().await;
     state.sender.stop();
     state.secrets.delete(ACCOUNT_BOT_TOKEN)?;
@@ -117,9 +106,7 @@ pub fn telegram_has_token(state: State<'_, Arc<TelegramState>>) -> Result<bool, 
 }
 
 #[tauri::command]
-pub fn telegram_status(
-    state: State<'_, Arc<TelegramState>>,
-) -> Result<ConnectionStatus, String> {
+pub fn telegram_status(state: State<'_, Arc<TelegramState>>) -> Result<ConnectionStatus, String> {
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();
     let status = compute_status(has_token, &state.pairing.lock().unwrap());
     tracing::info!(has_token, status = ?status, "telegram_status");
@@ -141,7 +128,9 @@ pub async fn telegram_start_pairing(
     // Spin up long-polling so the bot can receive /pair, plus the outbound
     // queue that carries replies.
     let arc = state.inner().clone();
-    arc.transport.start(token.clone(), app.clone(), arc.clone()).await?;
+    arc.transport
+        .start(token.clone(), app.clone(), arc.clone())
+        .await?;
     arc.sender.start(token)?;
 
     let _ = app.emit("telegram:status_changed", ());
@@ -209,7 +198,9 @@ pub fn telegram_delete_inbox_item(
             // an earlier manual cleanup, or the file was never saved
             // successfully in the first place.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => tracing::warn!(path = %p, error = %e, "telegram: failed to unlink inbox blob"),
+            Err(e) => {
+                tracing::warn!(path = %p, error = %e, "telegram: failed to unlink inbox blob")
+            }
         }
     }
 
@@ -405,10 +396,7 @@ fn pick_note_body(item: &crate::modules::telegram::repo::InboxItem) -> String {
     String::new()
 }
 
-fn pick_note_title(
-    item: &crate::modules::telegram::repo::InboxItem,
-    body: &str,
-) -> String {
+fn pick_note_title(item: &crate::modules::telegram::repo::InboxItem, body: &str) -> String {
     let first_line = body.lines().next().unwrap_or("").trim();
     if !first_line.is_empty() {
         return first_line.chars().take(80).collect();
@@ -505,10 +493,8 @@ pub async fn telegram_retry_transcribe(
     // Detach — same pattern as first-pass transcription so the IPC call
     // returns immediately and the UI stays responsive.
     tauri::async_runtime::spawn(async move {
-        match crate::modules::whisper::commands::transcribe_with_active_model(
-            &app_clone, abs, None,
-        )
-        .await
+        match crate::modules::whisper::commands::transcribe_with_active_model(&app_clone, abs, None)
+            .await
         {
             Ok(text) => {
                 let trimmed = text.trim().to_string();

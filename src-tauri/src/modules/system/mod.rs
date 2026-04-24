@@ -1,10 +1,5 @@
 pub mod apps_control;
 pub mod battery;
-pub mod focus;
-#[cfg(target_os = "macos")]
-pub mod frontmost;
-pub mod reminders_bridge;
-pub mod weather;
 pub mod caches;
 pub mod cancel;
 pub mod commands;
@@ -14,6 +9,9 @@ pub mod disk_hogs;
 pub mod displays;
 pub mod docker;
 pub mod duplicates;
+pub mod focus;
+#[cfg(target_os = "macos")]
+pub mod frontmost;
 pub mod large_files;
 pub mod launch_agents;
 pub mod network;
@@ -22,6 +20,8 @@ pub mod power;
 pub mod privacy;
 pub mod processes;
 pub mod quick_actions;
+pub mod reminders_bridge;
 pub mod screenshot;
 pub mod trash_bins;
 pub mod uninstaller;
+pub mod weather;

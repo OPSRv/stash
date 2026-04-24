@@ -268,8 +268,7 @@ fn label_for(service: &str) -> Result<String, String> {
 /// Safari UA — Google's "secure browser" check refuses anything that
 /// identifies as Chrome/Electron/WebView, but it accepts Safari on macOS.
 /// ChatGPT and Claude also serve cleaner pages to Safari-signed UAs.
-const SAFARI_UA: &str =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
+const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
      (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
 
 fn popup_window(app: &AppHandle) -> Result<tauri::Window, String> {
@@ -322,10 +321,9 @@ pub fn webchat_embed(
     let script = WEBVIEW_DISGUISE_TEMPLATE
         .replace("{SERVICE_ID}", &service)
         .replace("{INITIAL_ZOOM}", &zoom_literal);
-    let mut builder =
-        tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed))
-            .user_agent(&ua)
-            .initialization_script(&script);
+    let mut builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed))
+        .user_agent(&ua)
+        .initialization_script(&script);
     #[cfg(debug_assertions)]
     {
         builder = builder.devtools(true);

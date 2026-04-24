@@ -76,7 +76,6 @@ impl Tool for ListFacts {
             .collect();
         Ok(json!({ "facts": facts }))
     }
-
 }
 
 pub struct ForgetFact;
@@ -168,19 +167,13 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn remember_rejects_missing_text() {
-        let err = RememberFact
-            .invoke(&ctx(), json!({}))
-            .await
-            .unwrap_err();
+        let err = RememberFact.invoke(&ctx(), json!({})).await.unwrap_err();
         assert!(err.to_lowercase().contains("text"));
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn forget_rejects_missing_id() {
-        let err = ForgetFact
-            .invoke(&ctx(), json!({}))
-            .await
-            .unwrap_err();
+        let err = ForgetFact.invoke(&ctx(), json!({})).await.unwrap_err();
         assert!(err.to_lowercase().contains("id"));
     }
 }

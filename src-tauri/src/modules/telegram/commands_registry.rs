@@ -36,7 +36,6 @@ impl Reply {
             documents: Vec::new(),
         }
     }
-
 }
 
 /// Transport-agnostic inline-keyboard description. Telegram transport
@@ -167,10 +166,7 @@ impl HelpCmd {
 
     /// Call once after the registry is fully built so `/help` knows what to
     /// print. Idempotent — subsequent calls replace the snapshot.
-    pub fn set_snapshot(
-        &self,
-        entries: Vec<(&'static str, &'static str, &'static str)>,
-    ) {
+    pub fn set_snapshot(&self, entries: Vec<(&'static str, &'static str, &'static str)>) {
         *self.snapshot.lock().unwrap() = entries;
     }
 }
@@ -208,19 +204,31 @@ impl CommandHandler for HelpCmd {
 /// automatically even without updating this table.
 const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     ("🧭 Overview", &["dashboard", "status"]),
-    ("💻 System", &["battery", "display", "sleep", "shutdown", "screenshot"]),
-    ("📥 Capture", &["clip", "note", "notes", "memory", "remember", "forget_fact", "summarize"]),
+    (
+        "💻 System",
+        &["battery", "display", "sleep", "shutdown", "screenshot"],
+    ),
+    (
+        "📥 Capture",
+        &[
+            "clip",
+            "note",
+            "notes",
+            "memory",
+            "remember",
+            "forget_fact",
+            "summarize",
+        ],
+    ),
     ("🎛 Control", &["music", "volume"]),
-    ("⏰ Time",    &["remind", "reminders", "forget"]),
-    ("ℹ️ Meta",    &["help"]),
+    ("⏰ Time", &["remind", "reminders", "forget"]),
+    ("ℹ️ Meta", &["help"]),
 ];
 
 fn render_help(snap: &[(&'static str, &'static str, &'static str)]) -> String {
     // Index by name so category lookup is O(n) rather than O(n*m).
-    let by_name: std::collections::HashMap<&str, (&str, &str)> = snap
-        .iter()
-        .map(|(n, u, d)| (*n, (*u, *d)))
-        .collect();
+    let by_name: std::collections::HashMap<&str, (&str, &str)> =
+        snap.iter().map(|(n, u, d)| (*n, (*u, *d))).collect();
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut out = String::new();
     out.push_str("🤖 *Stash commands*\n\n");
@@ -267,7 +275,10 @@ pub fn suggest_commands(needle: &str, names: &[&str], limit: usize) -> Vec<Strin
             // Tight bound: either a close edit distance OR a clear
             // prefix/substring match. Prevents "foobarbaz" from
             // suggesting random 3-letter commands.
-            *d <= 2 || *d <= n.len().max(needle.len()) / 2 || n.starts_with(&needle) || n.contains(&needle)
+            *d <= 2
+                || *d <= n.len().max(needle.len()) / 2
+                || n.starts_with(&needle)
+                || n.contains(&needle)
         })
         .collect();
     ranked.sort_by_key(|(d, _)| *d);
@@ -293,9 +304,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, bc) in b.iter().enumerate() {
             let cost = if ac == bc { 0 } else { 1 };
-            curr[j + 1] = (curr[j] + 1)
-                .min(prev[j + 1] + 1)
-                .min(prev[j] + cost);
+            curr[j + 1] = (curr[j] + 1).min(prev[j + 1] + 1).min(prev[j] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -379,8 +388,18 @@ mod tests {
             .iter()
             .flat_map(|r| r.iter().map(|b| b.callback_data.as_str()))
             .collect();
-        for expected in ["battery", "clip", "screenshot", "music", "reminders", "memory"] {
-            assert!(names.contains(&expected), "missing {expected} in quick actions");
+        for expected in [
+            "battery",
+            "clip",
+            "screenshot",
+            "music",
+            "reminders",
+            "memory",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "missing {expected} in quick actions"
+            );
         }
     }
 
@@ -415,8 +434,16 @@ mod tests {
     #[test]
     fn suggest_commands_catches_typos_and_prefixes() {
         let names = &[
-            "battery", "clip", "note", "music", "remind", "reminders",
-            "forget", "forget_fact", "help", "memory",
+            "battery",
+            "clip",
+            "note",
+            "music",
+            "remind",
+            "reminders",
+            "forget",
+            "forget_fact",
+            "help",
+            "memory",
         ];
         // Typo: /fo → most likely /forget (then /forget_fact).
         let out = suggest_commands("fo", names, 3);
@@ -438,7 +465,10 @@ mod tests {
         // so the caller falls back to the generic "type / to explore" hint.
         let names = &["battery", "clip", "note"];
         let out = suggest_commands("xqwerty", names, 3);
-        assert!(out.is_empty(), "expected no suggestions for wild input, got {out:?}");
+        assert!(
+            out.is_empty(),
+            "expected no suggestions for wild input, got {out:?}"
+        );
     }
 
     #[test]

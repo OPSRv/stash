@@ -118,7 +118,10 @@ pub fn emit_events(app: &AppHandle, events: &[EngineEvent]) {
     if let Some(EngineEvent::SessionDone {
         blocks_completed,
         total_sec,
-    }) = events.iter().rev().find(|e| matches!(e, EngineEvent::SessionDone { .. }))
+    }) = events
+        .iter()
+        .rev()
+        .find(|e| matches!(e, EngineEvent::SessionDone { .. }))
     {
         let summary = format!("{} блоків · {} хв", blocks_completed, total_sec / 60);
         let _ = app
@@ -161,8 +164,8 @@ pub fn format_tray_title(snap: &super::engine::SessionSnapshot) -> Option<String
 
 #[cfg(test)]
 mod tray_title_tests {
-    use super::format_tray_title;
     use super::super::engine::{SessionSnapshot, SessionStatus};
+    use super::format_tray_title;
 
     fn snap(status: SessionStatus, remaining_ms: i64) -> SessionSnapshot {
         SessionSnapshot {

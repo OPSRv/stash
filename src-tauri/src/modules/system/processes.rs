@@ -113,7 +113,9 @@ pub fn kill_process(pid: i32, force: bool) -> Result<(), String> {
         {
             let owner = String::from_utf8_lossy(&out.stdout).trim().to_string();
             if !owner.is_empty() && owner != me {
-                return Err(format!("refusing to kill pid {pid}: not owned by current user"));
+                return Err(format!(
+                    "refusing to kill pid {pid}: not owned by current user"
+                ));
             }
         }
     }

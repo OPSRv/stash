@@ -25,10 +25,7 @@ pub fn fetch_vtt_files(
     } else {
         langs.join(",")
     };
-    let output_template = scratch
-        .join("%(id)s.%(ext)s")
-        .to_string_lossy()
-        .to_string();
+    let output_template = scratch.join("%(id)s.%(ext)s").to_string_lossy().to_string();
 
     let mut cmd = Command::new(yt_dlp);
     cmd.args([
@@ -59,9 +56,11 @@ pub fn fetch_vtt_files(
     // Drain stdout/stderr so the pipes don't stall. We don't inspect the
     // output line-by-line — exit status and on-disk files are the real truth.
     if let Some(out) = child.stdout.take() {
-        std::thread::spawn(move || {
-            for _ in BufReader::new(out).lines().map_while(Result::ok) {}
-        });
+        std::thread::spawn(
+            move || {
+                for _ in BufReader::new(out).lines().map_while(Result::ok) {}
+            },
+        );
     }
     let stderr_lines: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
         std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

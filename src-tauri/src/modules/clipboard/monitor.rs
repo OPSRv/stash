@@ -409,10 +409,16 @@ mod tests {
     fn poll_saves_image_and_inserts_image_row() {
         let mut repo = setup();
         // 2x2 red RGBA
-        let bytes = vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255];
+        let bytes = vec![
+            255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+        ];
         let reader = FakeReader {
             text_queue: vec![None],
-            image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
+            image_queue: vec![Some(RgbaImage {
+                bytes,
+                width: 2,
+                height: 2,
+            })],
             files_queue: vec![],
             has_files_queue: vec![],
         };
@@ -436,7 +442,10 @@ mod tests {
         let reader = FakeReader {
             text_queue: vec![None],
             image_queue: vec![None],
-            files_queue: vec![vec![PathBuf::from("/tmp/a.png"), PathBuf::from("/tmp/b.mp4")]],
+            files_queue: vec![vec![
+                PathBuf::from("/tmp/a.png"),
+                PathBuf::from("/tmp/b.mp4"),
+            ]],
             has_files_queue: vec![true],
         };
         let mut monitor = Monitor::new(reader);
@@ -458,10 +467,16 @@ mod tests {
         // pasteboard. Without the files-first check we'd save the icon
         // PNG and mis-classify the clip as an image.
         let mut repo = setup();
-        let bytes = vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255];
+        let bytes = vec![
+            255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+        ];
         let reader = FakeReader {
             text_queue: vec![None],
-            image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
+            image_queue: vec![Some(RgbaImage {
+                bytes,
+                width: 2,
+                height: 2,
+            })],
             files_queue: vec![vec![PathBuf::from("/tmp/finder-folder")]],
             has_files_queue: vec![true],
         };
@@ -471,7 +486,10 @@ mod tests {
         let id = monitor.poll_once(&mut repo, 100).unwrap().unwrap();
 
         let item = repo.get(id).unwrap().unwrap();
-        assert_eq!(item.kind, "file", "folder copy must store as file, not image");
+        assert_eq!(
+            item.kind, "file",
+            "folder copy must store as file, not image"
+        );
         assert_eq!(repo.list(10).unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -527,12 +545,15 @@ mod tests {
         let bytes = vec![1u8; 16]; // 2×2 RGBA
         let reader = FakeReader {
             text_queue: vec![None],
-            image_queue: vec![Some(RgbaImage { bytes, width: 2, height: 2 })],
-            files_queue: vec![vec![]], // filter stripped every path
+            image_queue: vec![Some(RgbaImage {
+                bytes,
+                width: 2,
+                height: 2,
+            })],
+            files_queue: vec![vec![]],   // filter stripped every path
             has_files_queue: vec![true], // …but the pb still has file-urls
         };
-        let tmp =
-            std::env::temp_dir().join(format!("stash-test-filter-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("stash-test-filter-{}", std::process::id()));
         let mut monitor = Monitor::with_images_dir(reader, tmp.clone());
 
         let result = monitor.poll_once(&mut repo, 100).unwrap();
@@ -568,7 +589,8 @@ mod tests {
     fn files_key_is_deterministic_and_order_sensitive() {
         let a = Monitor::<FakeReader>::test_files_key(&[PathBuf::from("/a"), PathBuf::from("/b")]);
         let b = Monitor::<FakeReader>::test_files_key(&[PathBuf::from("/a"), PathBuf::from("/b")]);
-        let reversed = Monitor::<FakeReader>::test_files_key(&[PathBuf::from("/b"), PathBuf::from("/a")]);
+        let reversed =
+            Monitor::<FakeReader>::test_files_key(&[PathBuf::from("/b"), PathBuf::from("/a")]);
         assert_eq!(a, b);
         assert_ne!(a, reversed, "order difference must produce a different key");
         assert!(a.starts_with("files:"));

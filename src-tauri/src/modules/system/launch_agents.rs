@@ -49,7 +49,11 @@ fn read_loaded_labels() -> HashSet<(String, Option<i32>)> {
     set
 }
 
-fn scan_dir(dir: &Path, scope: AgentScope, loaded: &HashSet<(String, Option<i32>)>) -> Vec<LaunchAgent> {
+fn scan_dir(
+    dir: &Path,
+    scope: AgentScope,
+    loaded: &HashSet<(String, Option<i32>)>,
+) -> Vec<LaunchAgent> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
@@ -92,8 +96,16 @@ fn scan_dir(dir: &Path, scope: AgentScope, loaded: &HashSet<(String, Option<i32>
 
 pub fn list_agents(home: &Path) -> Vec<LaunchAgent> {
     let loaded = read_loaded_labels();
-    let mut out = scan_dir(&home.join("Library/LaunchAgents"), AgentScope::User, &loaded);
-    out.extend(scan_dir(Path::new("/Library/LaunchAgents"), AgentScope::System, &loaded));
+    let mut out = scan_dir(
+        &home.join("Library/LaunchAgents"),
+        AgentScope::User,
+        &loaded,
+    );
+    out.extend(scan_dir(
+        Path::new("/Library/LaunchAgents"),
+        AgentScope::System,
+        &loaded,
+    ));
     out
 }
 

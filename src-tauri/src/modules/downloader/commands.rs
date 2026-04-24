@@ -1,5 +1,7 @@
 use crate::modules::downloader::{
-    detector::{fetch_info, fetch_oembed, pick_quality_options, QualityOption, QuickPreview, VideoInfo},
+    detector::{
+        fetch_info, fetch_oembed, pick_quality_options, QualityOption, QuickPreview, VideoInfo,
+    },
     installer,
     jobs::DownloadJob,
     platform::Platform,
@@ -136,27 +138,21 @@ pub fn dl_start(
         .unwrap_or(0);
     let id = {
         let mut repo = state.jobs.lock().unwrap();
-        to_string_err(repo.create(
-            &url,
-            serde_json::to_string(&platform)
-                .map(|s| s.trim_matches('"').to_string())
-                .unwrap_or_else(|_| "generic".into())
-                .as_str(),
-            title.as_deref(),
-            thumbnail.as_deref(),
-            format_id.as_deref(),
-            now,
-        ))?
+        to_string_err(
+            repo.create(
+                &url,
+                serde_json::to_string(&platform)
+                    .map(|s| s.trim_matches('"').to_string())
+                    .unwrap_or_else(|_| "generic".into())
+                    .as_str(),
+                title.as_deref(),
+                thumbnail.as_deref(),
+                format_id.as_deref(),
+                now,
+            ),
+        )?
     };
-    spawn_download(
-        app,
-        Arc::clone(&state),
-        &yt_dlp,
-        id,
-        &url,
-        height,
-        &kind,
-    )?;
+    spawn_download(app, Arc::clone(&state), &yt_dlp, id, &url, height, &kind)?;
     Ok(id)
 }
 
@@ -278,8 +274,8 @@ pub async fn dl_extract_subtitles(
             }
         }
         let chosen = manual.or(auto).unwrap();
-        let raw = std::fs::read_to_string(chosen)
-            .map_err(|e| format!("read subtitle file: {e}"))?;
+        let raw =
+            std::fs::read_to_string(chosen).map_err(|e| format!("read subtitle file: {e}"))?;
         let text = subtitles::vtt_to_plain_text(&raw);
         if text.trim().is_empty() {
             Err("Subtitle file was empty after parsing".into())
@@ -330,11 +326,7 @@ pub fn dl_resume(state: State<'_, Arc<RunnerState>>, id: i64) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub fn dl_retry(
-    app: AppHandle,
-    state: State<'_, Arc<RunnerState>>,
-    id: i64,
-) -> Result<(), String> {
+pub fn dl_retry(app: AppHandle, state: State<'_, Arc<RunnerState>>, id: i64) -> Result<(), String> {
     let yt_dlp = resolve_yt_dlp(&state)?;
     retry_download(app, Arc::clone(&state), &yt_dlp, id)
 }
@@ -380,10 +372,7 @@ pub(crate) fn clamp_max_parallel(value: usize) -> usize {
 }
 
 #[tauri::command]
-pub fn dl_set_max_parallel(
-    state: State<'_, Arc<RunnerState>>,
-    value: usize,
-) -> Result<(), String> {
+pub fn dl_set_max_parallel(state: State<'_, Arc<RunnerState>>, value: usize) -> Result<(), String> {
     *state.max_parallel.lock().unwrap() = clamp_max_parallel(value);
     Ok(())
 }
@@ -417,12 +406,21 @@ pub fn dl_prune_history(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let cutoff = now - older_than_days.max(1) * 86_400;
-    to_string_err(state.jobs.lock().unwrap().prune_completed_older_than(cutoff))
+    to_string_err(
+        state
+            .jobs
+            .lock()
+            .unwrap()
+            .prune_completed_older_than(cutoff),
+    )
 }
 
 #[tauri::command]
 pub fn dl_purge_cookies(state: State<'_, Arc<RunnerState>>) -> Result<(), String> {
-    let cookies = state.default_downloads_dir.join("bin").join("arc-cookies.txt");
+    let cookies = state
+        .default_downloads_dir
+        .join("bin")
+        .join("arc-cookies.txt");
     if cookies.exists() {
         std::fs::remove_file(&cookies).map_err(|e| format!("remove {cookies:?}: {e}"))?;
     }

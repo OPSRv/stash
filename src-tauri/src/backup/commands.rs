@@ -9,13 +9,13 @@ use super::import::{inspect, stage, ImportSelection, InspectReport, LAST_ERROR_F
 use super::ModuleDescription;
 
 fn data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|e| format!("data_dir: {e}"))
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("data_dir: {e}"))
 }
 
 #[tauri::command]
-pub fn backup_describe<R: Runtime>(
-    app: AppHandle<R>,
-) -> Result<Vec<ModuleDescription>, String> {
+pub fn backup_describe<R: Runtime>(app: AppHandle<R>) -> Result<Vec<ModuleDescription>, String> {
     let d = data_dir(&app)?;
     Ok(describe_all(&d).into_values().collect())
 }

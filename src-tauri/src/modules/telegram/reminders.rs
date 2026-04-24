@@ -46,11 +46,7 @@ pub fn spawn(app: tauri::AppHandle, state: Arc<TelegramState>) {
     });
 }
 
-fn flush_due(
-    app: &tauri::AppHandle,
-    state: &TelegramState,
-    now: i64,
-) -> Result<(), String> {
+fn flush_due(app: &tauri::AppHandle, state: &TelegramState, now: i64) -> Result<(), String> {
     use super::pairing::PairingState;
     use tauri::Emitter;
 
@@ -66,10 +62,12 @@ fn flush_due(
 
     for r in due {
         let late = now - r.due_at >= LATE_THRESHOLD_SEC;
-        let prefix = if late { "⏰ (запізно) " } else { "⏰ " };
-        state
-            .sender
-            .enqueue(chat_id, format!("{prefix}{}", r.text));
+        let prefix = if late {
+            "⏰ (запізно) "
+        } else {
+            "⏰ "
+        };
+        state.sender.enqueue(chat_id, format!("{prefix}{}", r.text));
         if let Ok(mut repo) = state.repo.lock() {
             let _ = repo.mark_reminder_sent(r.id);
         }

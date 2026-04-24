@@ -4,18 +4,22 @@
 //! tested directly. Everything here is sync; callers should run it inside
 //! `tauri::async_runtime::spawn_blocking` to keep the event loop free.
 
-use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::Once;
 use symphonia::core::audio::{AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
-use std::sync::Once;
-use whisper_rs::{whisper_rs_sys, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    whisper_rs_sys, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
+};
 
 /// Suppress whisper.cpp's per-token `whisper_full_with_state: id = …` spam
 /// from stderr. The crate's `print_*` params control sampling traces, but
@@ -79,7 +83,12 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
     }
 
     let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .map_err(|e| PipelineError::Decode(e.to_string()))?;
     let mut format = probed.format;
 
@@ -138,7 +147,10 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
     if samples.is_empty() {
         return Err(PipelineError::Empty);
     }
-    Ok(DecodedPcm { samples, sample_rate })
+    Ok(DecodedPcm {
+        samples,
+        sample_rate,
+    })
 }
 
 /// Peek the first few bytes to detect an OGG container carrying Opus.

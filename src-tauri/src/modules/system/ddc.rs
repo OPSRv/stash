@@ -198,10 +198,7 @@ fn intel_send_packet(packet: &[u8]) -> Result<(), String> {
         if rc == KERN_SUCCESS && req.result == KERN_SUCCESS {
             any_ok = true;
         } else {
-            last_err = Some(format!(
-                "IOI2CSendRequest: rc={rc} result={}",
-                req.result
-            ));
+            last_err = Some(format!("IOI2CSendRequest: rc={rc} result={}", req.result));
         }
     }
 
@@ -231,9 +228,8 @@ fn cfstr(s: &str) -> Option<CFStringRef> {
 /// to tag its services — this is what m1ddc / MonitorControl key off.
 fn read_string(service: IoServiceT, key: &str) -> Option<String> {
     let k = cfstr(key)?;
-    let val: CFTypeRef = unsafe {
-        IORegistryEntryCreateCFProperty(service, k, kCFAllocatorDefault, 0)
-    };
+    let val: CFTypeRef =
+        unsafe { IORegistryEntryCreateCFProperty(service, k, kCFAllocatorDefault, 0) };
     unsafe { CFRelease(k as CFTypeRef) };
     if val.is_null() {
         return None;
@@ -274,9 +270,7 @@ fn iter_services<F: FnMut(IoServiceT) -> bool>(class_name: &str, mut keep: F) ->
         return Vec::new();
     }
     let mut it: IoIteratorT = 0;
-    let rc = unsafe {
-        IOServiceGetMatchingServices(kIOMainPortDefault, matching, &mut it)
-    };
+    let rc = unsafe { IOServiceGetMatchingServices(kIOMainPortDefault, matching, &mut it) };
     if rc != KERN_SUCCESS || it == 0 {
         return Vec::new();
     }

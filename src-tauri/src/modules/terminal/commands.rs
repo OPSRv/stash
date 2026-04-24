@@ -74,7 +74,11 @@ pub fn pty_set_cwd(
         .get(&id)
         .ok_or_else(|| format!("no pty session: {id}"))?;
     let mut guard = session.last_cwd.lock().unwrap();
-    *guard = if cwd.trim().is_empty() { None } else { Some(cwd) };
+    *guard = if cwd.trim().is_empty() {
+        None
+    } else {
+        Some(cwd)
+    };
     Ok(())
 }
 
@@ -124,10 +128,7 @@ pub fn pty_resize(
 }
 
 #[tauri::command]
-pub fn pty_close(
-    state: tauri::State<'_, Arc<TerminalState>>,
-    id: String,
-) -> Result<(), String> {
+pub fn pty_close(state: tauri::State<'_, Arc<TerminalState>>, id: String) -> Result<(), String> {
     let id = normalise_id(&id)?;
     let mut map = state.sessions.lock().unwrap();
     if let Some(mut session) = map.remove(&id) {
@@ -172,9 +173,8 @@ pub fn terminal_save_paste_blob(
         .trim_start_matches('.')
         .to_ascii_lowercase();
     const BLOCKED: &[&str] = &[
-        "exe", "bat", "cmd", "com", "msi", "dll", "sh", "bash", "zsh",
-        "fish", "ps1", "app", "pkg", "dmg", "dylib", "so", "deb", "rpm",
-        "scpt", "scptd", "jar", "apk", "ipa", "workflow",
+        "exe", "bat", "cmd", "com", "msi", "dll", "sh", "bash", "zsh", "fish", "ps1", "app", "pkg",
+        "dmg", "dylib", "so", "deb", "rpm", "scpt", "scptd", "jar", "apk", "ipa", "workflow",
     ];
     let ext: String = if raw.is_empty()
         || raw.len() > 6

@@ -1,6 +1,6 @@
-use rusqlite::{params, Connection, Result};
 #[cfg(test)]
 use rusqlite::OptionalExtension;
+use rusqlite::{params, Connection, Result};
 
 use super::model::{Block, Posture, Preset, PresetKind, SessionRow};
 
@@ -63,11 +63,9 @@ impl PomodoroRepo {
     /// the app opens a fresh pomodoro DB. Users can delete or edit them;
     /// we only seed when the table is empty so re-opens don't duplicate.
     fn seed_defaults_if_empty(&mut self) -> Result<()> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM pomodoro_presets",
-            [],
-            |r| r.get(0),
-        )?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM pomodoro_presets", [], |r| r.get(0))?;
         if count > 0 {
             return Ok(());
         }
@@ -160,9 +158,8 @@ impl PomodoroRepo {
         blocks: &[Block],
         now: i64,
     ) -> Result<Preset> {
-        let blocks_json = serde_json::to_string(blocks).map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-        })?;
+        let blocks_json = serde_json::to_string(blocks)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(
             "INSERT INTO pomodoro_presets (name, kind, blocks_json, updated_at)
              VALUES (?1, ?2, ?3, ?4)
@@ -221,9 +218,8 @@ impl PomodoroRepo {
         blocks: &[Block],
         started_at: i64,
     ) -> Result<i64> {
-        let blocks_json = serde_json::to_string(blocks).map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-        })?;
+        let blocks_json = serde_json::to_string(blocks)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         self.conn.execute(
             "INSERT INTO pomodoro_sessions
                 (preset_id, started_at, ended_at, blocks_json, completed_idx)
@@ -233,12 +229,7 @@ impl PomodoroRepo {
         Ok(self.conn.last_insert_rowid())
     }
 
-    pub fn finalize_session(
-        &mut self,
-        id: i64,
-        ended_at: i64,
-        completed_idx: usize,
-    ) -> Result<()> {
+    pub fn finalize_session(&mut self, id: i64, ended_at: i64, completed_idx: usize) -> Result<()> {
         self.conn.execute(
             "UPDATE pomodoro_sessions
              SET ended_at = ?1, completed_idx = ?2
@@ -260,11 +251,7 @@ impl PomodoroRepo {
     fn map_preset(row: &rusqlite::Row<'_>) -> Result<Preset> {
         let blocks_json: String = row.get("blocks_json")?;
         let blocks: Vec<Block> = serde_json::from_str(&blocks_json).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(
-                0,
-                rusqlite::types::Type::Text,
-                Box::new(e),
-            )
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
         })?;
         let kind_str: String = row.get("kind").unwrap_or_else(|_| "daily".to_string());
         Ok(Preset {
@@ -279,11 +266,7 @@ impl PomodoroRepo {
     fn map_session(row: &rusqlite::Row<'_>) -> Result<SessionRow> {
         let blocks_json: String = row.get("blocks_json")?;
         let blocks: Vec<Block> = serde_json::from_str(&blocks_json).map_err(|e| {
-            rusqlite::Error::FromSqlConversionFailure(
-                0,
-                rusqlite::types::Type::Text,
-                Box::new(e),
-            )
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
         })?;
         let completed_idx: i64 = row.get("completed_idx")?;
         Ok(SessionRow {

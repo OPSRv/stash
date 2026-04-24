@@ -6,7 +6,6 @@
 //! Missing keys default to "enabled" — a pristine install sends all
 //! notifications out of the box; the user opts **out**, not in.
 
-
 use serde::{Deserialize, Serialize};
 
 use super::state::TelegramState;
@@ -72,14 +71,8 @@ impl NotificationSettings {
             download_complete: read_bool(KEY_DOWNLOAD, true),
             battery_low: read_bool(KEY_BATTERY_LOW, true),
             calendar: read_bool(KEY_CALENDAR, true),
-            calendar_lead_minutes: read_u32(
-                KEY_CALENDAR_LEAD_MIN,
-                DEFAULT_CALENDAR_LEAD_MIN,
-            ),
-            battery_threshold_pct: read_u32(
-                KEY_BATTERY_THRESHOLD,
-                DEFAULT_BATTERY_THRESHOLD,
-            ),
+            calendar_lead_minutes: read_u32(KEY_CALENDAR_LEAD_MIN, DEFAULT_CALENDAR_LEAD_MIN),
+            battery_threshold_pct: read_u32(KEY_BATTERY_THRESHOLD, DEFAULT_BATTERY_THRESHOLD),
         }
     }
 
@@ -298,10 +291,16 @@ mod tests {
     #[test]
     fn category_enabled_respects_toggle() {
         let s = fresh();
-        assert!(category_enabled(&s, super::super::notifier::Category::Pomodoro));
+        assert!(category_enabled(
+            &s,
+            super::super::notifier::Category::Pomodoro
+        ));
         let mut n = NotificationSettings::load(&s);
         n.pomodoro = false;
         n.save(&s).unwrap();
-        assert!(!category_enabled(&s, super::super::notifier::Category::Pomodoro));
+        assert!(!category_enabled(
+            &s,
+            super::super::notifier::Category::Pomodoro
+        ));
     }
 }

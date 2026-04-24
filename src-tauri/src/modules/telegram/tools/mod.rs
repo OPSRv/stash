@@ -254,7 +254,11 @@ mod tests {
             args_json: "{}".into(),
             signature: None,
         };
-        assert!(reg.invoke(&ctx, &call).await.unwrap_err().contains("unknown tool"));
+        assert!(reg
+            .invoke(&ctx, &call)
+            .await
+            .unwrap_err()
+            .contains("unknown tool"));
     }
 
     #[tokio::test(flavor = "current_thread")]

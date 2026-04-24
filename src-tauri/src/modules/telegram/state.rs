@@ -49,10 +49,7 @@ impl TelegramState {
         refresh_help_snapshot(&reg, &self.help);
     }
 
-    pub fn find_command(
-        &self,
-        name: &str,
-    ) -> Option<Arc<dyn CommandHandler>> {
+    pub fn find_command(&self, name: &str) -> Option<Arc<dyn CommandHandler>> {
         self.commands.read().unwrap().find(name)
     }
 }

@@ -68,8 +68,10 @@ impl ModuleBackup for Provider {
             report.restored_files += 1;
         }
         if ctx.include_media {
-            let a =
-                import::copy_staged_tree(&ctx.staged_dir.join(ARCHIVE_AUDIO), &ctx.data_dir.join(AUDIO_DIR))?;
+            let a = import::copy_staged_tree(
+                &ctx.staged_dir.join(ARCHIVE_AUDIO),
+                &ctx.data_dir.join(AUDIO_DIR),
+            )?;
             let i = import::copy_staged_tree(
                 &ctx.staged_dir.join(ARCHIVE_IMAGES),
                 &ctx.data_dir.join(IMAGES_DIR),

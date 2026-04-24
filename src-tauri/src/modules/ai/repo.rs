@@ -291,8 +291,10 @@ mod tests {
         repo.append_message("m3", "s", "user", "c", 30, false)
             .unwrap();
         let msgs = repo.list_messages("s").unwrap();
-        assert_eq!(msgs.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
-                   vec!["m1", "m2", "m3"]);
+        assert_eq!(
+            msgs.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["m1", "m2", "m3"]
+        );
     }
 
     #[test]

@@ -51,8 +51,7 @@ pub fn socket_path(app: &AppHandle) -> Result<PathBuf, String> {
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("create app_data_dir: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("create app_data_dir: {e}"))?;
     Ok(dir.join("ipc.sock"))
 }
 
@@ -198,11 +197,7 @@ where
     Ok(())
 }
 
-pub(crate) async fn dispatch(
-    req: Request,
-    app: AppHandle,
-    state: Arc<TelegramState>,
-) -> Response {
+pub(crate) async fn dispatch(req: Request, app: AppHandle, state: Arc<TelegramState>) -> Response {
     let cmd_name = req.cmd.trim().to_ascii_lowercase();
     if cmd_name.is_empty() {
         return Response::err("missing command");

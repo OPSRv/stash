@@ -108,7 +108,9 @@ mod tests {
 
     #[test]
     fn is_mostly_ascii_letters_detects_english_vs_cyrillic() {
-        assert!(is_mostly_ascii_letters("Hello there, how are you doing today?"));
+        assert!(is_mostly_ascii_letters(
+            "Hello there, how are you doing today?"
+        ));
         assert!(!is_mostly_ascii_letters("Привіт, як справи?"));
         // Mixed but overwhelmingly cyrillic — should not be treated as english.
         assert!(!is_mostly_ascii_letters("Це test перевірка"));

@@ -101,7 +101,9 @@ impl FileSecretStore {
 impl SecretStore for FileSecretStore {
     fn set(&self, account: &str, secret: &str) -> Result<(), String> {
         let mut cache = self.cache.lock().unwrap();
-        cache.accounts.insert(account.to_string(), secret.to_string());
+        cache
+            .accounts
+            .insert(account.to_string(), secret.to_string());
         self.persist(&cache)
     }
 
@@ -198,10 +200,7 @@ mod tests {
 
         // Fresh store from disk must decrypt and see the value.
         let store2 = FileSecretStore::new(path).unwrap();
-        assert_eq!(
-            store2.get("bot_token").unwrap().as_deref(),
-            Some("123:abc")
-        );
+        assert_eq!(store2.get("bot_token").unwrap().as_deref(), Some("123:abc"));
     }
 
     #[test]

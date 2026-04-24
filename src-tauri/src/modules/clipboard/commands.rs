@@ -103,7 +103,9 @@ pub fn paste_prepare(state: &ClipboardState, id: i64, now: i64) -> Result<Clipbo
     Ok(item)
 }
 
-fn to_string_err<T, E: std::fmt::Display>(r: std::result::Result<T, E>) -> std::result::Result<T, String> {
+fn to_string_err<T, E: std::fmt::Display>(
+    r: std::result::Result<T, E>,
+) -> std::result::Result<T, String> {
     r.map_err(|e| e.to_string())
 }
 
@@ -156,7 +158,10 @@ pub fn prune_orphan_file_rows(state: &ClipboardState) -> Result<usize> {
                 f.get("path")
                     .and_then(|p| p.as_str())
                     .map(std::path::Path::new)
-                    .map_or(false, crate::modules::clipboard::pasteboard::is_user_visible_path)
+                    .map_or(
+                        false,
+                        crate::modules::clipboard::pasteboard::is_user_visible_path,
+                    )
             })
         });
         if !any_actionable {
@@ -200,12 +205,15 @@ pub fn clipboard_copy_only(
     match item.kind.as_str() {
         "text" => {
             let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
-            clipboard.set_text(item.content).map_err(|e| e.to_string())?;
+            clipboard
+                .set_text(item.content)
+                .map_err(|e| e.to_string())?;
         }
         "image" => {
             let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
             let meta = item.meta.unwrap_or_default();
-            let parsed: serde_json::Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
+            let parsed: serde_json::Value =
+                serde_json::from_str(&meta).map_err(|e| e.to_string())?;
             let path = parsed
                 .get("path")
                 .and_then(|v| v.as_str())
@@ -309,11 +317,14 @@ pub fn clipboard_paste(
 
     match item.kind.as_str() {
         "text" => {
-            clipboard.set_text(item.content).map_err(|e| e.to_string())?;
+            clipboard
+                .set_text(item.content)
+                .map_err(|e| e.to_string())?;
         }
         "image" => {
             let meta = item.meta.unwrap_or_default();
-            let parsed: serde_json::Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
+            let parsed: serde_json::Value =
+                serde_json::from_str(&meta).map_err(|e| e.to_string())?;
             let path = parsed
                 .get("path")
                 .and_then(|v| v.as_str())
@@ -350,11 +361,15 @@ fn simulate_cmd_v() -> std::result::Result<(), String> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     std::thread::sleep(std::time::Duration::from_millis(80));
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-    enigo.key(Key::Meta, Direction::Press).map_err(|e| e.to_string())?;
+    enigo
+        .key(Key::Meta, Direction::Press)
+        .map_err(|e| e.to_string())?;
     enigo
         .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| e.to_string())?;
-    enigo.key(Key::Meta, Direction::Release).map_err(|e| e.to_string())?;
+    enigo
+        .key(Key::Meta, Direction::Release)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -374,8 +389,18 @@ mod tests {
     #[test]
     fn list_returns_inserted_items_newest_first() {
         let state = fresh_state();
-        state.repo.lock().unwrap().insert_text("older", 100).unwrap();
-        state.repo.lock().unwrap().insert_text("newer", 200).unwrap();
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_text("older", 100)
+            .unwrap();
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_text("newer", 200)
+            .unwrap();
 
         let items = list_items(&state, 10).unwrap();
 
@@ -419,7 +444,12 @@ mod tests {
     #[test]
     fn paste_prepare_returns_item_and_touches_timestamp() {
         let state = fresh_state();
-        let id = state.repo.lock().unwrap().insert_text("paste me", 100).unwrap();
+        let id = state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_text("paste me", 100)
+            .unwrap();
 
         let item = paste_prepare(&state, id, 999).unwrap();
 
@@ -443,10 +473,14 @@ mod tests {
         // One more insert forces a single eviction.
         state.put("https://example.com/new".into(), None);
 
-        assert!(state.get("https://example.com/0").is_some(),
-            "touched entry must survive eviction");
-        assert!(state.get("https://example.com/1").is_none(),
-            "oldest untouched entry must be evicted");
+        assert!(
+            state.get("https://example.com/0").is_some(),
+            "touched entry must survive eviction"
+        );
+        assert!(
+            state.get("https://example.com/1").is_none(),
+            "oldest untouched entry must be evicted"
+        );
         assert!(state.get("https://example.com/new").is_some());
     }
 

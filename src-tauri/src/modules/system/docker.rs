@@ -58,10 +58,7 @@ pub fn status() -> DockerStatus {
     let running = Command::new(&path)
         .args(["info", "--format", "{{.ServerVersion}}"])
         .output()
-        .map(|o| {
-            o.status.success()
-                && !String::from_utf8_lossy(&o.stdout).trim().is_empty()
-        })
+        .map(|o| o.status.success() && !String::from_utf8_lossy(&o.stdout).trim().is_empty())
         .unwrap_or(false);
     let version = Command::new(&path)
         .args(["version", "--format", "{{.Client.Version}}"])

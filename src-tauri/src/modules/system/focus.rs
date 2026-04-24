@@ -38,9 +38,7 @@ pub fn check() -> FocusCheck {
         Err(_) => return FocusCheck::CliMissing,
     };
     if !out.status.success() {
-        return FocusCheck::ListFailed(
-            String::from_utf8_lossy(&out.stderr).trim().to_string(),
-        );
+        return FocusCheck::ListFailed(String::from_utf8_lossy(&out.stderr).trim().to_string());
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let has_on = stdout.lines().any(|l| l.trim() == SHORTCUT_ON);
@@ -100,10 +98,19 @@ mod tests {
 
     #[test]
     fn focus_check_variants_compare_by_flags() {
-        let a = FocusCheck::ShortcutsMissing { on: true, off: false };
-        let b = FocusCheck::ShortcutsMissing { on: true, off: false };
+        let a = FocusCheck::ShortcutsMissing {
+            on: true,
+            off: false,
+        };
+        let b = FocusCheck::ShortcutsMissing {
+            on: true,
+            off: false,
+        };
         assert_eq!(a, b);
-        let c = FocusCheck::ShortcutsMissing { on: false, off: true };
+        let c = FocusCheck::ShortcutsMissing {
+            on: false,
+            off: true,
+        };
         assert_ne!(a, c);
     }
 }

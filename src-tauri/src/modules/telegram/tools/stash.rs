@@ -41,7 +41,8 @@ impl Tool for GetBattery {
                 json!({ "present": false, "reason": "unavailable" })
             }
         })
-    }}
+    }
+}
 
 pub struct GetLastClip {
     state: Arc<ClipboardState>,
@@ -75,7 +76,8 @@ impl Tool for GetLastClip {
             "kind": item.kind,
             "content": item.content,
         }))
-    }}
+    }
+}
 
 pub struct PomodoroStatus {
     state: Arc<PomodoroState>,
@@ -137,7 +139,9 @@ fn parse_posture(s: &str) -> Result<Posture, String> {
         "sit" => Ok(Posture::Sit),
         "stand" => Ok(Posture::Stand),
         "walk" => Ok(Posture::Walk),
-        other => Err(format!("unknown posture: {other} (expected sit|stand|walk)")),
+        other => Err(format!(
+            "unknown posture: {other} (expected sit|stand|walk)"
+        )),
     }
 }
 
@@ -162,8 +166,7 @@ fn parse_blocks(raw_blocks: &[Value], id_seed: i64) -> Result<Vec<Block>, String
             .get("posture")
             .and_then(|v| v.as_str())
             .ok_or_else(|| format!("blocks[{i}].posture missing"))?;
-        let posture = parse_posture(posture_str)
-            .map_err(|e| format!("blocks[{i}]: {e}"))?;
+        let posture = parse_posture(posture_str).map_err(|e| format!("blocks[{i}]: {e}"))?;
         let label = raw
             .get("label")
             .and_then(|v| v.as_str())
@@ -247,11 +250,7 @@ impl Tool for PomodoroStart {
             .clone()
             .ok_or_else(|| "pomodoro_start requires a Tauri AppHandle (not in test)".to_string())?;
         let snap = start_session(&app, &self.state, blocks, None)?;
-        let total_sec: i64 = snap
-            .blocks
-            .iter()
-            .map(|b| b.duration_sec as i64)
-            .sum();
+        let total_sec: i64 = snap.blocks.iter().map(|b| b.duration_sec as i64).sum();
         let blocks_json: Vec<Value> = snap
             .blocks
             .iter()
@@ -406,11 +405,7 @@ impl Tool for PomodoroStop {
 /// the business logic. Runs the registered handler with the stringified
 /// args and returns its text reply. Required by every tool that isn't
 /// side-effect-free (needs an `AppHandle` for `emit` / tauri state).
-async fn run_slash(
-    ctx: &ToolCtx,
-    cmd: &str,
-    slash_args: &str,
-) -> Result<Value, String> {
+async fn run_slash(ctx: &ToolCtx, cmd: &str, slash_args: &str) -> Result<Value, String> {
     let app = ctx
         .app
         .clone()
@@ -492,16 +487,12 @@ impl Tool for MetronomeControl {
         match (num, den) {
             (Some(n), Some(d)) => {
                 if !matches!(d, 2 | 4 | 8) {
-                    return Err(format!(
-                        "denominator must be 2, 4, or 8 (got {d})"
-                    ));
+                    return Err(format!("denominator must be 2, 4, or 8 (got {d})"));
                 }
                 parts.push(format!("sig={n}/{d}"));
             }
             (Some(_), None) | (None, Some(_)) => {
-                return Err(
-                    "numerator and denominator must be provided together".to_string(),
-                );
+                return Err("numerator and denominator must be provided together".to_string());
             }
             _ => {}
         }
@@ -512,7 +503,9 @@ impl Tool for MetronomeControl {
             parts.push(format!("sound={sound}"));
         }
         if parts.is_empty() {
-            return Err("at least one of action/bpm/numerator/subdivision/sound required".to_string());
+            return Err(
+                "at least one of action/bpm/numerator/subdivision/sound required".to_string(),
+            );
         }
         run_slash(ctx, "metronome", &parts.join(" ")).await
     }
@@ -550,7 +543,11 @@ impl Tool for MusicControl {
             .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| "missing required field: action".to_string())?;
-        let slash_arg = if matches!(action, "status") { "" } else { action };
+        let slash_arg = if matches!(action, "status") {
+            ""
+        } else {
+            action
+        };
         run_slash(ctx, "music", slash_arg).await
     }
 }
@@ -597,7 +594,11 @@ impl Tool for VolumeControl {
         } else if let Some(s) = step {
             s.to_string()
         } else if let Some(m) = mute {
-            if m { "mute".to_string() } else { "unmute".to_string() }
+            if m {
+                "mute".to_string()
+            } else {
+                "unmute".to_string()
+            }
         } else {
             // No arg => status query
             String::new()
@@ -762,13 +763,14 @@ impl Tool for InvokeCommand {
             )
             .await;
         Ok(json!({ "text": reply.text }))
-    }}
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::clipboard::repo::ClipboardRepo;
     use crate::modules::clipboard::commands::ClipboardState;
+    use crate::modules::clipboard::repo::ClipboardRepo;
     use crate::modules::pomodoro::repo::PomodoroRepo;
     use crate::modules::telegram::keyring::MemStore;
     use crate::modules::telegram::repo::TelegramRepo;
@@ -803,7 +805,10 @@ mod tests {
         // the important invariant is that the tool always returns
         // well-formed JSON with a `present` boolean.
         let present = out.get("present").and_then(|v| v.as_bool());
-        assert!(present.is_some(), "expected a boolean `present` field, got {out}");
+        assert!(
+            present.is_some(),
+            "expected a boolean `present` field, got {out}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -831,7 +836,10 @@ mod tests {
     async fn pomodoro_status_reports_idle_without_session() {
         let repo = PomodoroRepo::new(Connection::open_in_memory().unwrap()).unwrap();
         let pomo = Arc::new(PomodoroState::new(repo));
-        let out = PomodoroStatus::new(pomo).invoke(&ctx(), json!({})).await.unwrap();
+        let out = PomodoroStatus::new(pomo)
+            .invoke(&ctx(), json!({}))
+            .await
+            .unwrap();
         assert_eq!(out["status"], "idle");
         assert_eq!(out["remaining_sec"], 0);
     }
@@ -880,7 +888,10 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn metronome_control_requires_at_least_one_field() {
-        let err = MetronomeControl.invoke(&ctx(), json!({})).await.unwrap_err();
+        let err = MetronomeControl
+            .invoke(&ctx(), json!({}))
+            .await
+            .unwrap_err();
         assert!(err.to_lowercase().contains("at least one"));
     }
 

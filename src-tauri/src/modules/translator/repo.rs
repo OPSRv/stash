@@ -163,7 +163,8 @@ mod tests {
         // case-insensitive matching, for Cyrillic the substring must match
         // the stored case.
         let mut r = fresh();
-        r.insert("Hello world", "Привіт світ", "auto", "uk", 1).unwrap();
+        r.insert("Hello world", "Привіт світ", "auto", "uk", 1)
+            .unwrap();
         r.insert("Bonjour", "Вітаю", "auto", "uk", 2).unwrap();
         assert_eq!(r.search("WORLD", 10).unwrap().len(), 1);
         assert_eq!(r.search("Вітаю", 10).unwrap().len(), 1);

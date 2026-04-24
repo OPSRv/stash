@@ -109,11 +109,19 @@ pub fn format_duration(d: Duration) -> String {
     if total >= 3_600 {
         let h = total / 3_600;
         let m = (total % 3_600) / 60;
-        if m == 0 { format!("{h}h") } else { format!("{h}h {m}m") }
+        if m == 0 {
+            format!("{h}h")
+        } else {
+            format!("{h}h {m}m")
+        }
     } else if total >= 60 {
         let m = total / 60;
         let s = total % 60;
-        if s == 0 { format!("{m}m") } else { format!("{m}m {s}s") }
+        if s == 0 {
+            format!("{m}m")
+        } else {
+            format!("{m}m {s}s")
+        }
     } else {
         format!("{total}s")
     }

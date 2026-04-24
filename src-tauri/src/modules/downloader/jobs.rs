@@ -122,9 +122,9 @@ impl JobRepo {
     }
 
     pub fn list(&self, limit: usize) -> Result<Vec<DownloadJob>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT * FROM download_jobs ORDER BY created_at DESC LIMIT ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT * FROM download_jobs ORDER BY created_at DESC LIMIT ?1")?;
         let rows = stmt.query_map(params![limit as i64], Self::map_row)?;
         rows.collect()
     }
@@ -188,7 +188,14 @@ mod tests {
     fn create_then_get_returns_job() {
         let mut repo = fresh();
         let id = repo
-            .create("https://x.com/a", "twitter", Some("Nice post"), None, Some("22"), 100)
+            .create(
+                "https://x.com/a",
+                "twitter",
+                Some("Nice post"),
+                None,
+                Some("22"),
+                100,
+            )
             .unwrap();
         let job = repo.get(id).unwrap().unwrap();
         assert_eq!(job.url, "https://x.com/a");

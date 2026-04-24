@@ -163,7 +163,9 @@ fn stash_preserves_argument_boundaries_in_request() {
             line.contains("\"args\":[\"a b\",\"c d\"]"),
             "request line: {line}"
         );
-        stream.write_all(b"{\"ok\":true,\"text\":\"ok\"}\n").unwrap();
+        stream
+            .write_all(b"{\"ok\":true,\"text\":\"ok\"}\n")
+            .unwrap();
     });
 
     let output = Command::new(cargo_bin_path())

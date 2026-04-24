@@ -200,8 +200,10 @@ pub fn list_xcode_simulators(home: &Path) -> Vec<XcodeSimulator> {
                             for d in arr {
                                 let udid = d.get("udid").and_then(|v| v.as_str()).unwrap_or("");
                                 let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                                let available =
-                                    d.get("isAvailable").and_then(|v| v.as_bool()).unwrap_or(true);
+                                let available = d
+                                    .get("isAvailable")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(true);
                                 if !udid.is_empty() {
                                     meta.insert(udid.to_string(), (name.to_string(), available));
                                 }
@@ -318,7 +320,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let desk = tmp.path().join("Desktop");
         fs::create_dir_all(&desk).unwrap();
-        fs::write(desk.join("Screenshot 2025-01-02 at 10.11.12.png"), vec![0u8; 100]).unwrap();
+        fs::write(
+            desk.join("Screenshot 2025-01-02 at 10.11.12.png"),
+            vec![0u8; 100],
+        )
+        .unwrap();
         fs::write(desk.join("unrelated.txt"), b"hi").unwrap();
         let list = list_screenshots(tmp.path());
         assert_eq!(list.len(), 1);

@@ -77,10 +77,7 @@ async fn run_once(app: &AppHandle, seen: &Mutex<HashSet<String>>) -> Result<(), 
         notify_if_paired(
             app,
             Category::Calendar,
-            format!(
-                "📅 {} in {minutes} {minute_word}{loc}",
-                ev.title.trim()
-            ),
+            format!("📅 {} in {minutes} {minute_word}{loc}", ev.title.trim()),
         );
     }
     Ok(())
@@ -141,7 +138,10 @@ return out"#
         let uid = parts.next().unwrap_or("").to_string();
         let title = parts.next().unwrap_or("").to_string();
         let secs_str = parts.next().unwrap_or("");
-        let location = parts.next().map(|s| s.to_string()).filter(|s| !s.is_empty());
+        let location = parts
+            .next()
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty());
         let Ok(secs_float) = secs_str.trim().parse::<f64>() else {
             continue;
         };

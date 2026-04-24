@@ -119,16 +119,6 @@ use modules::ai::{
     repo::AiRepo,
     state::{AiState, KEYRING_SERVICE},
 };
-use modules::telegram::commands::{
-    telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
-    telegram_send_inbox_to_notes,
-    telegram_delete_memory, telegram_get_ai_settings, telegram_get_notification_settings,
-    telegram_has_token, telegram_list_inbox, telegram_list_memory, telegram_mark_inbox_routed,
-    telegram_retry_transcribe, telegram_reveal_inbox_file, telegram_send_text,
-    telegram_set_ai_settings, telegram_set_inbox_transcript,
-    telegram_set_notification_settings,
-    telegram_set_token, telegram_start_pairing, telegram_status, telegram_unpair,
-};
 use modules::clipboard::{
     commands::{
         clipboard_clear, clipboard_copy_only, clipboard_delete, clipboard_link_preview,
@@ -140,8 +130,8 @@ use modules::clipboard::{
 };
 use modules::downloader::{
     commands::{
-        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_extract_subtitles, dl_list,
-        dl_pause, dl_purge_cookies, dl_detect_quick, dl_prune_history, dl_resume, dl_retry,
+        dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_detect_quick, dl_extract_subtitles,
+        dl_list, dl_pause, dl_prune_history, dl_purge_cookies, dl_resume, dl_retry,
         dl_set_cookies_browser, dl_set_downloads_dir, dl_set_max_parallel, dl_set_rate_limit,
         dl_start, dl_update_binary, dl_ytdlp_version,
     },
@@ -151,14 +141,10 @@ use modules::downloader::{
 use modules::metronome::commands::{
     metronome_get_state, metronome_save_state, MetronomeStateHandle,
 };
-use modules::whisper::{
-    commands::{
-        whisper_delete_model, whisper_download_model, whisper_get_active, whisper_list_models,
-        whisper_set_active, whisper_transcribe_path,
-    },
-    state::WhisperStateHandle,
+use modules::music::commands::{
+    music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
+    music_show, music_status,
 };
-use modules::voice::commands::{voice_ask, voice_transcribe};
 use modules::notes::{
     commands::{
         notes_add_attachment, notes_create, notes_delete, notes_export_path, notes_get, notes_list,
@@ -179,44 +165,53 @@ use modules::pomodoro::{
     repo::PomodoroRepo,
     state::PomodoroState,
 };
-use modules::music::commands::{
-    music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
-    music_show, music_status,
-};
 use modules::search::commands::global_search;
 use modules::system::commands::{
-    system_adjust_brightness, system_battery_health, system_cancel_scan,
-    system_dashboard_metrics, system_delete_tm_snapshot, system_delete_unavailable_simulators,
-    system_empty_memory_pressure, system_empty_trash, system_find_duplicates,
+    system_adjust_brightness, system_battery_health, system_cancel_scan, system_dashboard_metrics,
+    system_delete_tm_snapshot, system_delete_unavailable_simulators, system_docker_prune,
+    system_docker_status, system_empty_memory_pressure, system_empty_trash, system_find_duplicates,
     system_find_leftovers, system_flush_dns, system_frontmost_app, system_kill_process,
-    system_list_apps,
-    system_list_caches, system_list_connections, system_list_displays,
+    system_list_apps, system_list_caches, system_list_connections, system_list_displays,
     system_list_hardware_displays, system_list_ios_backups, system_list_launch_agents,
     system_list_mail_attachments, system_list_privacy, system_list_processes,
     system_list_screenshots, system_list_tm_snapshots, system_list_trash_bins,
-    system_list_xcode_simulators, system_lock_screen, system_reindex_spotlight,
-    system_docker_prune, system_docker_status,
-    system_power_off_display, system_power_on_display, system_scan_large_files,
+    system_list_xcode_simulators, system_lock_screen, system_power_off_display,
+    system_power_on_display, system_reindex_spotlight, system_scan_large_files,
     system_scan_node_modules, system_set_display_brightness, system_set_display_hidden,
-    system_sleep_displays, system_sleep_now,
-    system_toggle_launch_agent, system_trash_path,
+    system_sleep_displays, system_sleep_now, system_toggle_launch_agent, system_trash_path,
+};
+use modules::telegram::commands::{
+    telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
+    telegram_delete_memory, telegram_get_ai_settings, telegram_get_notification_settings,
+    telegram_has_token, telegram_list_inbox, telegram_list_memory, telegram_mark_inbox_routed,
+    telegram_retry_transcribe, telegram_reveal_inbox_file, telegram_send_inbox_to_notes,
+    telegram_send_text, telegram_set_ai_settings, telegram_set_inbox_transcript,
+    telegram_set_notification_settings, telegram_set_token, telegram_start_pairing,
+    telegram_status, telegram_unpair,
 };
 use modules::terminal::commands::{
-    pty_close, pty_get_cwd, pty_open, pty_resize, pty_set_cwd, pty_write,
-    terminal_save_paste_blob,
+    pty_close, pty_get_cwd, pty_open, pty_resize, pty_set_cwd, pty_write, terminal_save_paste_blob,
 };
 use modules::terminal::state::TerminalState;
-use modules::webchat::commands::{
-    webchat_back, webchat_close, webchat_close_all, webchat_current_url, webchat_embed,
-    webchat_forward, webchat_hide, webchat_hide_all, webchat_reload, webchat_set_zoom,
-    webchat_toggle_play,
-};
 use modules::translator::{
     commands::{
         translator_clear, translator_delete, translator_list, translator_run, translator_search,
         translator_set_settings, TranslatorState,
     },
     repo::TranslationsRepo,
+};
+use modules::voice::commands::{voice_ask, voice_transcribe};
+use modules::webchat::commands::{
+    webchat_back, webchat_close, webchat_close_all, webchat_current_url, webchat_embed,
+    webchat_forward, webchat_hide, webchat_hide_all, webchat_reload, webchat_set_zoom,
+    webchat_toggle_play,
+};
+use modules::whisper::{
+    commands::{
+        whisper_delete_model, whisper_download_model, whisper_get_active, whisper_list_models,
+        whisper_set_active, whisper_transcribe_path,
+    },
+    state::WhisperStateHandle,
 };
 
 use rusqlite::Connection;
@@ -406,16 +401,12 @@ pub fn run() {
                         return;
                     }
                     let mods = Modifiers::SUPER | Modifiers::SHIFT;
-                    if shortcut
-                        .matches(mods, tauri_plugin_global_shortcut::Code::KeyV)
-                    {
+                    if shortcut.matches(mods, tauri_plugin_global_shortcut::Code::KeyV) {
                         if let Some(win) = resolve_popup(app) {
                             let pos_state = app.state::<Arc<PopupPositionState>>();
                             toggle_popup(&win, &pos_state);
                         }
-                    } else if shortcut
-                        .matches(mods, tauri_plugin_global_shortcut::Code::KeyN)
-                    {
+                    } else if shortcut.matches(mods, tauri_plugin_global_shortcut::Code::KeyN) {
                         // Quick-open Notes module and focus the editor.
                         if let Some(win) = resolve_popup(app) {
                             // `emit` stays on the AppHandle so child webviews
@@ -426,9 +417,7 @@ pub fn run() {
                             let _ = win.show();
                             let _ = win.set_focus();
                         }
-                    } else if shortcut
-                        .matches(mods, tauri_plugin_global_shortcut::Code::KeyA)
-                    {
+                    } else if shortcut.matches(mods, tauri_plugin_global_shortcut::Code::KeyA) {
                         // Open AI tab and kick off voice recording via
                         // the composer's mic hook. `voice:activate` is
                         // still a richer signal than raw nav — AiShell
@@ -1042,8 +1031,7 @@ fn init_tracing(data_dir: &std::path::Path) {
     INIT.call_once(|| {
         let logs_dir = data_dir.join("logs");
         let _ = std::fs::create_dir_all(&logs_dir);
-        let file_appender =
-            tracing_appender::rolling::daily(&logs_dir, "stash.log");
+        let file_appender = tracing_appender::rolling::daily(&logs_dir, "stash.log");
         let filter = EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| EnvFilter::new("stash=info,stash_app=info,stash_app_lib=info"));
         let file_layer = fmt::layer()
@@ -1117,7 +1105,8 @@ fn set_popup_appearance(app: tauri::AppHandle, mode: String) -> Result<(), Strin
             "dark" => Some(tauri::Theme::Dark),
             _ => None, // "auto" → follow system
         };
-        win.set_theme(theme).map_err(|e| format!("set_theme: {e}"))?;
+        win.set_theme(theme)
+            .map_err(|e| format!("set_theme: {e}"))?;
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -1247,7 +1236,6 @@ fn percent_decode(s: &str) -> String {
     }
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
-
 
 /// Keep the menubar label tight so it fits alongside the icon even when the
 /// user copies a long paragraph. Strip newlines and ellipsize past 30 chars.

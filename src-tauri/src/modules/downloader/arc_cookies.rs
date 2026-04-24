@@ -66,10 +66,8 @@ pub fn export_to_netscape(profile_dir: &Path, out_path: &Path) -> Result<(), Str
     // Copy the DB to a temp file so we don't lock Arc's live DB while it's
     // running; SQLite still opens the original shared-mode though. Plain
     // copy is safer than opening with immutable=1.
-    let tmp_db = std::env::temp_dir().join(format!(
-        "stash-arc-cookies-{}.sqlite",
-        std::process::id()
-    ));
+    let tmp_db =
+        std::env::temp_dir().join(format!("stash-arc-cookies-{}.sqlite", std::process::id()));
     std::fs::copy(&cookies_db, &tmp_db).map_err(|e| format!("copy db: {e}"))?;
 
     let conn = Connection::open(&tmp_db).map_err(|e| format!("open db: {e}"))?;
@@ -136,7 +134,11 @@ pub fn export_to_netscape(profile_dir: &Path, out_path: &Path) -> Result<(), Str
         } else {
             0
         };
-        let include_subdomains = if host.starts_with('.') { "TRUE" } else { "FALSE" };
+        let include_subdomains = if host.starts_with('.') {
+            "TRUE"
+        } else {
+            "FALSE"
+        };
         let secure_flag = if secure != 0 { "TRUE" } else { "FALSE" };
 
         writeln!(

@@ -48,7 +48,9 @@ impl Platform {
 }
 
 fn extract_host(url: &str) -> Option<&str> {
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
     let end = rest.find('/').unwrap_or(rest.len());
     let hostport = &rest[..end];
     // strip :port
@@ -114,24 +116,42 @@ mod tests {
 
     #[test]
     fn detects_vimeo_twitch_facebook() {
-        assert_eq!(Platform::from_url("https://vimeo.com/12345"), Platform::Vimeo);
-        assert_eq!(Platform::from_url("https://www.twitch.tv/clip/x"), Platform::Twitch);
-        assert_eq!(Platform::from_url("https://fb.watch/abc"), Platform::Facebook);
+        assert_eq!(
+            Platform::from_url("https://vimeo.com/12345"),
+            Platform::Vimeo
+        );
+        assert_eq!(
+            Platform::from_url("https://www.twitch.tv/clip/x"),
+            Platform::Twitch
+        );
+        assert_eq!(
+            Platform::from_url("https://fb.watch/abc"),
+            Platform::Facebook
+        );
     }
 
     #[test]
     fn falls_back_to_generic() {
-        assert_eq!(Platform::from_url("https://example.com/video.mp4"), Platform::Generic);
+        assert_eq!(
+            Platform::from_url("https://example.com/video.mp4"),
+            Platform::Generic
+        );
     }
 
     #[test]
     fn handles_http_and_https() {
-        assert_eq!(Platform::from_url("http://youtube.com/watch"), Platform::YouTube);
+        assert_eq!(
+            Platform::from_url("http://youtube.com/watch"),
+            Platform::YouTube
+        );
     }
 
     #[test]
     fn strips_www_prefix() {
-        assert_eq!(Platform::from_url("https://www.tiktok.com/foo"), Platform::TikTok);
+        assert_eq!(
+            Platform::from_url("https://www.tiktok.com/foo"),
+            Platform::TikTok
+        );
     }
 
     #[test]

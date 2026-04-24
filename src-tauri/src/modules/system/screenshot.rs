@@ -71,7 +71,10 @@ pub fn capture_main_display() -> Result<PathBuf, String> {
     // modern macOS, but being explicit guards against future changes.
     run_screencapture(std::slice::from_ref(&path), Some(1))?;
     if !path.exists() {
-        return Err(format!("screencapture produced no file at {}", path.display()));
+        return Err(format!(
+            "screencapture produced no file at {}",
+            path.display()
+        ));
     }
     Ok(path)
 }
@@ -93,7 +96,10 @@ fn run_screencapture(files: &[PathBuf], display: Option<u32>) -> Result<(), Stri
     if !status.success() {
         return Err(format!(
             "screencapture exited with {}",
-            status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into())
+            status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".into())
         ));
     }
     Ok(())
@@ -117,12 +123,16 @@ mod tests {
     #[test]
     fn file_for_single_display_omits_index_suffix() {
         let p = file_for(1, 1, 1_700_000_000_000);
-        assert!(p.to_string_lossy().ends_with("stash-shot-1700000000000.png"));
+        assert!(p
+            .to_string_lossy()
+            .ends_with("stash-shot-1700000000000.png"));
     }
 
     #[test]
     fn file_for_multi_display_includes_index() {
         let p = file_for(2, 3, 1_700_000_000_000);
-        assert!(p.to_string_lossy().ends_with("stash-shot-1700000000000-2.png"));
+        assert!(p
+            .to_string_lossy()
+            .ends_with("stash-shot-1700000000000-2.png"));
     }
 }

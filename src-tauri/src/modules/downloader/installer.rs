@@ -2,12 +2,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(target_os = "macos")]
-const YT_DLP_URL: &str =
-    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
+const YT_DLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
 
 #[cfg(not(target_os = "macos"))]
-const YT_DLP_URL: &str =
-    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
+const YT_DLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp";
 
 /// Ensure a yt-dlp binary exists inside `bin_dir`. Returns its path.
 /// If already present, returns immediately. Otherwise fetches via curl
@@ -34,8 +32,7 @@ pub fn ensure_bundled(bin_dir: &Path) -> Result<PathBuf, String> {
             .map_err(|e| format!("stat {target:?}: {e}"))?
             .permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(&target, perms)
-            .map_err(|e| format!("chmod {target:?}: {e}"))?;
+        std::fs::set_permissions(&target, perms).map_err(|e| format!("chmod {target:?}: {e}"))?;
     }
     Ok(target)
 }
@@ -107,8 +104,7 @@ pub fn force_reinstall(bin_dir: &Path) -> Result<PathBuf, String> {
             .map_err(|e| format!("stat {tmp:?}: {e}"))?
             .permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(&tmp, perms)
-            .map_err(|e| format!("chmod {tmp:?}: {e}"))?;
+        std::fs::set_permissions(&tmp, perms).map_err(|e| format!("chmod {tmp:?}: {e}"))?;
     }
     std::fs::rename(&tmp, &target).map_err(|e| format!("rename: {e}"))?;
     Ok(target)

@@ -374,12 +374,14 @@ mod tests {
 
     #[test]
     fn friendly_error_blames_cookies_for_format_errors() {
-        let msg =
-            friendly_error("ERROR: [youtube] abc: Requested format is not available");
+        let msg = friendly_error("ERROR: [youtube] abc: Requested format is not available");
         // Stale browser cookies are the dominant cause now; the wording must
         // point users to the Forget cookies button rather than yt-dlp updates.
         let lower = msg.to_lowercase();
-        assert!(lower.contains("cookies"), "msg should mention cookies: {msg}");
+        assert!(
+            lower.contains("cookies"),
+            "msg should mention cookies: {msg}"
+        );
         // Original stderr is preserved so power users still see the raw message.
         assert!(msg.contains("Requested format is not available"));
     }
@@ -398,9 +400,7 @@ mod tests {
 
     #[test]
     fn friendly_error_flags_instagram_no_formats() {
-        let msg = friendly_error(
-            "ERROR: [Instagram] DXUqwFBDJvI: No video formats found!",
-        );
+        let msg = friendly_error("ERROR: [Instagram] DXUqwFBDJvI: No video formats found!");
         let lower = msg.to_lowercase();
         assert!(lower.contains("instagram"));
         assert!(lower.contains("cookies"));

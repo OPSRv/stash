@@ -152,7 +152,6 @@ pub const MODELS: &[ModelSpec] = &[
         recommended_intel: false,
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
     },
-
     // --- English-only (smaller/faster/more accurate, but WILL NOT
     //     transcribe Ukrainian — parked below the multilingual picks). ---
     ModelSpec {
@@ -215,7 +214,8 @@ mod tests {
     fn urls_point_at_whisper_cpp_repo() {
         for m in MODELS {
             assert!(
-                m.url.starts_with("https://huggingface.co/ggerganov/whisper.cpp/"),
+                m.url
+                    .starts_with("https://huggingface.co/ggerganov/whisper.cpp/"),
                 "{} uses an unexpected source: {}",
                 m.id,
                 m.url
@@ -225,7 +225,11 @@ mod tests {
 
     #[test]
     fn recommended_intel_flags_cover_the_baseline() {
-        let rec: Vec<_> = MODELS.iter().filter(|m| m.recommended_intel).map(|m| m.id).collect();
+        let rec: Vec<_> = MODELS
+            .iter()
+            .filter(|m| m.recommended_intel)
+            .map(|m| m.id)
+            .collect();
         // Ukrainian is the product's base language — all recommended models
         // must be multilingual.
         for id in &rec {

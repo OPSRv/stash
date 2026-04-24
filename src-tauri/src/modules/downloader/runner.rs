@@ -163,9 +163,7 @@ pub fn spawn_download(
         // available" path can never bite us when the adaptive streams need
         // a PO token we don't have.
         let selector = match height {
-            Some(h) => format!(
-                "bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b/best"
-            ),
+            Some(h) => format!("bv*[height<={h}]+ba/b[height<={h}]/bv*+ba/b/best"),
             None => "bv*+ba/b/best".to_string(),
         };
         // `-S` is a sort spec (not a filter), so we always get *something*
@@ -174,14 +172,7 @@ pub fn spawn_download(
             Some(h) => format!("res:{h},codec:h264,br"),
             None => "codec:h264,res,br".to_string(),
         };
-        cmd.args([
-            "-f",
-            &selector,
-            "-S",
-            &sort,
-            "--merge-output-format",
-            "mp4",
-        ]);
+        cmd.args(["-f", &selector, "-S", &sort, "--merge-output-format", "mp4"]);
     }
 
     cmd.arg(url);
@@ -200,20 +191,10 @@ pub fn spawn_download(
     );
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn yt-dlp: {e}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "no stdout".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "no stderr".to_string())?;
+    let stdout = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "no stderr".to_string())?;
 
-    state
-        .active
-        .lock()
-        .unwrap()
-        .insert(job_id, child);
+    state.active.lock().unwrap().insert(job_id, child);
 
     // stderr drain (for logging + keep last ~30 lines for retry classification).
     let stderr_buf: Arc<Mutex<std::collections::VecDeque<String>>> =
@@ -308,8 +289,8 @@ pub fn spawn_download(
                 // not available". One immediate retry without cookies almost
                 // always succeeds for public videos.
                 let cookies_in_play = cookies_attached;
-                let try_no_cookies = cookies_in_play
-                    && super::detector::is_cookies_format_failure(&tail);
+                let try_no_cookies =
+                    cookies_in_play && super::detector::is_cookies_format_failure(&tail);
                 if try_no_cookies {
                     if let Some(spec) = state_clone.job_specs.lock().unwrap().get_mut(&job_id) {
                         spec.skip_cookies = true;
@@ -326,10 +307,8 @@ pub fn spawn_download(
                             retry_download(app_retry.clone(), state_retry, &yt_dlp_retry, job_id)
                         {
                             debug!("[yt-dlp:{job_id}] no-cookies retry failed: {e}");
-                            let _ = app_retry.emit(
-                                "downloader:failed",
-                                serde_json::json!({ "id": job_id }),
-                            );
+                            let _ = app_retry
+                                .emit("downloader:failed", serde_json::json!({ "id": job_id }));
                         }
                     });
                     return;
@@ -357,18 +336,14 @@ pub fn spawn_download(
                             retry_download(app_retry.clone(), state_retry, &yt_dlp_retry, job_id)
                         {
                             debug!("[yt-dlp:{job_id}] auto-retry failed: {e}");
-                            let _ = app_retry.emit(
-                                "downloader:failed",
-                                serde_json::json!({ "id": job_id }),
-                            );
+                            let _ = app_retry
+                                .emit("downloader:failed", serde_json::json!({ "id": job_id }));
                         }
                     });
                 } else {
                     state_clone.retry_counts.lock().unwrap().remove(&job_id);
-                    let _ = app_clone.emit(
-                        "downloader:failed",
-                        serde_json::json!({ "id": job_id }),
-                    );
+                    let _ =
+                        app_clone.emit("downloader:failed", serde_json::json!({ "id": job_id }));
                     drain_queue(app_clone.clone(), Arc::clone(&state_clone), &yt_dlp_owned);
                 }
             }
@@ -486,7 +461,15 @@ pub fn retry_download(
     if let Ok(mut repo) = state.jobs.lock() {
         let _ = repo.set_status(job_id, "pending");
     }
-    spawn_download(app, state, yt_dlp, job_id, &spec.url, spec.height, &spec.kind)
+    spawn_download(
+        app,
+        state,
+        yt_dlp,
+        job_id,
+        &spec.url,
+        spec.height,
+        &spec.kind,
+    )
 }
 
 /// Classify a stderr snapshot as transient (worth auto-retry) or permanent.
@@ -531,7 +514,9 @@ mod tests {
 
     #[test]
     fn permanent_errors_are_not_retryable() {
-        assert!(!is_transient_error("ERROR: Requested format is not available"));
+        assert!(!is_transient_error(
+            "ERROR: Requested format is not available"
+        ));
         assert!(!is_transient_error("ERROR: login required"));
         assert!(!is_transient_error("Video unavailable"));
     }

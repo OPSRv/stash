@@ -58,7 +58,6 @@ pub fn read_file_urls() -> Vec<PathBuf> {
     out
 }
 
-
 /// Heuristic: does this path point at something the user would
 /// recognise as "a file I copied"? Filters out three common sources
 /// of junk file-url entries that aren't actionable:
@@ -80,10 +79,7 @@ pub fn is_user_visible_path(path: &std::path::Path) -> bool {
         return false;
     }
     // (2) basename cannot look like a promise ID
-    let name = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     if name.is_empty() || looks_like_promise_id(name) {
         return false;
     }
@@ -285,7 +281,11 @@ fn resolve_via_nsurl(raw: &str) -> Option<PathBuf> {
         let resolved = url.filePathURL().unwrap_or(url);
         let path_ns = resolved.path()?;
         let s = path_ns.to_string();
-        if s.is_empty() { None } else { Some(PathBuf::from(s)) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(s))
+        }
     })
 }
 

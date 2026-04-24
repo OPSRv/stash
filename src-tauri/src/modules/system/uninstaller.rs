@@ -144,7 +144,12 @@ fn is_leftover_match(basename: &str, bundle_id: Option<&str>, app_name: &str) ->
     while let Some(found) = lc[idx..].find(&name_lc) {
         let start = idx + found;
         let end = start + name_lc.len();
-        let before_ok = start == 0 || lc[..start].chars().next_back().map(is_boundary).unwrap_or(true);
+        let before_ok = start == 0
+            || lc[..start]
+                .chars()
+                .next_back()
+                .map(is_boundary)
+                .unwrap_or(true);
         let after_ok = end == lc.len() || lc[end..].chars().next().map(is_boundary).unwrap_or(true);
         if before_ok && after_ok {
             return true;
@@ -169,7 +174,9 @@ pub fn find_leftovers(home: &Path, bundle_id: Option<&str>, app_name: &str) -> V
             if !is_leftover_match(base, bundle_id, app_name) {
                 continue;
             }
-            let size = if path.is_dir() { dir_size(path) } else {
+            let size = if path.is_dir() {
+                dir_size(path)
+            } else {
                 path.metadata().map(|m| m.len()).unwrap_or(0)
             };
             out.push(Leftover {

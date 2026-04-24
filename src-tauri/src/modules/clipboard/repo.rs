@@ -385,7 +385,11 @@ mod tests {
         let hits = repo.search("invoice", 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].kind, "file");
-        assert!(hits[0].meta.as_deref().unwrap().contains("invoice-2025.pdf"));
+        assert!(hits[0]
+            .meta
+            .as_deref()
+            .unwrap()
+            .contains("invoice-2025.pdf"));
     }
 
     #[test]

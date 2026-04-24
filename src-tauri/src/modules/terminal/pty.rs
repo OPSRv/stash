@@ -48,7 +48,12 @@ pub fn open_session(
 ) -> Result<PtySession, String> {
     let pty_system = native_pty_system();
     let pair = pty_system
-        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| format!("openpty failed: {}", e))?;
 
     // Prefer $SHELL so the user's login shell (with their zsh/bash init)
@@ -156,12 +161,7 @@ fn reader_loop(
 /// We use `ps` rather than reading `/proc` so the code stays
 /// cross-platform friendly (even though Stash is macOS-first — `ps`
 /// also works on Linux for future ports).
-fn proc_poll_loop(
-    app: AppHandle,
-    id: String,
-    leader_pid: Option<i32>,
-    shutdown: Arc<AtomicBool>,
-) {
+fn proc_poll_loop(app: AppHandle, id: String, leader_pid: Option<i32>, shutdown: Arc<AtomicBool>) {
     let mut last: String = String::new();
     let tick = Duration::from_millis(800);
     loop {
@@ -214,7 +214,10 @@ pub fn write_input(session: &mut PtySession, input_b64: &str) -> Result<(), Stri
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(input_b64)
         .map_err(|e| format!("bad base64: {}", e))?;
-    session.writer.write_all(&bytes).map_err(|e| format!("pty write: {}", e))?;
+    session
+        .writer
+        .write_all(&bytes)
+        .map_err(|e| format!("pty write: {}", e))?;
     session.writer.flush().ok();
     Ok(())
 }
@@ -222,6 +225,11 @@ pub fn write_input(session: &mut PtySession, input_b64: &str) -> Result<(), Stri
 pub fn resize(session: &PtySession, cols: u16, rows: u16) -> Result<(), String> {
     session
         .master
-        .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(|e| format!("resize: {}", e))
 }

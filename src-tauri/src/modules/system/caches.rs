@@ -59,23 +59,83 @@ pub fn list_caches(home: &Path) -> Vec<CacheEntry> {
     let mut queue: Vec<(String, PathBuf, CacheKind)> = Vec::new();
 
     // Dev tooling — these regenerate on next build/install.
-    maybe_queue(&mut queue, "Xcode DerivedData", home.join("Library/Developer/Xcode/DerivedData"), CacheKind::Regeneratable);
-    maybe_queue(&mut queue, "Xcode iOS DeviceSupport", home.join("Library/Developer/Xcode/iOS DeviceSupport"), CacheKind::Regeneratable);
-    maybe_queue(&mut queue, "Xcode Archives", home.join("Library/Developer/Xcode/Archives"), CacheKind::Regeneratable);
+    maybe_queue(
+        &mut queue,
+        "Xcode DerivedData",
+        home.join("Library/Developer/Xcode/DerivedData"),
+        CacheKind::Regeneratable,
+    );
+    maybe_queue(
+        &mut queue,
+        "Xcode iOS DeviceSupport",
+        home.join("Library/Developer/Xcode/iOS DeviceSupport"),
+        CacheKind::Regeneratable,
+    );
+    maybe_queue(
+        &mut queue,
+        "Xcode Archives",
+        home.join("Library/Developer/Xcode/Archives"),
+        CacheKind::Regeneratable,
+    );
     maybe_queue(&mut queue, "npm cache", home.join(".npm"), CacheKind::Safe);
-    maybe_queue(&mut queue, "pnpm store", home.join("Library/pnpm/store"), CacheKind::Safe);
-    maybe_queue(&mut queue, "Yarn cache", home.join("Library/Caches/Yarn"), CacheKind::Safe);
-    maybe_queue(&mut queue, "Cargo registry cache", home.join(".cargo/registry/cache"), CacheKind::Safe);
-    maybe_queue(&mut queue, "Gradle caches", home.join(".gradle/caches"), CacheKind::Regeneratable);
+    maybe_queue(
+        &mut queue,
+        "pnpm store",
+        home.join("Library/pnpm/store"),
+        CacheKind::Safe,
+    );
+    maybe_queue(
+        &mut queue,
+        "Yarn cache",
+        home.join("Library/Caches/Yarn"),
+        CacheKind::Safe,
+    );
+    maybe_queue(
+        &mut queue,
+        "Cargo registry cache",
+        home.join(".cargo/registry/cache"),
+        CacheKind::Safe,
+    );
+    maybe_queue(
+        &mut queue,
+        "Gradle caches",
+        home.join(".gradle/caches"),
+        CacheKind::Regeneratable,
+    );
 
     // Browsers — only the Cache sub-directories, never cookies/storage.
-    maybe_queue(&mut queue, "Chrome cache", home.join("Library/Caches/Google/Chrome"), CacheKind::Browser);
-    maybe_queue(&mut queue, "Safari cache", home.join("Library/Caches/com.apple.Safari"), CacheKind::Browser);
-    maybe_queue(&mut queue, "Firefox cache", home.join("Library/Caches/Firefox"), CacheKind::Browser);
-    maybe_queue(&mut queue, "Arc cache", home.join("Library/Caches/Arc"), CacheKind::Browser);
+    maybe_queue(
+        &mut queue,
+        "Chrome cache",
+        home.join("Library/Caches/Google/Chrome"),
+        CacheKind::Browser,
+    );
+    maybe_queue(
+        &mut queue,
+        "Safari cache",
+        home.join("Library/Caches/com.apple.Safari"),
+        CacheKind::Browser,
+    );
+    maybe_queue(
+        &mut queue,
+        "Firefox cache",
+        home.join("Library/Caches/Firefox"),
+        CacheKind::Browser,
+    );
+    maybe_queue(
+        &mut queue,
+        "Arc cache",
+        home.join("Library/Caches/Arc"),
+        CacheKind::Browser,
+    );
 
     // General system caches (safe).
-    maybe_queue(&mut queue, "QuickLook thumbnails", home.join("Library/Caches/com.apple.QuickLook.thumbnailcache"), CacheKind::Safe);
+    maybe_queue(
+        &mut queue,
+        "QuickLook thumbnails",
+        home.join("Library/Caches/com.apple.QuickLook.thumbnailcache"),
+        CacheKind::Safe,
+    );
 
     // Size each cache in its own thread. 13 parallel walks on SSD take
     // the same wall time as the single slowest one (Xcode DerivedData),
@@ -132,7 +192,9 @@ mod tests {
         fs::write(npm.join("pack.tgz"), vec![0u8; 4096]).unwrap();
 
         let list = list_caches(tmp.path());
-        assert!(list.iter().any(|c| c.label == "npm cache" && c.size_bytes == 4096));
+        assert!(list
+            .iter()
+            .any(|c| c.label == "npm cache" && c.size_bytes == 4096));
     }
 
     #[test]

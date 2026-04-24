@@ -23,7 +23,11 @@ impl ModuleBackup for Provider {
         ModuleDescription {
             id: self.id().into(),
             label: self.label().into(),
-            summary: if p.exists() { "presets".into() } else { "empty".into() },
+            summary: if p.exists() {
+                "presets".into()
+            } else {
+                "empty".into()
+            },
             size_bytes: path_size(&p),
             available: p.exists(),
         }

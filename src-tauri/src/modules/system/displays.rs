@@ -29,7 +29,6 @@ mod ffi {
     pub const K_CG_CONFIGURE_FOR_SESSION: i32 = 1;
     pub const K_CG_NULL_DIRECT_DISPLAY: CGDirectDisplayID = 0;
 
-
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
         /// Unlike `CGGetActiveDisplayList`, this also reports displays that
@@ -62,10 +61,7 @@ mod ffi {
             x: i32,
             y: i32,
         ) -> i32;
-        pub fn CGCompleteDisplayConfiguration(
-            config: CGDisplayConfigRef,
-            option: i32,
-        ) -> i32;
+        pub fn CGCompleteDisplayConfiguration(config: CGDisplayConfigRef, option: i32) -> i32;
         pub fn CGCancelDisplayConfiguration(config: CGDisplayConfigRef) -> i32;
     }
 
@@ -78,10 +74,7 @@ mod ffi {
             display: CGDirectDisplayID,
             brightness: *mut f32,
         ) -> i32;
-        pub fn DisplayServicesSetBrightness(
-            display: CGDirectDisplayID,
-            brightness: f32,
-        ) -> i32;
+        pub fn DisplayServicesSetBrightness(display: CGDirectDisplayID, brightness: f32) -> i32;
         pub fn DisplayServicesCanChangeBrightness(display: CGDirectDisplayID) -> bool;
     }
 }
@@ -152,7 +145,14 @@ pub fn list_hardware_displays() -> Vec<DisplayDevice> {
         // so the slider isn't stuck at zero.
         let brightness = ds_brightness.or_else(|| {
             if ddc_supports {
-                Some(saved_store().lock().unwrap().get(&id).copied().unwrap_or(0.7))
+                Some(
+                    saved_store()
+                        .lock()
+                        .unwrap()
+                        .get(&id)
+                        .copied()
+                        .unwrap_or(0.7),
+                )
             } else {
                 None
             }
@@ -208,17 +208,20 @@ fn annotate_names(out: &mut [DisplayDevice]) {
         Ok(o) if o.status.success() => o,
         _ => return,
     };
-    let root: serde_json::Value =
-        match serde_json::from_slice(&spp.stdout) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
+    let root: serde_json::Value = match serde_json::from_slice(&spp.stdout) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
     let mut named: Vec<(u32, u32, String)> = Vec::new();
     if let Some(arr) = root.get("SPDisplaysDataType").and_then(|v| v.as_array()) {
         for gpu in arr {
             if let Some(devs) = gpu.get("spdisplays_ndrvs").and_then(|v| v.as_array()) {
                 for d in devs {
-                    let name = d.get("_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = d
+                        .get("_name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let vendor = d
                         .get("_spdisplays_display-vendor-id")
                         .and_then(|v| v.as_str())
@@ -347,8 +350,9 @@ pub fn set_display_hidden(_s: u32, _m: u32, _h: bool) -> Result<(), String> {
 // to 100%. A process restart wipes it; that's fine, the monitor just wakes
 // at its own default.
 #[cfg(target_os = "macos")]
-static SAVED_BRIGHTNESS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, f32>>> =
-    std::sync::OnceLock::new();
+static SAVED_BRIGHTNESS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<u32, f32>>,
+> = std::sync::OnceLock::new();
 
 #[cfg(target_os = "macos")]
 fn saved_store() -> &'static std::sync::Mutex<std::collections::HashMap<u32, f32>> {
@@ -526,8 +530,14 @@ pub fn sleep_displays() -> Result<(), String> {
 pub fn adjust_brightness(up: bool) -> Result<(), String> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
-    let key = if up { Key::BrightnessUp } else { Key::BrightnessDown };
-    enigo.key(key, Direction::Click).map_err(|e| e.to_string())?;
+    let key = if up {
+        Key::BrightnessUp
+    } else {
+        Key::BrightnessDown
+    };
+    enigo
+        .key(key, Direction::Click)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

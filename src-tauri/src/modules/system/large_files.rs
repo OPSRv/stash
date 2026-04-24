@@ -127,9 +127,7 @@ fn is_safe_trash_target(path: &std::path::Path) -> bool {
         std::path::Path::new("/Applications"),
         std::path::Path::new("/Volumes"),
     ];
-    allowed_roots
-        .iter()
-        .any(|root| canonical.starts_with(root))
+    allowed_roots.iter().any(|root| canonical.starts_with(root))
 }
 
 /// Move a path to the macOS Trash via Finder AppleScript. Guards:
@@ -154,9 +152,7 @@ pub fn move_to_trash(path: &str) -> Result<(), String> {
     }
     // Escape embedded quotes so the AppleScript string literal stays valid.
     let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!(
-        "tell application \"Finder\" to delete POSIX file \"{escaped}\""
-    );
+    let script = format!("tell application \"Finder\" to delete POSIX file \"{escaped}\"");
     let out = Command::new("osascript")
         .args(["-e", &script])
         .output()
@@ -183,7 +179,13 @@ mod tests {
         let names: Vec<_> = summary
             .files
             .iter()
-            .map(|f| PathBuf::from(&f.path).file_name().unwrap().to_string_lossy().into_owned())
+            .map(|f| {
+                PathBuf::from(&f.path)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         assert_eq!(names, vec!["big.bin", "medium.bin"]);
         assert_eq!(summary.scanned, 3);

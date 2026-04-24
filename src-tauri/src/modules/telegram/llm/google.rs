@@ -289,17 +289,11 @@ mod tests {
     #[test]
     fn system_lifts_to_instruction_field() {
         let req = LlmRequest {
-            messages: vec![
-                ChatMessage::system("stay brief"),
-                ChatMessage::user("hi"),
-            ],
+            messages: vec![ChatMessage::system("stay brief"), ChatMessage::user("hi")],
             ..Default::default()
         };
         let wire = to_wire(&req);
-        assert_eq!(
-            wire["systemInstruction"]["parts"][0]["text"],
-            "stay brief"
-        );
+        assert_eq!(wire["systemInstruction"]["parts"][0]["text"], "stay brief");
         assert_eq!(wire["contents"].as_array().unwrap().len(), 1);
         assert_eq!(wire["contents"][0]["role"], "user");
         assert_eq!(wire["contents"][0]["parts"][0]["text"], "hi");
@@ -435,10 +429,7 @@ mod tests {
     fn tool_result_wraps_non_json_content() {
         let wire = tool_result_to_wire(&ChatMessage::tool("get_battery", "just a string"));
         assert_eq!(wire["role"], "user");
-        assert_eq!(
-            wire["parts"][0]["functionResponse"]["name"],
-            "get_battery"
-        );
+        assert_eq!(wire["parts"][0]["functionResponse"]["name"], "get_battery");
         assert_eq!(
             wire["parts"][0]["functionResponse"]["response"]["content"],
             "just a string"
@@ -466,10 +457,7 @@ mod tests {
         });
         let out = from_wire(&body).unwrap();
         assert_eq!(out.tool_calls.len(), 1);
-        assert_eq!(
-            out.tool_calls[0].signature.as_deref(),
-            Some("ZmFrZS1zaWc=")
-        );
+        assert_eq!(out.tool_calls[0].signature.as_deref(), Some("ZmFrZS1zaWc="));
     }
 
     #[test]

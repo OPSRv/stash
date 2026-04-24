@@ -135,8 +135,9 @@ mod tests {
         .unwrap();
         let list = list_privacy(tmp.path());
         assert!(
-            list.iter().all(|i| !i.path.ends_with("com.apple.finder.plist")
-                && !i.path.contains("sharedfilelist")),
+            list.iter()
+                .all(|i| !i.path.ends_with("com.apple.finder.plist")
+                    && !i.path.contains("sharedfilelist")),
             "privacy list must not surface Finder preferences, got: {:?}",
             list.iter().map(|i| &i.path).collect::<Vec<_>>()
         );

@@ -32,9 +32,7 @@ fn emit_snapshot(app: &AppHandle, snap: &SessionSnapshot) {
 // --- Presets -----------------------------------------------------------
 
 #[tauri::command]
-pub fn pomodoro_list_presets(
-    state: State<'_, Arc<PomodoroState>>,
-) -> Result<Vec<Preset>, String> {
+pub fn pomodoro_list_presets(state: State<'_, Arc<PomodoroState>>) -> Result<Vec<Preset>, String> {
     to_string_err(state.repo.lock().unwrap().list_presets())
 }
 
@@ -59,10 +57,7 @@ pub fn pomodoro_save_preset(
 }
 
 #[tauri::command]
-pub fn pomodoro_delete_preset(
-    state: State<'_, Arc<PomodoroState>>,
-    id: i64,
-) -> Result<(), String> {
+pub fn pomodoro_delete_preset(state: State<'_, Arc<PomodoroState>>, id: i64) -> Result<(), String> {
     to_string_err(state.repo.lock().unwrap().delete_preset(id))
 }
 
@@ -78,9 +73,7 @@ pub fn pomodoro_list_history(
 // --- Session control ---------------------------------------------------
 
 #[tauri::command]
-pub fn pomodoro_get_state(
-    state: State<'_, Arc<PomodoroState>>,
-) -> Result<SessionSnapshot, String> {
+pub fn pomodoro_get_state(state: State<'_, Arc<PomodoroState>>) -> Result<SessionSnapshot, String> {
     let core = state.core.lock().unwrap();
     Ok(core.snapshot())
 }

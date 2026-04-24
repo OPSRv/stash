@@ -60,7 +60,11 @@ pub fn global_search(
                     hits.push(SearchHit {
                         kind: "download",
                         id: j.id,
-                        title: if !t.is_empty() { t.to_string() } else { u.to_string() },
+                        title: if !t.is_empty() {
+                            t.to_string()
+                        } else {
+                            u.to_string()
+                        },
                         snippet: format!(
                             "{} · {}",
                             j.status,

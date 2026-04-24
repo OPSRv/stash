@@ -46,7 +46,11 @@ pub async fn fetch_weather(city: &str) -> Result<String, String> {
         .user_agent("curl/8 stash-cli")
         .build()
         .map_err(|e| format!("http client: {e}"))?;
-    let resp = client.get(&url).send().await.map_err(|e| format!("wttr: {e}"))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("wttr: {e}"))?;
     let status = resp.status();
     if !status.is_success() {
         return Err(format!("wttr returned {}", status.as_u16()));

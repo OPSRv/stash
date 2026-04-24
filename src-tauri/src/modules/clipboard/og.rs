@@ -59,16 +59,16 @@ pub fn fetch_preview(url: &str) -> Option<LinkPreview> {
 /// network. Looks at `<head>` metadata in a case-insensitive, order-
 /// independent way.
 pub fn parse_link_preview(url: &str, html: &str) -> LinkPreview {
-    let head = html
-        .split_once("</head>")
-        .map(|(h, _)| h)
-        .unwrap_or(html);
+    let head = html.split_once("</head>").map(|(h, _)| h).unwrap_or(html);
     LinkPreview {
         url: url.to_string(),
         image: meta_content(head, &["og:image", "twitter:image", "twitter:image:src"]),
         title: meta_content(head, &["og:title", "twitter:title"])
             .or_else(|| extract_title_tag(head)),
-        description: meta_content(head, &["og:description", "twitter:description", "description"]),
+        description: meta_content(
+            head,
+            &["og:description", "twitter:description", "description"],
+        ),
         site_name: meta_content(head, &["og:site_name", "application-name"]),
     }
 }

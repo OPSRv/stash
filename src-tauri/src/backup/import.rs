@@ -119,8 +119,7 @@ pub fn stage(
         std::io::copy(&mut entry, &mut out).map_err(|e| format!("unpack: {e}"))?;
     }
 
-    let sel_json =
-        serde_json::to_vec_pretty(selection).map_err(|e| format!("selection: {e}"))?;
+    let sel_json = serde_json::to_vec_pretty(selection).map_err(|e| format!("selection: {e}"))?;
     std::fs::write(pending.join("selection.json"), sel_json)
         .map_err(|e| format!("write selection: {e}"))?;
     // Clear any stale error marker from a previous import attempt.
@@ -162,8 +161,8 @@ fn apply_pending(data_dir: &Path, pending: &Path) -> Result<Vec<String>, String>
     let manifest_path = pending.join("manifest.json");
     let manifest_bytes =
         std::fs::read(&manifest_path).map_err(|e| format!("read manifest: {e}"))?;
-    let manifest: Manifest = serde_json::from_slice(&manifest_bytes)
-        .map_err(|e| format!("parse manifest: {e}"))?;
+    let manifest: Manifest =
+        serde_json::from_slice(&manifest_bytes).map_err(|e| format!("parse manifest: {e}"))?;
     if manifest.backup_format_version > super::manifest::BACKUP_FORMAT_VERSION {
         return Err(format!(
             "backup format v{} is newer than supported v{}",
@@ -224,8 +223,14 @@ fn apply_pending(data_dir: &Path, pending: &Path) -> Result<Vec<String>, String>
         let ctx_for_pre = super::BackupCtx { data_dir };
         for art in provider.artifacts(&ctx_for_pre) {
             match art {
-                super::BackupArtifact::SqliteFile { source, archive_path }
-                | super::BackupArtifact::JsonFile { source, archive_path } => {
+                super::BackupArtifact::SqliteFile {
+                    source,
+                    archive_path,
+                }
+                | super::BackupArtifact::JsonFile {
+                    source,
+                    archive_path,
+                } => {
                     if source.exists() {
                         let dst = backup_dir.join(&archive_path);
                         if let Some(p) = dst.parent() {
@@ -242,7 +247,9 @@ fn apply_pending(data_dir: &Path, pending: &Path) -> Result<Vec<String>, String>
                 }
             }
         }
-        provider.restore(&ctx).map_err(|e| format!("restore {mod_id}: {e}"))?;
+        provider
+            .restore(&ctx)
+            .map_err(|e| format!("restore {mod_id}: {e}"))?;
         replaced.push(mod_id.clone());
         let _ = entry; // entry details are read by the provider via staged_dir
     }
@@ -281,7 +288,10 @@ pub fn copy_staged_tree(staged_root: &Path, dest_root: &Path) -> Result<u32, Str
         if !entry.file_type().is_file() {
             continue;
         }
-        let rel = entry.path().strip_prefix(staged_root).unwrap_or(entry.path());
+        let rel = entry
+            .path()
+            .strip_prefix(staged_root)
+            .unwrap_or(entry.path());
         let dest = dest_root.join(rel);
         if let Some(p) = dest.parent() {
             std::fs::create_dir_all(p).map_err(|e| format!("mkdir: {e}"))?;
@@ -304,7 +314,6 @@ fn read_manifest<R: Read + std::io::Seek>(
         .map_err(|e| format!("read manifest: {e}"))?;
     serde_json::from_slice(&bytes).map_err(|e| format!("parse manifest: {e}"))
 }
-
 
 #[cfg(test)]
 mod tests {

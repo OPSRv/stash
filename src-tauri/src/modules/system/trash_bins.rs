@@ -67,10 +67,7 @@ end tell"#;
     let size = parts
         .next()
         .and_then(|v| {
-            let t = v
-                .trim()
-                .replace(',', ".")
-                .replace('Е', "E"); // U+0415 Cyrillic Ie → U+0045 Latin E
+            let t = v.trim().replace(',', ".").replace('Е', "E"); // U+0415 Cyrillic Ie → U+0045 Latin E
             t.parse::<u64>()
                 .or_else(|_| t.parse::<f64>().map(|f| f as u64))
                 .ok()
@@ -171,7 +168,9 @@ mod tests {
         fs::create_dir_all(&t).unwrap();
         fs::write(t.join("a"), vec![0u8; 2048]).unwrap();
         let bins = list_bins(tmp.path());
-        assert!(bins.iter().any(|b| b.size_bytes >= 2048 && b.item_count >= 1));
+        assert!(bins
+            .iter()
+            .any(|b| b.size_bytes >= 2048 && b.item_count >= 1));
     }
 
     fn normalize_and_parse(s: &str) -> Option<u64> {
@@ -186,10 +185,7 @@ mod tests {
         // Regression: Ukrainian-locale macOS emits `2,632136114Е+9` from
         // `return size as text` — Cyrillic Е, comma decimal — and the
         // standard f64 parser silently returned 0.
-        assert_eq!(
-            normalize_and_parse("2,632136114Е+9"),
-            Some(2_632_136_114)
-        );
+        assert_eq!(normalize_and_parse("2,632136114Е+9"), Some(2_632_136_114));
         assert_eq!(normalize_and_parse("1234567"), Some(1234567));
         assert_eq!(normalize_and_parse("1.5E+6"), Some(1_500_000));
     }

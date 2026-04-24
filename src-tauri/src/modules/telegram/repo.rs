@@ -290,11 +290,7 @@ impl TelegramRepo {
         rows.collect()
     }
 
-    pub fn due_reminders(
-        &self,
-        now: i64,
-        limit: usize,
-    ) -> Result<Vec<super::reminders::Reminder>> {
+    pub fn due_reminders(&self, now: i64, limit: usize) -> Result<Vec<super::reminders::Reminder>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, text, due_at, sent, cancelled
              FROM reminders
@@ -307,10 +303,8 @@ impl TelegramRepo {
     }
 
     pub fn mark_reminder_sent(&mut self, id: i64) -> Result<()> {
-        self.conn.execute(
-            "UPDATE reminders SET sent = 1 WHERE id = ?1",
-            params![id],
-        )?;
+        self.conn
+            .execute("UPDATE reminders SET sent = 1 WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -592,7 +586,15 @@ mod tests {
     fn set_inbox_transcript_persists() {
         let mut repo = fresh();
         let id = repo
-            .insert_media_inbox(1, "voice", Some("a.ogg"), Some("audio/ogg"), Some(3), None, 1)
+            .insert_media_inbox(
+                1,
+                "voice",
+                Some("a.ogg"),
+                Some("audio/ogg"),
+                Some(3),
+                None,
+                1,
+            )
             .unwrap();
         repo.set_inbox_transcript(id, "hello world").unwrap();
         let items = repo.list_inbox(10).unwrap();

@@ -62,11 +62,9 @@ const INIT_SCRIPT: &str = r#"
 })();
 "#;
 
-
 /// Safari UA — Google blocks sign-in from identifiable embedded WebViews
 /// ("browser not secure"); pretending to be Safari on macOS passes the check.
-const SAFARI_UA: &str =
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
+const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
      (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
 
 const HOME_URL: &str = "https://music.youtube.com/";
@@ -122,10 +120,9 @@ pub fn music_embed(
     let ua = user_agent
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| SAFARI_UA.to_string());
-    let mut builder =
-        tauri::webview::WebviewBuilder::new(LABEL, WebviewUrl::External(url))
-            .user_agent(&ua)
-            .initialization_script(INIT_SCRIPT);
+    let mut builder = tauri::webview::WebviewBuilder::new(LABEL, WebviewUrl::External(url))
+        .user_agent(&ua)
+        .initialization_script(INIT_SCRIPT);
     // Enable right-click → Inspect Element in dev builds so the injected
     // now-playing poller (and any YT Music DOM drift) can be diagnosed.
     #[cfg(debug_assertions)]

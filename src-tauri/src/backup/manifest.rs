@@ -69,10 +69,7 @@ fn chrono_now_iso() -> String {
     // Break seconds into Y-M-D H:M:S using a calendar routine. We use the
     // Howard Hinnant "days_from_civil" inverse so we can stay dependency-free.
     let (y, mo, d, h, mi, s) = break_unix_secs(secs as i64);
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        y, mo, d, h, mi, s
-    )
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo, d, h, mi, s)
 }
 
 fn break_unix_secs(secs: i64) -> (i32, u32, u32, u32, u32, u32) {

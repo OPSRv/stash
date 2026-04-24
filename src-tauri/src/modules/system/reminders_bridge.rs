@@ -42,9 +42,7 @@ fn applescript_date_literal(year: i32, month: u32, day: u32, hour: u32, minute: 
         12 => "December",
         _ => "January",
     };
-    format!(
-        "date \"{month_name} {day}, {year} {hour:02}:{minute:02}:00\""
-    )
+    format!("date \"{month_name} {day}, {year} {hour:02}:{minute:02}:00\"")
 }
 
 /// Create a reminder in the default list. `due_unix_secs` is interpreted
@@ -98,11 +96,21 @@ fn split_local(ts: i64) -> Result<(i32, u32, u32, u32, u32), String> {
     if parts.len() != 5 {
         return Err(format!("date: unexpected output `{stdout}`"));
     }
-    let y: i32 = parts[0].parse().map_err(|_| format!("bad year: {}", parts[0]))?;
-    let m: u32 = parts[1].parse().map_err(|_| format!("bad month: {}", parts[1]))?;
-    let d: u32 = parts[2].parse().map_err(|_| format!("bad day: {}", parts[2]))?;
-    let h: u32 = parts[3].parse().map_err(|_| format!("bad hour: {}", parts[3]))?;
-    let mi: u32 = parts[4].parse().map_err(|_| format!("bad minute: {}", parts[4]))?;
+    let y: i32 = parts[0]
+        .parse()
+        .map_err(|_| format!("bad year: {}", parts[0]))?;
+    let m: u32 = parts[1]
+        .parse()
+        .map_err(|_| format!("bad month: {}", parts[1]))?;
+    let d: u32 = parts[2]
+        .parse()
+        .map_err(|_| format!("bad day: {}", parts[2]))?;
+    let h: u32 = parts[3]
+        .parse()
+        .map_err(|_| format!("bad hour: {}", parts[3]))?;
+    let mi: u32 = parts[4]
+        .parse()
+        .map_err(|_| format!("bad minute: {}", parts[4]))?;
     Ok((y, m, d, h, mi))
 }
 

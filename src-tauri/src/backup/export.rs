@@ -70,7 +70,10 @@ pub fn export_to(
         let mut size = 0u64;
         for art in p.artifacts(&ctx) {
             match art {
-                BackupArtifact::SqliteFile { source, archive_path } => {
+                BackupArtifact::SqliteFile {
+                    source,
+                    archive_path,
+                } => {
                     if !source.exists() {
                         continue;
                     }
@@ -80,7 +83,10 @@ pub fn export_to(
                     write_bytes(&mut zip, &archive_path, &bytes, file_opts)?;
                     entry.db = Some(archive_path);
                 }
-                BackupArtifact::JsonFile { source, archive_path } => {
+                BackupArtifact::JsonFile {
+                    source,
+                    archive_path,
+                } => {
                     if !source.exists() {
                         continue;
                     }
@@ -90,7 +96,10 @@ pub fn export_to(
                     write_bytes(&mut zip, &archive_path, &bytes, file_opts)?;
                     entry.json = Some(archive_path);
                 }
-                BackupArtifact::MediaDir { source, archive_prefix } => {
+                BackupArtifact::MediaDir {
+                    source,
+                    archive_prefix,
+                } => {
                     if !opts.include_media {
                         continue;
                     }
@@ -142,7 +151,10 @@ fn vacuum_sqlite_to_vec(source: &Path) -> Result<Vec<u8>, String> {
     }
     let conn = Connection::open(source).map_err(|e| format!("open source: {e}"))?;
     conn.execute(
-        &format!("VACUUM INTO '{}'", tmp_path.to_string_lossy().replace('\'', "''")),
+        &format!(
+            "VACUUM INTO '{}'",
+            tmp_path.to_string_lossy().replace('\'', "''")
+        ),
         [],
     )
     .map_err(|e| format!("vacuum into: {e}"))?;
@@ -172,7 +184,10 @@ fn write_dir<W: Write + Seek>(
 ) -> Result<u64, String> {
     let prefix = archive_prefix.trim_end_matches('/').to_string();
     let mut total = 0u64;
-    for entry in walkdir::WalkDir::new(source).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(source)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -198,7 +213,12 @@ fn write_dir<W: Write + Seek>(
 pub fn suggested_filename() -> String {
     let m = Manifest::new(false, false);
     // `created_at` is already ISO; take the date portion.
-    let date = m.created_at.split('T').next().unwrap_or("backup").to_string();
+    let date = m
+        .created_at
+        .split('T')
+        .next()
+        .unwrap_or("backup")
+        .to_string();
     format!("stash-backup-{date}.zip")
 }
 

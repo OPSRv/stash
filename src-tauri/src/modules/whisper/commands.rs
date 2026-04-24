@@ -64,8 +64,11 @@ pub async fn transcribe_with_active_model(
         return Err(format!("audio file not found: {}", audio.display()));
     }
     let lang = language.unwrap_or_else(|| "uk".into());
-    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) / 2).max(2)
-        as i32;
+    let threads = (std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        / 2)
+    .max(2) as i32;
     tauri::async_runtime::spawn_blocking(move || {
         pipeline::transcribe(&audio, &model, &lang, threads).map_err(|e| e.to_string())
     })
@@ -78,12 +81,7 @@ pub fn whisper_list_models(
     app: AppHandle,
     state: State<'_, WhisperStateHandle>,
 ) -> Result<Vec<ModelRow>, String> {
-    let active_id = state
-        .config
-        .lock()
-        .unwrap()
-        .active_model_id
-        .clone();
+    let active_id = state.config.lock().unwrap().active_model_id.clone();
     let rows = catalog::MODELS
         .iter()
         .map(|m| {
@@ -153,7 +151,10 @@ async fn run_download(
     final_path: &PathBuf,
 ) -> Result<(), String> {
     // Defensive: only fetch from the prefix we baked into the catalog.
-    if !spec.url.starts_with("https://huggingface.co/ggerganov/whisper.cpp/") {
+    if !spec
+        .url
+        .starts_with("https://huggingface.co/ggerganov/whisper.cpp/")
+    {
         return Err("model url is not on the allowed host".into());
     }
     let client = reqwest::Client::builder()
@@ -295,11 +296,17 @@ pub async fn whisper_transcribe_path(
         return Err(format!("audio file not found: {path}"));
     }
     let lang = language.unwrap_or_else(|| "uk".into());
-    let threads = (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4) / 2).max(2)
-        as i32;
+    let threads = (std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        / 2)
+    .max(2) as i32;
     let _ = app.emit(
         "whisper:transcribe",
-        TranscribeEvent { note_id: 0, stage: "running" },
+        TranscribeEvent {
+            note_id: 0,
+            stage: "running",
+        },
     );
     let model = model_path.clone();
     let lang_owned = lang.clone();
@@ -310,7 +317,10 @@ pub async fn whisper_transcribe_path(
     .map_err(|e| e.to_string())??;
     let _ = app.emit(
         "whisper:transcribe",
-        TranscribeEvent { note_id: 0, stage: "done" },
+        TranscribeEvent {
+            note_id: 0,
+            stage: "done",
+        },
     );
     Ok(text)
 }

@@ -176,8 +176,10 @@ impl Assistant {
             for call in tool_calls {
                 let result = match self.tools.invoke(&ctx, &call).await {
                     Ok(payload) => payload,
-                    Err(e) => format!("{{\"error\":{}}}", serde_json::to_string(&e)
-                        .unwrap_or_else(|_| "\"tool error\"".into())),
+                    Err(e) => format!(
+                        "{{\"error\":{}}}",
+                        serde_json::to_string(&e).unwrap_or_else(|_| "\"tool error\"".into())
+                    ),
                 };
                 messages.push(ChatMessage::tool(call.id.clone(), result.clone()));
                 new_rows.push(NewChatRow {
@@ -243,7 +245,12 @@ fn list_commands_for_prompt(state: &TelegramState) -> String {
          arguments passed as a single free-text string):\n",
     );
     for h in handlers {
-        out.push_str(&format!("- {} — {} ({})\n", h.name(), h.description(), h.usage()));
+        out.push_str(&format!(
+            "- {} — {} ({})\n",
+            h.name(),
+            h.description(),
+            h.usage()
+        ));
     }
     out.trim_end().to_string()
 }
@@ -276,7 +283,11 @@ fn recent_inbox_for_prompt(state: &TelegramState) -> String {
         // Cap per-line length so a pasted essay doesn't dominate the
         // prompt — the model can always scroll via /summarize.
         let short: String = summary.chars().take(200).collect();
-        let ellipsis = if summary.chars().count() > 200 { "…" } else { "" };
+        let ellipsis = if summary.chars().count() > 200 {
+            "…"
+        } else {
+            ""
+        };
         out.push_str(&format!("- [{}] {short}{ellipsis}\n", it.kind));
     }
     out.trim_end().to_string()
@@ -382,14 +393,21 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::stash::ListNotes);
     tools.register(super::tools::stash::NavigateTab);
     tools.register(super::tools::stash::InvokeCommand);
-    if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>() {
+    if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>()
+    {
         tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));
     }
     if let Some(pomo) = app.try_state::<Arc<crate::modules::pomodoro::state::PomodoroState>>() {
-        tools.register(super::tools::stash::PomodoroStatus::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroStart::new(pomo.inner().clone()));
+        tools.register(super::tools::stash::PomodoroStatus::new(
+            pomo.inner().clone(),
+        ));
+        tools.register(super::tools::stash::PomodoroStart::new(
+            pomo.inner().clone(),
+        ));
         tools.register(super::tools::stash::PomodoroStop::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroSavePreset::new(pomo.inner().clone()));
+        tools.register(super::tools::stash::PomodoroSavePreset::new(
+            pomo.inner().clone(),
+        ));
     }
 
     Ok(Assistant {
@@ -503,7 +521,7 @@ mod tests {
                 id: call_id.into(),
                 name: name.into(),
                 args_json: args.into(),
-            signature: None,
+                signature: None,
             }],
         }
     }
@@ -555,7 +573,10 @@ mod tests {
             tools,
         };
 
-        let reply = assistant.handle("what do you know about me?").await.unwrap();
+        let reply = assistant
+            .handle("what do you know about me?")
+            .await
+            .unwrap();
         assert_eq!(reply.text, "You like tea.");
         let rows = state.repo.lock().unwrap().chat_load_recent(10).unwrap();
         // user + assistant(tool call) + tool + assistant(final)
@@ -595,10 +616,7 @@ mod tests {
         // rows; we break on the next tool-call turn without
         // executing its tools.
         let rows = state.repo.lock().unwrap().chat_load_recent(100).unwrap();
-        let tool_rows = rows
-            .iter()
-            .filter(|r| r.role == ChatRole::Tool)
-            .count();
+        let tool_rows = rows.iter().filter(|r| r.role == ChatRole::Tool).count();
         assert_eq!(tool_rows, MAX_TOOL_DEPTH);
     }
 
@@ -611,14 +629,18 @@ mod tests {
         AiSettings {
             system_prompt: "p".into(),
             context_window: 10,
-        reply_on_voice: true,
+            reply_on_voice: true,
         }
         .save(state.as_ref())
         .unwrap();
         // Pre-seed 100 rows.
         let rows: Vec<NewChatRow> = (0..100)
             .map(|i| NewChatRow {
-                role: if i % 2 == 0 { ChatRole::User } else { ChatRole::Assistant },
+                role: if i % 2 == 0 {
+                    ChatRole::User
+                } else {
+                    ChatRole::Assistant
+                },
                 content: format!("m{i}"),
                 tool_call_id: None,
                 tool_name: None,
@@ -644,7 +666,8 @@ mod tests {
     async fn system_prompt_and_facts_are_injected() {
         let state = fresh_state();
         AiSettings {
-            system_prompt: "be brief".into(), reply_on_voice: true,
+            system_prompt: "be brief".into(),
+            reply_on_voice: true,
             context_window: 50,
         }
         .save(state.as_ref())

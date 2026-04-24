@@ -83,9 +83,7 @@ fn existing_install(binary: &Path) -> Option<PathBuf> {
             let resolved = if target.is_absolute() {
                 target
             } else {
-                link.parent()
-                    .map(|p| p.join(&target))
-                    .unwrap_or(target)
+                link.parent().map(|p| p.join(&target)).unwrap_or(target)
             };
             if let (Ok(a), Ok(b)) = (resolved.canonicalize(), binary.canonicalize()) {
                 if a == b {
