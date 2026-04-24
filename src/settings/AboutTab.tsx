@@ -6,6 +6,7 @@ import { Card } from '../shared/ui/Card';
 import { Kbd } from '../shared/ui/Kbd';
 import { ytDlpVersion } from '../modules/downloader/api';
 import { accent } from '../shared/theme/accent';
+import { UpdateCheckRow } from './UpdateCheckRow';
 import logoUrl from '../../logo.svg?url';
 
 const GITHUB_URL = 'https://github.com/OPSRv/stash';
@@ -139,6 +140,8 @@ export const AboutTab = () => {
           </Card>
         ))}
       </div>
+
+      <UpdateCheckRow />
 
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         <Button size="xs" tone="accent" variant="solid" onClick={() => openUrl(GITHUB_URL)}>
