@@ -23,6 +23,7 @@ const meta = {
     onSend: () => {},
     onFileAttach: () => {},
     onEscape: () => {},
+    onClose: () => {},
     voice: voiceStub('idle'),
     compact: false,
   },
@@ -79,6 +80,11 @@ export const MicError: Story = {
 };
 
 /// Smoke playground — controlled value so typing works in the iframe.
+export const WithoutCloseAffordance: Story = {
+  args: { onClose: undefined },
+  parameters: { paneWidth: 720 },
+};
+
 export const Interactive: Story = {
   render: (args) => {
     const [val, setVal] = useState('');

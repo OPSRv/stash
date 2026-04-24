@@ -1,7 +1,8 @@
-import { forwardRef, useState } from 'react';
+import { forwardRef, useRef, useState } from 'react';
 
 import { Button } from '../../../shared/ui/Button';
 import {
+  CloseIcon,
   MicIcon,
   SendToAiIcon,
   StopCircleIcon,
@@ -20,6 +21,10 @@ export type ComposeBoxProps = {
   onFileAttach: (file: File) => void | Promise<void>;
   /// Focus terminal when the user escapes out of compose.
   onEscape: () => void;
+  /// Dismiss the Compose strip entirely — wired to the header close
+  /// button and Esc. When omitted the close affordance is hidden and
+  /// Esc falls back to `onEscape` (legacy focus-only behaviour).
+  onClose?: () => void;
   /// Whisper recorder state + toggle. The hook lives in the shell so
   /// transcripts can also land in `value` via the `insertAtCursor`
   /// helper; here we only render its UI.
@@ -37,12 +42,45 @@ export type ComposeBoxProps = {
 /// The outer div is itself a file dropzone — dragging a PDF from
 /// Finder over any part of the compose strip lights up an accent
 /// border on the textarea.
+const MIN_COMPOSE_HEIGHT = 96;
+const MAX_COMPOSE_HEIGHT = 460;
+const DEFAULT_COMPOSE_HEIGHT = 120;
+
 export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
   function ComposeBox(
-    { value, onChange, onSend, onFileAttach, onEscape, voice },
+    { value, onChange, onSend, onFileAttach, onEscape, onClose, voice },
     ref,
   ) {
     const [dragOver, setDragOver] = useState(false);
+    /// Textarea height in px. Drag the top-edge grip to grow Compose
+    /// upward into the terminal area; the pane re-fits xterm on the
+    /// next frame so the shell always occupies the remaining space.
+    const [textareaHeight, setTextareaHeight] = useState<number>(
+      DEFAULT_COMPOSE_HEIGHT,
+    );
+    const resizeStartY = useRef(0);
+    const resizeStartH = useRef(0);
+    const onResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      resizeStartY.current = e.clientY;
+      resizeStartH.current = textareaHeight;
+      const move = (ev: PointerEvent) => {
+        // Dragging UP => smaller clientY => larger compose.
+        const delta = resizeStartY.current - ev.clientY;
+        const next = Math.max(
+          MIN_COMPOSE_HEIGHT,
+          Math.min(MAX_COMPOSE_HEIGHT, resizeStartH.current + delta),
+        );
+        setTextareaHeight(next);
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+    };
     const handleFiles = async (files: File[]) => {
       // Sequential so caret placement stays predictable when the
       // consumer inserts an `@path` per file.
@@ -51,7 +89,7 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
 
     return (
       <div
-        className="border-t hair flex flex-col gap-1.5 px-3 py-2 shrink-0"
+        className="border-t hair flex flex-col gap-1.5 px-3 py-2 shrink-0 relative"
         style={{
           // Semi-transparent pane colour + backdrop-blur — the strip
           // reads as frosted-glass chrome over the tinted terminal
@@ -90,6 +128,35 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
         }}
         data-testid="terminal-compose"
       >
+        {/* Top-edge drag grip — a full-width 6 px band whose centre line
+            pulses faintly on hover so users discover they can grow
+            Compose upward into the terminal area. */}
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize compose height"
+          onPointerDown={onResizeStart}
+          className="absolute left-0 right-0 group"
+          style={{
+            top: -3,
+            height: 6,
+            cursor: 'ns-resize',
+            touchAction: 'none',
+            zIndex: 2,
+          }}
+          data-testid="terminal-compose-resize"
+        >
+          <div
+            className="mx-auto transition-colors"
+            style={{
+              marginTop: 2,
+              width: 36,
+              height: 2,
+              borderRadius: 2,
+              background: 'rgba(255,255,255,0.12)',
+            }}
+          />
+        </div>
         <div className="flex items-center gap-2 min-w-0">
           <span className="t-tertiary text-meta shrink-0 select-none">
             Compose
@@ -160,6 +227,18 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
             >
               <SendToAiIcon size={13} />
             </Button>
+            {onClose && (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={onClose}
+                title="Close Compose (⌘⇧E · Esc)"
+                aria-label="Close compose"
+                data-testid="terminal-compose-close"
+              >
+                <CloseIcon size={13} />
+              </Button>
+            )}
           </div>
         </div>
         <textarea
@@ -196,11 +275,15 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
               void onSend(true);
             } else if (e.key === 'Escape') {
               e.preventDefault();
-              onEscape();
+              // Prefer the full dismiss path when the host supports it —
+              // Esc then reads as "back to terminal" with Compose hidden,
+              // matching the close button. Falls back to the legacy
+              // focus-only behaviour for hosts that haven't migrated.
+              if (onClose) onClose();
+              else onEscape();
             }
           }}
           placeholder="Message · ⏎ send · ⇧⏎ newline · ⌥⏎ insert · Esc back"
-          rows={5}
           className="w-full resize-none rounded-md px-2 py-1.5 text-body font-mono outline-none t-primary"
           style={{
             // Darker recess against the frosted compose strip so the
@@ -210,8 +293,9 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
             border: dragOver
               ? '1px solid var(--stash-accent)'
               : '1px solid var(--color-border-hair, rgba(255,255,255,0.08))',
-            minHeight: 84,
-            maxHeight: 200,
+            height: textareaHeight,
+            minHeight: MIN_COMPOSE_HEIGHT,
+            maxHeight: MAX_COMPOSE_HEIGHT,
             transition: 'border-color 120ms',
           }}
           spellCheck={false}

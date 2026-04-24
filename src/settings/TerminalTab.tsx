@@ -31,6 +31,26 @@ const updateSnippet = (
 export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
   <div className="max-w-[560px] mx-auto space-y-6">
     <section>
+      <SettingsSectionHeader label="CLAUDE CODE" />
+      <div className="divide-y divide-white/5">
+        <SettingRow
+          title="Launcher command"
+          description="Runs when the Claude Code button in the terminal header is clicked. Add flags to taste — the whole line is written into the PTY verbatim, followed by Enter."
+          control={
+            <Input
+              aria-label="Claude Code launcher command"
+              placeholder="claude"
+              value={settings.terminalClaudeCommand}
+              onChange={(e) =>
+                onChange('terminalClaudeCommand', e.currentTarget.value)
+              }
+              className="w-[260px] font-mono"
+            />
+          }
+        />
+      </div>
+    </section>
+    <section>
       <SettingsSectionHeader label="SNIPPETS" />
       <div className="divide-y divide-white/5">
         <SettingRow

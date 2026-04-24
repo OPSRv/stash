@@ -72,6 +72,15 @@ export type Settings = {
    * have to be retyped.
    */
   terminalSnippets: TerminalSnippet[];
+  /**
+   * Command launched by the dedicated Claude Code button in the terminal
+   * pane header. Default is plain `claude`; advanced users override with
+   * flags (e.g. `claude --model opus --dangerously-skip-permissions`).
+   * Clicking the button writes this verbatim into the PTY followed by a
+   * newline AND opens the Compose box, so multi-line prompts are ready
+   * to type the moment the Claude CLI takes over the TTY.
+   */
+  terminalClaudeCommand: string;
 };
 
 export type TerminalSnippet = {
@@ -145,6 +154,7 @@ export const DEFAULT_SETTINGS: Settings = {
   popupWidth: 920,
   popupHeight: 520,
   terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
+  terminalClaudeCommand: 'claude',
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

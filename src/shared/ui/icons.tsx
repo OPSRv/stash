@@ -218,6 +218,36 @@ export const MagicWandIcon = ({ size = 14, className }: IconProps) => (
   </svg>
 );
 
+/// Claude radial burst mark — 10 thin tapered rays at 36° increments,
+/// matching the Anthropic Claude brand glyph silhouette at icon scale.
+/// Five rotated narrow ellipses give a 10-point asterisk; each ellipse
+/// is one ray and its mirror. Fill is the Claude brand orange, hard-
+/// coded so the mark reads as Claude regardless of theme — overridable
+/// via the `color` prop when a component needs a monochrome variant.
+export const ClaudeIcon = ({
+  size = 14,
+  className,
+  color = '#D97757',
+}: IconProps & { color?: string }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    className={className}
+    fill={color}
+    stroke="none"
+    aria-hidden
+  >
+    <g transform="translate(12 12)">
+      <ellipse cx="0" cy="0" rx="1.1" ry="10.5" transform="rotate(0)" />
+      <ellipse cx="0" cy="0" rx="1.1" ry="10.5" transform="rotate(36)" />
+      <ellipse cx="0" cy="0" rx="1.1" ry="10.5" transform="rotate(72)" />
+      <ellipse cx="0" cy="0" rx="1.1" ry="10.5" transform="rotate(108)" />
+      <ellipse cx="0" cy="0" rx="1.1" ry="10.5" transform="rotate(144)" />
+    </g>
+  </svg>
+);
+
 export const RefreshIcon = ({ size = 14, className }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
     <path d="M20 12a8 8 0 1 1-2.34-5.66" />

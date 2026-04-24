@@ -352,10 +352,14 @@ export const TerminalPane = ({
   const [snippets, setSnippets] = useState<
     { id: string; label: string; command: string }[]
   >([]);
+  const [claudeCommand, setClaudeCommand] = useState<string>('claude');
   useEffect(() => {
     const read = () =>
       loadSettings()
-        .then((s) => setSnippets(s.terminalSnippets))
+        .then((s) => {
+          setSnippets(s.terminalSnippets);
+          setClaudeCommand(s.terminalClaudeCommand || 'claude');
+        })
         .catch(() => {});
     read();
     window.addEventListener('stash:settings-changed', read);
@@ -379,6 +383,25 @@ export const TerminalPane = ({
     },
     [id],
   );
+
+  const launchClaude = useCallback(async () => {
+    const cmd = (claudeCommand || 'claude').trim();
+    if (!cmd) return;
+    // Open Compose first so a multi-line prompt is ready the moment the
+    // Claude CLI takes over the TTY. Focus lands on the composer via the
+    // same toggleCompose path used by ⌘⇧E.
+    if (!composeOpen) {
+      setComposeOpen(true);
+      requestAnimationFrame(() => composeRef.current?.focus());
+    }
+    try {
+      await ptyWrite(id, encodeBase64(`${cmd}\r`));
+    } catch (e) {
+      termRef.current?.write(
+        `\r\n\x1b[31mclaude launch failed: ${String(e)}\x1b[0m\r\n`,
+      );
+    }
+  }, [claudeCommand, composeOpen, id]);
 
   const restart = useCallback(async () => {
     // Reach into Rust first — it remembers the last cwd announced via
@@ -697,6 +720,9 @@ export const TerminalPane = ({
         maximized={maximized}
         onClosePane={onClosePane}
         onPaneDragStart={onPaneDragStart}
+        onLaunchClaude={launchClaude}
+        claudeCommand={claudeCommand}
+        claudeRunning={procName.toLowerCase() === 'claude'}
       />
       {searchOpen && (
         <div
@@ -816,6 +842,10 @@ export const TerminalPane = ({
           onSend={sendCompose}
           onFileAttach={(f) => attachFileBlob(f, f.name)}
           onEscape={() => termRef.current?.focus()}
+          onClose={() => {
+            setComposeOpen(false);
+            termRef.current?.focus();
+          }}
           voice={voice}
           compact={compact}
         />

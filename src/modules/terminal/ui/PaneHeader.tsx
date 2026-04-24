@@ -4,6 +4,7 @@ import { Button } from '../../../shared/ui/Button';
 import { ContextMenu, type ContextMenuItem } from '../../../shared/ui/ContextMenu';
 import { DragDots } from '../../../shared/ui/DragDots';
 import {
+  ClaudeIcon,
   CloseIcon,
   CodeIcon,
   PencilIcon,
@@ -45,6 +46,19 @@ export type PaneHeaderProps = {
   /// Pointer-down on the pane's drag handle; the shell's drag
   /// manager owns the rest of the gesture.
   onPaneDragStart?: (e: React.PointerEvent) => void;
+  /// One-click Claude Code launcher — runs the user's configured
+  /// command (default `claude`, overridable in Settings → Terminal so
+  /// flags like `--model opus` survive) and opens the Compose box so
+  /// a multi-line prompt is ready the moment the CLI takes over the TTY.
+  onLaunchClaude?: () => void;
+  /// Tooltip shown on the Claude Code button — mirrors the configured
+  /// command so users can confirm what will run before clicking.
+  claudeCommand?: string;
+  /// True when the foreground process in the pane is already `claude`.
+  /// Clicking the launcher again would just type `claude\r` into the
+  /// running CLI as prompt text, so the button becomes a no-op with a
+  /// clarifying tooltip instead.
+  claudeRunning?: boolean;
 };
 
 /// Pane header: drag-handle, status, snippet-popover trigger, action
@@ -68,6 +82,9 @@ export const PaneHeader = ({
   maximized = false,
   onClosePane,
   onPaneDragStart,
+  onLaunchClaude,
+  claudeCommand,
+  claudeRunning = false,
 }: PaneHeaderProps) => {
   const showStatus = !ultraCompact;
   const showLabel = !compact;
@@ -228,6 +245,27 @@ export const PaneHeader = ({
           </>
         )}
 
+        {onLaunchClaude && (
+          <Button
+            size="xs"
+            variant={claudeRunning ? 'soft' : 'ghost'}
+            tone={claudeRunning ? 'accent' : 'neutral'}
+            onClick={onLaunchClaude}
+            disabled={dead || claudeRunning}
+            title={
+              claudeRunning
+                ? 'Claude Code is already running in this pane'
+                : claudeCommand && claudeCommand.trim()
+                  ? `Launch Claude Code (${claudeCommand.trim()}) and open Compose`
+                  : 'Launch Claude Code — configure the command in Settings → Terminal'
+            }
+            aria-label="Launch Claude Code"
+            aria-pressed={claudeRunning}
+            data-testid="terminal-launch-claude"
+          >
+            <ClaudeIcon size={13} />
+          </Button>
+        )}
         <Button
           size="xs"
           variant={cmdMenu ? 'soft' : 'ghost'}

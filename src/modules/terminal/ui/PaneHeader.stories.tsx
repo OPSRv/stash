@@ -25,6 +25,8 @@ const meta = {
     toggleCompose: () => {},
     onFind: () => {},
     onRestart: () => {},
+    onLaunchClaude: () => {},
+    claudeCommand: 'claude',
   },
   argTypes: {
     compact: { control: 'boolean' },
@@ -89,5 +91,20 @@ export const DeadShell: Story = {
 
 export const WithSelection: Story = {
   args: { selection: 'npm run build\n' },
+  parameters: { paneWidth: 720 },
+};
+
+export const ClaudeCommandWithFlags: Story = {
+  args: { claudeCommand: 'claude --model opus --dangerously-skip-permissions' },
+  parameters: { paneWidth: 720 },
+};
+
+export const ClaudeLauncherDisabledWhenDead: Story = {
+  args: { dead: true, statusLabel: 'shell exited' },
+  parameters: { paneWidth: 720 },
+};
+
+export const ClaudeAlreadyRunning: Story = {
+  args: { claudeRunning: true, statusLabel: 'claude' },
   parameters: { paneWidth: 720 },
 };
