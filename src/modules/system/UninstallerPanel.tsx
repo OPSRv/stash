@@ -79,14 +79,14 @@ export const UninstallerPanel = () => {
     setUninstalling(false);
     if (failed === 0) {
       toast({
-        title: 'Застосунок видалено',
-        description: `${selected.name} · звільнено ${formatBytes(freed)}`,
+        title: 'App uninstalled',
+        description: `${selected.name} · freed ${formatBytes(freed)}`,
         variant: 'success',
       });
     } else {
       toast({
-        title: `Частково видалено (${failed} помилок)`,
-        description: `${selected.name} · звільнено ${formatBytes(freed)}`,
+        title: `Partially removed (${failed} errors)`,
+        description: `${selected.name} · freed ${formatBytes(freed)}`,
         variant: 'error',
       });
     }
@@ -129,9 +129,9 @@ export const UninstallerPanel = () => {
               </svg>
             </div>
             <div className="flex-1">
-              <div className="t-primary text-body font-semibold">Застосунки</div>
+              <div className="t-primary text-body font-semibold">Applications</div>
               <div className="t-tertiary text-meta">
-                {apps ? `${apps.length} знайдено` : 'Завантаження…'}
+                {apps ? `${apps.length} found` : 'Loading…'}
               </div>
             </div>
           </div>
@@ -140,15 +140,15 @@ export const UninstallerPanel = () => {
           compact
           value={query}
           onChange={setQuery}
-          placeholder="Пошук за назвою або bundle id"
+          placeholder="Search by name or bundle id"
         />
         <div className="flex-1 min-h-0 overflow-auto">
-          {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+          {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
           {!error && !apps && (
             <CenterSpinner fit="inline" />
           )}
           {filtered && filtered.length === 0 && (
-            <EmptyState title="Нічого не знайдено" />
+            <EmptyState title="Nothing found" />
           )}
           <ul>
             {(filtered ?? []).map((a) => {
@@ -184,8 +184,8 @@ export const UninstallerPanel = () => {
       <div className="flex-1 min-w-0 flex flex-col">
         {!selected ? (
           <EmptyState
-            title="Оберіть застосунок"
-            description="У правій панелі ви побачите його залишки по всіх Library/ локаціях."
+            title="Select an app"
+            description="The right panel will show its leftovers across all Library/ locations."
           />
         ) : (
           <>
@@ -203,7 +203,7 @@ export const UninstallerPanel = () => {
                 </div>
                 <div>
                   <div className="t-tertiary text-[10px] uppercase tracking-wider">
-                    Залишки
+                    Leftovers
                   </div>
                   <div className="t-primary tabular-nums font-medium">
                     {leftovers ? formatBytes(leftoversSize) : '…'}
@@ -211,7 +211,7 @@ export const UninstallerPanel = () => {
                 </div>
                 <div>
                   <div className="t-tertiary text-[10px] uppercase tracking-wider">
-                    Всього
+                    Total
                   </div>
                   <div className="t-primary tabular-nums font-medium">
                     {leftovers ? formatBytes(selected.size_bytes + leftoversSize) : '…'}
@@ -225,13 +225,13 @@ export const UninstallerPanel = () => {
                   loading={uninstalling}
                   onClick={() => setConfirmOpen(true)}
                 >
-                  Деінсталювати
+                  Uninstall
                 </Button>
               </div>
             </div>
             <div className="flex-1 min-h-0 overflow-auto">
               <div className="px-4 py-1.5 t-tertiary text-meta uppercase tracking-wider border-b hair">
-                Знайдені залишки
+                Found leftovers
               </div>
               {leftoversLoading && (
                 <div className="flex items-center justify-center py-4">
@@ -240,7 +240,7 @@ export const UninstallerPanel = () => {
               )}
               {!leftoversLoading && leftovers && leftovers.length === 0 && (
                 <div className="p-4 t-tertiary text-meta">
-                  Залишки не знайдено — застосунок чистий.
+                  No leftovers found — app is clean.
                 </div>
               )}
               {leftovers && leftovers.length > 0 && (
@@ -266,13 +266,13 @@ export const UninstallerPanel = () => {
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Видалити застосунок і залишки?"
+        title="Uninstall app and leftovers?"
         description={
           selected
-            ? `${selected.name} (${formatBytes(selected.size_bytes + leftoversSize)}) буде переміщено у кошик. Ви зможете відновити його з кошика macOS.`
+            ? `${selected.name} (${formatBytes(selected.size_bytes + leftoversSize)}) will be moved to trash. You can restore it from the macOS trash.`
             : undefined
         }
-        confirmLabel="Деінсталювати"
+        confirmLabel="Uninstall"
         tone="danger"
         onConfirm={handleUninstall}
         onCancel={() => setConfirmOpen(false)}

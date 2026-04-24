@@ -52,13 +52,13 @@ describe('CachesPanel', () => {
     wrap(<CachesPanel />);
     await waitFor(() => expect(screen.getByText('Yarn')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Yarn'));
-    fireEvent.click(screen.getByRole('button', { name: 'У кошик' }));
-    // Two "У кошик" buttons now exist: the toolbar one is still in the DOM,
+    fireEvent.click(screen.getByRole('button', { name: 'Trash' }));
+    // Two "Trash" buttons now exist: the toolbar one is still in the DOM,
     // the dialog confirm was just opened. Take the one inside role=dialog.
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(
       [...dialog.querySelectorAll('button')].find((b) =>
-        /У кошик/.test(b.textContent ?? ''),
+        /Trash/.test(b.textContent ?? ''),
       )!,
     );
     await waitFor(() =>
@@ -98,8 +98,8 @@ describe('LaunchAgentsPanel', () => {
     await waitFor(() =>
       expect(screen.getByText('com.example.user-agent')).toBeInTheDocument(),
     );
-    expect(screen.getByText(/Користувацькі \(1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Системні \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/User \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/System \(1\)/)).toBeInTheDocument();
 
     const switches = screen.getAllByRole('switch');
     // First agent is loaded (user) — clicking should disable it.

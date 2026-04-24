@@ -470,6 +470,14 @@ export const PopupShell = () => {
           window.addEventListener('blur', restore);
         }}
         className="relative flex items-center gap-1 px-2 py-1.5 border-b hair cursor-grab active:cursor-grabbing"
+        style={{
+          // Scope reflow caused by per-frame grid-template-columns on each
+          // TabButton (label expand/collapse) to the header itself. Without
+          // this, every animation frame re-lays out the rest of the popup
+          // (tab content + native overlays) — which is what made tab
+          // switches feel sticky on slow machines.
+          contain: 'layout style',
+        }}
       >
         {/*
           Active-tab pill. Sits BEHIND the buttons (earlier in DOM →
@@ -482,13 +490,18 @@ export const PopupShell = () => {
         */}
         <span
           aria-hidden
-          className="pointer-events-none absolute top-1.5 h-7 rounded-md"
+          className="pointer-events-none absolute top-1.5 h-7 rounded-md motion-reduce:!transition-none"
           style={{
             background: accent(0.14),
             boxShadow: `inset 0 0 0 1px ${accent(0.22)}`,
             left: 0,
-            transform: `translateX(${indicator.left}px)`,
+            // translate3d forces a dedicated compositor layer so the
+            // 260ms sweep paints on the GPU instead of re-rasterising
+            // the header background (vibrancy + hairline border) every
+            // frame. Big win on Intel iGPUs.
+            transform: `translate3d(${indicator.left}px, 0, 0)`,
             width: indicator.width,
+            willChange: 'transform, width',
             // Both transform (position) and width use CSS transitions so
             // the pill sweeps and grows in sync with the tab's own label
             // expansion (same 260ms / emphasized easing in TabButton).

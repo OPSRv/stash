@@ -40,7 +40,7 @@ export const PlaceholderPanel = ({ item }: { item: NavItem }) => (
             className="w-1.5 h-1.5 rounded-full"
             style={{ background: item.gradient[1] }}
           />
-          У розробці — див. SYSTEM_MODULE.md
+          In development — see SYSTEM_MODULE.md
         </div>
       </div>
     </div>

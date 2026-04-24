@@ -37,7 +37,13 @@ fn now_ms() -> i64 {
 pub fn spawn(state: Arc<PomodoroState>, app: AppHandle) {
     thread::spawn(move || loop {
         thread::sleep(Duration::from_millis(TICK_MS));
-        // Drain events inside the lock, then release before doing I/O.
+        // Drain events AND push the tray-title update inside the lock. If we
+        // release the lock before calling `set_title`, a `pomodoro_stop`
+        // command can sneak in between `snapshot()` and `set_title(...)`: the
+        // command clears the label to `None` first, and our stale call
+        // immediately re-paints the last "⏸ MM:SS" over it. Holding the lock
+        // across `set_title` serialises driver vs. command updates so the
+        // most recent core state always wins.
         let (events, snapshot) = {
             let mut core = match state.core.lock() {
                 Ok(c) => c,
@@ -45,16 +51,12 @@ pub fn spawn(state: Arc<PomodoroState>, app: AppHandle) {
             };
             let events = core.advance(now_ms());
             let snap = core.snapshot();
+            crate::tray::set_title(&app, format_tray_title(&snap).as_deref());
             (events, snap)
         };
         // Always emit the snapshot + a tick — the frontend relies on this
         // for its countdown render when the webview is alive.
         let _ = app.emit("pomodoro:tick", &snapshot);
-        // Mirror the countdown into the menubar tray title so the user
-        // can see time remaining without opening the popup. Paused
-        // sessions keep their last time but with a ⏸ prefix; idle
-        // clears the label so the icon reverts to bare glyph.
-        crate::tray::set_title(&app, format_tray_title(&snapshot).as_deref());
         if events.is_empty() {
             continue;
         }

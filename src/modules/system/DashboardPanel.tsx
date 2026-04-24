@@ -19,9 +19,9 @@ const formatUptime = (sec: number): string => {
   const d = Math.floor(sec / 86400);
   const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
-  if (d > 0) return `${d}д ${h}г`;
-  if (h > 0) return `${h}г ${m}хв`;
-  return `${m}хв`;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 };
 
 /// Format per-second throughput. We stay in binary units for consistency
@@ -42,7 +42,7 @@ const IFACE_LABEL: Record<NetIface['kind'], string> = {
   ethernet: 'Ethernet',
   vpn: 'VPN',
   loopback: 'Loopback',
-  other: 'Мережа',
+  other: 'Network',
 };
 
 const WIFI_GLYPH =
@@ -207,13 +207,13 @@ export const DashboardPanel = () => {
       // doesn't notify every tick.
       if (next.cpu_percent >= 90 && !alertState.current.cpu) {
         alertState.current.cpu = true;
-        fireAlert('CPU навантажено', `${next.cpu_percent.toFixed(0)}% · load ${next.load_1m.toFixed(2)}`);
+        fireAlert('CPU under load', `${next.cpu_percent.toFixed(0)}% · load ${next.load_1m.toFixed(2)}`);
       } else if (next.cpu_percent < 72) {
         alertState.current.cpu = false;
       }
       if (next.mem_pressure_percent >= 90 && !alertState.current.mem) {
         alertState.current.mem = true;
-        fireAlert('RAM на межі', `Використано ${next.mem_pressure_percent.toFixed(0)}%`);
+        fireAlert('RAM critical', `Used ${next.mem_pressure_percent.toFixed(0)}%`);
       } else if (next.mem_pressure_percent < 72) {
         alertState.current.mem = false;
       }
@@ -221,7 +221,7 @@ export const DashboardPanel = () => {
         const freePct = (next.disk_free_bytes / next.disk_total_bytes) * 100;
         if (freePct < 10 && !alertState.current.disk) {
           alertState.current.disk = true;
-          fireAlert('Диск майже повний', `Лишилось ${freePct.toFixed(0)}%`);
+          fireAlert('Disk almost full', `${freePct.toFixed(0)}% remaining`);
         } else if (freePct >= 15) {
           alertState.current.disk = false;
         }
@@ -233,7 +233,7 @@ export const DashboardPanel = () => {
         !alertState.current.battery
       ) {
         alertState.current.battery = true;
-        fireAlert('Батарея розряджається', `${next.battery_percent.toFixed(0)}%`);
+        fireAlert('Battery draining', `${next.battery_percent.toFixed(0)}%`);
       } else if (
         next.battery_percent === null ||
         next.battery_percent >= 30 ||
@@ -254,9 +254,9 @@ export const DashboardPanel = () => {
     <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
       <header className="flex items-end justify-between">
         <div>
-          <div className="t-primary text-title font-semibold">Огляд системи</div>
+          <div className="t-primary text-title font-semibold">System overview</div>
           <div className="t-tertiary text-meta">
-            Живі метрики, оновлюються кожні 1.5 с
+            Live metrics, updated every 1.5 s
           </div>
         </div>
         {m && (
@@ -266,7 +266,7 @@ export const DashboardPanel = () => {
         )}
       </header>
 
-      {error && <div className="t-danger text-body">Помилка: {error}</div>}
+      {error && <div className="t-danger text-body">Error: {error}</div>}
 
       <div
         className="grid gap-3"
@@ -323,12 +323,12 @@ export const DashboardPanel = () => {
               sublabel="RAM"
             />
             <div className="min-w-0 flex-1">
-              <div className="t-tertiary text-meta">Використано</div>
+              <div className="t-tertiary text-meta">Used</div>
               <div className="t-primary tabular-nums text-body font-semibold">
                 {m ? formatBytes(m.mem_used_bytes) : '—'}
               </div>
               <div className="t-tertiary text-meta tabular-nums">
-                з {m ? formatBytes(m.mem_total_bytes) : '—'}
+                of {m ? formatBytes(m.mem_total_bytes) : '—'}
               </div>
               <div className="mt-1">
                 <Sparkline values={memHist.current} color="#8b94ff" max={100} width={140} height={28} />
@@ -359,15 +359,15 @@ export const DashboardPanel = () => {
                   ? `${((m.disk_used_bytes / m.disk_total_bytes) * 100).toFixed(0)}%`
                   : '…'
               }
-              sublabel="Диск"
+              sublabel="Disk"
             />
             <div className="min-w-0 flex-1">
-              <div className="t-tertiary text-meta">Використано</div>
+              <div className="t-tertiary text-meta">Used</div>
               <div className="t-primary tabular-nums text-body font-semibold">
                 {m ? formatBytes(m.disk_used_bytes) : '—'}
               </div>
               <div className="t-tertiary text-meta tabular-nums">
-                з {m ? formatBytes(m.disk_total_bytes) : '—'}
+                of {m ? formatBytes(m.disk_total_bytes) : '—'}
               </div>
             </div>
           </div>
@@ -395,13 +395,13 @@ export const DashboardPanel = () => {
             />
             <div className="relative">
               <div className="t-tertiary text-[10px] uppercase tracking-wider">
-                Вільно на диску
+                Free disk
               </div>
               <div className="t-primary text-title font-semibold mt-1 tabular-nums">
                 {formatBytes(m.disk_free_bytes)}
               </div>
               <div className="t-tertiary text-meta tabular-nums">
-                {m.process_count.toLocaleString()} процесів · load{' '}
+                {m.process_count.toLocaleString()} processes · load{' '}
                 {m.load_1m.toFixed(2)} / {m.load_5m.toFixed(2)} / {m.load_15m.toFixed(2)}
               </div>
               <div className="t-tertiary text-meta tabular-nums mt-0.5">
@@ -445,12 +445,12 @@ export const DashboardPanel = () => {
                 gradient={['#7ef7a5', '#17b26a']}
                 glow="rgba(23,178,106,0.35)"
                 label={`${(m.battery_percent ?? 0).toFixed(0)}%`}
-                sublabel={m.battery_charging ? 'Заряджається' : 'Батарея'}
+                sublabel={m.battery_charging ? 'Charging' : 'Battery'}
               />
               <div className="min-w-0 flex-1">
-                <div className="t-tertiary text-meta">Стан</div>
+                <div className="t-tertiary text-meta">Status</div>
                 <div className="t-primary text-body font-semibold">
-                  {m.battery_charging ? '⚡ Живлення' : '🔋 Розряджається'}
+                  {m.battery_charging ? '⚡ Power' : '🔋 Discharging'}
                 </div>
               </div>
             </div>
@@ -464,7 +464,7 @@ export const DashboardPanel = () => {
       {m && m.interfaces.length > 0 && (
         <>
           <div className="t-tertiary text-meta uppercase tracking-wider pt-1">
-            Мережа
+            Network
           </div>
           <div
             className="grid gap-3"

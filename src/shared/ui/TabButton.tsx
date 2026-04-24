@@ -48,18 +48,34 @@ export const TabButton = forwardRef<HTMLButtonElement, TabButtonProps>(
             *actual* content width instead of a fixed max-width cap, so the
             expansion doesn't stall on empty space and the indicator travels
             exactly with the content edge. `min-w-0` on the inner span lets
-            the track collapse cleanly.
+            the track collapse cleanly. The label itself fades+unblurs in
+            place (no horizontal translate) so it materialises *inside* the
+            already-arrived pill instead of sliding sideways from the icon.
           */}
           <span
             aria-hidden={collapsed || undefined}
-            className={`grid transition-[grid-template-columns,opacity,margin-left,transform] duration-[260ms] motion-reduce:transition-none ${
+            className={`grid transition-[grid-template-columns,margin-left] duration-[260ms] motion-reduce:transition-none ${
               collapsed
-                ? 'grid-cols-[0fr] opacity-0 ml-0 -translate-x-1'
-                : `grid-cols-[1fr] opacity-100 translate-x-0 ${icon ? 'ml-1.5' : ''}`
+                ? 'grid-cols-[0fr] ml-0'
+                : `grid-cols-[1fr] ${icon ? 'ml-1.5' : ''}`
             }`}
             style={{ transitionTimingFunction: emphasized }}
           >
-            <span className="min-w-0 overflow-hidden">{label}</span>
+            <span
+              className={`min-w-0 overflow-hidden transition-opacity duration-150 motion-reduce:transition-none ${
+                collapsed ? 'opacity-0 delay-0' : 'opacity-100 delay-[110ms]'
+              }`}
+              style={{
+                transitionTimingFunction: 'ease-out',
+                // Hint the compositor only while a transition can actually
+                // run. `will-change` on idle elements wastes a layer per tab
+                // (12 tabs × extra GPU memory) — toggling by state keeps the
+                // promotion scoped to the moment it matters.
+                willChange: collapsed ? 'opacity' : undefined,
+              }}
+            >
+              {label}
+            </span>
           </span>
         </button>
       </Tooltip>

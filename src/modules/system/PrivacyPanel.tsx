@@ -34,13 +34,13 @@ export const PrivacyPanel = () => {
     try {
       await trashPath(p.path);
       toast({
-        title: 'У кошик',
+        title: 'Moved to trash',
         description: `${p.label} · ${formatBytes(p.size_bytes)}`,
         variant: 'success',
       });
       refresh();
     } catch (e) {
-      toast({ title: 'Помилка', description: String(e), variant: 'error' });
+      toast({ title: 'Error', description: String(e), variant: 'error' });
     }
   }, [pending, refresh, toast]);
 
@@ -53,8 +53,8 @@ export const PrivacyPanel = () => {
             <path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z" />
           </svg>
         }
-        title="Приватність"
-        description="Історія браузерів, Recent Items, QuickLook, shell history."
+        title="Privacy"
+        description="Browser history, Recent Items, QuickLook, shell history."
         trailing={
           <div className="t-primary tabular-nums text-title font-semibold">
             {formatBytes(total)}
@@ -63,9 +63,9 @@ export const PrivacyPanel = () => {
       />
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && !items && <CenterSpinner />}
-        {items && items.length === 0 && <EmptyState title="Нічого не знайдено" />}
+        {items && items.length === 0 && <EmptyState title="Nothing found" />}
         {items && items.length > 0 && (
           <ul className="divide-y hair">
             {items.map((i) => {
@@ -92,7 +92,7 @@ export const PrivacyPanel = () => {
                       <div className="t-primary tabular-nums shrink-0">{formatBytes(i.size_bytes)}</div>
                       <RevealButton path={i.path} />
                       <Button size="sm" variant="soft" tone="danger" onClick={() => setPending(i)}>
-                        У кошик
+                        Trash
                       </Button>
                     </>
                   }
@@ -105,13 +105,13 @@ export const PrivacyPanel = () => {
 
       <ConfirmDialog
         open={pending !== null}
-        title="Видалити слід активності?"
+        title="Delete activity trail?"
         description={
           pending
-            ? `${pending.label} — ${pending.path}\n\nБуде переміщено у кошик. Деякі застосунки автоматично відтворять файл при наступному запуску.`
+            ? `${pending.label} — ${pending.path}\n\nWill be moved to trash. Some apps will recreate the file automatically on next launch.`
             : undefined
         }
-        confirmLabel="У кошик"
+        confirmLabel="Trash"
         tone="danger"
         onConfirm={confirm}
         onCancel={() => setPending(null)}

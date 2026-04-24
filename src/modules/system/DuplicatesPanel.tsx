@@ -53,8 +53,8 @@ export const DuplicatesPanel = () => {
     setBulkProgress(null);
     setGroups([]);
     toast({
-      title: failed === 0 ? 'Дублікати прибрано' : `Частково (${failed} помилок)`,
-      description: `Звільнено ${formatBytes(freed)}`,
+      title: failed === 0 ? 'Duplicates removed' : `Partially done (${failed} errors)`,
+      description: `Freed ${formatBytes(freed)}`,
       variant: failed === 0 ? 'success' : 'error',
     });
   }, [groups, toast]);
@@ -101,9 +101,9 @@ export const DuplicatesPanel = () => {
               .filter((g) => g.paths.length >= 2)
           : prev,
       );
-      toast({ title: 'У кошик', description: path, variant: 'success' });
+      toast({ title: 'Moved to trash', description: path, variant: 'success' });
     } catch (e) {
-      toast({ title: 'Помилка', description: String(e), variant: 'error' });
+      toast({ title: 'Error', description: String(e), variant: 'error' });
     }
   }, [pending, toast]);
 
@@ -117,8 +117,8 @@ export const DuplicatesPanel = () => {
             <rect x="8" y="8" width="12" height="12" rx="2" />
           </svg>
         }
-        title="Дублікати"
-        description={root ?? 'SHA-256 + розмір. Спочатку оберіть папку.'}
+        title="Duplicates"
+        description={root ?? 'SHA-256 + size. Choose a folder to start.'}
         trailing={
           <>
             <SegmentedControl<Threshold>
@@ -128,7 +128,7 @@ export const DuplicatesPanel = () => {
                 setThreshold(v);
                 if (root) scan(root);
               }}
-              ariaLabel="Мінімальний розмір"
+              ariaLabel="Minimum size"
               options={[
                 { value: '1', label: '≥1 MB' },
                 { value: '10', label: '≥10 MB' },
@@ -143,11 +143,11 @@ export const DuplicatesPanel = () => {
                   tone="danger"
                   onClick={() => cancelScan('duplicates').catch(() => undefined)}
                 >
-                  Зупинити
+                  Stop
                 </Button>
               )}
               <Button size="sm" variant="solid" tone="accent" onClick={choose} loading={scanning}>
-                {root ? 'Інша папка' : 'Обрати папку'}
+                {root ? 'Change folder' : 'Choose folder'}
               </Button>
             </div>
           </>
@@ -157,18 +157,18 @@ export const DuplicatesPanel = () => {
       {groups && groups.length > 0 && (
         <div className="px-4 py-1.5 border-b hair t-secondary text-meta flex items-center justify-between">
           <div>
-            Знайдено <span className="t-primary font-medium">{groups.length}</span> груп ·
-            можна звільнити{' '}
+            Found <span className="t-primary font-medium">{groups.length}</span> groups ·
+            reclaimable{' '}
             <span className="t-primary font-medium">{formatBytes(wasted)}</span>
           </div>
           <div className="flex items-center gap-2">
             {bulkProgress ? (
               <span className="t-tertiary tabular-nums">
-                {bulkProgress.done} з {bulkProgress.total}…
+                {bulkProgress.done} of {bulkProgress.total}…
               </span>
             ) : (
               <Button size="sm" variant="soft" tone="danger" onClick={keepNewest}>
-                Залишити перший у кожній групі
+                Keep first in each group
               </Button>
             )}
           </div>
@@ -176,20 +176,20 @@ export const DuplicatesPanel = () => {
       )}
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && scanning && (
           <div className="flex flex-col items-center justify-center h-full gap-2">
             <Spinner />
             <div className="t-tertiary text-meta">
-              Хешуємо файли — це може зайняти пару хвилин…
+              Hashing files — this may take a few minutes…
             </div>
           </div>
         )}
         {!error && !scanning && !groups && (
-          <EmptyState title="Готово до сканування" description="Оберіть папку щоб розпочати." />
+          <EmptyState title="Ready to scan" description="Choose a folder to start." />
         )}
         {!error && groups && groups.length === 0 && !scanning && (
-          <EmptyState title="Дублікатів не знайдено" />
+          <EmptyState title="No duplicates found" />
         )}
         {!error && groups && groups.length > 0 && (
           <div className="space-y-3 p-3">
@@ -205,7 +205,7 @@ export const DuplicatesPanel = () => {
               >
                 <div className="px-3 py-1.5 flex items-center justify-between border-b hair">
                   <div className="t-secondary text-meta">
-                    {g.paths.length} копій · {formatBytes(g.size_bytes)} кожна
+                    {g.paths.length} copies · {formatBytes(g.size_bytes)} each
                   </div>
                   <div className="t-tertiary text-[10px] font-mono">
                     {g.hash.slice(0, 10)}…
@@ -225,10 +225,10 @@ export const DuplicatesPanel = () => {
                         variant="soft"
                         tone="danger"
                         disabled={i === 0 && g.paths.length > 1}
-                        title={i === 0 ? 'Перший шлях лишається як оригінал' : undefined}
+                        title={i === 0 ? 'First path is kept as the original' : undefined}
                         onClick={() => setPending(p)}
                       >
-                        У кошик
+                        Trash
                       </Button>
                     </li>
                   ))}
@@ -241,9 +241,9 @@ export const DuplicatesPanel = () => {
 
       <ConfirmDialog
         open={pending !== null}
-        title="Видалити дублікат?"
-        description={pending ? `${pending}\n\nБуде переміщено у кошик.` : undefined}
-        confirmLabel="У кошик"
+        title="Delete duplicate?"
+        description={pending ? `${pending}\n\nWill be moved to trash.` : undefined}
+        confirmLabel="Trash"
         tone="danger"
         onConfirm={handleTrash}
         onCancel={() => setPending(null)}

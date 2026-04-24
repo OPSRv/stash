@@ -252,7 +252,15 @@ pub fn notify_pomodoro_changed(app: &AppHandle, is_paused: bool) {
 /// "how much is left". This is the whole point of a menubar app.
 pub fn set_title(app: &AppHandle, title: Option<&str>) {
     if let Some(tray) = app.tray_by_id("main") {
-        if let Err(err) = tray.set_title(title) {
+        // Workaround for `tray-icon 0.21.3` on macOS: passing `None` to
+        // `set_title` is a silent no-op — the crate's `set_title_inner`
+        // only touches `NSStatusItem.button.title` on the `Some` branch,
+        // so the previous label (e.g. a stale "⏸ 12:34" from a paused
+        // pomodoro) lingers even after the session is stopped. Coerce
+        // `None` into `Some("")` so AppKit actually resets the label to
+        // the empty string.
+        let coerced: Option<&str> = Some(title.unwrap_or(""));
+        if let Err(err) = tray.set_title(coerced) {
             tracing::warn!(error = %err, "tray: set_title failed");
         }
     }

@@ -72,7 +72,7 @@ export const SmartScanPanel = () => {
       const next: Bucket[] = [
         {
           id: 'caches',
-          label: 'Кеші',
+          label: 'Caches',
           description: `${caches.length} categories: Xcode, npm, pnpm, Yarn, browsers…`,
           gradient: ['#5ee2c4', '#2aa3ff'],
           size: cachesTotal,
@@ -93,8 +93,8 @@ export const SmartScanPanel = () => {
         },
         {
           id: 'screenshots',
-          label: `Скріншоти старше ${SCREENSHOTS_OLDER_THAN_DAYS} днів`,
-          description: `${oldShots.length} файлів на Desktop`,
+          label: `Screenshots older than ${SCREENSHOTS_OLDER_THAN_DAYS} days`,
+          description: `${oldShots.length} files on Desktop`,
           gradient: ['#ffd86b', '#ff914d'],
           size: shotsTotal,
           enabled: shotsTotal > 0,
@@ -114,8 +114,8 @@ export const SmartScanPanel = () => {
         },
         {
           id: 'tm',
-          label: 'Локальні Time Machine snapshots',
-          description: `${tmSnaps.length} знімків займають місце на SSD`,
+          label: 'Local Time Machine snapshots',
+          description: `${tmSnaps.length} snapshots taking up SSD space`,
           gradient: ['#d08cff', '#7a4bff'],
           size: 0, // tmutil не віддає розмір; буде визначено по факту
           enabled: tmSnaps.length > 0,
@@ -133,8 +133,8 @@ export const SmartScanPanel = () => {
         },
         {
           id: 'sims',
-          label: 'Недоступні Xcode симулятори',
-          description: `${unavailableSims.length} симуляторів без SDK`,
+          label: 'Unavailable Xcode simulators',
+          description: `${unavailableSims.length} simulators without SDK`,
           gradient: ['#8ec5ff', '#5561ff'],
           size: simsTotal,
           enabled: unavailableSims.length > 0,
@@ -150,8 +150,8 @@ export const SmartScanPanel = () => {
         },
         {
           id: 'trash',
-          label: 'Очистити кошики',
-          description: 'Усі томи · незворотно',
+          label: 'Empty trash',
+          description: 'All volumes · irreversible',
           gradient: ['#ff8a5b', '#ff3a6f'],
           size: 0, // не знаємо заздалегідь (Finder рахує на запит)
           enabled: true,
@@ -169,8 +169,8 @@ export const SmartScanPanel = () => {
       if (docker?.running && dockerReclaimable > 0) {
         next.push({
           id: 'docker',
-          label: 'Docker невикористане',
-          description: 'Образи, контейнери, volumes, build cache',
+          label: 'Docker unused',
+          description: 'Images, containers, volumes, build cache',
           gradient: ['#0ea5e9', '#5ee2c4'],
           size: dockerReclaimable,
           enabled: true,
@@ -188,8 +188,8 @@ export const SmartScanPanel = () => {
       if (iosTotal > 0) {
         next.push({
           id: 'ios-note',
-          label: `iOS бекапи: ${formatBytes(iosTotal)}`,
-          description: 'Відкрий вкладку «Важке на диску» щоб видалити вибіркові',
+          label: `iOS backups: ${formatBytes(iosTotal)}`,
+          description: 'Open the "Disk hogs" tab to selectively delete backups',
           gradient: ['#6b7280', '#374151'],
           size: 0,
           enabled: false,
@@ -235,8 +235,8 @@ export const SmartScanPanel = () => {
     setProgress(null);
     setCleaning(false);
     toast({
-      title: `Очищено ${targets.length} категорій`,
-      description: `Звільнено приблизно ${formatBytes(freed)}`,
+      title: `Cleaned ${targets.length} categories`,
+      description: `Freed approximately ${formatBytes(freed)}`,
       variant: 'success',
     });
     scan();
@@ -251,17 +251,17 @@ export const SmartScanPanel = () => {
             <path d="M13 2 4 14h7l-1 8 9-12h-7z" />
           </svg>
         }
-        title="Розумне прибирання"
-        description="Один клік — перевіряємо все що можна почистити й trash-ємо разом."
+        title="Smart clean"
+        description="One click — scans everything cleanable and trashes it together."
         trailing={
           <div className="text-right">
             <div className="t-tertiary text-[10px] uppercase tracking-wider">
-              Обрано
+              Selected
             </div>
             <div className="t-primary text-title font-semibold tabular-nums">
               {formatBytes(totalSelected)}
             </div>
-            <div className="t-tertiary text-meta">{selectedCount} категорій</div>
+            <div className="t-tertiary text-meta">{selectedCount} categories</div>
           </div>
         }
       />
@@ -271,7 +271,7 @@ export const SmartScanPanel = () => {
           <div className="flex flex-col items-center justify-center h-full gap-2">
             <Spinner />
             <div className="t-tertiary text-meta">
-              Сканую весь сміттєвий хвіст macOS…
+              Scanning macOS junk…
             </div>
           </div>
         )}
@@ -324,11 +324,11 @@ export const SmartScanPanel = () => {
 
       <div className="px-4 py-3 border-t hair flex items-center justify-between">
         <Button size="sm" variant="ghost" onClick={scan} disabled={scanning || cleaning}>
-          Пересканувати
+          Rescan
         </Button>
         {progress ? (
           <span className="t-tertiary text-meta tabular-nums">
-            Очищаю {progress.done} з {progress.total}…
+            Cleaning {progress.done} of {progress.total}…
           </span>
         ) : (
           <Button
@@ -339,7 +339,7 @@ export const SmartScanPanel = () => {
             loading={cleaning}
             onClick={cleanAll}
           >
-            Почистити обране
+            Clean selected
           </Button>
         )}
       </div>

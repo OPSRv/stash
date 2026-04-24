@@ -32,13 +32,13 @@ export const TrashBinsPanel = () => {
     try {
       await emptyTrash();
       toast({
-        title: 'Кошик очищено',
-        description: `Звільнено ${formatBytes(total)}`,
+        title: 'Trash emptied',
+        description: `Freed ${formatBytes(total)}`,
         variant: 'success',
       });
       refresh();
     } catch (e) {
-      toast({ title: 'Не вдалося очистити', description: String(e), variant: 'error' });
+      toast({ title: 'Failed to empty', description: String(e), variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -53,8 +53,8 @@ export const TrashBinsPanel = () => {
             <path d="M3 6h18M8 6l1-3h6l1 3M6 6l1 14h10l1-14M10 11v6M14 11v6" />
           </svg>
         }
-        title="Кошики"
-        description={`Внутрішній і всі зовнішні томи · ${totalItems.toLocaleString()} елементів`}
+        title="Trash bins"
+        description={`Internal and all external volumes · ${totalItems.toLocaleString()} items`}
         trailing={
           <>
             <div className="t-primary tabular-nums text-title font-semibold">
@@ -68,17 +68,17 @@ export const TrashBinsPanel = () => {
               disabled={total === 0}
               onClick={() => setConfirm(true)}
             >
-              Очистити всі
+              Empty all
             </Button>
           </>
         }
       />
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && !bins && <CenterSpinner />}
         {bins && bins.length === 0 && (
-          <EmptyState title="Кошик порожній" description="Нічого не знайдено на жодному томі." />
+          <EmptyState title="Trash is empty" description="Nothing found on any volume." />
         )}
         {bins && bins.length > 0 && (
           <ul className="divide-y hair">
@@ -102,7 +102,7 @@ export const TrashBinsPanel = () => {
                 title={b.volume}
                 meta={
                   <span title={b.path}>
-                    {b.path} · {b.item_count} елементів
+                    {b.path} · {b.item_count} items
                   </span>
                 }
                 trailing={
@@ -121,9 +121,9 @@ export const TrashBinsPanel = () => {
 
       <ConfirmDialog
         open={confirm}
-        title="Очистити всі кошики?"
-        description={`Буде видалено ${totalItems} елементів (${formatBytes(total)}). Цю дію не можна скасувати.`}
-        confirmLabel="Очистити"
+        title="Empty all trash bins?"
+        description={`${totalItems} items (${formatBytes(total)}) will be permanently deleted. This action cannot be undone.`}
+        confirmLabel="Empty"
         tone="danger"
         onConfirm={empty}
         onCancel={() => setConfirm(false)}

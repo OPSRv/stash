@@ -69,10 +69,10 @@ export const NetworkPanel = () => {
     setKilling(null);
     try {
       await killProcess(pid, true);
-      toast({ title: 'Процес завершено', description: `${name} (${pid})`, variant: 'success' });
+      toast({ title: 'Process killed', description: `${name} (${pid})`, variant: 'success' });
       refresh();
     } catch (e) {
-      toast({ title: 'Помилка', description: String(e), variant: 'error' });
+      toast({ title: 'Error', description: String(e), variant: 'error' });
     }
   }, [killing, refresh, toast]);
 
@@ -86,21 +86,21 @@ export const NetworkPanel = () => {
             <circle cx="12" cy="20" r="1.2" />
           </svg>
         }
-        title="Мережа"
-        description={`Усі TCP/UDP-зʼєднання · ${rows ? rows.length : '…'} активних · оновлення 5 с`}
+        title="Network"
+        description={`All TCP/UDP connections · ${rows ? rows.length : '…'} active · refreshes every 5 s`}
       />
 
       <SearchInput
         compact
         value={query}
         onChange={setQuery}
-        placeholder="Пошук за процесом, адресою, PID, станом"
+        placeholder="Search by process, address, PID, state"
       />
 
       <div className="flex-1 min-h-0 flex flex-col">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && !rows && <CenterSpinner fit="inline" />}
-        {filtered && filtered.length === 0 && <EmptyState title="Нічого не знайдено" />}
+        {filtered && filtered.length === 0 && <EmptyState title="Nothing found" />}
         {filtered && filtered.length > 0 && (
           <>
             <div
@@ -110,12 +110,12 @@ export const NetworkPanel = () => {
               }}
               role="row"
             >
-              <div className="px-3">Процес</div>
+              <div className="px-3">Process</div>
               <div className="px-2">PID</div>
               <div className="px-2">Proto</div>
-              <div className="px-2">Локальна</div>
-              <div className="px-2">Віддалена</div>
-              <div className="px-2">Стан</div>
+              <div className="px-2">Local</div>
+              <div className="px-2">Remote</div>
+              <div className="px-2">State</div>
               <div />
             </div>
             <div
@@ -151,7 +151,7 @@ export const NetworkPanel = () => {
                           tone="danger"
                           onClick={() => setKilling(r)}
                           disabled={r.pid <= 1}
-                          title="Завершити процес"
+                          title="Kill process"
                         >
                           Kill
                         </Button>
@@ -167,10 +167,10 @@ export const NetworkPanel = () => {
 
       <ConfirmDialog
         open={killing !== null}
-        title="Завершити процес?"
+        title="Kill process?"
         description={
           killing
-            ? `${killing.process} (PID ${killing.pid}) — SIGKILL. Активні зʼєднання розірвуться.`
+            ? `${killing.process} (PID ${killing.pid}) — SIGKILL. Active connections will be terminated.`
             : undefined
         }
         confirmLabel="Force quit"

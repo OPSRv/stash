@@ -42,7 +42,7 @@ const ScreenshotsTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
   }, []);
   if (!list) return <CenterSpinner />;
   if (list.length === 0)
-    return <EmptyState title="Скріншотів на Desktop не знайдено" />;
+    return <EmptyState title="No screenshots found on Desktop" />;
   return (
     <ul className="divide-y hair">
       {list.map((s) => (
@@ -62,7 +62,7 @@ const ScreenshotsTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
                   onPending({ kind: 'trash', path: s.path, size: s.size_bytes, label: s.path.split('/').pop() ?? s.path })
                 }
               >
-                У кошик
+                Trash
               </Button>
             </>
           }
@@ -78,7 +78,7 @@ const IosTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
     listIosBackups().then(setList).catch(() => setList([]));
   }, []);
   if (!list) return <CenterSpinner />;
-  if (list.length === 0) return <EmptyState title="iOS-бекапів не знайдено" />;
+  if (list.length === 0) return <EmptyState title="No iOS backups found" />;
   return (
     <ul className="divide-y hair">
       {list.map((b) => (
@@ -102,7 +102,7 @@ const IosTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
                   onPending({ kind: 'trash', path: b.path, size: b.size_bytes, label: b.device_name ?? b.uuid })
                 }
               >
-                У кошик
+                Trash
               </Button>
             </>
           }
@@ -118,7 +118,7 @@ const MailTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
     listMailAttachments().then(setList).catch(() => setList([]));
   }, []);
   if (!list) return <CenterSpinner />;
-  if (list.length === 0) return <EmptyState title="Mail-даних не знайдено" />;
+  if (list.length === 0) return <EmptyState title="No Mail data found" />;
   return (
     <ul className="divide-y hair">
       {list.map((m) => (
@@ -138,7 +138,7 @@ const MailTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
                   onPending({ kind: 'trash', path: m.path, size: m.size_bytes, label: `Mail ${m.version}` })
                 }
               >
-                У кошик
+                Trash
               </Button>
             </>
           }
@@ -159,7 +159,7 @@ const XcodeTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
     <div>
       <div className="px-4 py-2 flex items-center justify-between border-b hair">
         <div className="t-tertiary text-meta">
-          {list.length} симуляторів · {formatBytes(list.reduce((a, s) => a + s.size_bytes, 0))}
+          {list.length} simulators · {formatBytes(list.reduce((a, s) => a + s.size_bytes, 0))}
         </div>
         <Button
           size="sm"
@@ -168,10 +168,10 @@ const XcodeTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
           disabled={list.every((s) => s.available)}
           onClick={() => onPending({ kind: 'sims-unavailable' })}
         >
-          Видалити недоступні
+          Remove unavailable
         </Button>
       </div>
-      {list.length === 0 && <EmptyState title="Симуляторів не знайдено" />}
+      {list.length === 0 && <EmptyState title="No simulators found" />}
       <ul className="divide-y hair">
         {list.map((s) => (
           <ListItemRow
@@ -199,7 +199,7 @@ const XcodeTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
                     onPending({ kind: 'trash', path: s.path, size: s.size_bytes, label: s.name })
                   }
                 >
-                  У кошик
+                  Trash
                 </Button>
               </>
             }
@@ -217,7 +217,7 @@ const TmTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
   }, []);
   if (!list) return <CenterSpinner />;
   if (list.length === 0)
-    return <EmptyState title="Локальних TM-снапшотів не знайдено" description="tmutil нічого не повертає — диск чистий." />;
+    return <EmptyState title="No local TM snapshots found" description="tmutil returned nothing — disk is clean." />;
   return (
     <ul className="divide-y hair">
       {list.map((s) => (
@@ -232,7 +232,7 @@ const TmTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
               tone="danger"
               onClick={() => onPending({ kind: 'tm', name: s.name })}
             >
-              Видалити
+              Delete
             </Button>
           }
         />
@@ -255,19 +255,19 @@ export const DiskHogsPanel = () => {
       if (p.kind === 'trash') {
         await trashPath(p.path);
         toast({
-          title: 'Переміщено в кошик',
+          title: 'Moved to trash',
           description: `${p.label} (${formatBytes(p.size)})`,
           variant: 'success',
         });
       } else if (p.kind === 'tm') {
         await deleteTmSnapshot(p.name);
-        toast({ title: 'Снапшот видалено', description: p.name, variant: 'success' });
+        toast({ title: 'Snapshot deleted', description: p.name, variant: 'success' });
       } else if (p.kind === 'sims-unavailable') {
         await deleteUnavailableSimulators();
-        toast({ title: 'Недоступні симулятори видалено', variant: 'success' });
+        toast({ title: 'Unavailable simulators removed', variant: 'success' });
       }
     } catch (e) {
-      toast({ title: 'Помилка', description: String(e), variant: 'error' });
+      toast({ title: 'Error', description: String(e), variant: 'error' });
     }
     setReloadKey((k) => k + 1);
   }, [pending, toast]);
@@ -290,10 +290,10 @@ export const DiskHogsPanel = () => {
   const dialogDescription = (() => {
     if (!pending) return undefined;
     if (pending.kind === 'trash')
-      return `${pending.label} (${formatBytes(pending.size)}) буде переміщено у кошик.`;
+      return `${pending.label} (${formatBytes(pending.size)}) will be moved to trash.`;
     if (pending.kind === 'tm')
-      return `Локальний TM-снапшот ${pending.name} буде видалено без можливості відновлення.`;
-    return 'Буде запущено `xcrun simctl delete unavailable` — видалить усі симулятори, чия iOS більше не встановлена.';
+      return `Local TM snapshot ${pending.name} will be permanently deleted.`;
+    return 'Runs `xcrun simctl delete unavailable` — removes all simulators whose iOS version is no longer installed.';
   })();
 
   return (
@@ -306,14 +306,14 @@ export const DiskHogsPanel = () => {
             <path d="M12 7v5l3 2" />
           </svg>
         }
-        title="Важке на диску"
-        description="Скріншоти, iOS-бекапи, Mail, Xcode-симулятори, Time Machine snapshots."
+        title="Disk hogs"
+        description="Screenshots, iOS backups, Mail, Xcode simulators, Time Machine snapshots."
         inlineRight={
           <SegmentedControl<Tab>
             size="sm"
             value={tab}
             onChange={setTab}
-            ariaLabel="Тип важких даних"
+            ariaLabel="Data type"
             options={[
               { value: 'screenshots', label: 'Screens' },
               { value: 'ios', label: 'iOS' },
@@ -329,9 +329,9 @@ export const DiskHogsPanel = () => {
 
       <ConfirmDialog
         open={pending !== null}
-        title={pending?.kind === 'sims-unavailable' ? 'Видалити недоступні симулятори?' : 'Видалити?'}
+        title={pending?.kind === 'sims-unavailable' ? 'Remove unavailable simulators?' : 'Delete?'}
         description={dialogDescription}
-        confirmLabel={pending?.kind === 'sims-unavailable' ? 'Видалити' : 'Видалити'}
+        confirmLabel={pending?.kind === 'sims-unavailable' ? 'Remove' : 'Delete'}
         tone="danger"
         onConfirm={confirm}
         onCancel={() => setPending(null)}

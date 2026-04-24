@@ -42,13 +42,13 @@ export const BatteryPanel = () => {
     batteryHealth().then(setH).catch((e) => setError(String(e)));
   }, []);
 
-  if (error) return <div className="p-4 t-danger">Помилка: {error}</div>;
+  if (error) return <div className="p-4 t-danger">Error: {error}</div>;
   if (!h) return <div className="flex items-center justify-center h-full"><Spinner /></div>;
   if (!h.present)
     return (
       <EmptyState
-        title="Батарею не знайдено"
-        description="Ймовірно, це десктоп — дані недоступні."
+        title="Battery not found"
+        description="This is likely a desktop — data unavailable."
       />
     );
 
@@ -60,9 +60,9 @@ export const BatteryPanel = () => {
   return (
     <div className="flex-1 overflow-auto p-4 space-y-4">
       <header>
-        <div className="t-primary text-title font-semibold">Стан батареї</div>
+        <div className="t-primary text-title font-semibold">Battery health</div>
         <div className="t-tertiary text-meta">
-          Дані з `system_profiler SPPowerDataType` — оновлюються macOS на його розсуд.
+          Data from `system_profiler SPPowerDataType` — updated by macOS at its discretion.
         </div>
       </header>
 
@@ -71,22 +71,22 @@ export const BatteryPanel = () => {
         style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}
       >
         <StatCard
-          label="Стан"
+          label="Condition"
           value={h.condition ?? '—'}
           tint={['#7ef7a5', '#17b26a']}
         />
         <StatCard
-          label="Цикли"
+          label="Cycles"
           value={h.cycle_count !== null ? h.cycle_count.toString() : '—'}
           tint={['#8ec5ff', '#5561ff']}
         />
         <StatCard
-          label="Поточна ємність"
+          label="Current capacity"
           value={h.current_capacity_mah !== null ? `${h.current_capacity_mah} mAh` : '—'}
           tint={['#ffd86b', '#ff914d']}
         />
         <StatCard
-          label="Макс. ємність"
+          label="Max capacity"
           value={
             capacityPct !== null
               ? `${capacityPct}%`
@@ -99,8 +99,8 @@ export const BatteryPanel = () => {
       </div>
 
       <div className="t-tertiary text-meta">
-        Підказка: коли цикли перевищують 1000 або стан показує «Service Recommended» —
-        час планувати заміну.
+        Tip: when cycle count exceeds 1000 or condition shows "Service Recommended" —
+        it's time to plan a replacement.
       </div>
     </div>
   );

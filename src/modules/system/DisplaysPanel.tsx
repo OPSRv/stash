@@ -55,7 +55,7 @@ const BrightnessSlider = ({ value, onChange, onCommit, disabled, note }: Brightn
           onKeyUp={(e) => onCommit(Number(e.currentTarget.value) / 100)}
           className="flex-1 accent-[color:var(--stash-accent)]"
           style={{ height: 4 }}
-          aria-label="Яскравість"
+          aria-label="Brightness"
         />
         <span className="t-primary text-body tabular-nums font-medium w-[38px] text-right">
           {pct}%
@@ -92,7 +92,7 @@ const DisplayCard = ({
   const brightness = d.brightness ?? 0.7;
   const sliderDisabled = off;
   const note = !d.supports_brightness && !off
-    ? 'Панель не відповідає ні DisplayServices, ні DDC — зміна може не мати ефекту.'
+    ? 'Panel does not respond to DisplayServices or DDC — change may have no effect.'
     : undefined;
 
   // NB: `overflow-hidden` is *not* on the outer card any more — if it were,
@@ -154,12 +154,12 @@ const DisplayCard = ({
                 className="text-[10px] px-1 py-px rounded t-secondary"
                 style={{ background: 'rgba(255,58,111,0.18)', color: '#ff8080' }}
               >
-                вимкнено
+                off
               </span>
             )}
           </div>
           <div className="t-tertiary text-meta">
-            {d.is_builtin ? 'Вбудований' : 'Зовнішній'} · ID {d.id}
+            {d.is_builtin ? 'Built-in' : 'External'} · ID {d.id}
           </div>
         </div>
         {off ? (
@@ -171,7 +171,7 @@ const DisplayCard = ({
             onClick={() => onPowerOn(d)}
             loading={powering}
           >
-            Увімкнути
+            Turn on
           </Button>
         ) : (
           <Button
@@ -184,13 +184,13 @@ const DisplayCard = ({
             disabled={alone}
             title={
               alone
-                ? 'Потрібен щонайменше один інший дисплей як точка поглинання'
+                ? 'At least one other display is needed as a mirror target'
                 : d.is_main
-                ? 'Вимкнути основний дисплей (інший стане основним)'
-                : 'Вимкнути цей дисплей'
+                ? 'Turn off main display (another will become main)'
+                : 'Turn off this display'
             }
           >
-            Вимкнути
+            Turn off
           </Button>
         )}
       </div>
@@ -248,7 +248,7 @@ export const DisplaysPanel = () => {
         await setDisplayBrightness(id, v);
       } catch (e) {
         toast({
-          title: 'Не вдалося змінити яскравість',
+          title: 'Failed to change brightness',
           description: String(e),
           variant: 'error',
         });
@@ -263,10 +263,10 @@ export const DisplaysPanel = () => {
       setBusyId(d.id);
       try {
         await powerOnDisplay(d.id);
-        toast({ title: 'Дисплей увімкнено', variant: 'success' });
+        toast({ title: 'Display turned on', variant: 'success' });
         await refresh();
       } catch (e) {
-        toast({ title: 'Не вдалося увімкнути', description: String(e), variant: 'error' });
+        toast({ title: 'Failed to turn on', description: String(e), variant: 'error' });
       } finally {
         setBusyId(null);
       }
@@ -285,13 +285,13 @@ export const DisplaysPanel = () => {
     try {
       await powerOffDisplay(target.id, masterId);
       toast({
-        title: 'Дисплей вимкнено',
-        description: 'Увімкнути можна кнопкою «Увімкнути» поруч з цим дисплеєм',
+        title: 'Display turned off',
+        description: 'Use the Turn on button next to this display to re-enable it',
         variant: 'success',
       });
       await refresh();
     } catch (e) {
-      toast({ title: 'Не вдалося вимкнути', description: String(e), variant: 'error' });
+      toast({ title: 'Failed to turn off', description: String(e), variant: 'error' });
     } finally {
       setBusyId(null);
     }
@@ -300,9 +300,9 @@ export const DisplaysPanel = () => {
   const handleSleepAll = useCallback(async () => {
     try {
       await sleepDisplays();
-      toast({ title: 'Екрани приспано', variant: 'success' });
+      toast({ title: 'Displays sleeping', variant: 'success' });
     } catch (e) {
-      toast({ title: 'Не вдалося', description: String(e), variant: 'error' });
+      toast({ title: 'Failed', description: String(e), variant: 'error' });
     }
   }, [toast]);
 
@@ -310,11 +310,10 @@ export const DisplaysPanel = () => {
     <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
       <header className="flex items-start justify-between gap-3">
         <div>
-          <div className="t-primary text-title font-semibold">Дисплеї</div>
+          <div className="t-primary text-title font-semibold">Displays</div>
           <div className="t-tertiary text-meta">
-            Яскравість через DisplayServices або DDC/CI · Вимкнути / Увімкнути
-            будь-який дисплей (коли вимикаєте основний — інший автоматично стає
-            основним).
+            Brightness via DisplayServices or DDC/CI · Turn off / Turn on
+            any display (turning off the main one makes another the main automatically).
           </div>
         </div>
         <Button
@@ -324,18 +323,18 @@ export const DisplaysPanel = () => {
           leadingIcon={<MoonIcon />}
           onClick={handleSleepAll}
         >
-          Приспати всі
+          Sleep all
         </Button>
       </header>
 
-      {error && <div className="t-danger text-body">Помилка: {error}</div>}
+      {error && <div className="t-danger text-body">Error: {error}</div>}
       {!error && !displays && (
         <div className="flex items-center justify-center py-6">
           <Spinner />
         </div>
       )}
       {!error && displays && displays.length === 0 && (
-        <div className="t-tertiary text-body">Дисплеїв не знайдено.</div>
+        <div className="t-tertiary text-body">No displays found.</div>
       )}
       {!error && displays && displays.length > 0 && (
         <div
@@ -359,13 +358,13 @@ export const DisplaysPanel = () => {
 
       <ConfirmDialog
         open={pendingOff !== null}
-        title="Вимкнути цей дисплей?"
+        title="Turn off this display?"
         description={
           pendingOff
-            ? `${pendingOff.name}${pendingOff.is_main ? ' (основний — спочатку зробимо основним інший дисплей)' : ''} буде програмно вимкнено: яскравість опуститься до 0, зовнішній монітор перейде в DPMS-сон, macOS перестане переносити туди вікна. Поточна яскравість запамʼятається — при увімкненні відновиться.`
+            ? `${pendingOff.name}${pendingOff.is_main ? ' (main — another display will become main first)' : ''} will be programmatically turned off: brightness drops to 0, the external monitor enters DPMS sleep, and macOS stops sending windows there. Current brightness is saved and restored when turned back on.`
             : undefined
         }
-        confirmLabel="Вимкнути"
+        confirmLabel="Turn off"
         tone="danger"
         onConfirm={confirmPowerOff}
         onCancel={() => setPendingOff(null)}

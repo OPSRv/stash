@@ -35,7 +35,7 @@ describe('ProcessesPanel', () => {
     renderPanel();
     await waitFor(() => expect(screen.getByText('chrome')).toBeInTheDocument());
     expect(screen.queryByText('tiny')).not.toBeInTheDocument();
-    expect(screen.getByText(/1 важких \/ 2 усього/)).toBeInTheDocument();
+    expect(screen.getByText(/1 heavy \/ 2 total/)).toBeInTheDocument();
   });
 
   it('disables the heavy filter via the toggle to show all processes', async () => {
@@ -105,7 +105,7 @@ describe('ProcessesPanel', () => {
     ]);
     renderPanel();
     await waitFor(() =>
-      expect(screen.getByText(/Важких процесів не знайдено/)).toBeInTheDocument(),
+      expect(screen.getByText(/No heavy processes found/)).toBeInTheDocument(),
     );
   });
 });

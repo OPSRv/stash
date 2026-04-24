@@ -525,6 +525,104 @@ pub fn notes_write_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+fn exports_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("notes")
+        .join("exports");
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    Ok(base)
+}
+
+/// Slugify a note title into a filename-safe token. Keeps ASCII letters,
+/// digits, and hyphens; collapses runs of other chars to single hyphens;
+/// trims leading/trailing hyphens and caps at 48 chars so the resulting
+/// path stays short enough for terminal paste.
+fn slugify_title(title: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for c in title.trim().chars() {
+        let keep = c.is_ascii_alphanumeric() || c == '-';
+        if keep {
+            out.push(c.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.len() > 48 {
+        out.truncate(48);
+        while out.ends_with('-') {
+            out.pop();
+        }
+    }
+    if out.is_empty() {
+        "note".to_string()
+    } else {
+        out
+    }
+}
+
+/// Export the current note body to a stable on-disk markdown file and
+/// return its absolute path. Used by "Reveal in Finder" and "Copy path"
+/// so external tools (Claude Code, editors) can read the note directly.
+///
+/// The filename is deterministic per note id (`<id>-<slug>.md`), so
+/// repeated exports overwrite in place — consumers get a stable path that
+/// follows the note as its title changes. Stale files for the same id
+/// with a different slug are removed on each export so the exports dir
+/// does not leak copies after renames.
+#[tauri::command]
+pub fn notes_export_path(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    id: i64,
+) -> Result<String, String> {
+    let note = to_string_err(state.repo.lock().unwrap().get(id))?
+        .ok_or_else(|| format!("note {id} not found"))?;
+    let dir = exports_dir(&app)?;
+    let slug = slugify_title(&note.title);
+    let filename = format!("{id}-{slug}.md");
+    let dest = dir.join(&filename);
+
+    // Drop any previous export for this id with a different slug so a
+    // renamed note doesn't leave stale `.md` siblings behind.
+    let prefix = format!("{id}-");
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if name == filename {
+                continue;
+            }
+            if !name.starts_with(&prefix) || !name.ends_with(".md") {
+                continue;
+            }
+            let after_prefix = &name[prefix.len()..];
+            // Guard against `12-foo.md` matching id `1` — the char right
+            // after the id must be the `-` we just matched, nothing else.
+            if after_prefix.contains('/') || after_prefix.is_empty() {
+                continue;
+            }
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+
+    let contents = if note.title.trim().is_empty() {
+        note.body
+    } else {
+        format!("# {}\n\n{}", note.title.trim(), note.body)
+    };
+    std::fs::write(&dest, contents).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct ReadFileResult {
     pub name: String,
@@ -569,6 +667,16 @@ mod tests {
         notes_write_file(p.to_string_lossy().into(), "# ok".into()).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "# ok");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn slugify_strips_punctuation_and_caps_length() {
+        assert_eq!(slugify_title("Hello, World!"), "hello-world");
+        assert_eq!(slugify_title("  trailing  "), "trailing");
+        assert_eq!(slugify_title(""), "note");
+        assert_eq!(slugify_title("---"), "note");
+        let long = "a".repeat(100);
+        assert!(slugify_title(&long).len() <= 48);
     }
 
     #[test]

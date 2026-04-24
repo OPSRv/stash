@@ -86,14 +86,14 @@ export const ProcessesPanel = () => {
       try {
         await killProcess(target.proc.pid, target.force);
         toast({
-          title: target.force ? 'Процес примусово завершено' : 'Сигнал завершення надіслано',
+          title: target.force ? 'Process force-quit' : 'Quit signal sent',
           description: `${target.proc.name} (PID ${target.proc.pid})`,
           variant: 'success',
         });
         fetchOnce();
       } catch (e) {
         toast({
-          title: 'Не вдалося завершити процес',
+          title: 'Failed to quit process',
           description: String(e),
           variant: 'error',
         });
@@ -139,7 +139,7 @@ export const ProcessesPanel = () => {
       <SearchInput
         value={query}
         onChange={setQuery}
-        placeholder="Фільтр за назвою, командою або PID"
+        placeholder="Filter by name, command, or PID"
         compact
         trailing={
           <div className="flex items-center gap-2 pr-1">
@@ -148,7 +148,7 @@ export const ProcessesPanel = () => {
               <Toggle
                 checked={heavyOnly}
                 onChange={setHeavyOnly}
-                label="Показувати лише важкі процеси"
+                label="Show only heavy processes"
               />
             </label>
           </div>
@@ -158,11 +158,11 @@ export const ProcessesPanel = () => {
       <div className="flex items-center justify-between px-3 py-1.5 border-b hair t-secondary text-meta">
         <div className="flex items-center gap-2">
           <span>
-            Сортування:
+            Sort:
           </span>
           {(['rss', 'cpu', 'name'] as const).map((k) => {
             const active = sortKey === k;
-            const label = k === 'rss' ? 'RAM' : k === 'cpu' ? 'CPU' : 'Назва';
+            const label = k === 'rss' ? 'RAM' : k === 'cpu' ? 'CPU' : 'Name';
             const arrow = k === 'name' ? '↑' : '↓';
             return (
               <button
@@ -180,13 +180,13 @@ export const ProcessesPanel = () => {
           })}
         </div>
         <div>
-          {rows ? `${heavyCount} важких / ${rows.length} усього` : 'Завантаження…'}
+          {rows ? `${heavyCount} heavy / ${rows.length} total` : 'Loading…'}
         </div>
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">
         {error && (
-          <div className="p-4 t-danger text-body">Помилка: {error}</div>
+          <div className="p-4 t-danger text-body">Error: {error}</div>
         )}
         {!error && rows === null && (
           <div className="flex-1 flex items-center justify-center">
@@ -195,11 +195,11 @@ export const ProcessesPanel = () => {
         )}
         {!error && filtered && filtered.length === 0 && (
           <EmptyState
-            title={heavyOnly ? 'Важких процесів не знайдено' : 'Нічого не знайдено'}
+            title={heavyOnly ? 'No heavy processes found' : 'Nothing found'}
             description={
               heavyOnly
-                ? 'Зараз жоден процес не перевищує 500 MB RAM.'
-                : 'Спробуйте змінити фільтр.'
+                ? 'No process currently exceeds 500 MB RAM.'
+                : 'Try adjusting the filter.'
             }
           />
         )}
@@ -213,7 +213,7 @@ export const ProcessesPanel = () => {
               style={{ gridTemplateColumns: '1fr 90px 60px 70px 140px' }}
               role="row"
             >
-              <div className="px-3">Процес</div>
+              <div className="px-3">Process</div>
               <div className="px-2 text-right">RAM</div>
               <div className="px-2 text-right">CPU</div>
               <div className="px-2">PID</div>
@@ -274,16 +274,16 @@ export const ProcessesPanel = () => {
                           size="sm"
                           variant="ghost"
                           onClick={() => setKill({ proc: p, force: false })}
-                          title="Надіслати SIGTERM (чемне завершення)"
+                          title="Send SIGTERM (graceful quit)"
                         >
-                          Завершити
+                          Quit
                         </Button>
                         <Button
                           size="sm"
                           variant="soft"
                           tone="danger"
                           onClick={() => setKill({ proc: p, force: true })}
-                          title="Надіслати SIGKILL (примусово)"
+                          title="Send SIGKILL (force)"
                         >
                           Force
                         </Button>
@@ -299,17 +299,17 @@ export const ProcessesPanel = () => {
 
       <ConfirmDialog
         open={kill !== null}
-        title={kill?.force ? 'Примусово завершити процес?' : 'Завершити процес?'}
+        title={kill?.force ? 'Force quit process?' : 'Quit process?'}
         description={
           kill
             ? `${kill.proc.name} (PID ${kill.proc.pid})\n${
                 kill.force
-                  ? 'SIGKILL завершить процес миттєво, без збереження стану.'
-                  : 'SIGTERM дозволить застосунку коректно завершити роботу.'
+                  ? 'SIGKILL will terminate the process immediately, without saving state.'
+                  : 'SIGTERM lets the app quit gracefully.'
               }`
             : undefined
         }
-        confirmLabel={kill?.force ? 'Force quit' : 'Завершити'}
+        confirmLabel={kill?.force ? 'Force quit' : 'Quit'}
         tone="danger"
         onConfirm={() => kill && handleKill(kill)}
         onCancel={() => setKill(null)}

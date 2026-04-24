@@ -42,9 +42,9 @@ describe('DashboardPanel', () => {
     wrap(<DashboardPanel />);
     await waitFor(() => expect(screen.getByText('42%')).toBeInTheDocument());
     expect(screen.getByText(/Uptime:/)).toBeInTheDocument();
-    expect(screen.getByText(/1д 5г/)).toBeInTheDocument();
+    expect(screen.getByText(/1d 5h/)).toBeInTheDocument();
     expect(screen.getByText('76%')).toBeInTheDocument();
-    expect(screen.getByText(/432 процесів/)).toBeInTheDocument();
+    expect(screen.getByText(/432 processes/)).toBeInTheDocument();
     expect(screen.getByText(/Wi-Fi/)).toBeInTheDocument();
   });
 });
@@ -63,8 +63,8 @@ describe('TrashBinsPanel', () => {
     });
     wrap(<TrashBinsPanel />);
     await waitFor(() => expect(screen.getByText('Macintosh HD')).toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Очистити всі' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Очистити' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Empty all' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Empty' }));
     await waitFor(() =>
       expect(invoke).toHaveBeenCalledWith('system_empty_trash'),
     );
@@ -90,7 +90,7 @@ describe('NodeModulesPanel', () => {
       return undefined;
     });
     wrap(<NodeModulesPanel />);
-    fireEvent.click(screen.getByRole('button', { name: /Обрати папку/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Choose folder/ }));
     // Assert the scan actually reached the backend with the picked root.
     // The subsequent UI render is covered indirectly by the assertion that
     // scanning completes (otherwise invoke wouldn't have been called with

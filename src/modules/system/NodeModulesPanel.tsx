@@ -90,14 +90,14 @@ export const NodeModulesPanel = () => {
     setProgress(null);
     if (failed === 0) {
       toast({
-        title: `Видалено ${targets.length} node_modules`,
-        description: `Звільнено ${formatBytes(freed)}`,
+        title: `Deleted ${targets.length} node_modules`,
+        description: `Freed ${formatBytes(freed)}`,
         variant: 'success',
       });
     } else {
       toast({
-        title: `Частково видалено (${failed} помилок)`,
-        description: `Звільнено ${formatBytes(freed)}`,
+        title: `Partially deleted (${failed} errors)`,
+        description: `Freed ${formatBytes(freed)}`,
         variant: 'error',
       });
     }
@@ -124,7 +124,7 @@ export const NodeModulesPanel = () => {
           </svg>
         }
         title="node_modules"
-        description={root ?? 'Оберіть папку — знайдемо всі node_modules рекурсивно'}
+        description={root ?? 'Choose a folder — we will find all node_modules recursively'}
         trailing={
           <>
             {entries && (
@@ -140,7 +140,7 @@ export const NodeModulesPanel = () => {
                   tone="danger"
                   onClick={() => cancelScan('node_modules').catch(() => undefined)}
                 >
-                  Зупинити
+                  Stop
                 </Button>
               )}
               <Button
@@ -150,7 +150,7 @@ export const NodeModulesPanel = () => {
                 onClick={chooseFolder}
                 loading={scanning}
               >
-                {root ? 'Інша папка' : 'Обрати папку'}
+                {root ? 'Change folder' : 'Choose folder'}
               </Button>
             </div>
           </>
@@ -166,14 +166,14 @@ export const NodeModulesPanel = () => {
           trailing={
             <div className="flex items-center gap-3 t-secondary text-meta">
               <span>
-                Обрано{' '}
+                Selected{' '}
                 <span className="t-primary font-medium tabular-nums">
                   {formatBytes(totalSelected)}
                 </span>
               </span>
               {progress ? (
                 <span className="t-tertiary text-meta tabular-nums">
-                  {progress.done} з {progress.total}…
+                  {progress.done} of {progress.total}…
                 </span>
               ) : (
                 <Button
@@ -183,7 +183,7 @@ export const NodeModulesPanel = () => {
                   disabled={selectedSize === 0}
                   onClick={() => setConfirmOpen(true)}
                 >
-                  У кошик
+                  Trash
                 </Button>
               )}
             </div>
@@ -192,21 +192,21 @@ export const NodeModulesPanel = () => {
       )}
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && scanning && (
           <div className="flex flex-col items-center justify-center h-full gap-2">
             <Spinner />
-            <div className="t-tertiary text-meta">Скануємо {root}…</div>
+            <div className="t-tertiary text-meta">Scanning {root}…</div>
           </div>
         )}
         {!error && !scanning && !entries && (
           <EmptyState
-            title="Готово до сканування"
-            description="Натисніть «Обрати папку». Скануємо лише верхні node_modules — не спускаємось у вкладені."
+            title="Ready to scan"
+            description="Click Choose folder. Only top-level node_modules are scanned — nested ones are skipped."
           />
         )}
         {!error && entries && entries.length === 0 && (
-          <EmptyState title="Жодного node_modules не знайдено" />
+          <EmptyState title="No node_modules found" />
         )}
         {!error && entries && entries.length > 0 && (
           <ul className="divide-y hair">
@@ -253,9 +253,9 @@ export const NodeModulesPanel = () => {
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Перемістити обрані node_modules у кошик?"
-        description={`Буде переміщено ${selectedSize} node_modules (${formatBytes(totalSelected)}). Виконайте npm install / pnpm install щоб відновити.`}
-        confirmLabel="У кошик"
+        title="Move selected node_modules to trash?"
+        description={`${selectedSize} node_modules (${formatBytes(totalSelected)}) will be moved to trash. Run npm install / pnpm install to restore.`}
+        confirmLabel="Trash"
         tone="danger"
         onConfirm={bulkDelete}
         onCancel={() => setConfirmOpen(false)}

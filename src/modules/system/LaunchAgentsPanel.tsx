@@ -41,14 +41,14 @@ export const LaunchAgentsPanel = () => {
       try {
         await toggleLaunchAgent(agent.path, enable);
         toast({
-          title: enable ? 'Запущено' : 'Зупинено',
+          title: enable ? 'Started' : 'Stopped',
           description: agent.label,
           variant: 'success',
         });
         refresh();
       } catch (e) {
         toast({
-          title: 'Не вдалося перемкнути',
+          title: 'Failed to toggle',
           description: String(e),
           variant: 'error',
         });
@@ -91,7 +91,7 @@ export const LaunchAgentsPanel = () => {
             <Toggle
               checked={loaded}
               onChange={() => handleToggle(a)}
-              label={loaded ? 'Вимкнути агент' : 'Увімкнути агент'}
+              label={loaded ? 'Disable agent' : 'Enable agent'}
             />
             {busyPath === a.path && <Spinner size={12} />}
           </>
@@ -109,25 +109,25 @@ export const LaunchAgentsPanel = () => {
             <path d="M12 2v6M12 22v-4M4 12H2M22 12h-2M5 5l1.5 1.5M19 19l-1.5-1.5M5 19l1.5-1.5M19 5l-1.5 1.5" />
           </svg>
         }
-        title="Автозапуск"
-        description="LaunchAgents користувача та системні. System-рівень потребує sudo при перемиканні."
+        title="Login items"
+        description="User and system LaunchAgents. System-level requires sudo to toggle."
         trailing={
           <Button size="sm" variant="ghost" onClick={refresh}>
-            Оновити
+            Refresh
           </Button>
         }
       />
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && !agents && <CenterSpinner />}
         {!error && agents && agents.length === 0 && (
-          <EmptyState title="Агентів не знайдено" />
+          <EmptyState title="No agents found" />
         )}
         {agents && userAgents.length > 0 && (
           <>
             <div className="px-4 py-1.5 t-tertiary text-meta uppercase tracking-wider border-b hair">
-              Користувацькі ({userAgents.length})
+              User ({userAgents.length})
             </div>
             <ul className="divide-y hair">{userAgents.map(renderRow)}</ul>
           </>
@@ -135,7 +135,7 @@ export const LaunchAgentsPanel = () => {
         {agents && systemAgents.length > 0 && (
           <>
             <div className="px-4 py-1.5 t-tertiary text-meta uppercase tracking-wider border-b hair border-t">
-              Системні ({systemAgents.length})
+              System ({systemAgents.length})
             </div>
             <ul className="divide-y hair">{systemAgents.map(renderRow)}</ul>
           </>

@@ -161,7 +161,7 @@ use modules::whisper::{
 use modules::voice::commands::{voice_ask, voice_transcribe};
 use modules::notes::{
     commands::{
-        notes_add_attachment, notes_create, notes_delete, notes_get, notes_list,
+        notes_add_attachment, notes_create, notes_delete, notes_export_path, notes_get, notes_list,
         notes_list_attachments, notes_read_audio_path, notes_read_file, notes_read_image_path,
         notes_remove_attachment, notes_save_audio_bytes, notes_save_audio_file,
         notes_save_image_bytes, notes_save_image_file, notes_search, notes_set_pinned,
@@ -490,6 +490,7 @@ pub fn run() {
             notes_add_attachment,
             notes_remove_attachment,
             notes_set_pinned,
+            notes_export_path,
             pomodoro_list_presets,
             pomodoro_save_preset,
             pomodoro_delete_preset,

@@ -95,13 +95,13 @@ export const LargeFilesPanel = () => {
             : prev,
         );
         toast({
-          title: 'Переміщено в кошик',
-          description: `Звільнено ${formatBytes(file.size_bytes)}`,
+          title: 'Moved to trash',
+          description: `Freed ${formatBytes(file.size_bytes)}`,
           variant: 'success',
         });
       } catch (e) {
         toast({
-          title: 'Не вдалося видалити',
+          title: 'Failed to delete',
           description: String(e),
           variant: 'error',
         });
@@ -124,15 +124,15 @@ export const LargeFilesPanel = () => {
             <path d="M14 3v6h6M9 13h6M9 17h4" />
           </svg>
         }
-        title="Великі файли"
-        description={root ?? 'Домашня папка · пропускаються node_modules, кеші, контейнери'}
+        title="Large files"
+        description={root ?? 'Home folder · skips node_modules, caches, containers'}
         trailing={
           <>
             <SegmentedControl<Threshold>
               size="sm"
               value={threshold}
               onChange={setThreshold}
-              ariaLabel="Мінімальний розмір файлу"
+              ariaLabel="Minimum file size"
               options={[
                 { value: '100', label: '≥100 MB' },
                 { value: '500', label: '≥500 MB' },
@@ -141,11 +141,11 @@ export const LargeFilesPanel = () => {
             />
             <div className="flex items-center gap-1">
               <Button size="sm" variant="ghost" onClick={chooseFolder}>
-                {root ? 'Інша папка' : 'Обрати папку'}
+                {root ? 'Change folder' : 'Choose folder'}
               </Button>
               {scanning ? (
                 <Button size="sm" variant="soft" tone="danger" onClick={stopScan}>
-                  Зупинити
+                  Stop
                 </Button>
               ) : (
                 <Button
@@ -154,7 +154,7 @@ export const LargeFilesPanel = () => {
                   size="sm"
                   onClick={() => runScan()}
                 >
-                  {result ? 'Повторити' : 'Сканувати'}
+                  {result ? 'Rescan' : 'Scan'}
                 </Button>
               )}
             </div>
@@ -165,31 +165,31 @@ export const LargeFilesPanel = () => {
       {result && (
         <div className="px-4 py-1.5 border-b hair t-secondary text-meta flex items-center justify-between">
           <div>
-            Знайдено <span className="t-primary font-medium">{result.files.length}</span> файлів на{' '}
+            Found <span className="t-primary font-medium">{result.files.length}</span> files totalling{' '}
             <span className="t-primary font-medium">{formatBytes(totalFreed)}</span>
           </div>
-          <div className="t-tertiary">{result.scanned.toLocaleString()} переглянуто</div>
+          <div className="t-tertiary">{result.scanned.toLocaleString()} scanned</div>
         </div>
       )}
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && scanning && !result && (
           <div className="flex flex-col items-center justify-center h-full gap-2">
             <Spinner />
-            <div className="t-tertiary text-meta">Сканування домашньої папки…</div>
+            <div className="t-tertiary text-meta">Scanning home folder…</div>
           </div>
         )}
         {!error && !scanning && !result && (
           <EmptyState
-            title="Готово до сканування"
-            description="Оберіть поріг і натисніть «Сканувати». Нічого не видаляється автоматично — лише показується перелік."
+            title="Ready to scan"
+            description="Choose a threshold and click Scan. Nothing is deleted automatically — only the list is shown."
           />
         )}
         {!error && result && result.files.length === 0 && (
           <EmptyState
-            title="Великих файлів не знайдено"
-            description="Вітаю — нічого не перевищує обраний поріг."
+            title="No large files found"
+            description="Nothing exceeds the selected threshold."
           />
         )}
         {!error && result && result.files.length > 0 && (
@@ -231,7 +231,7 @@ export const LargeFilesPanel = () => {
                         tone="danger"
                         onClick={() => setPending(f)}
                       >
-                        У кошик
+                        Trash
                       </Button>
                     </div>
                   </>
@@ -244,13 +244,13 @@ export const LargeFilesPanel = () => {
 
       <ConfirmDialog
         open={pending !== null}
-        title="Перемістити у кошик?"
+        title="Move to trash?"
         description={
           pending
-            ? `${basename(pending.path)} (${formatBytes(pending.size_bytes)})\n\nФайл можна буде відновити з кошика macOS.`
+            ? `${basename(pending.path)} (${formatBytes(pending.size_bytes)})\n\nThe file can be restored from the macOS trash.`
             : undefined
         }
-        confirmLabel="У кошик"
+        confirmLabel="Trash"
         tone="danger"
         onConfirm={() => pending && handleTrash(pending)}
         onCancel={() => setPending(null)}

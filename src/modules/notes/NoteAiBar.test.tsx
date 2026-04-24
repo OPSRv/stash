@@ -71,9 +71,18 @@ beforeEach(() => {
   settingsRef.value = makeSettings();
   streamControl.chunks = [];
   streamControl.throwError = undefined;
-  streamControl.respectAbort = true;
+  streamControl.hangAfterChunks = false;
   receivedAbortSignal = null;
 });
+
+const noopStubs = {
+  onUndo: () => {},
+  onRedo: () => {},
+  canUndo: false,
+  canRedo: false,
+  beginTransaction: () => {},
+  endTransaction: () => {},
+};
 
 describe('NoteAiBar', () => {
   it('streams AI output into the body via onBodyChange', async () => {
@@ -87,6 +96,7 @@ describe('NoteAiBar', () => {
         body="Original body"
         onBodyChange={onBodyChange}
         onClose={() => {}}
+        {...noopStubs}
       />,
     );
 
@@ -105,9 +115,8 @@ describe('NoteAiBar', () => {
 
   it('reverts to the original body when the user stops mid-stream', async () => {
     const user = userEvent.setup();
-    // A single chunk is enough — we abort before the stream completes, and
-    // the mock throws an AbortError-like on the next yield.
-    streamControl.chunks = ['partial…', ' more'];
+    streamControl.chunks = ['partial…'];
+    streamControl.hangAfterChunks = true;
     const onBodyChange = vi.fn();
 
     render(
@@ -116,6 +125,7 @@ describe('NoteAiBar', () => {
         body="ORIGINAL"
         onBodyChange={onBodyChange}
         onClose={() => {}}
+        {...noopStubs}
       />,
     );
 
@@ -143,6 +153,7 @@ describe('NoteAiBar', () => {
         body="hi"
         onBodyChange={() => {}}
         onClose={() => {}}
+        {...noopStubs}
       />,
     );
 

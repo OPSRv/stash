@@ -66,7 +66,7 @@ export const QuickActionsPanel = () => {
       setConfirmFor(null);
       try {
         await a.run();
-        toast({ title: a.label, description: 'Виконано', variant: 'success' });
+        toast({ title: a.label, description: 'Done', variant: 'success' });
       } catch (e) {
         toast({ title: a.label, description: String(e), variant: 'error' });
       }
@@ -85,7 +85,7 @@ export const QuickActionsPanel = () => {
   const actions: Action[] = [
     {
       id: 'sleep',
-      label: 'Приспати Mac',
+      label: 'Sleep Mac',
       hint: 'pmset sleepnow',
       gradient: ['#8ec5ff', '#5561ff'],
       glyph: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
@@ -93,7 +93,7 @@ export const QuickActionsPanel = () => {
     },
     {
       id: 'lock',
-      label: 'Заблокувати екран',
+      label: 'Lock screen',
       hint: 'CGSession -suspend',
       gradient: ['#d08cff', '#7a4bff'],
       glyph: 'M12 11V7a3 3 0 1 1 6 0v4M8 11h12v10H8z',
@@ -101,20 +101,20 @@ export const QuickActionsPanel = () => {
     },
     {
       id: 'purge',
-      label: 'Звільнити RAM (purge)',
-      hint: 'Запитає пароль адміністратора',
+      label: 'Free RAM (purge)',
+      hint: 'Prompts for admin password',
       gradient: ['#7ef7a5', '#17b26a'],
       glyph: 'M5 12a7 7 0 1 1 14 0M5 12l-2 2M19 12l2 2M12 5V3',
       run: emptyMemoryPressure,
       confirm: {
-        title: 'Звільнити неактивну RAM?',
+        title: 'Free inactive RAM?',
         description:
-          'macOS покаже стандартне вікно авторизації — введіть пароль адміністратора, і команда `purge` виконається.',
+          'macOS will show a standard authorization prompt — enter your admin password and `purge` will run.',
       },
     },
     {
       id: 'dns',
-      label: 'Очистити DNS-кеш',
+      label: 'Flush DNS cache',
       hint: 'dscacheutil + mDNSResponder',
       gradient: ['#5ee2c4', '#2aa3ff'],
       glyph: 'M4 12h16M12 4v16M6 6l12 12M18 6L6 18',
@@ -122,15 +122,15 @@ export const QuickActionsPanel = () => {
     },
     {
       id: 'spotlight',
-      label: 'Переіндексувати Spotlight',
+      label: 'Reindex Spotlight',
       hint: 'mdutil -E /',
       gradient: ['#ffd86b', '#ff914d'],
       glyph: 'M11 3a8 8 0 1 1-5.66 13.66l-3 3M11 3a8 8 0 0 1 8 8',
       run: reindexSpotlight,
       confirm: {
-        title: 'Переіндексувати Spotlight?',
+        title: 'Reindex Spotlight?',
         description:
-          'Spotlight перебудує індекс на томі «/» у фоні. Пошук може лагати декілька хвилин.',
+          'Spotlight will rebuild the index on «/» in the background. Search may be slow for a few minutes.',
       },
     },
   ];
@@ -138,9 +138,9 @@ export const QuickActionsPanel = () => {
   return (
     <div className="flex-1 overflow-auto p-4 space-y-4">
       <header>
-        <div className="t-primary text-title font-semibold">Швидкі дії</div>
+        <div className="t-primary text-title font-semibold">Quick actions</div>
         <div className="t-tertiary text-meta">
-          Системні команди одним кліком — з підтвердженням для небезпечних.
+          System commands in one click — with confirmation for destructive ones.
         </div>
       </header>
 
@@ -157,7 +157,7 @@ export const QuickActionsPanel = () => {
         open={confirmFor !== null}
         title={confirmFor?.confirm?.title ?? ''}
         description={confirmFor?.confirm?.description}
-        confirmLabel="Виконати"
+        confirmLabel="Run"
         tone="danger"
         onConfirm={() => confirmFor && execute(confirmFor)}
         onCancel={() => setConfirmFor(null)}

@@ -8,7 +8,9 @@ import { IconButton } from '../../shared/ui/IconButton';
 import { Tooltip } from '../../shared/ui/Tooltip';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import {
+  CopyIcon,
   DownloadIcon,
+  ExternalIcon,
   EyeIcon,
   MagicWandIcon,
   MicIcon,
@@ -26,12 +28,15 @@ import { useToast } from '../../shared/ui/Toast';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
+import { copyText } from '../../shared/util/clipboard';
+import { revealFile } from '../../shared/util/revealFile';
 import { NoteAttachmentsPanel } from './NoteAttachmentsPanel';
 import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { SaveStatusPill, type SaveStatus } from './SaveStatusPill';
 import { AudioRecorder, type RecordedAudio } from './AudioRecorder';
 import { NoteAiBar } from './NoteAiBar';
+import { useUndoableString } from './useUndoableString';
 import { useAudioFileDrop } from './useAudioFileDrop';
 import {
   appendAudioEmbed,
@@ -46,6 +51,7 @@ import { whisperGetActive, whisperTranscribePath } from '../whisper/api';
 import {
   notesCreate,
   notesDelete,
+  notesExportPath,
   notesGet,
   notesList,
   notesReadFile,
@@ -133,7 +139,17 @@ export const NotesShell = () => {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [query, setQuery] = useState('');
   const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
+  const {
+    value: body,
+    setValue: setBody,
+    reset: resetBody,
+    undo: undoBody,
+    redo: redoBody,
+    beginTransaction: beginBodyTransaction,
+    endTransaction: endBodyTransaction,
+    canUndo,
+    canRedo,
+  } = useUndoableString('');
   const [viewMode, setViewMode] = useState<NotesViewMode>('preview');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const saveTimer = useRef<number | null>(null);
@@ -271,7 +287,7 @@ export const NotesShell = () => {
     if (activeId == null) {
       setActiveNote(null);
       setTitle('');
-      setBody('');
+      resetBody('');
       return;
     }
     let cancelled = false;
@@ -279,7 +295,8 @@ export const NotesShell = () => {
       if (cancelled || !note) return;
       setActiveNote(note);
       setTitle(note.title);
-      setBody(note.body);
+      // Fresh history per note — undo shouldn't cross notes.
+      resetBody(note.body);
     });
     return () => {
       cancelled = true;
@@ -344,6 +361,68 @@ export const NotesShell = () => {
     setBody(v);
     scheduleSave(title, v);
   };
+
+  const handleUndo = useCallback(() => {
+    const prev = undoBody();
+    if (prev !== undefined) scheduleSave(title, prev);
+  }, [scheduleSave, title, undoBody]);
+
+  const handleRedo = useCallback(() => {
+    const next = redoBody();
+    if (next !== undefined) scheduleSave(title, next);
+  }, [redoBody, scheduleSave, title]);
+
+  /** Persist the current title/body and export a stable on-disk `.md`
+   *  copy, returning its absolute path. Flushes any pending debounced
+   *  save first so the export reflects the latest edits instead of a
+   *  stale DB snapshot. */
+  const exportCurrentNotePath = useCallback(async (): Promise<string | null> => {
+    if (activeId == null) return null;
+    if (saveTimer.current !== null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    await notesUpdate(activeId, title, body);
+    return notesExportPath(activeId);
+  }, [activeId, body, title]);
+
+  const revealNoteFile = useCallback(async () => {
+    try {
+      const path = await exportCurrentNotePath();
+      if (!path) return;
+      await revealFile(path);
+    } catch (e) {
+      toast({
+        title: 'Reveal failed',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
+  }, [exportCurrentNotePath, toast]);
+
+  const copyNotePath = useCallback(async () => {
+    try {
+      const path = await exportCurrentNotePath();
+      if (!path) return;
+      const ok = await copyText(path);
+      if (ok) {
+        toast({
+          title: 'Path copied',
+          description: path,
+          variant: 'success',
+          durationMs: 2200,
+        });
+      } else {
+        toast({ title: 'Copy failed', variant: 'error' });
+      }
+    } catch (e) {
+      toast({
+        title: 'Export failed',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
+  }, [exportCurrentNotePath, toast]);
 
   const onToggleCheckbox = useCallback(
     (line: number) => {
@@ -574,7 +653,7 @@ export const NotesShell = () => {
       await notesDelete(id);
       setActiveId(null);
       setTitle('');
-      setBody('');
+      resetBody('');
       await reload();
     },
     [reload]
@@ -1039,6 +1118,24 @@ export const NotesShell = () => {
                   >
                     <MagicWandIcon size={13} />
                   </IconButton>
+                  {activeId !== null && (
+                    <>
+                      <IconButton
+                        onClick={() => void revealNoteFile()}
+                        title="Reveal note file in Finder"
+                        stopPropagation={false}
+                      >
+                        <ExternalIcon size={13} />
+                      </IconButton>
+                      <IconButton
+                        onClick={() => void copyNotePath()}
+                        title="Copy note file path (e.g. for Claude Code)"
+                        stopPropagation={false}
+                      >
+                        <CopyIcon size={13} />
+                      </IconButton>
+                    </>
+                  )}
                   <IconButton
                     onClick={onExport}
                     title={exportDisabled ? 'Nothing to export' : 'Export as .md'}
@@ -1122,6 +1219,12 @@ export const NotesShell = () => {
                 body={body}
                 onBodyChange={onBodyChange}
                 onClose={() => setAiBarOpen(false)}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+                canUndo={canUndo}
+                canRedo={canRedo}
+                beginTransaction={beginBodyTransaction}
+                endTransaction={endBodyTransaction}
               />
             )}
           </>

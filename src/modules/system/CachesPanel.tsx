@@ -13,13 +13,13 @@ import { listCaches, trashPath, type CacheEntry, type CacheKind } from './api';
 import { formatBytes } from './format';
 
 const KIND_TINT: Record<CacheKind, { pill: string; dot: string; label: string }> = {
-  safe: { pill: 'rgba(94,226,196,0.18)', dot: '#5ee2c4', label: 'Безпечно' },
+  safe: { pill: 'rgba(94,226,196,0.18)', dot: '#5ee2c4', label: 'Safe' },
   regeneratable: {
     pill: 'rgba(255,216,107,0.18)',
     dot: '#ffd86b',
-    label: 'Перегенерується',
+    label: 'Regeneratable',
   },
-  browser: { pill: 'rgba(142,197,255,0.18)', dot: '#8ec5ff', label: 'Браузер' },
+  browser: { pill: 'rgba(142,197,255,0.18)', dot: '#8ec5ff', label: 'Browser' },
 };
 
 export const CachesPanel = () => {
@@ -86,14 +86,14 @@ export const CachesPanel = () => {
     }
     if (failed === 0) {
       toast({
-        title: `Звільнено ${formatBytes(freed)}`,
-        description: `Очищено ${targets.length} кешів`,
+        title: `Freed ${formatBytes(freed)}`,
+        description: `Cleaned ${targets.length} caches`,
         variant: 'success',
       });
     } else {
       toast({
-        title: `Звільнено ${formatBytes(freed)}`,
-        description: `Не вдалося видалити ${failed} елементів`,
+        title: `Freed ${formatBytes(freed)}`,
+        description: `Failed to delete ${failed} items`,
         variant: 'error',
       });
     }
@@ -120,15 +120,15 @@ export const CachesPanel = () => {
             <path d="M3 12h18" />
           </svg>
         }
-        title="Кеші"
-        description="Dev-tooling, браузерні та системні кеші. Видалення переносить у кошик."
+        title="Caches"
+        description="Dev-tooling, browser, and system caches. Deletion moves items to trash."
         trailing={
           <>
             <div className="t-primary font-semibold text-title tabular-nums">
               {formatBytes(grandTotal)}
             </div>
             <Button size="sm" variant="ghost" onClick={refresh} loading={loading}>
-              Перечитати
+              Refresh
             </Button>
           </>
         }
@@ -143,7 +143,7 @@ export const CachesPanel = () => {
           trailing={
             <div className="flex items-center gap-3 t-secondary text-meta">
               <span>
-                Обрано{' '}
+                Selected{' '}
                 <span className="t-primary font-medium tabular-nums">
                   {formatBytes(totalSelected)}
                 </span>
@@ -155,7 +155,7 @@ export const CachesPanel = () => {
                 disabled={selectedSize === 0}
                 onClick={() => setConfirmOpen(true)}
               >
-                У кошик
+                Trash
               </Button>
             </div>
           }
@@ -163,12 +163,12 @@ export const CachesPanel = () => {
       )}
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {error && <div className="p-4 t-danger text-body">Помилка: {error}</div>}
+        {error && <div className="p-4 t-danger text-body">Error: {error}</div>}
         {!error && !caches && loading && <CenterSpinner />}
         {!error && caches && caches.length === 0 && (
           <EmptyState
-            title="Кешів не знайдено"
-            description="Схоже, ваша система чиста — або Stash не має доступу (Full Disk Access)."
+            title="No caches found"
+            description="Your system looks clean — or Stash lacks access (Full Disk Access)."
           />
         )}
         {!error && caches && caches.length > 0 && (
@@ -222,9 +222,9 @@ export const CachesPanel = () => {
 
       <ConfirmDialog
         open={confirmOpen}
-        title="Очистити обрані кеші?"
-        description={`Буде переміщено у кошик ${selectedSize} елементів (${formatBytes(totalSelected)}). Застосунки перегенерують ці файли при наступному запуску.`}
-        confirmLabel="У кошик"
+        title="Clear selected caches?"
+        description={`${selectedSize} items (${formatBytes(totalSelected)}) will be moved to trash. Apps will regenerate these files on next launch.`}
+        confirmLabel="Trash"
         tone="danger"
         onConfirm={clean}
         onCancel={() => setConfirmOpen(false)}

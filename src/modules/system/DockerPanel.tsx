@@ -50,14 +50,14 @@ export const DockerPanel = () => {
     try {
       const res = await dockerPrune();
       toast({
-        title: 'Docker очищено',
-        description: `Звільнено ${formatBytes(res.reclaimed_bytes)}`,
+        title: 'Docker cleaned',
+        description: `Freed ${formatBytes(res.reclaimed_bytes)}`,
         variant: 'success',
       });
       refresh();
     } catch (e) {
       toast({
-        title: 'Не вдалося очистити',
+        title: 'Failed to clean',
         description: String(e),
         variant: 'error',
       });
@@ -82,16 +82,16 @@ export const DockerPanel = () => {
         title="Docker"
         description={
           status?.installed === false
-            ? 'Docker не встановлено'
+            ? 'Docker not installed'
             : status?.running === false
-            ? 'Демон не запущено — відкрийте Docker Desktop'
-            : `Запущено ${status?.version ?? ''} · використовує ${formatBytes(totalSize)}`
+            ? 'Daemon not running — open Docker Desktop'
+            : `Running ${status?.version ?? ''} · using ${formatBytes(totalSize)}`
         }
         trailing={
           status?.running ? (
             <div className="text-right">
               <div className="t-tertiary text-[10px] uppercase tracking-wider">
-                Можна звільнити
+                Reclaimable
               </div>
               <div className="t-primary text-title font-semibold tabular-nums">
                 {formatBytes(reclaimable)}
@@ -102,18 +102,18 @@ export const DockerPanel = () => {
       />
 
       <div className="flex-1 min-h-0 overflow-auto p-4 space-y-3">
-        {error && <div className="t-danger">Помилка: {error}</div>}
+        {error && <div className="t-danger">Error: {error}</div>}
         {!error && !status && <CenterSpinner fit="inline" />}
         {!error && status && !status.installed && (
           <EmptyState
-            title="Docker не знайдено"
-            description="Встановіть Docker Desktop або Colima — ми шукаємо docker CLI у стандартних шляхах."
+            title="Docker not found"
+            description="Install Docker Desktop or Colima — we look for the docker CLI in standard paths."
           />
         )}
         {!error && status?.installed && !status.running && (
           <EmptyState
-            title="Docker не запущено"
-            description="Запустіть Docker Desktop (або ваш runtime) щоб побачити розміри й почистити."
+            title="Docker not running"
+            description="Start Docker Desktop (or your runtime) to see sizes and clean up."
           />
         )}
         {!error && status?.running && status.items.length > 0 && (
@@ -142,7 +142,7 @@ export const DockerPanel = () => {
                     {formatBytes(it.size_bytes)}
                   </div>
                   <div className="t-tertiary text-meta tabular-nums">
-                    {it.total} · активних {it.active}
+                    {it.total} · active {it.active}
                   </div>
                   <div className="mt-2 h-1.5 rounded-full bg-white/5 overflow-hidden">
                     <div
@@ -154,7 +154,7 @@ export const DockerPanel = () => {
                     />
                   </div>
                   <div className="t-tertiary text-[10px] mt-1 tabular-nums">
-                    можна прибрати {formatBytes(it.reclaimable_bytes)}
+                    reclaimable {formatBytes(it.reclaimable_bytes)}
                     {pctRecl > 0 && ` · ${pctRecl}%`}
                   </div>
                 </div>
@@ -165,7 +165,7 @@ export const DockerPanel = () => {
         {status?.running && (
           <div className="flex items-center justify-end gap-2 pt-2">
             <Button size="sm" variant="ghost" onClick={refresh} disabled={busy}>
-              Оновити
+              Refresh
             </Button>
             <Button
               size="sm"
@@ -175,7 +175,7 @@ export const DockerPanel = () => {
               loading={busy}
               disabled={reclaimable === 0}
             >
-              Почистити невикористане
+              Clean unused
             </Button>
           </div>
         )}
@@ -183,16 +183,16 @@ export const DockerPanel = () => {
 
       <ConfirmDialog
         open={confirm}
-        title="Очистити невикористане у Docker?"
+        title="Clean unused Docker data?"
         description={
-          `Буде виконано \`docker system prune -af --volumes\` та \`docker builder prune -af\`:\n\n` +
-          `• зупинені контейнери\n` +
-          `• не використані образи (включаючи з тегами)\n` +
-          `• не використані volumes\n` +
+          `Runs \`docker system prune -af --volumes\` and \`docker builder prune -af\`:\n\n` +
+          `• stopped containers\n` +
+          `• unused images (including tagged)\n` +
+          `• unused volumes\n` +
           `• build cache (BuildKit)\n\n` +
-          `Приблизно звільниться ${formatBytes(reclaimable)}. Активні контейнери та їхні дані не чіпаються.`
+          `Approximately ${formatBytes(reclaimable)} will be freed. Running containers and their data are not touched.`
         }
-        confirmLabel="Очистити"
+        confirmLabel="Clean"
         tone="danger"
         onConfirm={prune}
         onCancel={() => setConfirm(false)}

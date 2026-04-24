@@ -2,9 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamText } from 'ai';
 
 import { Button } from '../../shared/ui/Button';
-import { IconButton } from '../../shared/ui/IconButton';
-import { Textarea } from '../../shared/ui/Textarea';
-import { CloseIcon } from '../../shared/ui/icons';
+import { Tooltip } from '../../shared/ui/Tooltip';
+import { CloseIcon, SendToAiIcon, StopCircleIcon } from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
 import { buildModel } from '../ai/provider';
 import { useAiSettings } from '../ai/useAiSettings';
@@ -14,15 +13,22 @@ type Props = {
   body: string;
   onBodyChange: (next: string) => void;
   onClose: () => void;
-  onStreamingChange?: (streaming: boolean) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Open an undo transaction before the AI stream begins and flush it
+   *  after — collapses the whole rewrite into one undoable step. */
+  beginTransaction: () => void;
+  endTransaction: () => void;
 };
 
 const SYSTEM_PROMPT = [
-  'You edit the user\'s markdown note in-place.',
+  "You edit the user's markdown note in-place.",
   'Output ONLY the complete revised note body in markdown — no commentary, no explanations, no code fences, no preamble.',
   'Preserve any section the user did not ask to change verbatim, including whitespace, headings, lists, and embeds like ![…](…).',
   'If the user asks to rewrite a specific paragraph, replace only that paragraph and keep the rest byte-identical.',
-  'If the note is empty, produce a coherent note body that answers the user\'s instruction.',
+  "If the note is empty, produce a coherent note body that answers the user's instruction.",
 ].join(' ');
 
 const buildUserMessage = (title: string, body: string, instruction: string): string => {
@@ -31,12 +37,51 @@ const buildUserMessage = (title: string, body: string, instruction: string): str
   return `${header}Current note body:\n---\n${current}\n---\n\nInstruction: ${instruction}`;
 };
 
+const UndoIcon = ({ size = 13 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h11a5 5 0 0 1 0 10h-4" />
+  </svg>
+);
+
+const RedoIcon = ({ size = 13 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9H9a5 5 0 0 0 0 10h4" />
+  </svg>
+);
+
 export const NoteAiBar = ({
   noteTitle,
   body,
   onBodyChange,
   onClose,
-  onStreamingChange,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
+  beginTransaction,
+  endTransaction,
 }: Props) => {
   const settings = useAiSettings();
   const { toast } = useToast();
@@ -44,22 +89,12 @@ export const NoteAiBar = ({
   const [isStreaming, setIsStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  // Latest body kept in a ref so the abort handler can revert even after
-  // many re-renders during streaming.
   const originalRef = useRef<string>(body);
 
-  useEffect(() => {
-    onStreamingChange?.(isStreaming);
-  }, [isStreaming, onStreamingChange]);
-
-  // Focus the textarea when the bar opens so the user can start typing
-  // immediately after hitting the magic-wand button.
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
-  // Abort any in-flight stream on unmount so navigating away from Notes
-  // does not keep charging tokens in the background.
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const aiReady =
@@ -106,6 +141,8 @@ export const NoteAiBar = ({
     const abort = new AbortController();
     abortRef.current = abort;
     originalRef.current = body;
+    // Whole rewrite collapses into one undo entry.
+    beginTransaction();
     setIsStreaming(true);
     setInput('');
 
@@ -123,8 +160,6 @@ export const NoteAiBar = ({
       }
     } catch (e) {
       if (abort.signal.aborted) {
-        // User pressed Stop → restore the pre-stream body so a partial
-        // rewrite doesn't leave the note in a broken state.
         onBodyChange(originalRef.current);
       } else {
         onBodyChange(originalRef.current);
@@ -136,11 +171,14 @@ export const NoteAiBar = ({
       }
     }
 
+    endTransaction();
     setIsStreaming(false);
     abortRef.current = null;
   }, [
     aiReady,
+    beginTransaction,
     body,
+    endTransaction,
     input,
     isStreaming,
     noteTitle,
@@ -154,11 +192,93 @@ export const NoteAiBar = ({
 
   return (
     <div
-      className="border-t hair px-3 py-2 flex items-end gap-2"
-      style={{ background: 'var(--color-surface)' }}
+      className="border-t hair flex flex-col gap-1.5 px-3 py-2 shrink-0 relative"
+      style={{
+        // Frosted glass to match Terminal's ComposeBox — the bar reads as
+        // chrome over the editor instead of a flat slab.
+        background: 'rgba(16, 18, 22, 0.6)',
+        backdropFilter: 'blur(18px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
+      }}
       data-testid="note-ai-bar"
     >
-      <Textarea
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="t-tertiary text-meta shrink-0 select-none">AI rewrite</span>
+        {isStreaming && (
+          <span
+            aria-hidden
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'var(--stash-accent)',
+              animation: 'pulse 1.1s ease-in-out infinite',
+            }}
+          />
+        )}
+        <div className="flex-1" />
+        <div className="flex items-center gap-0.5 shrink-0">
+          <Tooltip label="Undo (note body)">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={onUndo}
+              disabled={!canUndo || isStreaming}
+              aria-label="Undo"
+            >
+              <UndoIcon size={13} />
+            </Button>
+          </Tooltip>
+          <Tooltip label="Redo (note body)">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={onRedo}
+              disabled={!canRedo || isStreaming}
+              aria-label="Redo"
+            >
+              <RedoIcon size={13} />
+            </Button>
+          </Tooltip>
+          {isStreaming ? (
+            <Tooltip label="Stop and revert (Esc)">
+              <Button
+                size="xs"
+                variant="soft"
+                tone="danger"
+                onClick={stop}
+                aria-label="Stop and revert"
+              >
+                <StopCircleIcon size={13} />
+              </Button>
+            </Tooltip>
+          ) : (
+            <Tooltip label="Send (Enter)">
+              <Button
+                size="xs"
+                variant="soft"
+                tone="accent"
+                onClick={() => void send()}
+                disabled={!aiReady || !input.trim()}
+                aria-label="Send"
+              >
+                <SendToAiIcon size={13} />
+              </Button>
+            </Tooltip>
+          )}
+          <Tooltip label="Close AI bar (Esc)">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={onClose}
+              aria-label="Close AI bar"
+            >
+              <CloseIcon size={13} />
+            </Button>
+          </Tooltip>
+        </div>
+      </div>
+      <textarea
         ref={textareaRef}
         value={input}
         onChange={(e) => setInput(e.currentTarget.value)}
@@ -178,56 +298,25 @@ export const NoteAiBar = ({
             if (!isStreaming) void send();
           }
         }}
-        rows={1}
-        maxLength={8000}
         placeholder={
           aiReady
-            ? 'Tell AI how to rewrite this note — e.g. "rewrite paragraph 2"'
+            ? 'Tell AI how to rewrite this note · ⏎ send · ⇧⏎ newline · Esc close'
             : 'Configure AI in Settings → AI first'
         }
         disabled={!aiReady || isStreaming}
-        className="flex-1 resize-none nice-scroll"
-        style={{ minHeight: 36, maxHeight: 120 }}
+        rows={2}
+        maxLength={8000}
+        className="w-full resize-none rounded-md px-2 py-1.5 text-body outline-none t-primary nice-scroll"
+        style={{
+          // Dark recess matching Terminal's compose textarea.
+          background: 'rgba(0, 0, 0, 0.28)',
+          border: '1px solid var(--color-border-hair, rgba(255,255,255,0.08))',
+          minHeight: 48,
+          maxHeight: 160,
+        }}
         aria-label="AI instruction for this note"
+        spellCheck={false}
       />
-      {isStreaming ? (
-        <Button
-          aria-label="Stop and revert"
-          title="Stop and revert (Esc)"
-          onClick={stop}
-          variant="soft"
-          tone="danger"
-          shape="square"
-          size="sm"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <rect x="3" y="3" width="8" height="8" rx="1" fill="currentColor" />
-          </svg>
-        </Button>
-      ) : (
-        <Button
-          aria-label="Send"
-          title="Send (Enter)"
-          onClick={() => void send()}
-          disabled={!aiReady || !input.trim()}
-          variant="soft"
-          tone="accent"
-          shape="square"
-          size="sm"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path
-              d="M2 2 L12 7 L2 12 L5 7 Z"
-              fill="currentColor"
-              stroke="currentColor"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </Button>
-      )}
-      <IconButton onClick={onClose} title="Close AI bar" stopPropagation={false}>
-        <CloseIcon size={13} />
-      </IconButton>
     </div>
   );
 };

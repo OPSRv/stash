@@ -53,8 +53,8 @@ const NAV: NavItem[] = [
   // Overview
   {
     id: 'dashboard',
-    label: 'Огляд',
-    hint: 'CPU, RAM, диск, батарея',
+    label: 'Overview',
+    hint: 'CPU, RAM, disk, battery',
     gradient: ['#ff8a5b', '#ff3a6f'],
     glyph: 'M3 13h4l3-8 4 14 3-6h4',
     implemented: true,
@@ -62,8 +62,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'smart-scan',
-    label: 'Розумне прибирання',
-    hint: 'Один клік — усе гамузом',
+    label: 'Smart clean',
+    hint: 'One click — everything at once',
     gradient: ['#ffd86b', '#ff3a6f'],
     glyph: 'M13 2 4 14h7l-1 8 9-12h-7z',
     implemented: true,
@@ -71,8 +71,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'processes',
-    label: 'Процеси',
-    hint: 'Важкі задачі, RAM, CPU',
+    label: 'Processes',
+    hint: 'Heavy tasks, RAM, CPU',
     gradient: ['#ff8a5b', '#ff3a6f'],
     glyph: 'M3 4h18v4H3zM3 10h18v4H3zM3 16h18v4H3z',
     implemented: true,
@@ -80,8 +80,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'network',
-    label: 'Мережа',
-    hint: 'Активні зʼєднання',
+    label: 'Network',
+    hint: 'Active connections',
     gradient: ['#5ee2c4', '#2aa3ff'],
     glyph: 'M5 12a14 14 0 0 1 14 0M3 8a20 20 0 0 1 18 0M7 16a8 8 0 0 1 10 0',
     implemented: true,
@@ -89,8 +89,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'displays',
-    label: 'Екрани',
-    hint: 'Яскравість, сон моніторів',
+    label: 'Displays',
+    hint: 'Brightness, sleep monitors',
     gradient: ['#8ec5ff', '#5561ff'],
     glyph: 'M3 4h18v12H3zM8 20h8M12 16v4',
     implemented: true,
@@ -98,8 +98,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'battery',
-    label: 'Батарея',
-    hint: 'Цикли, стан, ємність',
+    label: 'Battery',
+    hint: 'Cycles, condition, capacity',
     gradient: ['#7ef7a5', '#17b26a'],
     glyph: 'M3 8h14v8H3zM17 10h2v4h-2zM6 11h6',
     implemented: true,
@@ -107,7 +107,7 @@ const NAV: NavItem[] = [
   },
   {
     id: 'quick-actions',
-    label: 'Швидкі дії',
+    label: 'Quick actions',
     hint: 'Sleep, Lock, DNS, Spotlight',
     gradient: ['#ffd86b', '#ff914d'],
     glyph: 'M13 2 4 14h7l-1 8 9-12h-7z',
@@ -118,8 +118,8 @@ const NAV: NavItem[] = [
   // Storage
   {
     id: 'large-files',
-    label: 'Великі файли',
-    hint: 'Знайди й видали важке',
+    label: 'Large files',
+    hint: 'Find and remove heavy files',
     gradient: ['#ffd86b', '#ff914d'],
     glyph: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6',
     implemented: true,
@@ -128,7 +128,7 @@ const NAV: NavItem[] = [
   {
     id: 'node-modules',
     label: 'node_modules',
-    hint: 'Рекурсивно у вибраній папці',
+    hint: 'Recursive in chosen folder',
     gradient: ['#5ee2c4', '#17b26a'],
     glyph: 'M3 7l9-4 9 4v10l-9 4-9-4z',
     implemented: true,
@@ -136,8 +136,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'caches',
-    label: 'Кеші',
-    hint: 'Браузери, npm, Xcode',
+    label: 'Caches',
+    hint: 'Browsers, npm, Xcode',
     gradient: ['#5ee2c4', '#2aa3ff'],
     glyph: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18',
     implemented: true,
@@ -154,8 +154,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'trash-bins',
-    label: 'Кошики',
-    hint: 'Усі томи · Empty all',
+    label: 'Trash bins',
+    hint: 'All volumes · Empty all',
     gradient: ['#ff8a5b', '#ff3a6f'],
     glyph: 'M3 6h18M8 6l1-3h6l1 3M6 6l1 14h10l1-14',
     implemented: true,
@@ -163,7 +163,7 @@ const NAV: NavItem[] = [
   },
   {
     id: 'disk-hogs',
-    label: 'Важке на диску',
+    label: 'Disk hogs',
     hint: 'iOS, Mail, Xcode, TM',
     gradient: ['#ffd86b', '#ff3a6f'],
     glyph: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM12 7v5l3 2',
@@ -172,8 +172,8 @@ const NAV: NavItem[] = [
   },
   {
     id: 'duplicates',
-    label: 'Дублікати',
-    hint: 'SHA-256 + розмір',
+    label: 'Duplicates',
+    hint: 'SHA-256 + size',
     gradient: ['#d08cff', '#5561ff'],
     glyph: 'M4 4h12v12H4zM8 8h12v12H8z',
     implemented: true,
@@ -183,8 +183,8 @@ const NAV: NavItem[] = [
   // System
   {
     id: 'uninstaller',
-    label: 'Деінсталятор',
-    hint: 'Застосунки + залишки',
+    label: 'Uninstaller',
+    hint: 'Apps + leftovers',
     gradient: ['#d08cff', '#7a4bff'],
     glyph: 'M9 7V4h6v3M5 7h14l-1 13H6z',
     implemented: true,
@@ -192,7 +192,7 @@ const NAV: NavItem[] = [
   },
   {
     id: 'launch-agents',
-    label: 'Автозапуск',
+    label: 'Login items',
     hint: 'LaunchAgents',
     gradient: ['#7ef7a5', '#17b26a'],
     glyph: 'M12 2v6M12 22v-4M4 12H2M22 12h-2M5 5l1.5 1.5M19 19l-1.5-1.5M5 19l1.5-1.5M19 5l-1.5 1.5',
@@ -203,8 +203,8 @@ const NAV: NavItem[] = [
   // Security
   {
     id: 'privacy',
-    label: 'Приватність',
-    hint: 'Історія, recents, QuickLook',
+    label: 'Privacy',
+    hint: 'History, recents, QuickLook',
     gradient: ['#d08cff', '#ff3a6f'],
     glyph: 'M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z',
     implemented: true,
@@ -213,10 +213,10 @@ const NAV: NavItem[] = [
 ];
 
 const GROUP_LABEL: Record<NavItem['group'], string> = {
-  overview: 'Огляд',
-  storage: 'Диск',
-  system: 'Система',
-  security: 'Приватність',
+  overview: 'Overview',
+  storage: 'Storage',
+  system: 'System',
+  security: 'Security',
 };
 
 const NavTile = ({
@@ -348,7 +348,7 @@ export const SystemShell = () => {
     <div className="flex h-full min-h-0">
       <aside
         className="w-[176px] shrink-0 border-r hair flex flex-col"
-        aria-label="Підрозділи системного модуля"
+        aria-label="System module sections"
       >
         <div className="px-2 pt-2 pb-1">
           <Input
@@ -356,7 +356,7 @@ export const SystemShell = () => {
             type="search"
             role="searchbox"
             size="sm"
-            placeholder="⌘F пошук…"
+            placeholder="⌘F search…"
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
           />
@@ -387,7 +387,7 @@ export const SystemShell = () => {
           })}
           {filteredIds && filteredIds.size === 0 && (
             <div className="px-2 py-3 t-tertiary text-meta">
-              Нічого не знайдено
+              Nothing found
             </div>
           )}
         </div>

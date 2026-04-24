@@ -48,6 +48,14 @@ export const notesReadFile = (path: string): Promise<ReadFileResult> =>
 export const notesWriteFile = (path: string, content: string): Promise<void> =>
   invoke('notes_write_file', { path, content });
 
+/** Write the current note's body to a stable on-disk markdown file under
+ *  the managed exports dir and return the absolute path. Used for
+ *  Reveal-in-Finder and for piping a note to external tools like Claude
+ *  Code. Re-exports on each call so the file content always matches the
+ *  latest saved note. */
+export const notesExportPath = (id: number): Promise<string> =>
+  invoke('notes_export_path', { id });
+
 /** Persist audio bytes (from the recorder) into the managed audio directory.
  *  Returns the absolute path so the caller can embed it into a note's body
  *  via markdown: `![voice note](/abs/path)`. */

@@ -4,15 +4,17 @@
 
 Stash — macOS menubar app, **Tauri 2 + React 19 + TS + Rust**. Single 920×520 popup hosts features as tabs. Global toggle `⌘⇧V`; tab switch `⌘⌥1..7`.
 
-## Три слони (project values)
+`npm run dev` = Vite only (UI work / e2e). `npm run tauri dev` = full app. Rust tests live under `src-tauri/` (`cargo test --manifest-path src-tauri/Cargo.toml`).
 
-Окрім стандартних **DRY / KISS / YAGNI**, усі рішення в Stash оцінюються через **три слони**:
+## Three elephants (project values)
 
-1. **UI/UX** — кожна взаємодія має бути передбачувана, фокус-менеджмент не ламається, feedback миттєвий, темна/світла тема, reduced-motion, accessibility не опційні.
-2. **Модульність** — кожен модуль у `src/modules/*` стендалон: свої `api.ts`, тести, `index.tsx` з lazy popup. Ніяких крос-модульних імпортів напряму, тільки через `shared/` або `stash:navigate` події.
-3. **Перформанс** — lazy tabs, prefetch on hover, нічого важкого в popup-open path, без зайвих ре-рендерів, bundle-stub для важких залежностей (як `lowlight`).
+On top of the usual **DRY / KISS / YAGNI**, every decision in Stash is judged against the **three elephants**:
 
-Коли пропонуєш правку — свідомо калібруй проти цих трьох. Якщо одна з них просідає — це має бути явний trade-off, а не випадкове.
+1. **UI/UX** — every interaction must be predictable, focus management never breaks, feedback is instant, dark/light theme + reduced-motion + accessibility are not optional.
+2. **Modularity** — each module in `src/modules/*` is standalone: its own `api.ts`, tests, `index.tsx` with a lazy popup. No direct cross-module imports — go through `shared/` or `stash:navigate` events.
+3. **Performance** — lazy tabs, prefetch on hover, nothing heavy in the popup-open path, no unnecessary re-renders, bundle-stub heavy deps (e.g. `lowlight`).
+
+When you propose a change, consciously calibrate it against these three. If one regresses, it must be an explicit trade-off, not accidental.
 
 ## Module system
 
@@ -32,14 +34,14 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
 
 ## Agent surface (Telegram + CLI + voice popup)
 
-Telegram-бот та AI-асистент — **first-class surface** для кожного модуля, не опція. Будь-який новий функціонал (команда, таб, таймер, дія) **зобов'язаний** бути доступним через:
+The Telegram bot and AI assistant are a **first-class surface** for every module, not an option. Any new feature (command, tab, timer, action) **must** be reachable via:
 
-1. **Slash-команду** в `src-tauri/src/modules/telegram/module_cmds.rs` (коли має сенс детерміністична швидка дія) та/або
-2. **LLM tool** у `src-tauri/src/modules/telegram/tools/stash.rs`, зареєстрований у `assistant.rs` → тоді асистент (Telegram, CLI через `stash ai "…"`, майбутній voice popup) може викликати дію з natural-language промпта.
+1. A **slash command** in `src-tauri/src/modules/telegram/module_cmds.rs` (when a deterministic quick action makes sense), and/or
+2. An **LLM tool** in `src-tauri/src/modules/telegram/tools/stash.rs`, registered in `assistant.rs` → so the assistant (Telegram, CLI via `stash ai "…"`, future voice popup) can invoke the action from a natural-language prompt.
 
-Єдина точка диспатчу асистента — `telegram::assistant::handle_user_text(app, state, prompt)`. Усі транспорти (Telegram, CLI, voice) ходять через неї — не дублювати LLM/tool-loop в окремих місцях.
+The single assistant dispatch point is `telegram::assistant::handle_user_text(app, state, prompt)`. All transports (Telegram, CLI, voice) go through it — never duplicate the LLM/tool loop elsewhere.
 
-Tool має експонувати **повний функціонал таба**, а не фіксовані пресети: асистент сам мапить natural-language параметри (BPM, тривалість, розмір такту тощо) на args. Якщо додаєш нове поле в модуль — одночасно розширюй tool-схему.
+A tool must expose the **full functionality of its tab**, not fixed presets: the assistant itself maps natural-language parameters (BPM, duration, time signature, etc.) onto args. If you add a new field to a module, extend the tool schema in the same change.
 
 ## Communication
 
@@ -54,11 +56,8 @@ Tool має експонувати **повний функціонал таба*
 - Prefer role-based queries. When a button is a tab/toggle, use proper ARIA (`role="tab"`, `aria-pressed`, `aria-checked`).
 - Rust repos tested with `Connection::open_in_memory()`.
 - E2E (`tests/e2e/`) runs Playwright against Vite dev — **no Tauri IPC in e2e**.
-- **Storybook**: кожен новий примітив у `src/shared/ui/` мусить мати поруч `*.stories.tsx` — з `tags: ['autodocs']`, argTypes на всі enum-пропси і принаймні однією сторі на кожен стан (tones/sizes/disabled/invalid тощо). Перевірити: `npm run storybook` (або `npm run build-storybook`). Сторі виключені з `tsc`/`vitest` — вони не замінюють юніт-тести, а доповнюють їх.
-  - **Тримати синхронним.** Будь-яка зміна в компоненті з наявним `*.stories.tsx` зобов’язує оновити сторі тим самим коммітом. Зокрема:
-    - **додав/видалив/перейменував проп** → оновити `argTypes`, `args`, і сторі-кейси, які його демонструють (нова сторі для нового стану; видалити мертві кейси для прибраного пропу). Зміна дефолту — оновити `args`.
-    - **зміна дизайну** (паддінги, кольори, іконки, розміри, emerging варіанти) → пройтись по всіх існуючих сторі цього компонента в Storybook візуально (`npm run storybook`) і переконатися, що жоден кейс не зламаний і покриває нові стани.
-    - **перевірка перед комітом**: `npm run build-storybook` не мусить додавати нових помилок — якщо сторі посилається на прибраний проп, білд покаже це раніше за ревʼю.
+- **Storybook**: every new primitive in `src/shared/ui/` must ship a co-located `*.stories.tsx` — with `tags: ['autodocs']`, `argTypes` for every enum prop, and at least one story per state (tones/sizes/disabled/invalid, etc.). Check with `npm run storybook` (or `npm run build-storybook`). Stories are excluded from `tsc`/`vitest` — they complement unit tests, not replace them.
+  - **Keep stories in sync.** Any prop/design change on a component that has `*.stories.tsx` must update the stories in the same commit (argTypes, args, cases for added/removed states). Run `npm run build-storybook` before commit — it catches references to removed props earlier than review.
 
 ## Conventions easy to get wrong
 
