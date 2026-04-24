@@ -9,6 +9,7 @@ import { SUPPORTED_VIDEO_URL } from '../modules/downloader/downloads.constants';
 import { setPendingDownloaderUrl } from '../modules/downloader/pendingUrl';
 import { TabButton } from '../shared/ui/TabButton';
 import { Button } from '../shared/ui/Button';
+import { accent } from '../shared/theme/accent';
 import { PinIcon } from '../shared/ui/icons';
 import { loadSettings, saveSetting } from '../settings/store';
 
@@ -68,11 +69,11 @@ export const PopupShell = () => {
     setVisitedIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   };
 
-  // Position the active-tab underline. Uses layout effect so the indicator
+  // Position the active-tab pill. Uses layout effect so the indicator
   // moves on the same paint as the highlight changes — no flash on switch.
   // The active tab animates its width (label expands from 0 to full) over
-  // ~200ms, so we keep re-measuring via rAF until the transition settles,
-  // otherwise the underline would stick to the collapsed-width snapshot.
+  // ~260ms, so we keep re-measuring via rAF until the transition settles,
+  // otherwise the pill would stick to the collapsed-width snapshot.
   useLayoutEffect(() => {
     const el = tabRefs.current.get(activeId);
     if (!el) return;
@@ -472,6 +473,34 @@ export const PopupShell = () => {
         }}
         className="relative flex items-center gap-1 px-2 py-1.5 border-b hair cursor-grab active:cursor-grabbing"
       >
+        {/*
+          Active-tab pill. Sits BEHIND the buttons (earlier in DOM →
+          lower paint order for absolute siblings) and echoes each
+          button's `rounded-md h-7` geometry, so the highlight matches
+          the popup's rounded-corner language instead of fighting it
+          with a stray bottom underline. The accent-tinted fill is
+          kept low-alpha so active label text (`t-primary`) stays
+          legible over vibrancy.
+        */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute top-1.5 h-7 rounded-md"
+          style={{
+            background: accent(0.14),
+            boxShadow: `inset 0 0 0 1px ${accent(0.22)}`,
+            left: 0,
+            transform: `translateX(${indicator.left}px)`,
+            width: indicator.width,
+            // Position (transform) uses CSS transition to sweep smoothly
+            // between tabs. Width is driven frame-by-frame by the rAF
+            // loop above so the pill hugs the active tab's edge while
+            // its label expands — transitioning width here would lag a
+            // frame behind every measurement and feel sluggish.
+            transition:
+              'transform 260ms var(--easing-emphasized), opacity 150ms ease',
+            opacity: indicator.width > 0 ? 1 : 0,
+          }}
+        />
         {visibleModules.map((m, i) => (
           <TabButton
             key={m.id}
@@ -496,23 +525,6 @@ export const PopupShell = () => {
             onHover={() => m.preloadPopup?.().catch(() => {})}
           />
         ))}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute bottom-0 h-[2px] rounded-full"
-          style={{
-            background: 'var(--stash-accent)',
-            left: 0,
-            transform: `translateX(${indicator.left}px)`,
-            width: indicator.width,
-            // Position (transform) uses CSS transition to sweep smoothly
-            // between tabs. Width is driven frame-by-frame by the rAF loop
-            // above so it hugs the active tab's content edge while it
-            // expands — transitioning width here would lag a frame behind
-            // every measurement and feel sluggish.
-            transition: 'transform 260ms var(--easing-emphasized), opacity 150ms ease',
-            opacity: indicator.width > 0 ? 1 : 0,
-          }}
-        />
         <div className="ml-auto flex items-center gap-1">
           <Button
             size="sm"
