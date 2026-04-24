@@ -11,7 +11,18 @@
 <link rel="icon" type="image/svg+xml" href="assets/logo.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<!-- Async font load: `media="print"` takes the stylesheet off the critical
+     render path; the onload handler swaps it back to `all` once it's in
+     cache, avoiding the ~720 ms Lighthouse flagged for render-blocking
+     Google Fonts. `font-display: swap` (already in the URL's response)
+     covers the flash-of-fallback window. -->
+<link rel="preload" as="style"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap"
+      onload="this.onload=null;this.rel='stylesheet'">
+<noscript>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+</noscript>
 <style>
   :root {
     --bg-0: #0A0B0E;
@@ -20,8 +31,10 @@
     --bg-3: #23262D;
     --ink-hi: #F2F3F5;
     --ink:    #C8CBD1;
-    --ink-lo: #7A7F89;
-    --ink-xlo:#4B4F58;
+    /* Bumped from #7A7F89 / #4B4F58 to clear WCAG AA on #0A0B0E — Lighthouse
+       flagged the old `--ink-xlo` at ~2.6:1 which is below the 4.5:1 floor. */
+    --ink-lo: #9096A0;
+    --ink-xlo:#7A7F89;
     --line:   rgba(255,255,255,0.08);
     --line-2: rgba(255,255,255,0.14);
     --blue:   #2F7AE5;
@@ -900,6 +913,7 @@
   </a>
 </nav>
 
+<main id="top">
 <!-- ================== HERO ================== -->
 <header class="hero">
   <div class="hero-inner" id="heroInner">
@@ -1449,6 +1463,8 @@
   </div>
 </section>
 
+</main>
+
 <footer>
   <div class="foot">
     <div class="foot-brand">
@@ -1748,7 +1764,7 @@ MODULES.forEach(m => {
   el.innerHTML = `
     ${m.kbd ? `<div class="mkbd">${m.kbd}</div>` : ''}
     <div class="mod-icon"><svg><use href="${m.icon}"/></svg></div>
-    <h4>${m.title}</h4>
+    <h3>${m.title}</h3>
     <p>${m.long}</p>
   `;
   modGrid.appendChild(el);
@@ -1789,21 +1805,41 @@ window.addEventListener('scroll', () => {
 }, { passive: true });
 
 // ============== CURSOR AURA ==============
+// Coalesce pointermove → one layout write per frame. Lighthouse flagged
+// long main-thread tasks (3.1 s total); the raw handler was writing
+// style on every pointer event, causing paint-thrash on dense moves.
 const aura = document.getElementById('aura');
+let auraX = 0, auraY = 0, auraQueued = false;
 window.addEventListener('pointermove', (e) => {
-  aura.style.left = e.clientX + 'px';
-  aura.style.top  = e.clientY + 'px';
-  document.body.classList.add('aura-on');
+  auraX = e.clientX; auraY = e.clientY;
+  if (auraQueued) return;
+  auraQueued = true;
+  requestAnimationFrame(() => {
+    auraQueued = false;
+    aura.style.left = auraX + 'px';
+    aura.style.top  = auraY + 'px';
+    if (!document.body.classList.contains('aura-on')) {
+      document.body.classList.add('aura-on');
+    }
+  });
 }, { passive: true });
 window.addEventListener('pointerleave', () => document.body.classList.remove('aura-on'));
 
 // ============== PILLAR RADIAL HOVER ==============
 document.querySelectorAll('.pillar').forEach(p => {
+  let pending = false, mx = 0, my = 0;
   p.addEventListener('pointermove', e => {
     const r = p.getBoundingClientRect();
-    p.style.setProperty('--mx', ((e.clientX - r.left)/r.width*100)+'%');
-    p.style.setProperty('--my', ((e.clientY - r.top)/r.height*100)+'%');
-  });
+    mx = (e.clientX - r.left)/r.width*100;
+    my = (e.clientY - r.top)/r.height*100;
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      p.style.setProperty('--mx', mx + '%');
+      p.style.setProperty('--my', my + '%');
+    });
+  }, { passive: true });
 });
 
 // ============== REVEAL ON SCROLL ==============
@@ -1832,14 +1868,21 @@ const cio = new IntersectionObserver((ents) => {
 document.querySelectorAll('[data-count]').forEach(el => cio.observe(el));
 
 // ============== DESKTOP PARALLAX TILT ==============
+// Same rAF-coalesced pattern as the aura — one transform write per frame.
 const desktop = document.getElementById('desktop');
 const stage = document.getElementById('stage');
+let tiltPending = false, tiltX = 0, tiltY = 0;
 stage.addEventListener('pointermove', (e) => {
   const r = stage.getBoundingClientRect();
-  const x = (e.clientX - r.left) / r.width - .5;
-  const y = (e.clientY - r.top) / r.height - .5;
-  desktop.style.transform = `rotateX(${8 - y*6}deg) rotateY(${-1 + x*6}deg)`;
-});
+  tiltX = (e.clientX - r.left) / r.width - .5;
+  tiltY = (e.clientY - r.top) / r.height - .5;
+  if (tiltPending) return;
+  tiltPending = true;
+  requestAnimationFrame(() => {
+    tiltPending = false;
+    desktop.style.transform = `rotateX(${8 - tiltY*6}deg) rotateY(${-1 + tiltX*6}deg)`;
+  });
+}, { passive: true });
 stage.addEventListener('pointerleave', () => { desktop.style.transform = ''; });
 
 // ============== KEYBOARD: Cmd+Shift+V on page replays popup ==============
