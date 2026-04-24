@@ -120,7 +120,8 @@ pub fn notes_delete(
         // depth against a corrupted row pointing somewhere unexpected.
         if let Ok(base) = audio_dir(&app) {
             let path = Path::new(&p);
-            if path.starts_with(&base) {
+            let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if canon.starts_with(&base) {
                 let _ = std::fs::remove_file(path);
             }
         }
@@ -131,7 +132,8 @@ pub fn notes_delete(
     for a in attachments {
         let path = Path::new(&a.file_path);
         if let Some(ref base) = attach_base {
-            if path.starts_with(base) {
+            let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if canon.starts_with(base) {
                 let _ = std::fs::remove_file(path);
             }
         }
@@ -261,7 +263,8 @@ pub fn notes_remove_attachment(
         // poisoned rows pointing outside the sandbox.
         if let Ok(base) = attachments_root(&app) {
             let path = Path::new(&p);
-            if path.starts_with(&base) {
+            let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if canon.starts_with(&base) {
                 match std::fs::remove_file(path) {
                     Ok(()) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -455,7 +458,8 @@ pub fn notes_read_image_path(
 ) -> Result<Vec<u8>, String> {
     let base = image_dir(&app)?;
     let p = Path::new(&path);
-    if !p.starts_with(&base) {
+    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    if !canon.starts_with(&base) {
         return Err("image path is outside the managed images directory".into());
     }
     if !p.is_file() {
@@ -476,7 +480,8 @@ pub fn notes_read_audio_path(
 ) -> Result<Vec<u8>, String> {
     let base = audio_dir(&app)?;
     let p = Path::new(&path);
-    if !p.starts_with(&base) {
+    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    if !canon.starts_with(&base) {
         return Err("audio path is outside the managed audio directory".into());
     }
     if !p.is_file() {

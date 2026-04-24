@@ -31,7 +31,7 @@ import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { SaveStatusPill, type SaveStatus } from './SaveStatusPill';
 import { AudioRecorder, type RecordedAudio } from './AudioRecorder';
-import { NoteChatPanel } from './NoteChatPanel';
+import { NoteAiBar } from './NoteAiBar';
 import { useAudioFileDrop } from './useAudioFileDrop';
 import {
   appendAudioEmbed,
@@ -145,19 +145,19 @@ export const NotesShell = () => {
   /// in-flight promise so later saves wait for `activeId` to land.
   const pendingCreateRef = useRef<Promise<number> | null>(null);
   const [recorderOpen, setRecorderOpen] = useState(false);
-  const [chatOpen, setChatOpenState] = useState<boolean>(() => {
+  const [aiBarOpen, setAiBarOpenState] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
-      return window.localStorage?.getItem('stash:notes:chat-open') === '1';
+      return window.localStorage?.getItem('stash:notes:ai-bar-open') === '1';
     } catch {
       return false;
     }
   });
-  const setChatOpen = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
-    setChatOpenState((prev) => {
+  const setAiBarOpen = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setAiBarOpenState((prev) => {
       const value = typeof next === 'function' ? next(prev) : next;
       try {
-        window.localStorage.setItem('stash:notes:chat-open', value ? '1' : '0');
+        window.localStorage.setItem('stash:notes:ai-bar-open', value ? '1' : '0');
       } catch {
         /* ignore */
       }
@@ -1033,17 +1033,8 @@ export const NotesShell = () => {
                     </svg>
                   </IconButton>
                   <IconButton
-                    onClick={() => {
-                      setChatOpen((v) => {
-                        const next = !v;
-                        // Free horizontal space when opening — at 920 px
-                        // popup width the 220 px notes list, the editor
-                        // and a 360 px chat don't all fit comfortably.
-                        if (next && !sidebarCollapsed) setSidebarCollapsed(true);
-                        return next;
-                      });
-                    }}
-                    title={chatOpen ? 'Hide note chat' : 'Chat with AI about this note'}
+                    onClick={() => setAiBarOpen((v) => !v)}
+                    title={aiBarOpen ? 'Hide AI bar' : 'Rewrite this note with AI'}
                     stopPropagation={false}
                   >
                     <MagicWandIcon size={13} />
@@ -1125,6 +1116,14 @@ export const NotesShell = () => {
                 </div>
               )}
             </div>
+            {aiBarOpen && (
+              <NoteAiBar
+                noteTitle={title}
+                body={body}
+                onBodyChange={onBodyChange}
+                onClose={() => setAiBarOpen(false)}
+              />
+            )}
           </>
         ) : (
           <EmptyState
@@ -1143,14 +1142,6 @@ export const NotesShell = () => {
           />
         )}
       </main>
-      {chatOpen && activeId != null && active && (
-        <NoteChatPanel
-          noteId={activeId}
-          noteTitle={title}
-          noteBody={body}
-          onClose={() => setChatOpen(false)}
-        />
-      )}
       <AudioRecorder
         open={recorderOpen}
         onCancel={() => setRecorderOpen(false)}
