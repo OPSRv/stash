@@ -103,6 +103,7 @@ export function NotificationsPanel() {
         description="Minutes before an event to ping."
         control={
           <NumberInput
+            size="sm"
             ariaLabel="Calendar lead minutes"
             min={1}
             max={120}
@@ -123,6 +124,7 @@ export function NotificationsPanel() {
         description="Charge percentage below which to ping."
         control={
           <NumberInput
+            size="sm"
             ariaLabel="Battery threshold"
             min={1}
             max={99}

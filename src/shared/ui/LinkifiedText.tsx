@@ -1,4 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react';
+import { Tooltip } from './Tooltip';
 
 type LinkifiedTextProps = {
   /// Raw text, possibly containing URLs. Preserves whitespace and
@@ -71,16 +72,16 @@ export const LinkifiedText = ({ content, className }: LinkifiedTextProps) => {
     const raw = m[0];
     const href = normaliseHref(raw);
     nodes.push(
-      <a
-        key={`${m.index}-${raw}`}
-        href={href}
-        onClick={(e) => onAnchorClick(e, href)}
-        className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
-        style={{ color: 'rgb(var(--stash-accent-rgb))' }}
-        title={href}
-      >
-        {raw}
-      </a>,
+      <Tooltip key={`${m.index}-${raw}`} label={href}>
+        <a
+          href={href}
+          onClick={(e) => onAnchorClick(e, href)}
+          className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+          style={{ color: 'rgb(var(--stash-accent-rgb))' }}
+        >
+          {raw}
+        </a>
+      </Tooltip>,
     );
     last = m.index + raw.length;
   }

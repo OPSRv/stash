@@ -88,11 +88,12 @@ export const StashCliRow = () => {
         description={description}
         control={
           installed ? (
-            <Button variant="soft" tone="neutral" onClick={onUninstall} disabled={busy}>
+            <Button size="sm" variant="soft" tone="neutral" onClick={onUninstall} disabled={busy}>
               Uninstall
             </Button>
           ) : (
             <Button
+              size="sm"
               variant="solid"
               tone="accent"
               onClick={onInstall}

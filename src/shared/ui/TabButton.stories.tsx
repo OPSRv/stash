@@ -17,9 +17,9 @@ export const Row: Story = {
     const Demo = () => {
       const [active, setActive] = useState('notes');
       const tabs = [
-        { id: 'notes', label: 'Notes', icon: <NoteIcon size={12} />, sc: '⌘⌥1' },
-        { id: 'search', label: 'Search', icon: <SearchIcon size={12} />, sc: '⌘⌥2' },
-        { id: 'translator', label: 'Translator', icon: <TranslateIcon size={12} />, sc: '⌘⌥3' },
+        { id: 'notes', label: 'Notes', icon: <NoteIcon size={12} />  },
+        { id: 'search', label: 'Search', icon: <SearchIcon size={12} />  },
+        { id: 'translator', label: 'Translator', icon: <TranslateIcon size={12} />  },
       ];
       return (
         <div role="tablist" className="sb-row">
@@ -28,7 +28,6 @@ export const Row: Story = {
               key={t.id}
               label={t.label}
               icon={t.icon}
-              shortcutHint={t.sc}
               active={active === t.id}
               onClick={() => setActive(t.id)}
             />
@@ -48,9 +47,9 @@ export const IconOnlyInactive: Story = {
     const Demo = () => {
       const [active, setActive] = useState('search');
       const tabs = [
-        { id: 'notes', label: 'Notes', icon: <NoteIcon size={12} />, sc: '⌘⌥1' },
-        { id: 'search', label: 'Search', icon: <SearchIcon size={12} />, sc: '⌘⌥2' },
-        { id: 'translator', label: 'Translator', icon: <TranslateIcon size={12} />, sc: '⌘⌥3' },
+        { id: 'notes', label: 'Notes', icon: <NoteIcon size={12} />  },
+        { id: 'search', label: 'Search', icon: <SearchIcon size={12} />  },
+        { id: 'translator', label: 'Translator', icon: <TranslateIcon size={12} />  },
       ];
       return (
         <div role="tablist" className="sb-row">
@@ -59,7 +58,6 @@ export const IconOnlyInactive: Story = {
               key={t.id}
               label={t.label}
               icon={t.icon}
-              shortcutHint={t.sc}
               active={active === t.id}
               onClick={() => setActive(t.id)}
             />
@@ -78,9 +76,9 @@ export const LabelOnly: Story = {
     const Demo = () => {
       const [active, setActive] = useState('b');
       const tabs = [
-        { id: 'a', label: 'Alpha', sc: '⌘⌥1' },
-        { id: 'b', label: 'Bravo', sc: '⌘⌥2' },
-        { id: 'c', label: 'Charlie', sc: '⌘⌥3' },
+        { id: 'a', label: 'Alpha'  },
+        { id: 'b', label: 'Bravo'  },
+        { id: 'c', label: 'Charlie'  },
       ];
       return (
         <div role="tablist" className="sb-row">
@@ -88,7 +86,6 @@ export const LabelOnly: Story = {
             <TabButton
               key={t.id}
               label={t.label}
-              shortcutHint={t.sc}
               active={active === t.id}
               onClick={() => setActive(t.id)}
             />

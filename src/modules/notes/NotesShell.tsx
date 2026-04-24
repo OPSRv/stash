@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { SearchInput } from '../../shared/ui/SearchInput';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
+import { Tooltip } from '../../shared/ui/Tooltip';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import {
   DownloadIcon,
@@ -68,15 +69,16 @@ const RailButton = ({
   title: string;
   children: ReactNode;
 }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    aria-label={title}
-    title={title}
-    className="ring-focus w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors t-secondary hover:t-primary"
-  >
-    {children}
-  </button>
+  <Tooltip label={title} side="right">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={title}
+      className="ring-focus w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors t-secondary hover:t-primary"
+    >
+      {children}
+    </button>
+  </Tooltip>
 );
 
 const iso = (ts: number) => {
@@ -750,32 +752,33 @@ export const NotesShell = () => {
             >
               {iso(n.updated_at)}
             </span>
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                void togglePinned(n.id, !n.pinned);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
+            <Tooltip label={n.pinned ? 'Unpin note' : 'Pin note'}>
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
                   e.stopPropagation();
                   void togglePinned(n.id, !n.pinned);
-                }
-              }}
-              title={n.pinned ? 'Unpin note' : 'Pin note'}
-              aria-label={n.pinned ? 'Unpin note' : 'Pin note'}
-              aria-pressed={n.pinned}
-              className={`ring-focus rounded p-0.5 t-tertiary hover:t-primary cursor-pointer ${
-                n.pinned
-                  ? 'inline-flex items-center'
-                  : 'hidden group-hover:inline-flex group-focus-within:inline-flex items-center'
-              }`}
-              style={n.pinned ? { color: 'var(--stash-accent)' } : undefined}
-            >
-              <PinIcon size={11} filled={n.pinned} />
-            </span>
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void togglePinned(n.id, !n.pinned);
+                  }
+                }}
+                aria-label={n.pinned ? 'Unpin note' : 'Pin note'}
+                aria-pressed={n.pinned}
+                className={`ring-focus rounded p-0.5 t-tertiary hover:t-primary cursor-pointer ${
+                  n.pinned
+                    ? 'inline-flex items-center'
+                    : 'hidden group-hover:inline-flex group-focus-within:inline-flex items-center'
+                }`}
+                style={n.pinned ? { color: 'var(--stash-accent)' } : undefined}
+              >
+                <PinIcon size={11} filled={n.pinned} />
+              </span>
+            </Tooltip>
           </span>
         </div>
         <div className="t-tertiary text-meta truncate mt-0.5">{preview}</div>

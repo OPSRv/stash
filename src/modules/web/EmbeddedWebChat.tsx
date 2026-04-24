@@ -8,6 +8,7 @@ import { userAgentFor } from '../../shared/browserUA';
 import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 import { MoreHorizontalIcon } from '../../shared/ui/icons';
+import { Tooltip } from '../../shared/ui/Tooltip';
 import { Input } from '../../shared/ui/Input';
 import { useToast } from '../../shared/ui/Toast';
 
@@ -500,36 +501,40 @@ export const EmbeddedWebChat = ({
               }}
             />
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                startEditingUrl().catch(() => {});
-              }}
-              className="flex items-center gap-2 flex-1 min-w-0 h-7 px-2 text-meta t-secondary hover:t-primary rounded-md text-left"
-              title="Edit URL (⌘L)"
-            >
-              <Favicon url={currentUrl} label={currentTitle || service.label} size={14} />
-              <span className="t-primary font-medium shrink-0">{service.label}</span>
-              <span className="t-tertiary truncate" title={currentUrl}>{host}</span>
-              {zoom !== 1 && (
-                <span className="ml-auto pl-2 t-tertiary tabular-nums shrink-0" title="Zoom — ⌘0 to reset">
-                  {zoomLabel}
-                </span>
-              )}
-            </button>
+            <Tooltip label="Edit URL (⌘L)" side="bottom">
+              <button
+                type="button"
+                onClick={() => {
+                  startEditingUrl().catch(() => {});
+                }}
+                className="flex items-center gap-2 flex-1 min-w-0 h-7 px-2 text-meta t-secondary hover:t-primary rounded-md text-left"
+              >
+                <Favicon url={currentUrl} label={currentTitle || service.label} size={14} />
+                <span className="t-primary font-medium shrink-0">{service.label}</span>
+                <span className="t-tertiary truncate" title={currentUrl}>{host}</span>
+                {zoom !== 1 && (
+                  <Tooltip label="Zoom — ⌘0 to reset" side="bottom">
+                    <span className="ml-auto pl-2 t-tertiary tabular-nums shrink-0">
+                      {zoomLabel}
+                    </span>
+                  </Tooltip>
+                )}
+              </button>
+            </Tooltip>
           )}
         </div>
 
-        <button
-          type="button"
-          aria-label="More actions"
-          aria-haspopup="menu"
-          onClick={(e) => void openOverflowMenu(e.currentTarget)}
-          className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
-          title="More"
-        >
-          <MoreHorizontalIcon />
-        </button>
+        <Tooltip label="More" side="bottom">
+          <button
+            type="button"
+            aria-label="More actions"
+            aria-haspopup="menu"
+            onClick={(e) => void openOverflowMenu(e.currentTarget)}
+            className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
+          >
+            <MoreHorizontalIcon />
+          </button>
+        </Tooltip>
       </div>
       <div
         ref={sizerRef}
@@ -581,16 +586,17 @@ const NavIconButton = ({
   ariaLabel: string;
   children: React.ReactNode;
 }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    aria-label={ariaLabel}
-    title={title}
-    className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
-  >
-    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      {children}
-    </svg>
-  </button>
+  <Tooltip label={title} side="bottom">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        {children}
+      </svg>
+    </button>
+  </Tooltip>
 );
 

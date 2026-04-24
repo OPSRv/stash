@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { Tooltip } from './Tooltip';
 
 type VideoPlayerProps = {
   src: string;
@@ -218,52 +219,65 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
             onChange={(e) => changeVolume(Number(e.currentTarget.value))}
             className="w-20 accent-accent"
           />
-          <select
-            value={rate}
-            onChange={(e) => {
-              const r = Number(e.currentTarget.value);
-              setRate(r);
-              if (videoRef.current) videoRef.current.playbackRate = r;
-            }}
-            className="t-primary text-meta bg-transparent rounded px-1 py-0.5"
-            style={{ border: '1px solid rgba(255,255,255,0.05)' }}
-            title="Playback speed (+/-)"
-          >
-            {SPEED_PRESETS.map((r) => (
-              <option key={r} value={r}>
-                {r}×
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => {
-              const v = videoRef.current;
-              if (!v) return;
-              if (document.pictureInPictureElement) {
-                document.exitPictureInPicture().catch(() => {});
-              } else {
-                v.requestPictureInPicture?.().catch(() => {});
-              }
-            }}
-            className="t-secondary hover:t-primary"
-            title="Picture-in-Picture (P)"
-            aria-label="Picture-in-Picture"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="5" width="18" height="14" rx="2" />
-              <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" />
-            </svg>
-          </button>
-          <button onClick={toggleFullscreen} className="t-secondary hover:t-primary" title="Fullscreen (F)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" />
-            </svg>
-          </button>
-          <button onClick={onClose} className="t-secondary hover:t-primary" title="Close (Esc)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18M6 6l12 12" />
-            </svg>
-          </button>
+          {/* `<select>` can't host a `<span role="tooltip">` child, so the
+              tip is anchored on an explicit wrapper span instead of going
+              through the Tooltip component. */}
+          <span className="tip tip-top inline-flex">
+            <select
+              value={rate}
+              onChange={(e) => {
+                const r = Number(e.currentTarget.value);
+                setRate(r);
+                if (videoRef.current) videoRef.current.playbackRate = r;
+              }}
+              className="t-primary text-meta bg-transparent rounded px-1 py-0.5"
+              style={{ border: '1px solid rgba(255,255,255,0.05)' }}
+              aria-label="Playback speed"
+            >
+              {SPEED_PRESETS.map((r) => (
+                <option key={r} value={r}>
+                  {r}×
+                </option>
+              ))}
+            </select>
+            <span role="tooltip" aria-hidden="true" className="tip-label">
+              Playback speed (+/-)
+            </span>
+          </span>
+          <Tooltip label="Picture-in-Picture (P)" side="top">
+            <button
+              onClick={() => {
+                const v = videoRef.current;
+                if (!v) return;
+                if (document.pictureInPictureElement) {
+                  document.exitPictureInPicture().catch(() => {});
+                } else {
+                  v.requestPictureInPicture?.().catch(() => {});
+                }
+              }}
+              className="t-secondary hover:t-primary"
+              aria-label="Picture-in-Picture"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip label="Fullscreen (F)" side="top">
+            <button onClick={toggleFullscreen} className="t-secondary hover:t-primary" aria-label="Fullscreen">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9V3h6M15 3h6v6M21 15v6h-6M9 21H3v-6" />
+              </svg>
+            </button>
+          </Tooltip>
+          <Tooltip label="Close (Esc)" side="top">
+            <button onClick={onClose} className="t-secondary hover:t-primary" aria-label="Close">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </Tooltip>
         </div>
       </div>
     </div>

@@ -3,46 +3,37 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { TabButton } from './TabButton';
 
+const ICON = <span data-testid="icon" />;
+
 describe('TabButton', () => {
-  it('keeps shortcut out of the visible label and only in the title', () => {
-    // Tabs no longer render the shortcut hint inline — it lives on `title`
-    // so the chip stays compact while still being discoverable on hover.
-    const { rerender } = render(
-      <TabButton label="Clipboard" shortcutHint="⌘1" active={false} onClick={() => {}} />
-    );
-    expect(screen.queryByText('⌘1')).not.toBeInTheDocument();
-    rerender(<TabButton label="Clipboard" shortcutHint="⌘1" active onClick={() => {}} />);
-    expect(screen.queryByText('⌘1')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Clipboard/ })).toHaveAttribute(
-      'title',
-      'Clipboard (⌘1)',
-    );
+  it('surfaces the label via the custom Tooltip when collapsed to icon-only', () => {
+    // Inactive tabs with an icon render collapsed — the label lives in the
+    // hidden Tooltip bubble so hover still reveals the tab name.
+    render(<TabButton label="Clipboard" icon={ICON} active={false} onClick={() => {}} />);
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('Clipboard');
   });
 
-  it('exposes the shortcut via the title attribute on hover', () => {
-    render(<TabButton label="Clipboard" shortcutHint="⌘1" active={false} onClick={() => {}} />);
-    expect(screen.getByRole('button', { name: /Clipboard/ })).toHaveAttribute(
-      'title',
-      'Clipboard (⌘1)'
-    );
+  it('does not render a Tooltip when the label is already visible (active tab)', () => {
+    render(<TabButton label="Clipboard" icon={ICON} active onClick={() => {}} />);
+    expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument();
   });
 
   it('calls onClick when clicked', async () => {
     const user = userEvent.setup();
     const onClick = vi.fn();
-    render(<TabButton label="Downloads" shortcutHint="⌘2" active={false} onClick={onClick} />);
+    render(<TabButton label="Downloads" active={false} onClick={onClick} />);
 
     await user.click(screen.getByRole('button', { name: /Downloads/ }));
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it('marks active state via aria-current="true"', () => {
-    render(<TabButton label="Clipboard" shortcutHint="⌘1" active onClick={() => {}} />);
+    render(<TabButton label="Clipboard" active onClick={() => {}} />);
     expect(screen.getByRole('button', { name: /Clipboard/ })).toHaveAttribute('aria-current', 'true');
   });
 
   it('omits aria-current when inactive', () => {
-    render(<TabButton label="Clipboard" shortcutHint="⌘1" active={false} onClick={() => {}} />);
+    render(<TabButton label="Clipboard" active={false} onClick={() => {}} />);
     expect(screen.getByRole('button', { name: /Clipboard/ })).not.toHaveAttribute('aria-current');
   });
 });

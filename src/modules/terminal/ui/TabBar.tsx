@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Tooltip } from '../../../shared/ui/Tooltip';
 
 import { MAX_TABS, type DropPosition, type Tab } from '../types';
 import { defaultTabLabel, tabLabel } from '../state/tabStorage';
@@ -174,21 +175,22 @@ export const TabBar = ({
                   data-testid={`terminal-tab-rename-${t.id}`}
                 />
               ) : (
-                <span
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    beginEdit(t, defaultTabLabel(t, idx));
-                  }}
-                  title={`${label} — double-click to rename`}
-                  style={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    minWidth: 0,
-                  }}
-                >
-                  {label}
-                </span>
+                <Tooltip label={`${label} — double-click to rename`} side="bottom">
+                  <span
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      beginEdit(t, defaultTabLabel(t, idx));
+                    }}
+                    style={{
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      minWidth: 0,
+                    }}
+                  >
+                    {label}
+                  </span>
+                </Tooltip>
               )}
               {dropOverTab === t.id &&
                 (dropZone === 'left' || dropZone === 'right') && (
@@ -207,37 +209,41 @@ export const TabBar = ({
                   />
                 )}
               {tabs.length > 1 && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClose(t.id);
-                  }}
-                  aria-label={`Close ${label}`}
-                  className="w-4 h-4 flex items-center justify-center rounded-sm t-tertiary opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:t-primary hover:bg-white/[0.08] shrink-0"
-                  title="Close tab"
-                  style={{
-                    fontSize: 12,
-                    lineHeight: 1,
-                    opacity: active ? 1 : undefined,
-                  }}
-                >
-                  ×
-                </button>
+                <Tooltip label="Close tab" side="bottom">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClose(t.id);
+                    }}
+                    aria-label={`Close ${label}`}
+                    className="w-4 h-4 flex items-center justify-center rounded-sm t-tertiary opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:t-primary hover:bg-white/[0.08] shrink-0"
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1,
+                      opacity: active ? 1 : undefined,
+                    }}
+                  >
+                    ×
+                  </button>
+                </Tooltip>
               )}
             </div>
           );
         })}
+        <Tooltip
+          label={
+            tabs.length >= MAX_TABS
+              ? `Max ${MAX_TABS} tabs`
+              : 'New shell (open another terminal session)'
+          }
+          side="bottom"
+        >
         <button
           type="button"
           onClick={onAdd}
           disabled={tabs.length >= MAX_TABS}
           aria-label="New shell"
-          title={
-            tabs.length >= MAX_TABS
-              ? `Max ${MAX_TABS} tabs`
-              : 'New shell (open another terminal session)'
-          }
           className="shrink-0 flex items-center justify-center t-tertiary hover:t-primary hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
           style={{
             width: 28,
@@ -250,6 +256,7 @@ export const TabBar = ({
         >
           +
         </button>
+        </Tooltip>
       </div>
       <div
         className="terminal-tabbar-fade terminal-tabbar-fade-left"

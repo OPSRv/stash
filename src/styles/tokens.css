@@ -320,7 +320,6 @@
 
   .tip {
     position: relative;
-    display: inline-flex;
   }
   .tip > .tip-label {
     position: absolute;

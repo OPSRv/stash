@@ -38,6 +38,7 @@ export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
           description="Runs when the Claude Code button in the terminal header is clicked. Add flags to taste — the whole line is written into the PTY verbatim, followed by Enter."
           control={
             <Input
+              size="sm"
               aria-label="Claude Code launcher command"
               placeholder="claude"
               value={settings.terminalClaudeCommand}
@@ -84,6 +85,7 @@ export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
       {settings.terminalSnippets.map((s, i) => (
         <div key={s.id + i} className="flex items-center gap-2">
           <Input
+            size="sm"
             aria-label="Snippet label"
             placeholder="Label"
             value={s.label}
@@ -93,6 +95,7 @@ export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
             className="w-[140px]"
           />
           <Input
+            size="sm"
             aria-label="Snippet command"
             placeholder="claude --model opus"
             value={s.command}

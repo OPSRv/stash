@@ -1,4 +1,5 @@
 import type { MouseEvent, ReactNode } from 'react';
+import { Tooltip } from './Tooltip';
 
 export type CardTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
 export type CardPadding = 'none' | 'sm' | 'md' | 'lg';
@@ -63,14 +64,18 @@ export const Card = ({
 
   if (onClick) {
     return (
-      <button type="button" onClick={onClick} title={title} aria-label={ariaLabel} className={base}>
-        {children}
-      </button>
+      <Tooltip label={title}>
+        <button type="button" onClick={onClick} aria-label={ariaLabel} className={base}>
+          {children}
+        </button>
+      </Tooltip>
     );
   }
   return (
-    <div title={title} aria-label={ariaLabel} className={base}>
-      {children}
-    </div>
+    <Tooltip label={title}>
+      <div aria-label={ariaLabel} className={base}>
+        {children}
+      </div>
+    </Tooltip>
   );
 };

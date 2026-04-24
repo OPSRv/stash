@@ -45,11 +45,11 @@ const fullExisting = {
   pinned: false,
 };
 
-// The segmented control labels each option with a title attr ("Preview only",
-// "Editor only"), so we look up checked state via the title attribute. Using
-// role+accessible-name breaks when the label is an sr-only span.
+// The segmented control labels each option with a hidden label ("Preview only",
+// "Editor only") wired through the custom Tooltip. The rendered button carries
+// the label via `data-seg-title`, which is stable across the tooltip refactor.
 const segOption = (title: string): HTMLElement => {
-  const el = document.querySelector<HTMLElement>(`[title="${title}"]`);
+  const el = document.querySelector<HTMLElement>(`[data-seg-title="${title}"]`);
   if (!el) throw new Error(`segmented option not found: ${title}`);
   return el;
 };
@@ -77,7 +77,7 @@ describe('NotesShell view-mode defaults', () => {
     render(<NotesShell />);
     await screen.findByText('Existing note');
 
-    await user.click(screen.getAllByTitle('New note (⌘N)')[0]!);
+    await user.click(screen.getAllByRole('button', { name: /^New note/ })[0]!);
 
     await waitFor(() =>
       expect(segOption('Editor only')).toHaveAttribute('aria-checked', 'true'),
@@ -100,7 +100,7 @@ describe('NotesShell view-mode defaults', () => {
     render(<NotesShell />);
     await screen.findByText('Existing note');
 
-    await user.click(screen.getAllByTitle('New note (⌘N)')[0]!);
+    await user.click(screen.getAllByRole('button', { name: /^New note/ })[0]!);
     await waitFor(() =>
       expect(segOption('Editor only')).toHaveAttribute('aria-checked', 'true'),
     );

@@ -50,6 +50,7 @@ export const AppearanceTab = ({ settings, onChange }: AppearanceTabProps) => {
             description="Dark, light, or follow the system."
             control={
               <SegmentedControl
+                size="sm"
                 ariaLabel="Theme mode"
                 options={themeModeOptions}
                 value={settings.themeMode}

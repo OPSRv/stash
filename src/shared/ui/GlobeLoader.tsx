@@ -1,5 +1,5 @@
 /// Hero loader — animated globe used as the app/tab bootstrap state. Sized
-/// for the 920×520 popup body; scales down via the `scale` prop.
+/// for the 920×640 popup body; scales down via the `scale` prop.
 ///
 /// The 60 halo dots are precomputed once at module scope (object pool) so
 /// every mount of `<GlobeLoader />` reuses the same array — Suspense

@@ -62,7 +62,7 @@ export type Settings = {
   aiWebServices: WebChatService[];
   voiceEnabled: boolean;
   voiceActiveModel: WhisperModelSize | null;
-  /** Persisted popup size in logical pixels. Never stored below the 920×520 floor. */
+  /** Persisted popup size in logical pixels. Never stored below the 920×640 floor. */
   popupWidth: number;
   popupHeight: number;
   /**
@@ -152,7 +152,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notesAutoTranscribe: true,
   notesAutoPolish: true,
   popupWidth: 920,
-  popupHeight: 520,
+  popupHeight: 640,
   terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
   terminalClaudeCommand: 'claude',
 };

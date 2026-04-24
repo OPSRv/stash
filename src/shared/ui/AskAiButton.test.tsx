@@ -51,6 +51,6 @@ describe('AskAiButton', () => {
     const btn = screen.getByRole('button');
     expect(btn).toBeDisabled();
     expect(btn).toHaveAttribute('aria-label', expect.stringMatching(/nothing to ask/i));
-    expect(screen.getByRole('tooltip')).toHaveTextContent(/nothing to ask/i);
+    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent(/nothing to ask/i);
   });
 });

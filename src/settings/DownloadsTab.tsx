@@ -99,6 +99,7 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
         description="Extra jobs wait in a queue and start as slots free up."
         control={
           <NumberInput
+            size="sm"
             ariaLabel="Max parallel downloads"
             min={1}
             max={10}
@@ -118,6 +119,7 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
         description='yt-dlp rate syntax: "500K", "2M", "1.5M". Empty = unlimited.'
         control={
           <Input
+            size="sm"
             aria-label="Bandwidth limit"
             placeholder="unlimited"
             value={settings.downloadRateLimit ?? ''}
@@ -140,6 +142,7 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
         description="Days before completed/failed jobs vanish from the Downloads list (files are not removed)."
         control={
           <NumberInput
+            size="sm"
             ariaLabel="History retention days"
             min={1}
             max={365}

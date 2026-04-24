@@ -43,7 +43,7 @@ export const defaultLabelFromUrl = (url: string): string => {
 };
 
 /// Allowed zoom band — below 0.5 the chat UIs collapse into unreadable
-/// glyphs, above 2.0 they blow past the popup's fixed 920×520 frame.
+/// glyphs, above 2.0 they blow past the popup's fixed 920×640 frame.
 export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 2.0;
 export const ZOOM_STEP = 0.1;

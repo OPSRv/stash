@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 import { saveSetting, type WebChatService } from '../../settings/store';
 import { Input } from '../../shared/ui/Input';
+import { Tooltip } from '../../shared/ui/Tooltip';
 import { useToast } from '../../shared/ui/Toast';
 import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
@@ -569,6 +570,7 @@ export const WebShell = () => {
             className="h-7 flex-1 mx-1 text-meta"
           />
         ) : (
+          <Tooltip label={labelTitle} side="right">
           <button
             type="button"
             role="tab"
@@ -580,7 +582,6 @@ export const WebShell = () => {
             className={`flex items-center min-w-0 flex-1 rounded-md text-meta ${
               collapsed ? 'justify-center py-2' : 'gap-2 pl-2 pr-1 py-1.5'
             } ${active ? 't-primary' : 't-secondary'}`}
-            title={labelTitle}
             aria-label={collapsed ? s.label : undefined}
           >
             <span className="relative shrink-0 inline-flex items-center justify-center w-[14px] h-[14px]">
@@ -598,13 +599,14 @@ export const WebShell = () => {
             </span>
             {!collapsed && <span className="truncate">{s.label}</span>}
           </button>
+          </Tooltip>
         )}
         {!isRenaming && !collapsed && (
           <>
+            <Tooltip label="Copy URL (⌘⇧C)" side="right">
             <button
               type="button"
               aria-label={`Copy URL of ${s.label}`}
-              title={`Copy URL (⌘⇧C)`}
               onClick={(e) => {
                 e.stopPropagation();
                 copyServiceUrl(s).catch(() => {});
@@ -628,10 +630,11 @@ export const WebShell = () => {
                 <path d="M12 3a10 10 0 0 0 0 18" />
               </svg>
             </button>
+            </Tooltip>
+            <Tooltip label={`Close ${s.label} (free RAM; reopens on click)`} side="right">
             <button
               type="button"
               aria-label={`Close ${s.label}`}
-              title={`Close ${s.label} (free RAM; reopens on click)`}
               onClick={(e) => {
                 e.stopPropagation();
                 closeService(s.id).catch(() => {});
@@ -640,6 +643,7 @@ export const WebShell = () => {
             >
               ×
             </button>
+            </Tooltip>
           </>
         )}
         {indicatorSide && (
@@ -686,6 +690,7 @@ export const WebShell = () => {
         }}
         onDrop={onDrop}
       >
+        <Tooltip label="Home — all services" side="right">
         <button
           type="button"
           role="tab"
@@ -698,7 +703,6 @@ export const WebShell = () => {
               ? 't-primary bg-white/[0.08]'
               : 't-secondary hover:t-primary hover:bg-white/[0.04]'
           }`}
-          title={collapsed ? 'Home — all services' : 'Home — all services'}
           aria-label="Home"
         >
           <svg
@@ -716,6 +720,7 @@ export const WebShell = () => {
           </svg>
           {!collapsed && <span className="truncate">Home</span>}
         </button>
+        </Tooltip>
 
         {pinnedServices.length > 0 && (
           <>
@@ -761,13 +766,13 @@ export const WebShell = () => {
 
         <div className="flex-1" />
 
+        <Tooltip label="Add web tab (or drop a URL onto the sidebar)" side="right">
         <button
           type="button"
           onClick={() => openAddDialog('')}
           className={`flex items-center rounded-md text-meta t-secondary hover:t-primary hover:bg-white/[0.04] transition-colors ${
             collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
           }`}
-          title="Add web tab (or drop a URL onto the sidebar)"
           aria-label="Add web tab"
         >
           <svg
@@ -783,14 +788,15 @@ export const WebShell = () => {
           </svg>
           {!collapsed && <span className="truncate">New tab</span>}
         </button>
+        </Tooltip>
 
+        <Tooltip label={collapsed ? 'Expand sidebar (⌘S)' : 'Collapse sidebar (⌘S)'} side="right">
         <button
           type="button"
           onClick={toggleCollapsed}
           className={`flex items-center rounded-md text-meta t-tertiary hover:t-primary hover:bg-white/[0.04] transition-colors ${
             collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
           }`}
-          title={collapsed ? 'Expand sidebar (⌘S)' : 'Collapse sidebar (⌘S)'}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           aria-pressed={collapsed}
         >
@@ -808,6 +814,7 @@ export const WebShell = () => {
           </svg>
           {!collapsed && <span className="truncate">Collapse</span>}
         </button>
+        </Tooltip>
 
         {dragOver && (
           <div

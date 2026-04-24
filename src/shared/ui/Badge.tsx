@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Tooltip } from './Tooltip';
 
 export type BadgeTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
 
@@ -18,12 +19,13 @@ export const Badge = ({ children, tone = 'neutral', color, bg, className = '', t
   const toneClass = hasOverride ? '' : `stash-badge--${tone}`;
   const style = hasOverride ? { color, background: bg } : undefined;
   return (
-    <span
-      title={title}
-      className={`stash-badge ${toneClass} ${className}`.trim()}
-      style={style}
-    >
-      {children}
-    </span>
+    <Tooltip label={title}>
+      <span
+        className={`stash-badge ${toneClass} ${className}`.trim()}
+        style={style}
+      >
+        {children}
+      </span>
+    </Tooltip>
   );
 };

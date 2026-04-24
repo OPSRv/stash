@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react';
 
 type TooltipProps = {
   label?: string;
@@ -10,17 +10,28 @@ type TooltipProps = {
   side?: 'top' | 'bottom' | 'left' | 'right';
 };
 
-/** CSS-only hover/focus tooltip. Renders the trigger as a positioned wrapper
- *  and a small bubble that fades in after a short delay. When `label` is
- *  empty the wrapper is skipped entirely. */
+/** CSS-only hover/focus tooltip. Decorates the child element in place — no
+ *  wrapper element — so parent flex/grid layout (flex-1, w-full, shrink-0,
+ *  etc.) keeps working. The child receives `tip tip-<side>` on its className
+ *  and a hidden `<span role="tooltip">` bubble as a trailing child.
+ *
+ *  Children that cannot accept arbitrary DOM children (e.g. `<select>`,
+ *  `<input>`, `<img>`) must be wrapped by the caller in a `<span>` first.
+ */
 export const Tooltip = ({ label, children, side = 'top' }: TooltipProps) => {
-  if (!label) return <>{children}</>;
-  return (
-    <span className={`tip tip-${side}`}>
-      {children}
-      <span role="tooltip" className="tip-label">
+  if (!label || !isValidElement(children)) return <>{children}</>;
+  const child = children as ReactElement<{ className?: string; children?: ReactNode }>;
+  const className = [child.props.className ?? '', `tip tip-${side}`]
+    .filter(Boolean)
+    .join(' ');
+  return cloneElement(
+    child,
+    { className },
+    <>
+      {child.props.children}
+      <span role="tooltip" aria-hidden="true" className="tip-label">
         {label}
       </span>
-    </span>
+    </>,
   );
 };

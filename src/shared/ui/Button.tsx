@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from 'react';
 import { Spinner } from './Spinner';
+import { Tooltip } from './Tooltip';
 
 export type ButtonVariant = 'solid' | 'soft' | 'ghost' | 'outline';
 export type ButtonTone = 'neutral' | 'accent' | 'success' | 'warning' | 'danger';
@@ -109,6 +110,7 @@ export const Button = ({
   className = '',
   type = 'button',
   disabled,
+  title,
   ...rest
 }: ButtonProps) => {
   const isDisabled = disabled || loading;
@@ -126,19 +128,21 @@ export const Button = ({
   const lead = loading ? <Spinner size={size === 'xs' ? 10 : 12} /> : leadingIcon;
 
   return (
-    <button
-      type={type}
-      disabled={isDisabled}
-      onClick={(e) => {
-        if (stopPropagation) e.stopPropagation();
-        onClick?.(e);
-      }}
-      className={classes}
-      {...rest}
-    >
-      {lead ? <span className="inline-flex shrink-0">{lead}</span> : null}
-      {children}
-      {trailingIcon ? <span className="inline-flex shrink-0">{trailingIcon}</span> : null}
-    </button>
+    <Tooltip label={title}>
+      <button
+        type={type}
+        disabled={isDisabled}
+        onClick={(e) => {
+          if (stopPropagation) e.stopPropagation();
+          onClick?.(e);
+        }}
+        className={classes}
+        {...rest}
+      >
+        {lead ? <span className="inline-flex shrink-0">{lead}</span> : null}
+        {children}
+        {trailingIcon ? <span className="inline-flex shrink-0">{trailingIcon}</span> : null}
+      </button>
+    </Tooltip>
   );
 };

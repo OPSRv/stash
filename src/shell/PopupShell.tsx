@@ -14,7 +14,7 @@ import { PinIcon } from '../shared/ui/icons';
 import { loadSettings, saveSetting } from '../settings/store';
 
 const MIN_WIDTH = 920;
-const MIN_HEIGHT = 520;
+const MIN_HEIGHT = 640;
 
 import { TAB_ICONS, TAB_ICON_COLORS } from './tabIcons';
 import { pushPlayerArtwork, pushPlayerIcons, pushTrayMenu } from './trayMenu';
@@ -69,27 +69,25 @@ export const PopupShell = () => {
     setVisitedIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   };
 
-  // Position the active-tab pill. Uses layout effect so the indicator
-  // moves on the same paint as the highlight changes — no flash on switch.
-  // The active tab animates its width (label expands from 0 to full) over
-  // ~260ms, so we keep re-measuring via rAF until the transition settles,
-  // otherwise the pill would stick to the collapsed-width snapshot.
+  // Position the active-tab pill. Uses layout effect so the indicator moves
+  // on the same paint as the highlight changes — no flash on switch. We
+  // measure twice: once synchronously to seize the new tab's current
+  // offsetLeft (collapsed width is fine — the pill then sweeps there via
+  // CSS transform), and once after the label-expansion transition settles
+  // so the final width matches the expanded tab. Using two point
+  // measurements + CSS transitions instead of a 60fps rAF loop keeps the
+  // animation smooth on slow machines, where rAF re-layout thrash was the
+  // source of the jitter.
   useLayoutEffect(() => {
     const el = tabRefs.current.get(activeId);
     if (!el) return;
-    const measure = () =>
-      setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
-    measure();
-    const start = performance.now();
-    let raf = 0;
-    const tick = () => {
-      measure();
-      if (performance.now() - start < 300) {
-        raf = requestAnimationFrame(tick);
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+    const t = window.setTimeout(() => {
+      const now = tabRefs.current.get(activeId);
+      if (!now) return;
+      setIndicator({ left: now.offsetLeft, width: now.offsetWidth });
+    }, 280);
+    return () => window.clearTimeout(t);
   }, [activeId]);
 
   // Restore persisted popup size on first mount. Tauri's window defaults to
@@ -491,17 +489,17 @@ export const PopupShell = () => {
             left: 0,
             transform: `translateX(${indicator.left}px)`,
             width: indicator.width,
-            // Position (transform) uses CSS transition to sweep smoothly
-            // between tabs. Width is driven frame-by-frame by the rAF
-            // loop above so the pill hugs the active tab's edge while
-            // its label expands — transitioning width here would lag a
-            // frame behind every measurement and feel sluggish.
+            // Both transform (position) and width use CSS transitions so
+            // the pill sweeps and grows in sync with the tab's own label
+            // expansion (same 260ms / emphasized easing in TabButton).
+            // Avoiding a rAF-driven width means no per-frame layout reads
+            // on slow machines.
             transition:
-              'transform 260ms var(--easing-emphasized), opacity 150ms ease',
+              'transform 260ms var(--easing-emphasized), width 260ms var(--easing-emphasized), opacity 150ms ease',
             opacity: indicator.width > 0 ? 1 : 0,
           }}
         />
-        {visibleModules.map((m, i) => (
+        {visibleModules.map((m) => (
           <TabButton
             key={m.id}
             ref={(el) => {
@@ -519,7 +517,6 @@ export const PopupShell = () => {
                 </span>
               ) : undefined
             }
-            shortcutHint={`⌘⌥${i + 1}`}
             active={m.id === activeId}
             onClick={() => openTab(m.id)}
             onHover={() => m.preloadPopup?.().catch(() => {})}

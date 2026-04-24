@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Tooltip } from './Tooltip';
 
 export type SegmentOption<T extends string = string> = {
   value: T;
@@ -34,19 +35,21 @@ export const SegmentedControl = <T extends string>({
     {options.map((opt) => {
       const active = opt.value === value;
       return (
-        <button
-          key={opt.value}
-          type="button"
-          role="radio"
-          aria-checked={active}
-          disabled={opt.disabled}
-          title={opt.title}
-          onClick={() => onChange(opt.value)}
-          className={`rounded-md inline-flex items-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed ${padding[size]} ${active ? 'on' : ''}`}
-        >
-          {opt.icon}
-          {opt.label}
-        </button>
+        <Tooltip key={opt.value} label={opt.title}>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={active}
+            aria-label={opt.title}
+            disabled={opt.disabled}
+            data-seg-title={opt.title}
+            onClick={() => onChange(opt.value)}
+            className={`rounded-md inline-flex items-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed ${padding[size]} ${active ? 'on' : ''}`}
+          >
+            {opt.icon}
+            {opt.label}
+          </button>
+        </Tooltip>
       );
     })}
   </div>

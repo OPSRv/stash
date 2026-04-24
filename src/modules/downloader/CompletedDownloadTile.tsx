@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import { CloseIcon, PlayIcon, ReuseIcon } from '../../shared/ui/icons';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { Tooltip } from '../../shared/ui/Tooltip';
 import { PlatformBadge } from './PlatformBadge';
 import type { DownloadJob } from './api';
 
@@ -69,26 +70,29 @@ const CompletedDownloadTileImpl = ({
           </div>
         )}
         {failed && onRetry && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRetry(job.id);
-            }}
-            className="absolute inset-0 flex items-center justify-center gap-1.5 text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/40"
-            aria-label="Retry download"
-            title={job.error ? `Retry — ${job.error}` : 'Retry download'}
-          >
-            <ReuseIcon size={16} />
-            <span className="text-meta">Retry</span>
-          </button>
+          <Tooltip label={job.error ? `Retry — ${job.error}` : 'Retry download'}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRetry(job.id);
+              }}
+              className="absolute inset-0 flex items-center justify-center gap-1.5 text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/40"
+              aria-label="Retry download"
+            >
+              <ReuseIcon size={16} />
+              <span className="text-meta">Retry</span>
+            </button>
+          </Tooltip>
         )}
-        <button
-          onClick={openDelete}
-          className="absolute top-1 right-1 w-6 h-6 rounded-md items-center justify-center hidden group-hover:flex bg-black/[0.55]"
-          aria-label="Delete"
-        >
-          <CloseIcon className="text-white" size={12} />
-        </button>
+        <Tooltip label="Delete">
+          <button
+            onClick={openDelete}
+            className="absolute top-1 right-1 w-6 h-6 rounded-md items-center justify-center hidden group-hover:flex bg-black/[0.55]"
+            aria-label="Delete"
+          >
+            <CloseIcon className="text-white" size={12} />
+          </button>
+        </Tooltip>
       </div>
       <div className="px-2 py-1.5">
         <div className="flex items-center gap-1 mb-0.5">

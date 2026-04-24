@@ -139,6 +139,7 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
           description="Exact model id as the provider expects it. Not validated — new models work the moment your provider adds them."
           control={
             <Input
+              size="sm"
               aria-label="Model name"
               placeholder={modelPlaceholder(settings.aiProvider)}
               value={settings.aiModel}
@@ -157,6 +158,7 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
           control={
             <div className="flex items-center gap-2">
               <Input
+                size="sm"
                 aria-label="API key"
                 type={showKey ? 'text' : 'password'}
                 placeholder={keyStored ? '••••••••' : 'sk-…'}
@@ -193,6 +195,7 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
             description='Example: "https://api.openrouter.ai/api/v1" or "http://localhost:11434/v1".'
             control={
               <Input
+                size="sm"
                 aria-label="Base URL"
                 placeholder="https://…"
                 value={settings.aiBaseUrl ?? ''}

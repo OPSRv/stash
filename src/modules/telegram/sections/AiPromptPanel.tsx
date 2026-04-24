@@ -105,7 +105,7 @@ export function AiPromptPanel() {
           className="w-full block"
         />
         <div className="flex justify-end mt-2">
-          <Button variant="soft" tone="neutral" onClick={onReset}>
+          <Button size="sm" variant="soft" tone="neutral" onClick={onReset}>
             Reset to default
           </Button>
         </div>

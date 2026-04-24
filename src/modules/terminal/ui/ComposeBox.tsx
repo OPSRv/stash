@@ -1,6 +1,7 @@
 import { forwardRef, useRef, useState } from 'react';
 
 import { Button } from '../../../shared/ui/Button';
+import { Tooltip } from '../../../shared/ui/Tooltip';
 import {
   CloseIcon,
   MicIcon,
@@ -173,13 +174,14 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
             />
           )}
           {voice.phase === 'error' && voice.error && (
-            <span
-              className="t-tertiary text-meta"
-              title={voice.error}
-              style={{ color: 'var(--color-warning-fg)' }}
-            >
-              ⚠ mic
-            </span>
+            <Tooltip label={voice.error}>
+              <span
+                className="t-tertiary text-meta"
+                style={{ color: 'var(--color-warning-fg)' }}
+              >
+                ⚠ mic
+              </span>
+            </Tooltip>
           )}
           <div className="flex-1" />
           <div className="flex items-center gap-0.5 shrink-0">

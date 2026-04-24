@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Button } from '../../../shared/ui/Button';
 import { ContextMenu, type ContextMenuItem } from '../../../shared/ui/ContextMenu';
 import { DragDots } from '../../../shared/ui/DragDots';
+import { Tooltip } from '../../../shared/ui/Tooltip';
 import {
   ClaudeIcon,
   CloseIcon,
@@ -132,31 +133,32 @@ export const PaneHeader = ({
       className="flex items-center gap-1 px-2 py-1 shrink-0 border-b hair"
       style={{ minHeight: 28 }}
     >
-      <span
-        onPointerDown={(e) => {
-          e.stopPropagation();
-          onPaneDragStart?.(e);
-        }}
-        className="t-tertiary inline-flex items-center justify-center select-none"
-        style={{
-          cursor: 'grab',
-          width: 22,
-          height: 24,
-          flexShrink: 0,
-          borderRadius: 4,
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLSpanElement).style.background =
-            'rgba(255,255,255,0.06)';
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLSpanElement).style.background = 'transparent';
-        }}
-        title="Drag to a tab or another pane to compose layouts"
-        data-testid={`terminal-pane-drag-${paneId}`}
-      >
-        <DragDots />
-      </span>
+      <Tooltip label="Drag to a tab or another pane to compose layouts">
+        <span
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onPaneDragStart?.(e);
+          }}
+          className="t-tertiary inline-flex items-center justify-center select-none"
+          style={{
+            cursor: 'grab',
+            width: 22,
+            height: 24,
+            flexShrink: 0,
+            borderRadius: 4,
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLSpanElement).style.background =
+              'rgba(255,255,255,0.06)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLSpanElement).style.background = 'transparent';
+          }}
+          data-testid={`terminal-pane-drag-${paneId}`}
+        >
+          <DragDots />
+        </span>
+      </Tooltip>
 
       {showLabel && (
         <span className="t-tertiary text-meta select-none">Terminal</span>

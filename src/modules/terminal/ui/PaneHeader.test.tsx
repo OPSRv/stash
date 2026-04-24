@@ -61,8 +61,12 @@ describe('<PaneHeader />', () => {
         })}
       />,
     );
-    const btn = screen.getByRole('button', { name: /launch claude code/i });
-    expect(btn.getAttribute('title')).toContain(
+    screen.getByRole('button', { name: /launch claude code/i });
+    // Tooltip carries the full command so the flags are visible on hover.
+    const tip = screen
+      .getAllByRole('tooltip', { hidden: true })
+      .find((el) => /claude --model opus/.test(el.textContent ?? ''));
+    expect(tip?.textContent).toContain(
       'claude --model opus --dangerously-skip-permissions',
     );
   });
@@ -90,6 +94,9 @@ describe('<PaneHeader />', () => {
     );
     const btn = screen.getByRole('button', { name: /launch claude code/i });
     expect(btn).toBeDisabled();
-    expect(btn.getAttribute('title')).toMatch(/already running/i);
+    const tip = screen
+      .getAllByRole('tooltip', { hidden: true })
+      .find((el) => /already running/i.test(el.textContent ?? ''));
+    expect(tip).toBeTruthy();
   });
 });

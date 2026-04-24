@@ -62,6 +62,7 @@ export function ConnectionPanel() {
           control={
             <div className="flex items-center gap-2">
               <Input
+                size="sm"
                 placeholder="Bot token from @BotFather"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
@@ -73,6 +74,7 @@ export function ConnectionPanel() {
                 className="w-56"
               />
               <Button
+                size="sm"
                 disabled={busy || !isValidBotToken(token.trim())}
                 onClick={() => run(() => api.setToken(token.trim()))}
               >
@@ -90,6 +92,7 @@ export function ConnectionPanel() {
           control={
             <div className="flex items-center gap-2">
               <Button
+                size="sm"
                 disabled={busy}
                 onClick={() => run(() => api.startPairing())}
                 tone="accent"
@@ -97,6 +100,7 @@ export function ConnectionPanel() {
                 Start pairing
               </Button>
               <Button
+                size="sm"
                 disabled={busy}
                 onClick={() => run(() => api.clearToken())}
               >
@@ -122,6 +126,7 @@ export function ConnectionPanel() {
           description={`Paired with chat ${status.chat_id}.`}
           control={
             <Button
+              size="sm"
               disabled={busy}
               onClick={() => run(() => api.unpair())}
               tone="danger"
@@ -175,7 +180,7 @@ function PairingRow({
         </div>
       </div>
       <div className="shrink-0">
-        <Button disabled={busy} onClick={onCancel}>
+        <Button size="sm" disabled={busy} onClick={onCancel}>
           Cancel pairing
         </Button>
       </div>

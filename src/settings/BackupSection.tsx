@@ -164,6 +164,7 @@ export const BackupSection = () => {
             {modules.map((m) => (
               <li key={m.id} className="flex items-center gap-3">
                 <Checkbox
+                  size="sm"
                   id={`backup-${m.id}`}
                   checked={selected.has(m.id)}
                   disabled={!m.available}
@@ -193,10 +194,10 @@ export const BackupSection = () => {
             Estimated size: {formatBytes(totalBytes)}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onImportPick} disabled={busy}>
+            <Button size="sm" variant="outline" onClick={onImportPick} disabled={busy}>
               Import backup…
             </Button>
-            <Button tone="accent" onClick={onExport} loading={busy}>
+            <Button size="sm" tone="accent" onClick={onExport} loading={busy}>
               Export backup…
             </Button>
           </div>

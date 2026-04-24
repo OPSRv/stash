@@ -22,6 +22,7 @@ export const ClipboardTab = ({ settings, onChange }: ClipboardTabProps) => (
           description="Older unpinned items are trimmed automatically."
           control={
             <NumberInput
+              size="sm"
               ariaLabel="Max history items"
               min={10}
               max={10000}
@@ -72,6 +73,7 @@ export const ClipboardTab = ({ settings, onChange }: ClipboardTabProps) => (
               description="Skip very short clips so single words don't spam the banner."
               control={
                 <NumberInput
+                  size="sm"
                   ariaLabel="Minimum translate length"
                   min={1}
                   max={200}

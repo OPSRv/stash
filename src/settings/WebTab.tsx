@@ -90,6 +90,7 @@ export const WebTab = ({ settings, onChange }: WebTabProps) => {
             {settings.aiWebServices.map((s, i) => (
               <div key={s.id + i} className="flex items-center gap-2">
                 <Input
+                  size="sm"
                   aria-label="Tab label"
                   placeholder="Label"
                   value={s.label}
@@ -99,6 +100,7 @@ export const WebTab = ({ settings, onChange }: WebTabProps) => {
                   className="w-[140px]"
                 />
                 <Input
+                  size="sm"
                   aria-label="Tab URL"
                   placeholder="https://"
                   value={s.url}

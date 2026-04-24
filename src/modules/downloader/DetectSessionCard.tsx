@@ -83,14 +83,14 @@ export const DetectSessionCard = ({ session, onDismiss, onCancel: _onCancel, onD
             {session.url}
           </span>
           <span className="shrink-0">{error}</span>
-          <button
+          <IconButton
             onClick={onDismiss}
-            aria-label="Dismiss"
             title="Dismiss"
-            className="shrink-0 t-secondary hover:t-primary"
+            tone="danger"
+            stopPropagation={false}
           >
-            ×
-          </button>
+            <CloseIcon size={12} />
+          </IconButton>
         </div>
       </div>
     );
