@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::driver::emit_events;
-use super::engine::{EngineEvent, SessionSnapshot};
+use super::engine::{EngineEvent, SessionSnapshot, SessionStatus};
 use super::model::{Block, Preset, PresetKind, SessionRow};
 use super::state::PomodoroState;
 
@@ -25,14 +25,8 @@ fn to_string_err<T, E: std::fmt::Display>(r: Result<T, E>) -> Result<T, String> 
 
 fn emit_snapshot(app: &AppHandle, snap: &SessionSnapshot) {
     let _ = app.emit("pomodoro:state", snap);
-    // Mirror every state change into the tray title synchronously
-    // so stop/pause/skip reflect instantly — the driver's 500 ms
-    // tick loop would otherwise leave a stale `MM:SS` up top for
-    // half a second after the user explicitly ended the session.
-    crate::tray::set_title(
-        app,
-        super::driver::format_tray_title(snap).as_deref(),
-    );
+    crate::tray::set_title(app, super::driver::format_tray_title(snap).as_deref());
+    crate::tray::notify_pomodoro_changed(app, snap.status == SessionStatus::Paused);
 }
 
 // --- Presets -----------------------------------------------------------
@@ -158,6 +152,22 @@ pub fn pomodoro_resume(
     };
     emit_snapshot(&app, &snap);
     Ok(snap)
+}
+
+/// Called from the tray menu event handler — no Tauri `State` available
+/// there, so we look up managed state via `AppHandle::try_state` directly.
+pub fn pomodoro_resume_from_tray(app: AppHandle) -> Result<(), String> {
+    let state = app
+        .try_state::<Arc<PomodoroState>>()
+        .ok_or("pomodoro state not initialised")?;
+    let now = now_ms();
+    let snap = {
+        let mut core = state.core.lock().unwrap();
+        core.resume(now);
+        core.snapshot()
+    };
+    emit_snapshot(&app, &snap);
+    Ok(())
 }
 
 #[tauri::command]

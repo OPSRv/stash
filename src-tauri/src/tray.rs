@@ -89,6 +89,9 @@ pub struct TrayState {
     /// webview from `state.artwork` (the YT-Music thumbnail URL). Resets
     /// to `None` whenever nothing is playing.
     artwork: Mutex<Option<Vec<u8>>>,
+    /// `true` when the active Pomodoro session is paused — shows "Resume
+    /// Pomodoro" in the context menu below the music block.
+    pomodoro_paused: Mutex<bool>,
 }
 
 impl TrayState {
@@ -98,6 +101,7 @@ impl TrayState {
             music: Mutex::new(PlayerSnapshot::default()),
             player_icons: Mutex::new(PlayerIcons::default()),
             artwork: Mutex::new(None),
+            pomodoro_paused: Mutex::new(false),
         }
     }
 }
@@ -152,13 +156,14 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         &state.music.lock().unwrap(),
         &state.player_icons.lock().unwrap(),
         state.artwork.lock().unwrap().as_deref(),
+        false,
     )?;
 
     let tray_icon = {
         let bytes = include_bytes!("../icons/tray.png");
         Image::from_bytes(bytes)
             .ok()
-            .unwrap_or_else(|| app.default_window_icon().unwrap().clone())
+            .unwrap_or_else(|| app.default_window_icon().expect("tray icon missing from bundle").clone())
     };
     TrayIconBuilder::with_id("main")
         .icon(tray_icon)
@@ -220,6 +225,24 @@ pub fn tray_set_player_artwork(app: AppHandle, bytes: Option<Vec<u8>>) -> Result
     Ok(())
 }
 
+/// Called from `emit_snapshot` whenever the pomodoro status changes. Updates
+/// the `pomodoro_paused` flag in `TrayState` and rebuilds the menu so the
+/// "Resume Pomodoro" item appears or disappears immediately.
+pub fn notify_pomodoro_changed(app: &AppHandle, is_paused: bool) {
+    let state = match app.try_state::<Arc<TrayState>>() {
+        Some(s) => s,
+        None => return,
+    };
+    {
+        let mut flag = state.pomodoro_paused.lock().unwrap();
+        if *flag == is_paused {
+            return;
+        }
+        *flag = is_paused;
+    }
+    rebuild(app);
+}
+
 /// Set (or clear) the text shown *next to* the tray icon in the menubar.
 /// Passing `None` removes the label so the icon reverts to bare glyph.
 ///
@@ -244,7 +267,8 @@ fn rebuild(app: &AppHandle) {
     let music = state.music.lock().unwrap().clone();
     let icons = state.player_icons.lock().unwrap().clone();
     let artwork = state.artwork.lock().unwrap().clone();
-    let menu = match build_menu(app, &modules, &music, &icons, artwork.as_deref()) {
+    let pomodoro_paused = *state.pomodoro_paused.lock().unwrap();
+    let menu = match build_menu(app, &modules, &music, &icons, artwork.as_deref(), pomodoro_paused) {
         Ok(m) => m,
         Err(err) => {
             tracing::warn!(error = %err, "tray: rebuild failed");
@@ -264,11 +288,23 @@ fn build_menu(
     music: &PlayerSnapshot,
     icons: &PlayerIcons,
     artwork: Option<&[u8]>,
+    pomodoro_paused: bool,
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
 
     if music.is_active() {
         append_music_block(app, &menu, music, icons, artwork)?;
+    }
+
+    if pomodoro_paused {
+        if music.is_active() {
+            menu.append(&PredefinedMenuItem::separator(app)?)?;
+        }
+        let resume = MenuItem::with_id(app, "pomodoro:resume", "Resume Pomodoro", true, None::<&str>)?;
+        menu.append(&resume)?;
+    }
+
+    if music.is_active() || pomodoro_paused {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
 
@@ -404,6 +440,9 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             let _ = crate::modules::music::commands::music_prev(app.clone());
         }
         "player:music:title" => { /* disabled header — unreachable */ }
+        "pomodoro:resume" => {
+            let _ = crate::modules::pomodoro::commands::pomodoro_resume_from_tray(app.clone());
+        }
         other => {
             if let Some(module_id) = other.strip_prefix("module:") {
                 show_popup(app);

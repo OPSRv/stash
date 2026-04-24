@@ -223,7 +223,6 @@
   color: var(--pom-block-fg, rgba(255, 255, 255, 0.92));
   transition: transform 140ms var(--easing-emphasized), box-shadow 180ms, opacity 180ms;
   cursor: grab;
-  overflow: hidden;
 }
 .pom-block[data-posture='sit'] {
   --pom-block-bg: linear-gradient(
