@@ -78,6 +78,15 @@ export const getInboxLimits = (): Promise<InboxLimits> =>
 export const setInboxLimits = (limits: InboxLimits): Promise<void> =>
   invoke('telegram_set_inbox_limits', { limits });
 
+/// Wipe every inbox row and the file each one points at. Returns
+/// `[rows_removed, files_removed]` for the toast.
+export const clearInbox = (): Promise<[number, number]> =>
+  invoke('telegram_clear_inbox');
+
+/// Manually trigger the retention sweep — drops rows older than
+/// `retention_days`. Normally fires hourly in the background.
+export const sweepInbox = (): Promise<void> => invoke('telegram_sweep_inbox');
+
 export const listMemory = (): Promise<MemoryRow[]> =>
   invoke('telegram_list_memory');
 

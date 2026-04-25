@@ -2,8 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
 import { Button } from '../../../shared/ui/Button';
+import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog';
 import { Textarea } from '../../../shared/ui/Textarea';
 import { Toggle } from '../../../shared/ui/Toggle';
+import { useToast } from '../../../shared/ui/Toast';
 import { SliderField } from '../../../settings/SliderField';
 import * as api from '../api';
 import type { AiSettings, DiarStatus, InboxLimits } from '../types';
@@ -158,8 +160,11 @@ type InboxLimitsSectionProps = {
 /// Writes go through the same debounce pattern as the prompt editor
 /// — a quick drag doesn't fire a save per intermediate value.
 function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
+  const { toast } = useToast();
   const [limits, setLimits] = useState<InboxLimits | null>(null);
   const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -174,6 +179,23 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
       if (timer.current) clearTimeout(timer.current);
     };
   }, [onError]);
+
+  const onClear = async () => {
+    setConfirmClear(false);
+    setBusy(true);
+    try {
+      const [rows, files] = await api.clearInbox();
+      toast({
+        title: 'Inbox cleared',
+        description: `${rows} item${rows === 1 ? '' : 's'} · ${files} file${files === 1 ? '' : 's'} removed`,
+        variant: 'success',
+      });
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const schedule = (next: InboxLimits) => {
     setLimits(next);
@@ -225,6 +247,50 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
             ? `${(limits.per_day_mb / 1024).toFixed(1)} GB`
             : `${limits.per_day_mb} MB`
         }
+      />
+      <div className="h-2" />
+      <SliderField
+        label="Retention"
+        description="Скільки днів інбокс тримає файл на диску. 0 — ніколи не видаляти."
+        value={limits.retention_days}
+        min={0}
+        max={365}
+        step={1}
+        onChange={(v) => schedule({ ...limits, retention_days: v })}
+        display={
+          limits.retention_days === 0
+            ? 'off'
+            : `${limits.retention_days} day${limits.retention_days === 1 ? '' : 's'}`
+        }
+      />
+
+      <div className="mt-4 pt-3 border-t border-white/8 flex items-center justify-between gap-3">
+        <div>
+          <div className="t-primary text-body font-medium">Clear inbox</div>
+          <div className="t-tertiary text-meta">
+            Видалить усі рядки і відповідні файли з диска. Незворотно.
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="soft"
+          tone="danger"
+          disabled={busy}
+          onClick={() => setConfirmClear(true)}
+        >
+          Clear inbox…
+        </Button>
+      </div>
+
+      <ConfirmDialog
+        open={confirmClear}
+        title="Clear all inbox items?"
+        description="Кожен рядок і прив'язаний файл буде видалено з диска. Скасувати неможливо."
+        confirmLabel="Clear"
+        cancelLabel="Cancel"
+        tone="danger"
+        onConfirm={() => void onClear()}
+        onCancel={() => setConfirmClear(false)}
       />
     </div>
   );

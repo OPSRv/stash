@@ -272,6 +272,31 @@ pub fn telegram_set_inbox_limits(
     limits.save(state.as_ref())
 }
 
+/// Wipe every inbox row + the file each one points at. Returns
+/// `(rows_removed, files_removed)` so the toast can surface concrete
+/// numbers; the user's per-day byte counter for today/yesterday is
+/// also reset so a freshly cleared inbox can absorb a new burst.
+#[tauri::command]
+pub fn telegram_clear_inbox(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<(usize, usize), String> {
+    super::inbox::clear_all(&app, state.as_ref())
+}
+
+/// Run the retention sweep on demand. Normally fired by the
+/// background timer in `lib.rs`, but exposed so the user can force a
+/// pass after they bump the slider down.
+#[tauri::command]
+pub fn telegram_sweep_inbox(
+    app: AppHandle,
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<(), String> {
+    let days = super::settings::InboxLimits::load(state.as_ref()).retention_days;
+    super::inbox::sweep_old(&app, state.as_ref(), days);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn telegram_list_memory(
     state: State<'_, Arc<TelegramState>>,

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { listen } from '@tauri-apps/api/event';
 import { appDataDir, join } from '@tauri-apps/api/path';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -352,14 +353,28 @@ export function InboxPanel() {
           {error}
         </p>
       )}
-      <div className="flex-1 overflow-y-auto nice-scroll">
-        {!hasItems ? (
+      {!hasItems ? (
+        <div className="flex-1 overflow-y-auto nice-scroll">
           <EmptyState connection={connection} />
-        ) : noMatches ? (
+        </div>
+      ) : noMatches ? (
+        <div className="flex-1 overflow-y-auto nice-scroll">
           <div className="px-8 py-12 text-center text-meta text-white/45">
             Nothing matches “{query}”.
           </div>
-        ) : (
+        </div>
+      ) : visibleItems.length >= INBOX_VIRTUALIZE_THRESHOLD ? (
+        <VirtualInboxList
+          groups={groups}
+          selection={selection}
+          busyId={busyId}
+          transcribing={transcribing}
+          failed={failed}
+          onToggleSelect={toggleSelect}
+          onAction={runOn}
+        />
+      ) : (
+        <div className="flex-1 overflow-y-auto nice-scroll">
           <div className="flex flex-col">
             {groups.map((group) => (
               <div key={group.label} className="flex flex-col">
@@ -392,11 +407,116 @@ export function InboxPanel() {
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }
+
+/// Below this many visible items we render the plain stacked list —
+/// virtualization adds layout overhead that's not worth it for the
+/// common "couple-dozen-rows" case. Kicks in for hundreds of items
+/// where DOM weight starts to lag scrolling.
+const INBOX_VIRTUALIZE_THRESHOLD = 40;
+
+type VirtualEntry =
+  | { kind: 'header'; label: string }
+  | { kind: 'item'; item: InboxItem };
+
+type VirtualInboxListProps = {
+  groups: Group[];
+  selection: Set<number>;
+  busyId: number | null;
+  transcribing: Set<number>;
+  failed: Set<number>;
+  onToggleSelect: (id: number) => void;
+  onAction: (id: number, fn: () => Promise<unknown>) => Promise<void>;
+};
+
+/// react-virtual scroller for the inbox. Group labels live in the
+/// same virtual list as the rows so they stick at the right position
+/// while scrolling without us having to render off-screen items.
+/// Estimated heights err on the larger side (180 px) since dynamic
+/// measurement corrects the layout on the first paint anyway.
+const VirtualInboxList = ({
+  groups,
+  selection,
+  busyId,
+  transcribing,
+  failed,
+  onToggleSelect,
+  onAction,
+}: VirtualInboxListProps) => {
+  const parentRef = useRef<HTMLDivElement | null>(null);
+  const entries = useMemo<VirtualEntry[]>(() => {
+    const out: VirtualEntry[] = [];
+    for (const g of groups) {
+      out.push({ kind: 'header', label: g.label });
+      for (const it of g.items) out.push({ kind: 'item', item: it });
+    }
+    return out;
+  }, [groups]);
+
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: (i) => (entries[i]?.kind === 'header' ? 36 : 180),
+    overscan: 6,
+    getItemKey: (i) => {
+      const e = entries[i];
+      return e?.kind === 'header' ? `h:${e.label}` : `i:${(e as { item: InboxItem }).item.id}`;
+    },
+  });
+  const items = virtualizer.getVirtualItems();
+  const totalSize = virtualizer.getTotalSize();
+
+  return (
+    <div ref={parentRef} className="flex-1 overflow-y-auto nice-scroll">
+      <div style={{ height: totalSize, width: '100%', position: 'relative' }}>
+        {items.map((virtualItem) => {
+          const entry = entries[virtualItem.index];
+          if (!entry) return null;
+          return (
+            <div
+              key={virtualItem.key}
+              data-index={virtualItem.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                transform: `translateY(${virtualItem.start}px)`,
+              }}
+            >
+              {entry.kind === 'header' ? (
+                <div className="px-4 pt-4 pb-1.5 flex items-center gap-2">
+                  <span className="text-meta font-semibold uppercase tracking-wider text-white/35">
+                    {entry.label}
+                  </span>
+                  <span className="h-px flex-1 bg-white/5" />
+                </div>
+              ) : (
+                <InboxRow
+                  item={entry.item}
+                  selected={selection.has(entry.item.id)}
+                  busy={busyId === entry.item.id}
+                  transcribing={transcribing.has(entry.item.id)}
+                  failed={failed.has(entry.item.id)}
+                  onToggleSelect={() => onToggleSelect(entry.item.id)}
+                  onAction={(fn) => onAction(entry.item.id, fn)}
+                  onEditTranscript={async (next) => {
+                    await api.setInboxTranscript(entry.item.id, next);
+                  }}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 type InboxRowProps = {
   item: InboxItem;

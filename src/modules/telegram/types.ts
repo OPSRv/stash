@@ -70,6 +70,9 @@ export type DiarStatus = {
 export type InboxLimits = {
   per_file_mb: number;
   per_day_mb: number;
+  /// Days kept on disk before the retention sweeper drops the row +
+  /// file. `0` disables auto-deletion.
+  retention_days: number;
 };
 
 export type MemoryRow = {

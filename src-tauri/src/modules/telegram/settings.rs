@@ -34,6 +34,11 @@ pub const KEY_AI_DIARIZATION: &str = "ai.diarization_enabled";
 /// kv table stays human-inspectable.
 pub const KEY_INBOX_PER_FILE_MB: &str = "inbox.per_file_mb";
 pub const KEY_INBOX_PER_DAY_MB: &str = "inbox.per_day_mb";
+/// Days of inbox history kept on disk before the retention sweeper
+/// removes the row + file. `0` disables auto-deletion.
+pub const KEY_INBOX_RETENTION_DAYS: &str = "inbox.retention_days";
+pub const DEFAULT_INBOX_RETENTION_DAYS: u32 = 30;
+pub const MAX_INBOX_RETENTION_DAYS: u32 = 365;
 
 pub const DEFAULT_AI_SYSTEM_PROMPT: &str =
     "You are Oleksandr's Stash assistant, talking back through Telegram. \
@@ -189,13 +194,18 @@ impl AiSettings {
     }
 }
 
-/// User-tunable inbox storage limits, in megabytes. Sent over IPC so
-/// the Settings UI can render two sliders. Both fields are clamped on
-/// save against the bounds in `inbox::MIN_*` / `MAX_*`.
+/// User-tunable inbox storage limits, in megabytes, plus a retention
+/// window in days. Sent over IPC so the Settings UI can render the
+/// sliders together. All fields are clamped on save against the
+/// bounds in `inbox::MIN_*` / `MAX_*` so a typo can't bypass them.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InboxLimits {
     pub per_file_mb: u32,
     pub per_day_mb: u32,
+    /// How long an inbox row + its file stay on disk. `0` disables
+    /// auto-deletion entirely; positive values trigger the retention
+    /// sweeper at startup and once an hour after that.
+    pub retention_days: u32,
 }
 
 impl InboxLimits {
@@ -229,6 +239,15 @@ impl InboxLimits {
                 MIN_PER_DAY_MB,
                 MAX_PER_DAY_MB,
             ),
+            // 0 is intentionally allowed (= disable auto-deletion);
+            // upper bound is one year so a slider at the right edge
+            // still feels like "basically forever".
+            retention_days: read(
+                KEY_INBOX_RETENTION_DAYS,
+                DEFAULT_INBOX_RETENTION_DAYS,
+                0,
+                MAX_INBOX_RETENTION_DAYS,
+            ),
         }
     }
 
@@ -236,10 +255,13 @@ impl InboxLimits {
         use super::inbox::{MAX_PER_DAY_MB, MAX_PER_FILE_MB, MIN_PER_DAY_MB, MIN_PER_FILE_MB};
         let pf = self.per_file_mb.clamp(MIN_PER_FILE_MB, MAX_PER_FILE_MB);
         let pd = self.per_day_mb.clamp(MIN_PER_DAY_MB, MAX_PER_DAY_MB);
+        let rd = self.retention_days.min(MAX_INBOX_RETENTION_DAYS);
         let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
         repo.kv_set(KEY_INBOX_PER_FILE_MB, &pf.to_string())
             .map_err(|e| e.to_string())?;
         repo.kv_set(KEY_INBOX_PER_DAY_MB, &pd.to_string())
+            .map_err(|e| e.to_string())?;
+        repo.kv_set(KEY_INBOX_RETENTION_DAYS, &rd.to_string())
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -381,16 +403,19 @@ mod tests {
         let l = InboxLimits::load(&s);
         assert_eq!(l.per_file_mb, 200, "default per-file is 200 MB");
         assert_eq!(l.per_day_mb, 1024, "default per-day is 1 GB");
+        assert_eq!(l.retention_days, DEFAULT_INBOX_RETENTION_DAYS);
 
         InboxLimits {
             per_file_mb: 500,
             per_day_mb: 4096,
+            retention_days: 7,
         }
         .save(&s)
         .unwrap();
         let reloaded = InboxLimits::load(&s);
         assert_eq!(reloaded.per_file_mb, 500);
         assert_eq!(reloaded.per_day_mb, 4096);
+        assert_eq!(reloaded.retention_days, 7);
     }
 
     #[test]
@@ -399,12 +424,27 @@ mod tests {
         InboxLimits {
             per_file_mb: 0,
             per_day_mb: 99_999,
+            retention_days: 9_999,
         }
         .save(&s)
         .unwrap();
         let l = InboxLimits::load(&s);
         assert_eq!(l.per_file_mb, super::super::inbox::MIN_PER_FILE_MB);
         assert_eq!(l.per_day_mb, super::super::inbox::MAX_PER_DAY_MB);
+        assert_eq!(l.retention_days, MAX_INBOX_RETENTION_DAYS);
+    }
+
+    #[test]
+    fn inbox_limits_allow_zero_retention_to_disable() {
+        let s = fresh();
+        InboxLimits {
+            per_file_mb: 200,
+            per_day_mb: 1024,
+            retention_days: 0,
+        }
+        .save(&s)
+        .unwrap();
+        assert_eq!(InboxLimits::load(&s).retention_days, 0);
     }
 
     #[test]

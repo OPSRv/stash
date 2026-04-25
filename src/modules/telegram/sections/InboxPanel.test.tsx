@@ -137,6 +137,26 @@ describe('<InboxPanel />', () => {
     expect(screen.getByRole('button', { name: /^delete$/i })).toBeEnabled();
   });
 
+  it('virtualizes the list once items exceed the threshold', async () => {
+    // 60 items > the 40-row threshold → virtual scroller mounts. We
+    // assert by row count: the virtualizer mounts a window-sized
+    // subset, so the rendered DOM has noticeably fewer rows than the
+    // 60 items in the dataset. The exact viewport math depends on
+    // jsdom layout shims, so we just check "much less than 60".
+    const items: InboxItem[] = Array.from({ length: 60 }, (_, i) =>
+      mkItem({ id: i + 1, text_content: `entry ${i + 1}` }),
+    );
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox') return items;
+      return undefined;
+    });
+    const { container } = render(<InboxPanel />);
+    // Wait for the first refresh round-trip to settle.
+    await screen.findByPlaceholderText(/search inbox/i);
+    const rendered = container.querySelectorAll('[data-testid^="inbox-item-"]').length;
+    expect(rendered).toBeLessThan(items.length);
+  });
+
   it('renders an OCR transcript on a photo row', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd) => {
       if (cmd === 'telegram_list_inbox')

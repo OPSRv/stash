@@ -188,14 +188,14 @@ use modules::system::commands::{
     system_sleep_displays, system_sleep_now, system_toggle_launch_agent, system_trash_path,
 };
 use modules::telegram::commands::{
-    telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
-    telegram_delete_memory, telegram_get_ai_settings, telegram_get_inbox_limits,
-    telegram_get_notification_settings, telegram_has_token, telegram_list_inbox,
-    telegram_list_memory, telegram_mark_inbox_routed, telegram_retry_transcribe,
-    telegram_reveal_inbox_file, telegram_send_inbox_to_notes, telegram_send_text,
-    telegram_set_ai_settings, telegram_set_inbox_limits, telegram_set_inbox_transcript,
-    telegram_set_notification_settings, telegram_set_token, telegram_start_pairing,
-    telegram_status, telegram_unpair,
+    telegram_cancel_pairing, telegram_clear_inbox, telegram_clear_token,
+    telegram_delete_inbox_item, telegram_delete_memory, telegram_get_ai_settings,
+    telegram_get_inbox_limits, telegram_get_notification_settings, telegram_has_token,
+    telegram_list_inbox, telegram_list_memory, telegram_mark_inbox_routed,
+    telegram_retry_transcribe, telegram_reveal_inbox_file, telegram_send_inbox_to_notes,
+    telegram_send_text, telegram_set_ai_settings, telegram_set_inbox_limits,
+    telegram_set_inbox_transcript, telegram_set_notification_settings, telegram_set_token,
+    telegram_start_pairing, telegram_status, telegram_sweep_inbox, telegram_unpair,
 };
 use modules::terminal::commands::{
     pty_close, pty_get_cwd, pty_open, pty_resize, pty_set_cwd, pty_write, terminal_save_paste_blob,
@@ -632,6 +632,8 @@ pub fn run() {
             telegram_set_ai_settings,
             telegram_get_inbox_limits,
             telegram_set_inbox_limits,
+            telegram_clear_inbox,
+            telegram_sweep_inbox,
             telegram_list_memory,
             telegram_delete_memory,
             diarization_status,
@@ -941,6 +943,26 @@ pub fn run() {
             }
 
             let telegram_for_ipc = Arc::clone(&telegram_state);
+            // Inbox retention sweeper. Runs once at startup so today's
+            // launch already collects yesterday's expired bytes, then
+            // every hour after that — picking up slider changes
+            // without a restart.
+            {
+                let app_for_sweep = app.handle().clone();
+                let state_for_sweep = Arc::clone(&telegram_state);
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        let days = modules::telegram::settings::InboxLimits::load(&state_for_sweep)
+                            .retention_days;
+                        modules::telegram::inbox::sweep_old(
+                            &app_for_sweep,
+                            &state_for_sweep,
+                            days,
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(60 * 60)).await;
+                    }
+                });
+            }
             app.manage(telegram_state);
 
             // Local IPC transport for the `stash` CLI. Shares the

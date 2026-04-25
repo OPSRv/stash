@@ -221,8 +221,8 @@
     position: fixed; top: 0; left: 0; right: 0; z-index: 40;
     display: flex; align-items: center; justify-content: space-between;
     padding: 18px 32px;
-    backdrop-filter: blur(12px) saturate(140%);
-    -webkit-backdrop-filter: blur(12px) saturate(140%);
+    backdrop-filter: blur(6px) saturate(140%);
+    -webkit-backdrop-filter: blur(6px) saturate(140%);
     background: linear-gradient(180deg, rgba(13,14,17,.72), rgba(13,14,17,.2));
     border-bottom: 1px solid transparent;
     transition: border-color .3s ease, background .3s ease, padding .3s ease;
@@ -400,14 +400,18 @@
       radial-gradient(circle at 80% 70%, rgba(140,100,255,.16), transparent 40%),
       linear-gradient(160deg,#101420 0%, #070910 100%);
   }
+  /* Faked soft blob via radial-gradient instead of filter: blur(60px).
+     Animated `filter` is the single most expensive composite op; a
+     radial-gradient with the same falloff costs ~zero per frame. */
   .blob {
-    position: absolute; width: 280px; height: 280px; border-radius: 50%;
-    filter: blur(60px); opacity: .55; mix-blend-mode: screen;
+    position: absolute; width: 420px; height: 420px; border-radius: 50%;
+    opacity: .55; mix-blend-mode: screen;
     animation: blobFloat 22s ease-in-out infinite;
+    will-change: transform;
   }
-  .blob.b1 { background: #2F7AE5; left: 8%; top: 18%; }
-  .blob.b2 { background: #7B61FF; right: 10%; top: 38%; animation-duration: 28s; animation-delay: -6s;}
-  .blob.b3 { background: #4ade80; right: 28%; top: 62%; animation-duration: 32s; animation-delay: -12s; opacity: .25;}
+  .blob.b1 { background: radial-gradient(circle, #2F7AE5 0%, rgba(47,122,229,0) 65%); left: 4%; top: 12%; }
+  .blob.b2 { background: radial-gradient(circle, #7B61FF 0%, rgba(123,97,255,0) 65%); right: 6%; top: 32%; animation-duration: 28s; animation-delay: -6s;}
+  .blob.b3 { background: radial-gradient(circle, #4ade80 0%, rgba(74,222,128,0) 65%); right: 24%; top: 56%; animation-duration: 32s; animation-delay: -12s; opacity: .25;}
   @keyframes blobFloat {
     0%, 100% { transform: translate(0,0) scale(1);}
     33% { transform: translate(40px,-30px) scale(1.1);}
@@ -417,9 +421,9 @@
   /* macOS menubar */
   .menubar {
     position: absolute; top: 0; left: 0; right: 0; height: 26px;
-    background: rgba(18,20,26,0.7);
-    backdrop-filter: blur(18px);
-    -webkit-backdrop-filter: blur(18px);
+    background: rgba(18,20,26,0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     border-bottom: 1px solid rgba(255,255,255,.05);
     display: flex; align-items: center;
     padding: 0 12px;
@@ -448,9 +452,9 @@
     max-width: 700px;
     border-radius: 16px;
     overflow: hidden;
-    background: rgba(16,18,23,.86);
-    backdrop-filter: blur(22px) saturate(150%);
-    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    background: rgba(16,18,23,.92);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
     border: 1px solid rgba(255,255,255,.1);
     box-shadow:
       0 30px 80px rgba(0,0,0,.7),
@@ -534,10 +538,11 @@
     left: 50%; transform: translateX(-50%);
     display: flex; align-items: center; gap: 8px;
     font-size: 13px; color: var(--ink-lo);
-    background: rgba(13,14,17,.85);
+    background: rgba(13,14,17,.92);
     padding: 8px 14px; border-radius: 10px;
     border: 1px solid var(--line-2);
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
   }
   .stage-kbd kbd.pulse { animation: kbdPulse 3.6s ease-in-out infinite; }
   .stage-kbd kbd.pulse:nth-child(2){ animation-delay: .15s;}
@@ -558,7 +563,6 @@
     display: grid; place-items: center;
     color: var(--blue-2);
     box-shadow: 0 14px 30px -10px rgba(0,0,0,.6);
-    backdrop-filter: blur(8px);
     animation: orbFloat 8s ease-in-out infinite;
   }
   .float-icon svg { width: 22px; height: 22px; }
@@ -961,6 +965,45 @@
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important;}
+  }
+
+  /* ===== LITE MODE =====
+     Auto-applied for: low-core CPUs, coarse-pointer devices (mobile/tablet),
+     prefers-reduced-motion, or manual ?lite=1 override. Drops every
+     backdrop-filter, kills decorative animations, hides the cursor aura.
+     Visual fidelity is intentionally reduced in exchange for ~5–10x paint
+     speed on integrated GPUs. */
+  body.lite #aura { display: none !important; }
+  body.lite nav.topbar,
+  body.lite nav.topbar.scrolled,
+  body.lite .menubar,
+  body.lite .popup,
+  body.lite .stage-kbd {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  body.lite nav.topbar { background: rgba(13,14,17,.92); }
+  body.lite .menubar  { background: rgba(18,20,26,.96); }
+  body.lite .popup    { background: rgba(16,18,23,.98); }
+  body.lite .stage-kbd { background: rgba(13,14,17,.96); }
+  body.lite .blob,
+  body.lite .cta-orbits,
+  body.lite .marquee { display: none !important; }
+  body.lite .btn-primary::after,            /* shine */
+  body.lite .cta-logo,
+  body.lite .float-icon,
+  body.lite .stage-kbd kbd.pulse,
+  body.lite .met-pendulum,
+  body.lite .blob,
+  body.lite .typing span,
+  body.lite .cursor-blink,
+  body.lite .stash-led { animation: none !important; }
+  body.lite .cta-logo  { transform: none !important; }
+  /* Hard kill on remaining infinite decorative loops, just in case. */
+  body.lite *,
+  body.lite *::before,
+  body.lite *::after {
+    animation-iteration-count: 1 !important;
   }
 </style>
 </head>
@@ -1587,6 +1630,35 @@
 </footer>
 
 <script>
+// ============== LITE MODE (low-perf devices) ==============
+// Apply BEFORE anything paints — we want the heavy backdrop-filters /
+// blob / orbits to never hit the GPU on weak machines, not flicker on
+// for one frame and then disappear.
+(function () {
+  const qs = new URLSearchParams(location.search);
+  // Manual overrides win over auto-detect and survive a reload via
+  // localStorage. ?lite=0 to force-disable on a strong-but-mobile device.
+  if (qs.has('lite')) {
+    try { localStorage.setItem('stash:lite', qs.get('lite') === '0' ? '0' : '1'); } catch {}
+  }
+  let manual = null;
+  try { manual = localStorage.getItem('stash:lite'); } catch {}
+  if (manual === '1') { document.body.classList.add('lite'); return; }
+  if (manual === '0') return;
+
+  // Auto-detect: any one of the signals flips lite on.
+  const cores = navigator.hardwareConcurrency;
+  const lowCpu = typeof cores === 'number' && cores > 0 && cores <= 4;
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // deviceMemory is Chromium-only; treat undefined as "unknown" (no-op).
+  const lowRam = typeof navigator.deviceMemory === 'number' && navigator.deviceMemory <= 4;
+
+  if (lowCpu || coarse || reducedMotion || lowRam) {
+    document.body.classList.add('lite');
+  }
+})();
+
 // ============== MODULES DATA ==============
 const MODULES = [
   { id:'clipboard',  icon:'#ic-clipboard', title:'Clipboard',  kbd:'⌘⌥1', short:'Clipboard history', long:'Clipboard history with search, pins, and one-click re-copy. Autodetects URLs and offers them to Downloader.', glow:'rgba(47,122,229,.18)', shotIdx: 0 },
@@ -1913,22 +1985,57 @@ window.addEventListener('scroll', () => {
 // Coalesce pointermove → one layout write per frame. Lighthouse flagged
 // long main-thread tasks (3.1 s total); the raw handler was writing
 // style on every pointer event, causing paint-thrash on dense moves.
+// Skipped entirely in lite mode — the aura element is `display:none`.
 const aura = document.getElementById('aura');
-let auraX = 0, auraY = 0, auraQueued = false;
-window.addEventListener('pointermove', (e) => {
-  auraX = e.clientX; auraY = e.clientY;
-  if (auraQueued) return;
-  auraQueued = true;
-  requestAnimationFrame(() => {
-    auraQueued = false;
-    aura.style.left = auraX + 'px';
-    aura.style.top  = auraY + 'px';
-    if (!document.body.classList.contains('aura-on')) {
-      document.body.classList.add('aura-on');
-    }
+if (!document.body.classList.contains('lite')) {
+  let auraX = 0, auraY = 0, auraQueued = false;
+  window.addEventListener('pointermove', (e) => {
+    auraX = e.clientX; auraY = e.clientY;
+    if (auraQueued) return;
+    auraQueued = true;
+    requestAnimationFrame(() => {
+      auraQueued = false;
+      aura.style.left = auraX + 'px';
+      aura.style.top  = auraY + 'px';
+      if (!document.body.classList.contains('aura-on')) {
+        document.body.classList.add('aura-on');
+      }
+    });
+  }, { passive: true });
+  window.addEventListener('pointerleave', () => document.body.classList.remove('aura-on'));
+}
+
+// ============== PAUSE OFF-SCREEN ANIMATIONS ==============
+// Heavy decorative loops (.blob mix-blend-mode, .orbit spinners, marquee,
+// cta-logo float, metronome pendulum, typing dots) keep painting even
+// when scrolled out of view. Toggle animation-play-state via IO so the
+// GPU only draws what the user is actually looking at.
+(function () {
+  if (document.body.classList.contains('lite')) return; // already neutered
+  const targets = document.querySelectorAll(
+    // Note: .btn-primary's shine lives on ::after — we can't toggle a
+    // pseudo-element's animation from JS, so it stays as-is (cheap anyway).
+    '.blob, .orbit, .marquee-track, .cta-logo, .met-pendulum, .typing span, .float-icon, .stage-kbd kbd.pulse'
+  );
+  if (!targets.length) return;
+  // Group targets by their nearest <section> (or fall back to the el itself)
+  // so we observe ~7 sections instead of dozens of individual nodes.
+  const groups = new Map();
+  targets.forEach(el => {
+    const host = el.closest('section, header, .marquee, .hero-stage') || el;
+    if (!groups.has(host)) groups.set(host, []);
+    groups.get(host).push(el);
   });
-}, { passive: true });
-window.addEventListener('pointerleave', () => document.body.classList.remove('aura-on'));
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const els = groups.get(e.target);
+      if (!els) continue;
+      const state = e.isIntersecting ? 'running' : 'paused';
+      for (const el of els) el.style.animationPlayState = state;
+    }
+  }, { rootMargin: '100px' });
+  groups.forEach((_, host) => io.observe(host));
+})();
 
 // ============== PILLAR RADIAL HOVER ==============
 document.querySelectorAll('.pillar').forEach(p => {

@@ -65,7 +65,7 @@ const INIT_SCRIPT: &str = r#"
 /// Safari UA — Google blocks sign-in from identifiable embedded WebViews
 /// ("browser not secure"); pretending to be Safari on macOS passes the check.
 const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
-     (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+     (KHTML, like Gecko) Version/18.3 Safari/605.1.15";
 
 const HOME_URL: &str = "https://music.youtube.com/";
 

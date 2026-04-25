@@ -272,6 +272,51 @@ impl TelegramRepo {
         Ok(())
     }
 
+    /// Return every (id, file_path) pair currently in the inbox so the
+    /// caller can unlink files before dropping rows. Used by both the
+    /// "clear all" command and the retention sweeper.
+    pub fn list_inbox_files(&self) -> Result<Vec<(i64, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, file_path FROM inbox WHERE file_path IS NOT NULL")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect()
+    }
+
+    /// Return (id, file_path) for inbox rows whose `received_at`
+    /// is *older* than the cutoff. The retention sweeper feeds this
+    /// to the unlink loop, then drops the matching rows.
+    pub fn list_inbox_files_older_than(
+        &self,
+        cutoff_secs: i64,
+    ) -> Result<Vec<(i64, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, file_path FROM inbox WHERE received_at < ?1")?;
+        let rows = stmt.query_map(params![cutoff_secs], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        rows.collect()
+    }
+
+    /// Drop every inbox row in one transaction. Caller is responsible
+    /// for unlinking the files first — `inbox::clear_all` orchestrates
+    /// that order so a half-failed sweep can't strand bytes on disk.
+    pub fn clear_inbox(&mut self) -> Result<usize> {
+        let n = self.conn.execute("DELETE FROM inbox", [])?;
+        Ok(n)
+    }
+
+    /// Drop every inbox row whose `received_at < cutoff`. Returns the
+    /// number of rows removed.
+    pub fn delete_inbox_older_than(&mut self, cutoff_secs: i64) -> Result<usize> {
+        let n = self.conn.execute(
+            "DELETE FROM inbox WHERE received_at < ?1",
+            params![cutoff_secs],
+        )?;
+        Ok(n)
+    }
+
     /// Fetch the on-disk file path associated with an inbox row, if any.
     /// Used by the delete command so it can unlink the file before
     /// dropping the row. Returns `Ok(None)` when the row is gone or the

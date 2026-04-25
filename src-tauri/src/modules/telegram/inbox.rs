@@ -330,6 +330,111 @@ pub fn bump_used_bytes(state: &TelegramState, day: &str, extra: u64) {
     }
 }
 
+/// Wipe every inbox row and the file each one points at. Returns the
+/// (rows_removed, files_removed) pair so the caller can surface the
+/// numbers in a toast. We unlink files *before* dropping the rows so
+/// a crash mid-sweep can't leave orphaned bytes that the next sweep
+/// no longer knows about.
+pub fn clear_all(app: &AppHandle, state: &TelegramState) -> Result<(usize, usize), String> {
+    use tauri::Manager;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+
+    let files = {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.list_inbox_files().map_err(|e| e.to_string())?
+    };
+    let mut files_removed = 0usize;
+    for (_id, rel) in &files {
+        let abs = if std::path::Path::new(rel).is_absolute() {
+            std::path::PathBuf::from(rel)
+        } else {
+            data_dir.join(rel)
+        };
+        if abs.exists() && std::fs::remove_file(&abs).is_ok() {
+            files_removed += 1;
+        }
+    }
+
+    let rows_removed = {
+        let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.clear_inbox().map_err(|e| e.to_string())?
+    };
+
+    // Daily byte counters in `kv` are tied to specific YYYY-MM-DD
+    // keys; the safest way to reset them is to drop the keys we know
+    // about (today + yesterday). Older counters are harmless because
+    // they're already irrelevant, but cleaning today's value matters
+    // so the user can immediately fill the inbox without waiting for
+    // midnight.
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if let Ok(mut repo) = state.repo.lock() {
+        for offset in [0i64, 86_400] {
+            let day = today_str(now_secs - offset);
+            let _ = repo.kv_set(&format!("inbox_bytes_{day}"), "0");
+        }
+    }
+    use tauri::Emitter;
+    let _ = app.emit("telegram:inbox_added", 0);
+    Ok((rows_removed, files_removed))
+}
+
+/// Drop inbox rows older than `retention_days`, plus the files those
+/// rows point at. Called on a timer + once at startup. Skips when
+/// retention is disabled (`days == 0`).
+pub fn sweep_old(app: &AppHandle, state: &TelegramState, retention_days: u32) {
+    if retention_days == 0 {
+        return;
+    }
+    use tauri::Manager;
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let cutoff = now_secs - (retention_days as i64) * 86_400;
+
+    let data_dir = match app.path().app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::warn!(error = %e, "retention sweep: app_data_dir lookup failed");
+            return;
+        }
+    };
+
+    let stale = match state.repo.lock() {
+        Ok(repo) => repo.list_inbox_files_older_than(cutoff).unwrap_or_default(),
+        Err(_) => return,
+    };
+    if stale.is_empty() {
+        return;
+    }
+    for (_id, rel) in &stale {
+        if let Some(rel) = rel {
+            let abs = if std::path::Path::new(rel).is_absolute() {
+                std::path::PathBuf::from(rel)
+            } else {
+                data_dir.join(rel)
+            };
+            if abs.exists() {
+                let _ = std::fs::remove_file(&abs);
+            }
+        }
+    }
+    if let Ok(mut repo) = state.repo.lock() {
+        let n = repo.delete_inbox_older_than(cutoff).unwrap_or(0);
+        if n > 0 {
+            tracing::info!(removed = n, retention_days, "inbox retention sweep");
+            use tauri::Emitter;
+            let _ = app.emit("telegram:inbox_added", 0);
+        }
+    }
+}
+
 /// Persist an inbox row, emit the refresh event, return the new row id.
 pub fn record_media(
     app: &AppHandle,

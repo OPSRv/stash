@@ -268,8 +268,10 @@ fn label_for(service: &str) -> Result<String, String> {
 /// Safari UA — Google's "secure browser" check refuses anything that
 /// identifies as Chrome/Electron/WebView, but it accepts Safari on macOS.
 /// ChatGPT and Claude also serve cleaner pages to Safari-signed UAs.
+/// Keep `Version/` near current shipping Safari; older majors get the same
+/// "this browser may be unsafe" page on Google sign-in.
 const SAFARI_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 \
-     (KHTML, like Gecko) Version/17.5 Safari/605.1.15";
+     (KHTML, like Gecko) Version/18.3 Safari/605.1.15";
 
 fn popup_window(app: &AppHandle) -> Result<tauri::Window, String> {
     if let Some(w) = app.get_webview_window("popup") {
