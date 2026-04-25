@@ -4,7 +4,14 @@ export type ConnectionStatus =
   | { kind: 'pairing'; code: string; expires_at: number }
   | { kind: 'paired'; chat_id: number };
 
-export type InboxKind = 'text' | 'voice' | 'photo' | 'document' | 'video' | 'sticker';
+export type InboxKind =
+  | 'text'
+  | 'voice'
+  | 'photo'
+  | 'document'
+  | 'video'
+  | 'video_note'
+  | 'sticker';
 
 export type InboxItem = {
   id: number;

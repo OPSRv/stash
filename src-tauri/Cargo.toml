@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "stash-app"
-version = "0.1.1"
+version = "0.1.2"
 description = "Stash — macOS menubar multitool"
 authors = ["OPSRv"]
 edition = "2021"
@@ -86,8 +86,15 @@ window-vibrancy = "0.6"
 # reads, multi-file writes). Versions match the graph Tauri already pulls
 # in so we don't compile two copies of AppKit bindings.
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
-objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL", "NSData", "NSDictionary", "NSError", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSRunningApplication", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSGraphics"] }
+# Apple Vision framework — used by the OCR pipeline that extracts text
+# from photos / image documents / scanned-PDF pages so they land in the
+# Telegram inbox transcript field alongside whisper transcripts.
+objc2-vision = { version = "0.3", features = ["VNRequest", "VNRequestHandler", "VNRecognizeTextRequest", "VNObservation", "VNTypes"] }
+# PDFKit — primary text-layer extraction (`PDFDocument.string`) and
+# per-page rendering for the scanned-PDF OCR fallback.
+objc2-pdf-kit = { version = "0.3", features = ["PDFDocument", "PDFPage"] }
 # Safe NSWindow → NSPanel conversion. The naive `object_setClass` from
 # wry's NSWindow subclass (464 B) to stock NSPanel (456 B) is UB, and
 # objc2 aborts at runtime when it sees mismatched instance sizes. This

@@ -39,6 +39,23 @@ export const VideoItem = ({ filePath, caption, durationSec }: VideoItemProps) =>
   <InlineVideo src={filePath} caption={caption} durationSec={durationSec} />
 );
 
+type VideoNoteItemProps = {
+  filePath: string;
+  durationSec: number | null;
+};
+
+/// Telegram's round "video note" (кружечок). Same mp4 container as a
+/// regular video, but presented as a circle to match the chat UI. Sized
+/// down vs. the rectangular `VideoItem` since these are always short
+/// face-cam clips.
+export const VideoNoteItem = ({ filePath, durationSec }: VideoNoteItemProps) => (
+  <InlineVideo
+    src={filePath}
+    durationSec={durationSec}
+    className="w-[200px] h-[200px] aspect-square rounded-full object-cover"
+  />
+);
+
 type DocumentItemProps = {
   filePath: string;
   mimeType: string | null;

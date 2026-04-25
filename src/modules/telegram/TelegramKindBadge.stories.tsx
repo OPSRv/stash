@@ -8,6 +8,7 @@ const KIND_META: Record<string, { label: string; color: string }> = {
   voice: { label: 'Voice', color: '#4A8BEA' },
   photo: { label: 'Photo', color: '#7B54E8' },
   video: { label: 'Video', color: '#EA8B4A' },
+  video_note: { label: 'Кружечок', color: '#EA4A8B' },
   document: { label: 'Doc', color: '#5BC88A' },
   sticker: { label: 'Sticker', color: '#EAD24A' },
 };

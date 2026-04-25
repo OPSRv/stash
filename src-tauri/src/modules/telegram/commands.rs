@@ -468,23 +468,31 @@ pub async fn telegram_retry_transcribe(
     id: i64,
 ) -> Result<(), String> {
     use tauri::Manager;
-    let rel = {
+    let (rel, kind, mime) = {
         let repo = state.repo.lock().map_err(|e| e.to_string())?;
-        repo.list_inbox(500)
+        let item = repo
+            .list_inbox(500)
             .map_err(|e| e.to_string())?
             .into_iter()
-            .find(|i| i.id == id && i.kind == "voice")
-            .ok_or_else(|| format!("voice inbox item {id} not found"))?
+            .find(|i| i.id == id)
+            .ok_or_else(|| format!("inbox item {id} not found"))?;
+        let path = item
             .file_path
-            .ok_or_else(|| "voice item has no file on disk".to_string())?
+            .ok_or_else(|| "item has no file on disk".to_string())?;
+        (path, item.kind, item.mime_type)
     };
+    let runs_whisper = super::inbox::is_transcribable(&kind);
+    let runs_ocr = !runs_whisper && crate::modules::ocr::is_ocr_able(&kind, mime.as_deref());
+    if !runs_whisper && !runs_ocr {
+        return Err(format!("inbox item {id} is not transcribable"));
+    }
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
     let abs = data_dir.join(&rel);
     if !abs.is_file() {
-        return Err(format!("audio file missing: {}", abs.display()));
+        return Err(format!("file missing: {}", abs.display()));
     }
 
     let _ = app.emit("telegram:transcribing", id);
@@ -493,9 +501,23 @@ pub async fn telegram_retry_transcribe(
     // Detach — same pattern as first-pass transcription so the IPC call
     // returns immediately and the UI stays responsive.
     tauri::async_runtime::spawn(async move {
-        match crate::modules::whisper::commands::transcribe_with_active_model(&app_clone, abs, None)
+        let result: Result<String, String> = if runs_whisper {
+            crate::modules::whisper::commands::transcribe_with_active_model(
+                &app_clone, abs, None,
+            )
             .await
-        {
+        } else {
+            // OCR — Vision/PDFKit are sync. spawn_blocking keeps the
+            // tokio worker free.
+            let mime_owned = mime.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::modules::ocr::extract_text(&abs, mime_owned.as_deref())
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r)
+        };
+        match result {
             Ok(text) => {
                 let trimmed = text.trim().to_string();
                 if trimmed.is_empty() {
@@ -508,7 +530,7 @@ pub async fn telegram_retry_transcribe(
                 let _ = app_clone.emit("telegram:inbox_updated", id);
             }
             Err(e) => {
-                tracing::warn!(error = %e, "retry whisper failed");
+                tracing::warn!(error = %e, "retry transcription failed");
                 let _ = app_clone.emit("telegram:transcribe_failed", id);
             }
         }

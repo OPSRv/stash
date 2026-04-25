@@ -105,8 +105,27 @@ pub fn extract_media(msg: &Message) -> Option<MediaIntent> {
             caption,
             extension: "mp4",
         }),
+        // Telegram's round "video note" (кружечок). Same mp4 container
+        // as a regular video, but a different message kind so we can
+        // render it with the round bubble in the inbox.
+        MediaKind::VideoNote(v) => Some(MediaIntent {
+            kind: "video_note",
+            file_id: v.video_note.file.id.clone(),
+            declared_size: Some(v.video_note.file.size as u64),
+            mime: Some("video/mp4".into()),
+            duration_sec: Some(v.video_note.duration.seconds() as i64),
+            caption: None,
+            extension: "mp4",
+        }),
         _ => None,
     }
+}
+
+/// Whisper handles these kinds: voice notes, regular videos and
+/// round video notes. Symphonia demuxes the mp4 container and pulls
+/// the audio track, so we don't need a separate ffmpeg pass.
+pub fn is_transcribable(kind: &str) -> bool {
+    matches!(kind, "voice" | "video" | "video_note")
 }
 
 /// Today's date in `YYYY-MM-DD` form, in local time.

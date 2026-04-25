@@ -137,6 +137,69 @@ describe('<InboxPanel />', () => {
     expect(screen.getByRole('button', { name: /^delete$/i })).toBeEnabled();
   });
 
+  it('renders an OCR transcript on a photo row', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox')
+        return [
+          mkItem({
+            id: 33,
+            kind: 'photo',
+            text_content: null,
+            file_path: '/tmp/menu.jpg',
+            caption: 'menu',
+            transcript: 'Розмарин латте — 95',
+          }),
+        ];
+      return undefined;
+    });
+    render(<InboxPanel />);
+    await screen.findByTestId('inbox-item-33');
+    expect(screen.getByText(/Розмарин латте/)).toBeInTheDocument();
+  });
+
+  it('renders an OCR transcript on a pdf-document row', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox')
+        return [
+          mkItem({
+            id: 44,
+            kind: 'document',
+            text_content: null,
+            file_path: '/tmp/contract.pdf',
+            mime_type: 'application/pdf',
+            transcript: 'Акт виконаних робіт №42',
+          }),
+        ];
+      return undefined;
+    });
+    render(<InboxPanel />);
+    await screen.findByTestId('inbox-item-44');
+    expect(screen.getByText(/Акт виконаних робіт/)).toBeInTheDocument();
+  });
+
+  it('renders a video_note (кружечок) with kind badge and inline player', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_list_inbox')
+        return [
+          mkItem({
+            id: 11,
+            kind: 'video_note',
+            text_content: null,
+            file_path: '/tmp/note.mp4',
+            duration_sec: 6,
+            mime_type: 'video/mp4',
+          }),
+        ];
+      return undefined;
+    });
+    const { container } = render(<InboxPanel />);
+    await screen.findByTestId('inbox-item-11');
+    expect(screen.getByText(/Кружечок/i)).toBeInTheDocument();
+    const video = container.querySelector('video');
+    expect(video).not.toBeNull();
+    expect(video?.className).toMatch(/rounded-full/);
+  });
+
   it('shows routed tag when item was routed before', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd) => {
       if (cmd === 'telegram_list_inbox')

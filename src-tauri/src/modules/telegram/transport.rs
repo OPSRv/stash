@@ -568,10 +568,14 @@ async fn handle_media(
         .filter(|s| *s > 0)
         .map(|s| format!(" · {s}s"))
         .unwrap_or_default();
-    // Voice messages go silent on ingest — the user gets a transcript
-    // *and* an AI reply once Whisper finishes, which is already two
-    // messages per recording. Adding an inbox-save ack on top is noise.
-    if intent.kind != "voice" {
+    // Audio-bearing (voice / video / video_note) and OCR-able (photo /
+    // image-document / pdf) kinds go silent on ingest — the user gets
+    // a transcript message once Whisper / Vision finishes, which is
+    // already informative on its own. Adding an inbox-save ack on top
+    // is noise.
+    let will_transcribe = super::inbox::is_transcribable(intent.kind);
+    let will_ocr = crate::modules::ocr::is_ocr_able(intent.kind, intent.mime.as_deref());
+    if !will_transcribe && !will_ocr {
         let reply = format!(
             "📥 Saved {} ({}{}). See it in Stash → Telegram → Inbox.",
             intent.kind, human_size, duration_tag
@@ -579,10 +583,58 @@ async fn handle_media(
         state.sender.enqueue(chat_id, reply);
     }
 
-    // Voice messages trigger Whisper transcription in the background.
-    // Keeping this off the request path means a bad model config never
-    // blocks the inbox write — the row is already persisted above.
-    if intent.kind == "voice" {
+    // Voice / video / video_note all trigger Whisper transcription in
+    // the background. Symphonia demuxes the mp4 container so the same
+    // pipeline handles all three. Keeping this off the request path
+    // means a bad model config never blocks the inbox write — the row
+    // is already persisted above.
+    if will_ocr {
+        let file_abs = abs.clone();
+        let mime_owned = intent.mime.clone();
+        let app_for_task = app.clone();
+        let state_for_task = Arc::clone(state);
+        let chat_for_task = chat_id;
+        use tauri::Emitter;
+        let _ = app.emit("telegram:transcribing", inbox_id);
+        tauri::async_runtime::spawn(async move {
+            // Vision / PDFKit are sync APIs and can take a few hundred
+            // ms on big PDFs; offload to spawn_blocking so we don't pin
+            // a tokio worker.
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                crate::modules::ocr::extract_text(&file_abs, mime_owned.as_deref())
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r);
+
+            match result {
+                Ok(text) if !text.is_empty() => {
+                    if let Ok(mut repo) = state_for_task.repo.lock() {
+                        let _ = repo.set_inbox_transcript(inbox_id, &text);
+                    }
+                    let _ = app_for_task.emit("telegram:inbox_updated", inbox_id);
+                    state_for_task
+                        .sender
+                        .enqueue(chat_for_task, format!("📝 {text}"));
+                }
+                Ok(_) => {
+                    // Vision found no text — surface that as a failure
+                    // so the row clears the spinner and shows a retry
+                    // hint, same UX as a flubbed Whisper run.
+                    let _ = app_for_task.emit("telegram:transcribe_failed", inbox_id);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "ocr failed");
+                    let _ = app_for_task.emit("telegram:transcribe_failed", inbox_id);
+                    state_for_task
+                        .sender
+                        .enqueue(chat_for_task, format!("⚠️ OCR не впорався: {e}"));
+                }
+            }
+        });
+    }
+
+    if will_transcribe {
         let audio_abs = abs.clone();
         let app_for_task = app.clone();
         let state_for_task = Arc::clone(state);

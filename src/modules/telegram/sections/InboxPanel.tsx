@@ -16,8 +16,10 @@ import {
   PhotoItem,
   TextItem,
   VideoItem,
+  VideoNoteItem,
 } from './inbox/MediaItems';
 import { VoiceItem } from './inbox/VoiceItem';
+import { TranscriptArea } from '../../../shared/ui/TranscriptArea';
 
 type Group = {
   label: string;
@@ -559,31 +561,86 @@ const InboxBody = ({
       );
     case 'photo':
       return item.file_path ? (
-        <PhotoItem filePath={item.file_path} caption={item.caption} />
+        <div className="flex flex-col gap-2">
+          <PhotoItem filePath={item.file_path} caption={item.caption} />
+          {(item.transcript || transcribing || failed) && (
+            <TranscriptArea
+              transcript={item.transcript}
+              transcribing={transcribing}
+              failed={failed}
+              onRetry={onRetryTranscribe}
+              onEdit={onEditTranscript}
+            />
+          )}
+        </div>
       ) : (
         <TextItem content="[photo file missing]" />
       );
     case 'video':
       return item.file_path ? (
-        <VideoItem
-          filePath={item.file_path}
-          caption={item.caption}
-          durationSec={item.duration_sec}
-        />
+        <div className="flex flex-col gap-2">
+          <VideoItem
+            filePath={item.file_path}
+            caption={item.caption}
+            durationSec={item.duration_sec}
+          />
+          <TranscriptArea
+            transcript={item.transcript}
+            transcribing={transcribing}
+            failed={failed}
+            onRetry={onRetryTranscribe}
+            onEdit={onEditTranscript}
+          />
+        </div>
       ) : (
         <TextItem content="[video file missing]" />
       );
-    case 'document':
-    case 'sticker':
+    case 'video_note':
       return item.file_path ? (
-        <DocumentItem
-          filePath={item.file_path}
-          mimeType={item.mime_type}
-          caption={item.caption}
-        />
+        <div className="flex flex-col gap-2">
+          <VideoNoteItem
+            filePath={item.file_path}
+            durationSec={item.duration_sec}
+          />
+          <TranscriptArea
+            transcript={item.transcript}
+            transcribing={transcribing}
+            failed={failed}
+            onRetry={onRetryTranscribe}
+            onEdit={onEditTranscript}
+          />
+        </div>
       ) : (
-        <TextItem content={`[${item.kind}]`} />
+        <TextItem content="[video note file missing]" />
       );
+    case 'document':
+    case 'sticker': {
+      if (!item.file_path) return <TextItem content={`[${item.kind}]`} />;
+      const mime = (item.mime_type ?? '').toLowerCase();
+      // Documents that ran through OCR (image/* or application/pdf)
+      // get a transcript area underneath, same affordance as voice.
+      const ocrEligible =
+        item.kind === 'document' &&
+        (mime.startsWith('image/') || mime === 'application/pdf');
+      return (
+        <div className="flex flex-col gap-2">
+          <DocumentItem
+            filePath={item.file_path}
+            mimeType={item.mime_type}
+            caption={item.caption}
+          />
+          {ocrEligible && (item.transcript || transcribing || failed) && (
+            <TranscriptArea
+              transcript={item.transcript}
+              transcribing={transcribing}
+              failed={failed}
+              onRetry={onRetryTranscribe}
+              onEdit={onEditTranscript}
+            />
+          )}
+        </div>
+      );
+    }
     default:
       return <TextItem content={item.text_content ?? `[${item.kind}]`} />;
   }
@@ -637,6 +694,7 @@ const KIND_META: Record<
   voice: { label: 'Voice', color: '#4A8BEA' },
   photo: { label: 'Photo', color: '#7B54E8' },
   video: { label: 'Video', color: '#EA8B4A' },
+  video_note: { label: 'Кружечок', color: '#EA4A8B' },
   document: { label: 'Doc', color: '#5BC88A' },
   sticker: { label: 'Sticker', color: '#EAD24A' },
 };

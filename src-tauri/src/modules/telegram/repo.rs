@@ -121,7 +121,7 @@ impl TelegramRepo {
              CREATE TABLE IF NOT EXISTS inbox (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_message_id INTEGER NOT NULL,
-                kind TEXT NOT NULL CHECK(kind IN ('text','voice','photo','document','video','sticker')),
+                kind TEXT NOT NULL CHECK(kind IN ('text','voice','photo','document','video','video_note','sticker')),
                 text_content TEXT,
                 file_path TEXT,
                 mime_type TEXT,
@@ -133,6 +133,46 @@ impl TelegramRepo {
              );
              CREATE INDEX IF NOT EXISTS idx_inbox_recent ON inbox(received_at DESC);",
         )?;
+        // Existing DBs created before video_note was added will carry
+        // an old CHECK constraint without it, so inserts of the new
+        // kind would fail. Detect and rebuild the table preserving all
+        // rows. Idempotent — no-op once the schema already has it.
+        let needs_rebuild = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='inbox'",
+                [],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten()
+            .map(|sql| sql.contains("CHECK") && !sql.contains("video_note"))
+            .unwrap_or(false);
+        if needs_rebuild {
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE inbox_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_message_id INTEGER NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN ('text','voice','photo','document','video','video_note','sticker')),
+                    text_content TEXT,
+                    file_path TEXT,
+                    mime_type TEXT,
+                    duration_sec INTEGER,
+                    transcript TEXT,
+                    caption TEXT,
+                    received_at INTEGER NOT NULL,
+                    routed_to TEXT
+                 );
+                 INSERT INTO inbox_new
+                    SELECT id, telegram_message_id, kind, text_content, file_path,
+                           mime_type, duration_sec, transcript, caption, received_at, routed_to
+                    FROM inbox;
+                 DROP TABLE inbox;
+                 ALTER TABLE inbox_new RENAME TO inbox;
+                 CREATE INDEX IF NOT EXISTS idx_inbox_recent ON inbox(received_at DESC);
+                 COMMIT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -496,6 +536,63 @@ mod tests {
             [],
         );
         assert!(err.is_err(), "role CHECK must reject unknown values");
+    }
+
+    #[test]
+    fn inbox_accepts_video_note_kind() {
+        let mut repo = fresh();
+        let id = repo
+            .insert_media_inbox(
+                42,
+                "video_note",
+                Some("telegram/inbox/2026-04-25/abc.mp4"),
+                Some("video/mp4"),
+                Some(7),
+                None,
+                1_000,
+            )
+            .unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert!(items.iter().any(|i| i.id == id && i.kind == "video_note"));
+    }
+
+    #[test]
+    fn migration_rebuilds_legacy_inbox_table() {
+        // Simulate a pre-video_note DB by creating the table with the
+        // old CHECK list, populating it, and then handing the connection
+        // to TelegramRepo::new — the migration should rebuild the table
+        // (preserving rows) and now accept 'video_note' inserts.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE inbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_message_id INTEGER NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('text','voice','photo','document','video','sticker')),
+                text_content TEXT,
+                file_path TEXT,
+                mime_type TEXT,
+                duration_sec INTEGER,
+                transcript TEXT,
+                caption TEXT,
+                received_at INTEGER NOT NULL,
+                routed_to TEXT
+             );
+             INSERT INTO inbox(telegram_message_id, kind, text_content, received_at)
+                VALUES(1, 'text', 'preserved', 100);",
+        )
+        .unwrap();
+        let repo = TelegramRepo::new(conn).unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert_eq!(items.len(), 1, "old rows must survive the rebuild");
+        assert_eq!(items[0].text_content.as_deref(), Some("preserved"));
+        // New kind now accepted.
+        repo.conn
+            .execute(
+                "INSERT INTO inbox(telegram_message_id, kind, received_at)
+                 VALUES(2, 'video_note', 200)",
+                [],
+            )
+            .unwrap();
     }
 
     #[test]

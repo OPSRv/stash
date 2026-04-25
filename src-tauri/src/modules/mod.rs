@@ -5,6 +5,7 @@ pub mod ipc;
 pub mod metronome;
 pub mod music;
 pub mod notes;
+pub mod ocr;
 pub mod pomodoro;
 pub mod search;
 pub mod system;
