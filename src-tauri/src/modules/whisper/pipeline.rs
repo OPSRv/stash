@@ -95,10 +95,12 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
     let track = format
         .default_track()
         .ok_or_else(|| PipelineError::Decode("no default audio track".into()))?;
-    let sample_rate = track
-        .codec_params
-        .sample_rate
-        .ok_or_else(|| PipelineError::Decode("unknown sample rate".into()))?;
+    // Some mp4/AAC streams (e.g. TikTok rips) leave the container-level
+    // sample rate unset — the rate lives in the AAC frame header and
+    // only becomes known after the first decoded packet. Use the
+    // codec_params hint when present, otherwise pick it up from the
+    // first decoded buffer below.
+    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(0);
     let track_id = track.id;
 
     let mut decoder = match symphonia::default::get_codecs()
@@ -141,11 +143,31 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
             Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
             Err(e) => return Err(PipelineError::Decode(e.to_string())),
         };
+        if sample_rate == 0 {
+            // First decoded buffer fills in the rate the container
+            // didn't carry. Each AudioBufferRef variant exposes the
+            // signal spec — pull the rate via a tiny match.
+            sample_rate = match &decoded {
+                AudioBufferRef::F32(b) => b.spec().rate,
+                AudioBufferRef::F64(b) => b.spec().rate,
+                AudioBufferRef::S8(b) => b.spec().rate,
+                AudioBufferRef::S16(b) => b.spec().rate,
+                AudioBufferRef::S24(b) => b.spec().rate,
+                AudioBufferRef::S32(b) => b.spec().rate,
+                AudioBufferRef::U8(b) => b.spec().rate,
+                AudioBufferRef::U16(b) => b.spec().rate,
+                AudioBufferRef::U24(b) => b.spec().rate,
+                AudioBufferRef::U32(b) => b.spec().rate,
+            };
+        }
         append_mono_f32(&decoded, &mut samples);
     }
 
     if samples.is_empty() {
         return Err(PipelineError::Empty);
+    }
+    if sample_rate == 0 {
+        return Err(PipelineError::Decode("unknown sample rate".into()));
     }
     Ok(DecodedPcm {
         samples,
