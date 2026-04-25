@@ -1,8 +1,8 @@
 import { useState } from 'react';
 
-import { Button } from '../../../shared/ui/Button';
 import { ContextMenu, type ContextMenuItem } from '../../../shared/ui/ContextMenu';
 import { DragDots } from '../../../shared/ui/DragDots';
+import { IconButton } from '../../../shared/ui/IconButton';
 import { Tooltip } from '../../../shared/ui/Tooltip';
 import {
   ClaudeIcon,
@@ -131,7 +131,7 @@ export const PaneHeader = ({
   return (
     <div
       className="flex items-center gap-1 px-2 py-1 shrink-0 border-b hair"
-      style={{ minHeight: 28 }}
+      style={{ minHeight: 28, overflow: 'visible' }}
     >
       <Tooltip label="Drag to a tab or another pane to compose layouts">
         <span
@@ -186,35 +186,18 @@ export const PaneHeader = ({
       <div className="flex items-center gap-0.5 shrink-0">
         {onSplit && (
           <>
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => onSplit('row')}
-              title="Split side-by-side (⌘D)"
-              aria-label="Split right"
-            >
+            <IconButton onClick={() => onSplit('row')} title="Split side-by-side (⌘D)">
               <SplitViewIcon size={13} />
-            </Button>
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => onSplit('column')}
-              title="Split top/bottom (⌘⇧D)"
-              aria-label="Split down"
-            >
+            </IconButton>
+            <IconButton onClick={() => onSplit('column')} title="Split top/bottom (⌘⇧D)">
               <SplitViewIcon size={13} className="rotate-90" />
-            </Button>
+            </IconButton>
             {onToggleMaximize && (
-              <Button
-                size="xs"
-                variant={maximized ? 'soft' : 'ghost'}
-                tone={maximized ? 'accent' : 'neutral'}
+              <IconButton
                 onClick={onToggleMaximize}
+                active={maximized}
                 title={maximized ? 'Restore layout (⌘E)' : 'Maximize pane (⌘E)'}
-                aria-label={maximized ? 'Restore' : 'Maximize'}
-                aria-pressed={maximized}
               >
-                {/* Two-square glyph: corner-arrows in/out depending on state. */}
                 <svg
                   width={13}
                   height={13}
@@ -241,19 +224,17 @@ export const PaneHeader = ({
                     </>
                   )}
                 </svg>
-              </Button>
+              </IconButton>
             )}
             <HeaderDivider />
           </>
         )}
 
         {onLaunchClaude && (
-          <Button
-            size="xs"
-            variant={claudeRunning ? 'soft' : 'ghost'}
-            tone={claudeRunning ? 'accent' : 'neutral'}
+          <IconButton
             onClick={onLaunchClaude}
             disabled={dead || claudeRunning}
+            active={claudeRunning}
             title={
               claudeRunning
                 ? 'Claude Code is already running in this pane'
@@ -261,29 +242,22 @@ export const PaneHeader = ({
                   ? `Launch Claude Code (${claudeCommand.trim()}) and open Compose`
                   : 'Launch Claude Code — configure the command in Settings → Terminal'
             }
-            aria-label="Launch Claude Code"
-            aria-pressed={claudeRunning}
             data-testid="terminal-launch-claude"
           >
             <ClaudeIcon size={13} />
-          </Button>
+          </IconButton>
         )}
-        <Button
-          size="xs"
-          variant={cmdMenu ? 'soft' : 'ghost'}
-          tone={cmdMenu ? 'accent' : 'neutral'}
+        <IconButton
           onClick={(e) => (cmdMenu ? setCmdMenu(null) : openCmdMenu(e))}
+          active={!!cmdMenu}
           title={
             hasSnippets
               ? `Saved commands (${snippets.length})`
               : 'Commands — add your own in Settings'
           }
-          aria-label="Commands"
-          aria-haspopup="menu"
-          aria-expanded={!!cmdMenu}
         >
           <CodeIcon size={13} />
-        </Button>
+        </IconButton>
         <ContextMenu
           open={!!cmdMenu}
           x={cmdMenu?.x ?? 0}
@@ -293,49 +267,26 @@ export const PaneHeader = ({
           label="Saved terminal commands"
         />
 
-        <Button
-          size="xs"
-          variant={composeOpen ? 'soft' : 'ghost'}
-          tone={composeOpen ? 'accent' : 'neutral'}
-          onClick={toggleCompose}
-          title="Multi-line prompt (⌘⇧E)"
-          aria-label="Toggle compose"
-        >
+        <IconButton onClick={toggleCompose} active={composeOpen} title="Multi-line prompt (⌘⇧E)">
           <PencilIcon size={13} />
-        </Button>
-        <Button
-          size="xs"
-          variant="ghost"
-          onClick={onFind}
-          title="Search scrollback (⌘F)"
-          aria-label="Find"
-        >
+        </IconButton>
+        <IconButton onClick={onFind} title="Search scrollback (⌘F)">
           <SearchIcon size={13} />
-        </Button>
-        <Button
-          size="xs"
-          variant={dead ? 'soft' : 'ghost'}
-          tone={dead ? 'accent' : 'neutral'}
+        </IconButton>
+        <IconButton
           onClick={onRestart}
+          active={dead}
           title={dead ? 'Start a fresh shell session' : 'Restart shell'}
-          aria-label={dead ? 'Restart shell' : 'Restart'}
         >
           <ReuseIcon size={13} />
-        </Button>
+        </IconButton>
 
         {onClosePane && (
           <>
             <HeaderDivider />
-            <Button
-              size="xs"
-              variant="ghost"
-              tone="danger"
-              onClick={onClosePane}
-              title="Close this pane (⌘W)"
-              aria-label="Close pane"
-            >
+            <IconButton onClick={onClosePane} tone="danger" title="Close this pane (⌘W)">
               <CloseIcon size={13} />
-            </Button>
+            </IconButton>
           </>
         )}
       </div>

@@ -6,6 +6,8 @@ type IconButtonProps = {
   children: ReactNode;
   title?: string;
   tone?: 'default' | 'danger';
+  /** Renders a subtle accent highlight — use for toggle-on / pressed state. */
+  active?: boolean;
   stopPropagation?: boolean;
   disabled?: boolean;
   /** Tooltip placement relative to the button. Defaults to `bottom` because
@@ -20,24 +22,27 @@ export const IconButton = ({
   children,
   title,
   tone = 'default',
+  active = false,
   stopPropagation = true,
   disabled = false,
   tooltipSide = 'bottom',
   'data-testid': dataTestId,
 }: IconButtonProps) => {
   const toneClass = tone === 'danger' ? 't-primary hover:text-red-400' : 't-primary hover:t-primary';
+  const activeClass = active ? 'bg-white/[0.12]' : 'bg-white/[0.04] hover:bg-white/[0.08]';
   return (
     <Tooltip label={title} side={tooltipSide}>
       <button
         type="button"
         aria-label={title}
+        aria-pressed={active}
         disabled={disabled}
         onClick={(e) => {
           if (stopPropagation) e.stopPropagation();
           onClick(e);
         }}
         data-testid={dataTestId}
-        className={`ring-focus w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/[0.04] ${toneClass}`}
+        className={`ring-focus w-6 h-6 rounded-md flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/[0.04] ${activeClass} ${toneClass}`}
       >
         {children}
       </button>
