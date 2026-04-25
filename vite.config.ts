@@ -47,6 +47,22 @@ const stubLowlightCommon: Plugin = {
 export default defineConfig(async () => ({
   plugins: [stubLowlightCommon, react(), tailwindcss()],
 
+  // Two HTML entries:
+  //   index.html — the main 920×640 popup with every module tab.
+  //   voice.html — the slim Claude-style voice capsule pinned to
+  //                the bottom of the screen.
+  // Listing both lets Vite build them together while keeping their
+  // bundles separate so the voice popup doesn't drag the entire
+  // module tree into its first paint.
+  build: {
+    rollupOptions: {
+      input: {
+        index: fileURLToPath(new URL('./index.html', import.meta.url)),
+        voice: fileURLToPath(new URL('./voice.html', import.meta.url)),
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

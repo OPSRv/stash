@@ -1,5 +1,9 @@
 //! Tauri commands backing the voice popup.
 //!
+//! Settings live in the same telegram `kv` table as everything else
+//! — there's already a single SQLite handle wired in, no point in
+//! spinning a second one for two booleans.
+//!
 //! `voice_transcribe` takes an in-memory recording (usually WebM/Opus
 //! from the browser's MediaRecorder), spills it to an app-cache temp
 //! file, and runs it through the active Whisper model. The temp file
@@ -78,6 +82,65 @@ pub async fn voice_transcribe(
     let result = transcribe_with_active_model(&app, path.clone(), language).await;
     let _ = std::fs::remove_file(&path);
     result
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct VoiceSettings {
+    /// When true, recording auto-stops once `autostop_silence_ms` of
+    /// silence accumulates. Default false — explicit tap-to-stop is
+    /// the primary UX.
+    pub autostop_enabled: bool,
+    /// How much continuous silence triggers auto-stop. Clamped to a
+    /// usable range (0.5 s … 5 s) on save so a typo can't make the
+    /// recorder fire on the first audible breath.
+    pub autostop_silence_ms: u32,
+}
+
+const KEY_AUTOSTOP_ENABLED: &str = "voice.autostop_enabled";
+const KEY_AUTOSTOP_SILENCE_MS: &str = "voice.autostop_silence_ms";
+const DEFAULT_AUTOSTOP_SILENCE_MS: u32 = 1500;
+const MIN_AUTOSTOP_SILENCE_MS: u32 = 500;
+const MAX_AUTOSTOP_SILENCE_MS: u32 = 5000;
+
+#[tauri::command]
+pub fn voice_get_settings(state: State<'_, Arc<TelegramState>>) -> Result<VoiceSettings, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let enabled = repo
+        .kv_get(KEY_AUTOSTOP_ENABLED)
+        .ok()
+        .flatten()
+        .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let silence_ms = repo
+        .kv_get(KEY_AUTOSTOP_SILENCE_MS)
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<u32>().ok())
+        .map(|v| v.clamp(MIN_AUTOSTOP_SILENCE_MS, MAX_AUTOSTOP_SILENCE_MS))
+        .unwrap_or(DEFAULT_AUTOSTOP_SILENCE_MS);
+    Ok(VoiceSettings {
+        autostop_enabled: enabled,
+        autostop_silence_ms: silence_ms,
+    })
+}
+
+#[tauri::command]
+pub fn voice_set_settings(
+    state: State<'_, Arc<TelegramState>>,
+    settings: VoiceSettings,
+) -> Result<(), String> {
+    let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.kv_set(
+        KEY_AUTOSTOP_ENABLED,
+        if settings.autostop_enabled { "1" } else { "0" },
+    )
+    .map_err(|e| e.to_string())?;
+    let silence_ms = settings
+        .autostop_silence_ms
+        .clamp(MIN_AUTOSTOP_SILENCE_MS, MAX_AUTOSTOP_SILENCE_MS);
+    repo.kv_set(KEY_AUTOSTOP_SILENCE_MS, &silence_ms.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

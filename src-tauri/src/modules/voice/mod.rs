@@ -6,3 +6,4 @@
 //! streaming mode can reuse one without the other.
 
 pub mod commands;
+pub mod popup;

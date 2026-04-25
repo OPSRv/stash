@@ -208,7 +208,10 @@ use modules::translator::{
     },
     repo::TranslationsRepo,
 };
-use modules::voice::commands::{voice_ask, voice_transcribe};
+use modules::voice::commands::{
+    voice_ask, voice_get_settings, voice_set_settings, voice_transcribe,
+};
+use modules::voice::popup::{voice_popup_hide, voice_popup_show, voice_popup_toggle};
 use modules::webchat::commands::{
     webchat_back, webchat_close, webchat_close_all, webchat_current_url, webchat_embed,
     webchat_forward, webchat_hide, webchat_hide_all, webchat_reload, webchat_set_zoom,
@@ -426,20 +429,14 @@ pub fn run() {
                             let _ = win.set_focus();
                         }
                     } else if shortcut.matches(mods, tauri_plugin_global_shortcut::Code::KeyA) {
-                        // Open AI tab and kick off voice recording via
-                        // the composer's mic hook. `voice:activate` is
-                        // still a richer signal than raw nav — AiShell
-                        // uses it to start recording only when the shell
-                        // is mounted, so the user doesn't have to aim at
-                        // the mic button.
-                        if let Some(win) = resolve_popup(app) {
-                            let _ = app.emit("nav:activate", "ai");
-                            let _ = app.emit("voice:activate", true);
-                            let pos_state = app.state::<Arc<PopupPositionState>>();
-                            position_popup(&win, &pos_state);
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
+                        // Toggle the floating Claude-style voice
+                        // capsule (separate `voice-popup` window).
+                        // The previous behaviour — open the main
+                        // popup on the AI tab — is gone; the dedicated
+                        // capsule fits the "talk anywhere, no app
+                        // switch" feel a lot better than redirecting
+                        // through a tab.
+                        let _ = modules::voice::popup::voice_popup_toggle(app.clone());
                     }
                 })
                 .build(),
@@ -533,6 +530,11 @@ pub fn run() {
             whisper_transcribe_path,
             voice_transcribe,
             voice_ask,
+            voice_get_settings,
+            voice_set_settings,
+            voice_popup_show,
+            voice_popup_hide,
+            voice_popup_toggle,
             global_search,
             system_list_processes,
             system_kill_process,
@@ -1064,6 +1066,28 @@ pub fn run() {
                 });
             }
 
+            // Mirror the convert + auto-hide-on-blur dance for the
+            // floating voice capsule. Lives in its own NSPanel class
+            // so the two windows don't compete for the panel-manager
+            // registration in tauri-nspanel.
+            if let Some(voice_win) = app.get_webview_window("voice-popup") {
+                #[cfg(target_os = "macos")]
+                {
+                    if let Err(e) = modules::voice::popup::convert_voice_popup(&voice_win) {
+                        tracing::warn!(error = %e, "nspanel: convert_voice_popup failed");
+                    }
+                }
+                let voice_clone = voice_win.clone();
+                voice_win.on_window_event(move |event| {
+                    if let WindowEvent::Focused(false) = event {
+                        // Mic-permission and a few system-level
+                        // pickers blur the capsule briefly; we
+                        // tolerate that — hide is best-effort and
+                        // the user can re-summon with ⌘⇧A.
+                        let _ = voice_clone.hide();
+                    }
+                });
+            }
 
             Ok(())
         })
