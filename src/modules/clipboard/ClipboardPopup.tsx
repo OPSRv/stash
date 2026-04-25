@@ -56,6 +56,7 @@ import {
   subtypeVisual,
   typeTint,
 } from './icons';
+import { AudioItemTranscript, isSingleAudioItem } from './AudioItemTranscript';
 import { ClipboardVirtualList } from './ClipboardVirtualList';
 import { LinkRow } from './LinkRow';
 import { detect as detectVideo, start as startDownload, type DetectedVideo } from '../downloader/api';
@@ -1062,66 +1063,75 @@ export const ClipboardPopup = () => {
         iconFor('file')
       );
       const tint = typeTint.file;
+      const isAudio = isSingleAudioItem(item);
       return (
-        <Row
-          key={item.id}
-          primary={first.name}
-          icon={icon}
-          iconTint={firstKind.kind === 'image' || useCollage ? 'transparent' : tint.bg}
-          iconColor={tint.fg}
-          actions={
-            <>
-              <IconButton
-                onClick={() => revealInFinder(first.path)}
-                title="Reveal in Finder"
-              >
-                <EyeIcon size={12} />
-              </IconButton>
-              <IconButton
-                onClick={() => openFile(first.path)}
-                title="Open with default app"
-              >
-                <ExternalIcon size={12} />
-              </IconButton>
-              <IconButton
-                onClick={() => handleTogglePin(item.id)}
-                title={item.pinned ? 'Unpin' : 'Pin'}
-              >
-                <PinIcon size={12} filled={item.pinned} />
-              </IconButton>
-              <IconButton
-                onClick={() => handleDelete(item.id)}
-                title="Delete"
-                tone="danger"
-              >
-                <TrashIcon size={12} />
-              </IconButton>
-            </>
-          }
-          meta={
-            <>
-              {extraCount > 0 && (
-                <span
-                  className="text-[10px] font-mono font-medium tabular-nums px-1.5 py-px rounded"
-                  style={{ background: tint.bg, color: tint.fg }}
-                  title={`${files.length} files copied together`}
+        <div key={item.id}>
+          <Row
+            primary={first.name}
+            icon={icon}
+            iconTint={firstKind.kind === 'image' || useCollage ? 'transparent' : tint.bg}
+            iconColor={tint.fg}
+            actions={
+              <>
+                <IconButton
+                  onClick={() => revealInFinder(first.path)}
+                  title="Reveal in Finder"
                 >
-                  +{extraCount}
+                  <EyeIcon size={12} />
+                </IconButton>
+                <IconButton
+                  onClick={() => openFile(first.path)}
+                  title="Open with default app"
+                >
+                  <ExternalIcon size={12} />
+                </IconButton>
+                <IconButton
+                  onClick={() => handleTogglePin(item.id)}
+                  title={item.pinned ? 'Unpin' : 'Pin'}
+                >
+                  <PinIcon size={12} filled={item.pinned} />
+                </IconButton>
+                <IconButton
+                  onClick={() => handleDelete(item.id)}
+                  title="Delete"
+                  tone="danger"
+                >
+                  <TrashIcon size={12} />
+                </IconButton>
+              </>
+            }
+            meta={
+              <>
+                {extraCount > 0 && (
+                  <span
+                    className="text-[10px] font-mono font-medium tabular-nums px-1.5 py-px rounded"
+                    style={{ background: tint.bg, color: tint.fg }}
+                    title={`${files.length} files copied together`}
+                  >
+                    +{extraCount}
+                  </span>
+                )}
+                <span className="t-tertiary text-meta font-mono">
+                  {iso(item.created_at)}
                 </span>
-              )}
-              <span className="t-tertiary text-meta font-mono">
-                {iso(item.created_at)}
-              </span>
-              {index === flatIndex && <Kbd>↵</Kbd>}
-            </>
-          }
-          pinned={item.pinned}
-          active={index === flatIndex}
-          selected={selectedIds.has(item.id)}
-          onSelect={(e) => handleRowClick(flatIndex, e)}
+                {index === flatIndex && <Kbd>↵</Kbd>}
+              </>
+            }
+            pinned={item.pinned}
+            active={index === flatIndex}
+            selected={selectedIds.has(item.id)}
+            onSelect={(e) => handleRowClick(flatIndex, e)}
             onContextMenu={(e) => handleRowContextMenu(flatIndex, e)}
-          className={enterClass}
-        />
+            className={enterClass}
+          />
+          {isAudio && (
+            <AudioItemTranscript
+              itemId={item.id}
+              initial={item.transcription}
+              className="mx-4 mb-2"
+            />
+          )}
+        </div>
       );
     }
     if (item.type === 'link') {
@@ -1366,18 +1376,20 @@ export const ClipboardPopup = () => {
       >
         <div className="flex items-center gap-1">
           {filters.map((f) => (
-            <button
+            <Button
               key={f.id}
+              size="sm"
+              variant={filter === f.id ? 'soft' : 'ghost'}
               onClick={() => setFilter(f.id)}
-              className={`h-7 px-2.5 rounded-md flex items-center gap-1.5 text-meta font-medium ring-focus-sm transition-colors duration-150 ${
+              leadingIcon={<Kbd>{f.hint}</Kbd>}
+              className={`font-medium text-meta ${
                 filter === f.id
-                  ? 't-primary bg-[var(--color-surface-raised)]'
-                  : 't-secondary hover:bg-[var(--color-surface-raised)]'
+                  ? 't-primary !bg-[var(--color-surface-raised)]'
+                  : 't-secondary'
               }`}
             >
-              <Kbd>{f.hint}</Kbd>
               {f.label}
-            </button>
+            </Button>
           ))}
         </div>
         <div className="flex items-center gap-3">
@@ -1437,6 +1449,8 @@ export const ClipboardPopup = () => {
         const filePreviewFiles = filePreviewItem
           ? parseFileMeta(filePreviewItem)?.files ?? []
           : [];
+        const filePreviewAudioItem =
+          filePreviewItem && isSingleAudioItem(filePreviewItem) ? filePreviewItem : null;
         return (
           <FilePreviewDialog
             open={filePreviewItem !== null && filePreviewFiles.length > 0}
@@ -1450,6 +1464,7 @@ export const ClipboardPopup = () => {
               void openFile(p);
               setFilePreviewId(null);
             }}
+            audioItem={filePreviewAudioItem}
           />
         );
       })()}

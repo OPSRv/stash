@@ -6,8 +6,14 @@ export type Note = {
   body: string;
   created_at: number;
   updated_at: number;
+  /** Absolute path to the note's primary recorded audio, if any. */
+  audio_path: string | null;
+  /** Recording length in milliseconds, when known. */
+  audio_duration_ms: number | null;
   /** User-pinned notes float to the top of the side-list. */
   pinned: boolean;
+  /** Whisper transcript of the primary audio recording, if transcription has been run. */
+  audio_transcription: string | null;
 };
 
 /** Lightweight projection returned by the list / search endpoints — carries a
@@ -97,6 +103,8 @@ export type NoteAttachment = {
   mime_type: string | null;
   size_bytes: number | null;
   created_at: number;
+  /** Whisper transcript of the attachment audio, if transcription has been run. */
+  transcription: string | null;
 };
 
 export const notesListAttachments = (noteId: number): Promise<NoteAttachment[]> =>
@@ -113,3 +121,35 @@ export const notesAddAttachment = (
 
 export const notesRemoveAttachment = (id: number): Promise<void> =>
   invoke('notes_remove_attachment', { id });
+
+/** Manually set (or clear) the transcription for a note's primary audio
+ *  recording. Pass `null` to erase a previously stored transcription. */
+export const notesSetAudioTranscription = (
+  noteId: number,
+  transcription: string | null,
+): Promise<void> =>
+  invoke('notes_set_audio_transcription', { noteId, transcription });
+
+/** Manually set (or clear) the transcription for an audio attachment.
+ *  Pass `null` to erase a previously stored transcription. */
+export const notesSetAttachmentTranscription = (
+  id: number,
+  transcription: string | null,
+): Promise<void> =>
+  invoke('notes_set_attachment_transcription', { id, transcription });
+
+/** Start a Whisper transcription of the note's primary audio recording.
+ *  Returns immediately. Listen for Tauri events:
+ *  - `notes:audio_transcribing`        `{ note_id }`
+ *  - `notes:note_updated`              `{ note_id }`
+ *  - `notes:audio_transcribe_failed`   `{ note_id, error }` */
+export const notesTranscribeNoteAudio = (noteId: number): Promise<void> =>
+  invoke('notes_transcribe_note_audio', { noteId });
+
+/** Start a Whisper transcription of an audio attachment.
+ *  Returns immediately. Listen for Tauri events:
+ *  - `notes:attachment_transcribing`       `{ id }`
+ *  - `notes:attachment_updated`            `{ id }`
+ *  - `notes:attachment_transcribe_failed`  `{ id, error }` */
+export const notesTranscribeAttachment = (attachmentId: number): Promise<void> =>
+  invoke('notes_transcribe_attachment', { attachmentId });

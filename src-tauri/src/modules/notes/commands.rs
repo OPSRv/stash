@@ -613,6 +613,195 @@ pub fn notes_export_path(
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// Audio MIME prefixes and extensions accepted for attachment transcription.
+/// Matches the extensions Whisper can handle.
+const AUDIO_MIME_PREFIXES: &[&str] = &["audio/"];
+const AUDIO_ATTACH_EXT: &[&str] = &["mp3", "m4a", "wav", "ogg", "opus", "flac", "webm", "aac"];
+
+fn is_audio_attachment(att: &crate::modules::notes::repo::NoteAttachment) -> bool {
+    if let Some(ref mime) = att.mime_type {
+        if AUDIO_MIME_PREFIXES.iter().any(|p| mime.starts_with(p)) {
+            return true;
+        }
+    }
+    // Fall back to extension check.
+    let ext = std::path::Path::new(&att.file_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    AUDIO_ATTACH_EXT.contains(&ext.as_str())
+}
+
+/// Manually set the transcription text for the note's primary audio recording.
+/// Pass `null` / empty string to clear it.
+#[tauri::command]
+pub fn notes_set_audio_transcription(
+    state: State<'_, NotesState>,
+    note_id: i64,
+    transcription: Option<String>,
+) -> Result<(), String> {
+    to_string_err(
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .set_note_audio_transcription(note_id, transcription.as_deref()),
+    )
+}
+
+/// Manually set the transcription text for an audio attachment.
+/// Pass `null` / empty string to clear it.
+#[tauri::command]
+pub fn notes_set_attachment_transcription(
+    state: State<'_, NotesState>,
+    id: i64,
+    transcription: Option<String>,
+) -> Result<(), String> {
+    to_string_err(
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .set_attachment_transcription(id, transcription.as_deref()),
+    )
+}
+
+/// Transcribe the note's primary audio recording (`audio_path`) with
+/// the active Whisper model. Returns immediately; the actual work runs
+/// in a detached async task and reports progress via events:
+///   - `notes:audio_transcribing  { note_id }`  — started
+///   - `notes:note_updated        { note_id }`  — succeeded, transcription persisted
+///   - `notes:audio_transcribe_failed { note_id, error }` — failed
+#[tauri::command]
+pub async fn notes_transcribe_note_audio(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    note_id: i64,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let audio_path = {
+        let repo = state.repo.lock().unwrap();
+        let note = to_string_err(repo.get(note_id))?
+            .ok_or_else(|| format!("note {note_id} not found"))?;
+        note.audio_path
+            .ok_or_else(|| format!("note {note_id} has no audio_path"))?
+    };
+    let path = std::path::PathBuf::from(&audio_path);
+    if !path.is_file() {
+        return Err(format!("audio file missing: {audio_path}"));
+    }
+
+    let _ = app.emit("notes:audio_transcribing", serde_json::json!({ "note_id": note_id }));
+
+    let state_repo = std::sync::Arc::clone(&state.repo);
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match crate::modules::whisper::commands::transcribe_with_active_model(
+            &app_clone,
+            path,
+            None,
+        )
+        .await
+        {
+            Ok(text) => {
+                let trimmed = text.trim().to_string();
+                if trimmed.is_empty() {
+                    let _ = app_clone.emit(
+                        "notes:audio_transcribe_failed",
+                        serde_json::json!({ "note_id": note_id, "error": "empty transcription" }),
+                    );
+                    return;
+                }
+                if let Ok(mut repo) = state_repo.lock() {
+                    let _ = repo.set_note_audio_transcription(note_id, Some(&trimmed));
+                }
+                let _ = app_clone.emit("notes:note_updated", serde_json::json!({ "note_id": note_id }));
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, note_id, "notes: whisper transcription failed");
+                let _ = app_clone.emit(
+                    "notes:audio_transcribe_failed",
+                    serde_json::json!({ "note_id": note_id, "error": e }),
+                );
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Transcribe an audio attachment with the active Whisper model.
+/// Returns immediately; progress events:
+///   - `notes:attachment_transcribing  { id }`          — started
+///   - `notes:attachment_updated       { id }`          — succeeded
+///   - `notes:attachment_transcribe_failed { id, error }` — failed
+#[tauri::command]
+pub async fn notes_transcribe_attachment(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    attachment_id: i64,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let att = {
+        let repo = state.repo.lock().unwrap();
+        to_string_err(repo.get_attachment(attachment_id))?
+            .ok_or_else(|| format!("attachment {attachment_id} not found"))?
+    };
+    if !is_audio_attachment(&att) {
+        return Err(format!(
+            "attachment {attachment_id} is not an audio file (mime: {:?})",
+            att.mime_type
+        ));
+    }
+    let path = std::path::PathBuf::from(&att.file_path);
+    if !path.is_file() {
+        return Err(format!("attachment file missing: {}", att.file_path));
+    }
+
+    let _ = app.emit(
+        "notes:attachment_transcribing",
+        serde_json::json!({ "id": attachment_id }),
+    );
+
+    let state_repo = std::sync::Arc::clone(&state.repo);
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match crate::modules::whisper::commands::transcribe_with_active_model(
+            &app_clone,
+            path,
+            None,
+        )
+        .await
+        {
+            Ok(text) => {
+                let trimmed = text.trim().to_string();
+                if trimmed.is_empty() {
+                    let _ = app_clone.emit(
+                        "notes:attachment_transcribe_failed",
+                        serde_json::json!({ "id": attachment_id, "error": "empty transcription" }),
+                    );
+                    return;
+                }
+                if let Ok(mut repo) = state_repo.lock() {
+                    let _ = repo.set_attachment_transcription(attachment_id, Some(&trimmed));
+                }
+                let _ = app_clone.emit(
+                    "notes:attachment_updated",
+                    serde_json::json!({ "id": attachment_id }),
+                );
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, attachment_id, "notes: attachment whisper failed");
+                let _ = app_clone.emit(
+                    "notes:attachment_transcribe_failed",
+                    serde_json::json!({ "id": attachment_id, "error": e }),
+                );
+            }
+        }
+    });
+    Ok(())
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct ReadFileResult {
     pub name: String,

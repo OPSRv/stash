@@ -30,6 +30,9 @@ pub struct NoteAttachment {
     pub mime_type: Option<String>,
     pub size_bytes: Option<i64>,
     pub created_at: i64,
+    /// Whisper transcription of the attachment's audio content, if this
+    /// attachment is an audio file and transcription has been run.
+    pub transcription: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -47,6 +50,10 @@ pub struct Note {
     /// User-pinned notes float to the top of the side-list regardless of
     /// their `updated_at`.
     pub pinned: bool,
+    /// Whisper transcription of the note's primary audio recording
+    /// (`audio_path`). Named `audio_transcription` to distinguish it from
+    /// any future general-purpose transcription field.
+    pub audio_transcription: Option<String>,
 }
 
 /// Projection used for the side-list. Carries only what the list row needs so
@@ -122,6 +129,23 @@ impl NotesRepo {
                 [],
             )?;
         }
+        if !cols.iter().any(|c| c == "audio_transcription") {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN audio_transcription TEXT",
+                [],
+            )?;
+        }
+        // note_attachments migrations.
+        let attach_cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(note_attachments)")?
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<_>>()?;
+        if !attach_cols.iter().any(|c| c == "transcription") {
+            conn.execute(
+                "ALTER TABLE note_attachments ADD COLUMN transcription TEXT",
+                [],
+            )?;
+        }
         // FTS5 index over title + body. Uses the `trigram` tokenizer so
         // `MATCH` has the same *substring* semantics as the old
         // `LIKE %q%` path — a query for `bar` still hits `foobar`. This
@@ -171,6 +195,34 @@ impl NotesRepo {
         Ok(())
     }
 
+    /// Persist a Whisper transcript for the note's primary audio recording.
+    /// Pass `None` to clear a previously stored transcription.
+    pub fn set_note_audio_transcription(
+        &mut self,
+        note_id: i64,
+        transcription: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE notes SET audio_transcription = ?1 WHERE id = ?2",
+            params![transcription, note_id],
+        )?;
+        Ok(())
+    }
+
+    /// Persist a Whisper transcript for an audio attachment.
+    /// Pass `None` to clear a previously stored transcription.
+    pub fn set_attachment_transcription(
+        &mut self,
+        attachment_id: i64,
+        transcription: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE note_attachments SET transcription = ?1 WHERE id = ?2",
+            params![transcription, attachment_id],
+        )?;
+        Ok(())
+    }
+
     pub fn create(&mut self, title: &str, body: &str, now: i64) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO notes (title, body, created_at, updated_at)
@@ -197,7 +249,7 @@ impl NotesRepo {
     pub fn get(&self, id: i64) -> Result<Option<Note>> {
         self.conn
             .query_row(
-                "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms, pinned
+                "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms, pinned, audio_transcription
                  FROM notes WHERE id = ?1",
                 params![id],
                 Self::map_row,
@@ -229,7 +281,7 @@ impl NotesRepo {
             return Ok(Vec::new());
         };
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms, pinned
+            "SELECT id, title, body, created_at, updated_at, audio_path, audio_duration_ms, pinned, audio_transcription
              FROM notes
              WHERE id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?1)
              ORDER BY pinned DESC, updated_at DESC",
@@ -285,7 +337,7 @@ impl NotesRepo {
 
     pub fn list_attachments(&self, note_id: i64) -> Result<Vec<NoteAttachment>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, note_id, file_path, original_name, mime_type, size_bytes, created_at
+            "SELECT id, note_id, file_path, original_name, mime_type, size_bytes, created_at, transcription
              FROM note_attachments
              WHERE note_id = ?1
              ORDER BY created_at ASC, id ASC",
@@ -297,7 +349,7 @@ impl NotesRepo {
     pub fn get_attachment(&self, id: i64) -> Result<Option<NoteAttachment>> {
         self.conn
             .query_row(
-                "SELECT id, note_id, file_path, original_name, mime_type, size_bytes, created_at
+                "SELECT id, note_id, file_path, original_name, mime_type, size_bytes, created_at, transcription
                  FROM note_attachments WHERE id = ?1",
                 params![id],
                 Self::map_attachment,
@@ -324,6 +376,7 @@ impl NotesRepo {
             mime_type: row.get("mime_type").ok(),
             size_bytes: row.get("size_bytes").ok(),
             created_at: row.get("created_at")?,
+            transcription: row.get("transcription").ok(),
         })
     }
 
@@ -337,6 +390,7 @@ impl NotesRepo {
             audio_path: row.get("audio_path").ok(),
             audio_duration_ms: row.get("audio_duration_ms").ok(),
             pinned: row.get::<_, i64>("pinned").unwrap_or(0) != 0,
+            audio_transcription: row.get("audio_transcription").ok(),
         })
     }
 
@@ -573,5 +627,61 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].title, "old");
         assert_eq!(notes[0].audio_path, None);
+    }
+
+    #[test]
+    fn set_note_audio_transcription_persists_and_clears() {
+        let mut repo = fresh();
+        let id = repo.create("voice note", "", 1).unwrap();
+        // Initially None.
+        assert_eq!(repo.get(id).unwrap().unwrap().audio_transcription, None);
+        // Set a transcription.
+        repo.set_note_audio_transcription(id, Some("hello world"))
+            .unwrap();
+        assert_eq!(
+            repo.get(id).unwrap().unwrap().audio_transcription.as_deref(),
+            Some("hello world")
+        );
+        // Clear it.
+        repo.set_note_audio_transcription(id, None).unwrap();
+        assert_eq!(repo.get(id).unwrap().unwrap().audio_transcription, None);
+    }
+
+    #[test]
+    fn set_attachment_transcription_persists_and_clears() {
+        let mut repo = fresh();
+        let note_id = repo.create("n", "", 1).unwrap();
+        let aid = repo
+            .add_attachment(
+                note_id,
+                "/tmp/voice.m4a",
+                "voice.m4a",
+                Some("audio/mp4"),
+                Some(512),
+                10,
+            )
+            .unwrap();
+        // Initially None.
+        assert_eq!(
+            repo.get_attachment(aid).unwrap().unwrap().transcription,
+            None
+        );
+        // Set a transcription.
+        repo.set_attachment_transcription(aid, Some("test transcript"))
+            .unwrap();
+        assert_eq!(
+            repo.get_attachment(aid)
+                .unwrap()
+                .unwrap()
+                .transcription
+                .as_deref(),
+            Some("test transcript")
+        );
+        // Clear it.
+        repo.set_attachment_transcription(aid, None).unwrap();
+        assert_eq!(
+            repo.get_attachment(aid).unwrap().unwrap().transcription,
+            None
+        );
     }
 }

@@ -1,9 +1,23 @@
-import { memo, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { CloseIcon, PlayIcon, ReuseIcon } from '../../shared/ui/icons';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { Tooltip } from '../../shared/ui/Tooltip';
+import { TranscriptArea } from '../../shared/ui/TranscriptArea';
+import { useTranscription, type TranscriptionHandlers } from '../../shared/hooks/useTranscription';
+import { extOf } from '../../shared/util/fileKind';
 import { PlatformBadge } from './PlatformBadge';
+import { list, setTranscription, transcribeJob } from './api';
 import type { DownloadJob } from './api';
+
+const AUDIO_EXTS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'opus', 'flac', 'aac', 'aiff', 'aif']);
+
+export const isAudioJob = (job: DownloadJob): boolean => {
+  if (job.target_path) {
+    return AUDIO_EXTS.has(extOf(job.target_path));
+  }
+  return false;
+};
 
 interface CompletedDownloadTileProps {
   job: DownloadJob;
@@ -18,7 +32,6 @@ interface CompletedDownloadTileProps {
   onRetry?: (id: number) => void;
 }
 
-
 const isFailure = (status: DownloadJob['status']) =>
   status === 'failed' || status === 'cancelled';
 
@@ -31,6 +44,49 @@ const CompletedDownloadTileImpl = ({
   const failed = isFailure(job.status);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const canPurge = Boolean(job.target_path) && !failed;
+  const showTranscript = job.status === 'completed' && isAudioJob(job);
+
+  // Stable subscribe fn for useTranscription — listens to the three
+  // downloader transcription events filtered to this job's id.
+  const subscribe = useCallback(
+    (handlers: TranscriptionHandlers) => {
+      let cancelled = false;
+      const unlisteners: Array<() => void> = [];
+
+      Promise.all([
+        listen<{ id: number }>('downloader:transcribing', (e) => {
+          if (!cancelled && e.payload.id === job.id) handlers.onStart();
+        }),
+        listen<{ id: number }>('downloader:job_updated', async (e) => {
+          if (cancelled || e.payload.id !== job.id) return;
+          const jobs = await list();
+          const updated = jobs.find((j) => j.id === job.id);
+          if (updated?.transcription != null) handlers.onDone(updated.transcription);
+        }),
+        listen<{ id: number; error: string }>('downloader:transcribe_failed', (e) => {
+          if (!cancelled && e.payload.id === job.id) handlers.onFailed(e.payload.error);
+        }),
+      ]).then((fns) => {
+        if (!cancelled) unlisteners.push(...fns);
+        else fns.forEach((f) => f());
+      });
+
+      return () => {
+        cancelled = true;
+        unlisteners.forEach((f) => f());
+      };
+    },
+    // job.id is stable for the lifetime of a tile
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [job.id],
+  );
+
+  const { transcript, status: transcribeStatus, failed: transcribeFailed, transcribe } =
+    useTranscription({
+      initial: job.transcription,
+      start: () => transcribeJob(job.id),
+      subscribe,
+    });
 
   const openDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -101,6 +157,23 @@ const CompletedDownloadTileImpl = ({
         <div className="t-primary text-meta font-medium truncate">
           {job.title ?? (job.target_path?.split('/').pop() ?? job.url)}
         </div>
+        {showTranscript && (
+          <TranscriptArea
+            transcript={transcript}
+            transcribing={transcribeStatus === 'running'}
+            failed={transcribeFailed}
+            onTranscribe={transcribe}
+            onRetry={transcribe}
+            onEdit={(t) => setTranscription(job.id, t)}
+            className="mt-1.5"
+            labels={{
+              transcribe: 'Transcribe audio',
+              transcribing: 'Transcribing…',
+              failed: '⚠ Transcription failed',
+              retry: 'Retry',
+            }}
+          />
+        )}
       </div>
       <ConfirmDialog
         open={deleteOpen}

@@ -23,6 +23,7 @@ pub struct ClipboardItem {
     pub meta: Option<String>,
     pub created_at: i64,
     pub pinned: bool,
+    pub transcription: Option<String>,
 }
 
 pub struct ClipboardRepo {
@@ -49,6 +50,8 @@ impl ClipboardRepo {
         // Migration: add kind + meta columns for clients that predate image support.
         Self::ensure_column(&conn, "kind", "TEXT NOT NULL DEFAULT 'text'")?;
         Self::ensure_column(&conn, "meta", "TEXT")?;
+        // Migration: transcription column for audio clipboard items.
+        Self::ensure_column(&conn, "transcription", "TEXT")?;
         // FTS5 index over text content + file-meta JSON, using the
         // trigram tokenizer so `MATCH` keeps the old `LIKE %q%`
         // substring semantics (`bar` still hits `foobar`). Image rows
@@ -169,7 +172,7 @@ impl ClipboardRepo {
 
     pub fn list(&self, limit: usize) -> Result<Vec<ClipboardItem>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items
+            "SELECT id, kind, content, meta, created_at, pinned, transcription FROM clipboard_items
              ORDER BY pinned DESC, created_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], Self::map_row)?;
@@ -189,7 +192,7 @@ impl ClipboardRepo {
             return Ok(Vec::new());
         };
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items
+            "SELECT id, kind, content, meta, created_at, pinned, transcription FROM clipboard_items
              WHERE id IN (SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?1)
                AND kind != 'image'
              ORDER BY pinned DESC, created_at DESC LIMIT ?2",
@@ -201,11 +204,19 @@ impl ClipboardRepo {
     pub fn get(&self, id: i64) -> Result<Option<ClipboardItem>> {
         self.conn
             .query_row(
-                "SELECT id, kind, content, meta, created_at, pinned FROM clipboard_items WHERE id = ?1",
+                "SELECT id, kind, content, meta, created_at, pinned, transcription FROM clipboard_items WHERE id = ?1",
                 params![id],
                 Self::map_row,
             )
             .optional()
+    }
+
+    pub fn set_transcription(&mut self, id: i64, transcription: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE clipboard_items SET transcription = ?1 WHERE id = ?2",
+            params![transcription, id],
+        )?;
+        Ok(())
     }
 
     pub fn touch(&mut self, id: i64, created_at: i64) -> Result<()> {
@@ -289,6 +300,7 @@ impl ClipboardRepo {
             meta: row.get(3)?,
             created_at: row.get(4)?,
             pinned: row.get::<_, i64>(5)? != 0,
+            transcription: row.get(6)?,
         })
     }
 }
@@ -598,5 +610,46 @@ mod tests {
         let items = repo.list(10).unwrap();
         assert_eq!(items[0].content, "pinned-older");
         assert_eq!(items[1].content, "recent-unpinned");
+    }
+
+    #[test]
+    fn set_transcription_stores_and_retrieves_text() {
+        let mut repo = fresh_repo();
+        let id = repo
+            .insert_files(
+                "files:audio",
+                r#"{"files":[{"path":"/tmp/note.m4a","name":"note.m4a"}]}"#,
+                1,
+            )
+            .unwrap();
+        // Initially null
+        assert!(repo.get(id).unwrap().unwrap().transcription.is_none());
+        // Set a value
+        repo.set_transcription(id, Some("hello world")).unwrap();
+        assert_eq!(
+            repo.get(id).unwrap().unwrap().transcription.as_deref(),
+            Some("hello world")
+        );
+        // Clear it
+        repo.set_transcription(id, None).unwrap();
+        assert!(repo.get(id).unwrap().unwrap().transcription.is_none());
+    }
+
+    #[test]
+    fn set_transcription_appears_in_list() {
+        let mut repo = fresh_repo();
+        let id = repo
+            .insert_files(
+                "files:audio2",
+                r#"{"files":[{"path":"/tmp/clip.mp3","name":"clip.mp3"}]}"#,
+                2,
+            )
+            .unwrap();
+        repo.set_transcription(id, Some("transcribed text")).unwrap();
+        let items = repo.list(10).unwrap();
+        assert_eq!(
+            items[0].transcription.as_deref(),
+            Some("transcribed text")
+        );
     }
 }

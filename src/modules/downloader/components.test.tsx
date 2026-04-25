@@ -1,6 +1,9 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import * as events from '@tauri-apps/api/event';
+const __emit = (events as unknown as { __emit: (e: string, p: unknown) => void }).__emit;
+import { invoke } from '@tauri-apps/api/core';
 import { ActiveDownloadRow } from './ActiveDownloadRow';
 import { CompletedDownloadRow } from './CompletedDownloadRow';
 import { CompletedDownloadTile } from './CompletedDownloadTile';
@@ -26,6 +29,7 @@ const job = (overrides: Partial<DownloadJob> = {}): DownloadJob => ({
   error: null,
   created_at: 0,
   completed_at: null,
+  transcription: null,
   ...overrides,
 });
 
@@ -339,5 +343,73 @@ describe('CompletedDownloadTile', () => {
     );
     await user.click(getByRole('button', { name: 'Delete' }));
     expect(onDelete).toHaveBeenCalledWith(expect.any(Number), true);
+  });
+
+  it('renders TranscriptArea for a completed audio job', () => {
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/clip.m4a' })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: /transcribe audio/i })).toBeInTheDocument();
+  });
+
+  it('does not render TranscriptArea for a completed video job', () => {
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole('button', { name: /transcribe audio/i })).not.toBeInTheDocument();
+  });
+
+  it('clicking the transcribe button calls dl_transcribe_job', async () => {
+    const user = userEvent.setup();
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    render(
+      <CompletedDownloadTile
+        job={job({ id: 42, status: 'completed', target_path: '/tmp/clip.mp3' })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: /transcribe audio/i }));
+    expect(invoke).toHaveBeenCalledWith('dl_transcribe_job', { id: 42 });
+  });
+
+  it('refreshes transcript text on downloader:job_updated event', async () => {
+    // dl_list returns the updated job with transcription text
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'dl_list') {
+        return [
+          job({ id: 7, status: 'completed', target_path: '/tmp/clip.m4a', transcription: 'Hello world' }),
+        ];
+      }
+      return undefined;
+    });
+
+    render(
+      <CompletedDownloadTile
+        job={job({ id: 7, status: 'completed', target_path: '/tmp/clip.m4a', transcription: null })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+
+    // No transcript yet — transcribe button is visible
+    expect(screen.getByRole('button', { name: /transcribe audio/i })).toBeInTheDocument();
+
+    // Fire the job_updated event
+    await act(async () => {
+      __emit('downloader:job_updated', { id: 7 });
+      // Allow the async list() call inside the subscribe handler to settle
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.getByText('Hello world')).toBeInTheDocument();
   });
 });

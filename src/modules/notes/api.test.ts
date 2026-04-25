@@ -8,6 +8,10 @@ import {
   notesSaveAudioBytes,
   notesSaveAudioFile,
   notesSearch,
+  notesSetAttachmentTranscription,
+  notesSetAudioTranscription,
+  notesTranscribeAttachment,
+  notesTranscribeNoteAudio,
   notesUpdate,
 } from './api';
 
@@ -68,5 +72,47 @@ describe('notes/api', () => {
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(Array.from(bytes)).toEqual([10, 20, 30]);
     expect(invoke).toHaveBeenCalledWith('notes_read_audio_path', { path: '/managed/rec.mp4' });
+  });
+
+  it('notesSetAudioTranscription forwards noteId and transcription text', async () => {
+    await notesSetAudioTranscription(42, 'hello world');
+    expect(invoke).toHaveBeenCalledWith('notes_set_audio_transcription', {
+      noteId: 42,
+      transcription: 'hello world',
+    });
+  });
+
+  it('notesSetAudioTranscription forwards null to clear', async () => {
+    await notesSetAudioTranscription(42, null);
+    expect(invoke).toHaveBeenCalledWith('notes_set_audio_transcription', {
+      noteId: 42,
+      transcription: null,
+    });
+  });
+
+  it('notesSetAttachmentTranscription forwards id and transcription text', async () => {
+    await notesSetAttachmentTranscription(7, 'attachment text');
+    expect(invoke).toHaveBeenCalledWith('notes_set_attachment_transcription', {
+      id: 7,
+      transcription: 'attachment text',
+    });
+  });
+
+  it('notesSetAttachmentTranscription forwards null to clear', async () => {
+    await notesSetAttachmentTranscription(7, null);
+    expect(invoke).toHaveBeenCalledWith('notes_set_attachment_transcription', {
+      id: 7,
+      transcription: null,
+    });
+  });
+
+  it('notesTranscribeNoteAudio forwards noteId', async () => {
+    await notesTranscribeNoteAudio(12);
+    expect(invoke).toHaveBeenCalledWith('notes_transcribe_note_audio', { noteId: 12 });
+  });
+
+  it('notesTranscribeAttachment forwards attachmentId', async () => {
+    await notesTranscribeAttachment(99);
+    expect(invoke).toHaveBeenCalledWith('notes_transcribe_attachment', { attachmentId: 99 });
   });
 });

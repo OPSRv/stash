@@ -12,6 +12,8 @@ export type ClipboardItem = {
   meta: string | null;
   created_at: number;
   pinned: boolean;
+  /** Whisper transcription — only populated for single-audio-file items. */
+  transcription: string | null;
 };
 
 export type ImageMeta = {
@@ -80,6 +82,19 @@ export const clearAll = (): Promise<number> => invoke('clipboard_clear');
 /// were removed. Safe to call any time — backend treats it as a
 /// best-effort sweep.
 export const pruneFiles = (): Promise<number> => invoke('clipboard_prune_files');
+
+/** Overwrite (or clear) the stored transcription for a clipboard item.
+ *  Pass `null` to clear. Emits `clipboard:item_updated` on success. */
+export const setTranscription = (id: number, transcription: string | null): Promise<void> =>
+  invoke('clipboard_set_transcription', { id, transcription });
+
+/** Ask the backend to run Whisper on the single audio file in this item.
+ *  Returns immediately — progress is delivered via events:
+ *  - `clipboard:transcribing`      `id`           — job started
+ *  - `clipboard:item_updated`      `id`           — transcription saved
+ *  - `clipboard:transcribe_failed` `{id, error}`  — Whisper failed */
+export const transcribeItem = (id: number): Promise<void> =>
+  invoke('clipboard_transcribe_item', { id });
 
 export type LinkPreview = {
   url: string;

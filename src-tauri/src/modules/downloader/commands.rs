@@ -12,7 +12,7 @@ use crate::modules::downloader::{
 };
 use serde::Serialize;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 #[derive(Serialize)]
 pub struct DetectedVideo {
@@ -287,6 +287,96 @@ pub async fn dl_extract_subtitles(
     result
 }
 
+/// Directly set (or clear) the transcription text for a job.
+/// The frontend can use this to inject manually-edited text without
+/// re-running Whisper.
+#[tauri::command]
+pub fn dl_set_transcription(
+    state: State<'_, Arc<RunnerState>>,
+    id: i64,
+    transcription: Option<String>,
+) -> Result<(), String> {
+    to_string_err(
+        state
+            .jobs
+            .lock()
+            .unwrap()
+            .set_transcription(id, transcription.as_deref()),
+    )
+}
+
+/// Run Whisper on the audio file produced by a completed download job.
+/// Returns immediately — the actual work runs on a detached async task and
+/// the result is broadcast via events:
+///   `downloader:transcribing    { id }`         — started
+///   `downloader:job_updated     { id }`          — done (transcription saved)
+///   `downloader:transcribe_failed { id, error }` — whisper error
+///
+/// Errors synchronously if the job is not found, not `completed`, or its
+/// `target_path` does not exist on disk.
+#[tauri::command]
+pub async fn dl_transcribe_job(
+    app: AppHandle,
+    state: State<'_, Arc<RunnerState>>,
+    id: i64,
+) -> Result<(), String> {
+    // ── validate synchronously ──────────────────────────────────────────
+    let audio_path: std::path::PathBuf = {
+        let repo = state.jobs.lock().unwrap();
+        let job = to_string_err(repo.get(id))?
+            .ok_or_else(|| format!("download job {id} not found"))?;
+        if job.status != "completed" {
+            return Err(format!(
+                "job {id} is '{}', not 'completed' — cannot transcribe",
+                job.status
+            ));
+        }
+        let path_str = job
+            .target_path
+            .ok_or_else(|| format!("job {id} has no target_path"))?;
+        let p = std::path::PathBuf::from(&path_str);
+        if !p.is_file() {
+            return Err(format!("audio file missing on disk: {path_str}"));
+        }
+        p
+    };
+
+    let _ = app.emit("downloader:transcribing", id);
+
+    let state_clone = Arc::clone(&state);
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match crate::modules::whisper::commands::transcribe_with_active_model(
+            &app_clone,
+            audio_path,
+            None,
+        )
+        .await
+        {
+            Ok(text) => {
+                let trimmed = text.trim().to_string();
+                if let Ok(repo) = state_clone.jobs.lock() {
+                    let _ = repo.set_transcription(id, Some(&trimmed));
+                }
+                let _ = app_clone.emit("downloader:job_updated", id);
+            }
+            Err(e) => {
+                #[derive(serde::Serialize, Clone)]
+                struct FailedPayload {
+                    id: i64,
+                    error: String,
+                }
+                let _ = app_clone.emit(
+                    "downloader:transcribe_failed",
+                    FailedPayload { id, error: e },
+                );
+            }
+        }
+    });
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn dl_clear_completed(state: State<'_, Arc<RunnerState>>) -> Result<usize, String> {
     to_string_err(state.jobs.lock().unwrap().clear_completed())
@@ -495,6 +585,7 @@ mod tests {
             error: None,
             created_at: 0,
             completed_at: Some(0),
+            transcription: None,
         }
     }
 

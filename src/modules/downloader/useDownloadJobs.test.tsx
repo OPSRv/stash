@@ -25,6 +25,7 @@ const job = (overrides: Partial<DownloadJob>): DownloadJob => ({
   error: null,
   created_at: 0,
   completed_at: null,
+  transcription: null,
   ...overrides,
 });
 

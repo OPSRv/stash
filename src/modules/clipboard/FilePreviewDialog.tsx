@@ -3,7 +3,8 @@ import { Modal } from '../../shared/ui/Modal';
 import { CloseIcon } from '../../shared/ui/icons';
 import { FilePreviewList, type FileSource } from '../../shared/ui/FilePreview';
 import { formatBytes } from '../../shared/ui/FileChip';
-import type { FileEntry } from './api';
+import { AudioItemTranscript } from './AudioItemTranscript';
+import type { ClipboardItem, FileEntry } from './api';
 
 type FilePreviewDialogProps = {
   open: boolean;
@@ -11,6 +12,9 @@ type FilePreviewDialogProps = {
   onClose: () => void;
   onRevealFirst: (path: string) => void;
   onOpenFirst: (path: string) => void;
+  /** When provided and the item is a single-audio-file clip, renders the
+   *  transcription section below the preview. */
+  audioItem?: Pick<ClipboardItem, 'id' | 'transcription'> | null;
 };
 
 /// Space-key preview for `kind='file'` clips. Renders every file via
@@ -24,6 +28,7 @@ export const FilePreviewDialog = ({
   onClose,
   onRevealFirst,
   onOpenFirst,
+  audioItem = null,
 }: FilePreviewDialogProps) => {
   const totalBytes = files.reduce((s, f) => s + (f.size ?? 0), 0);
   const summary = `${files.length} ${files.length === 1 ? 'file' : 'files'}${
@@ -58,8 +63,14 @@ export const FilePreviewDialog = ({
           <CloseIcon size={12} />
         </Button>
       </header>
-      <div className="flex-1 overflow-auto nice-scroll px-4 py-3">
+      <div className="flex-1 overflow-auto nice-scroll px-4 py-3 flex flex-col gap-4">
         <FilePreviewList files={sources} />
+        {audioItem && (
+          <AudioItemTranscript
+            itemId={audioItem.id}
+            initial={audioItem.transcription}
+          />
+        )}
       </div>
       <footer className="px-4 py-2.5 border-t hair flex items-center justify-end gap-2">
         {first && (

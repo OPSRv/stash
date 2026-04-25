@@ -10,10 +10,15 @@ import { FileChip, formatBytes } from '../../shared/ui/FileChip';
 import { IconButton } from '../../shared/ui/IconButton';
 import { ImageThumbnail } from '../../shared/ui/ImageThumbnail';
 import { InlineVideo } from '../../shared/ui/InlineVideo';
+import { TranscriptArea } from '../../shared/ui/TranscriptArea';
+import { useTranscription } from '../../shared/hooks/useTranscription';
+import type { TranscriptionHandlers } from '../../shared/hooks/useTranscription';
 import {
   notesAddAttachment,
   notesListAttachments,
   notesRemoveAttachment,
+  notesTranscribeAttachment,
+  notesSetAttachmentTranscription,
   type NoteAttachment,
 } from './api';
 
@@ -61,14 +66,32 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  // Holds the latest fetched list so `onRefreshAndGetTranscription` can
+  // look up the updated item without an extra round-trip.
+  const itemsRef = useRef<NoteAttachment[]>([]);
+
+  const refresh = useCallback(async (): Promise<NoteAttachment[]> => {
     try {
       const out = await notesListAttachments(noteId);
-      setItems(Array.isArray(out) ? out : []);
+      const next = Array.isArray(out) ? out : [];
+      setItems(next);
+      itemsRef.current = next;
+      return next;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      return itemsRef.current;
     }
   }, [noteId]);
+
+  /// Called by AudioAttachmentBody when `notes:attachment_updated` fires.
+  /// Refreshes the list then returns the new transcription for the given id.
+  const onRefreshAndGetTranscription = useCallback(
+    async (id: number): Promise<string | null> => {
+      const fresh = await refresh();
+      return fresh.find((a) => a.id === id)?.transcription ?? null;
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     void refresh();
@@ -238,7 +261,10 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
             key={a.id}
             className="group relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center"
           >
-            <AttachmentBody item={a} />
+            <AttachmentBody
+                  item={a}
+                  onRefreshAndGetTranscription={onRefreshAndGetTranscription}
+                />
             <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
               {onEmbedMarkdown && (
                 <IconButton
@@ -276,7 +302,13 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
   );
 };
 
-const AttachmentBody = ({ item }: { item: NoteAttachment }) => {
+const AttachmentBody = ({
+  item,
+  onRefreshAndGetTranscription,
+}: {
+  item: NoteAttachment;
+  onRefreshAndGetTranscription: (id: number) => Promise<string | null>;
+}) => {
   const kind = kindOf(item);
   switch (kind) {
     case 'image':
@@ -293,12 +325,10 @@ const AttachmentBody = ({ item }: { item: NoteAttachment }) => {
       );
     case 'audio':
       return (
-        <div className="px-3 py-2 min-w-[260px] flex flex-col gap-1">
-          <AudioPlayer src={item.file_path} caption={item.original_name} />
-          <div className="text-[10px] text-white/40 font-mono tabular-nums">
-            {formatBytes(item.size_bytes)}
-          </div>
-        </div>
+        <AudioAttachmentBody
+          item={item}
+          onRefreshAndGetTranscription={onRefreshAndGetTranscription}
+        />
       );
     case 'file':
     default:
@@ -312,4 +342,71 @@ const AttachmentBody = ({ item }: { item: NoteAttachment }) => {
         </div>
       );
   }
+};
+
+/// Audio attachment with an inline Whisper transcript panel. Subscribes to
+/// the three backend transcription events for this specific attachment id.
+const AudioAttachmentBody = ({
+  item,
+  onRefreshAndGetTranscription,
+}: {
+  item: NoteAttachment;
+  onRefreshAndGetTranscription: (id: number) => Promise<string | null>;
+}) => {
+  const subscribe = useCallback(
+    (handlers: TranscriptionHandlers) => {
+      const fns: Array<Promise<() => void>> = [];
+
+      fns.push(
+        listen<{ id: number }>('notes:attachment_transcribing', (e) => {
+          if (e.payload.id === item.id) handlers.onStart();
+        }),
+      );
+
+      fns.push(
+        listen<{ id: number }>('notes:attachment_updated', async (e) => {
+          if (e.payload.id !== item.id) return;
+          const t = await onRefreshAndGetTranscription(item.id);
+          if (t != null) handlers.onDone(t);
+        }),
+      );
+
+      fns.push(
+        listen<{ id: number; error: string }>('notes:attachment_transcribe_failed', (e) => {
+          if (e.payload.id === item.id) handlers.onFailed(e.payload.error);
+        }),
+      );
+
+      return () => {
+        fns.forEach((p) => void p.then((fn) => fn()));
+      };
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [item.id],
+  );
+
+  const { status, transcript, failed, transcribe } = useTranscription({
+    initial: item.transcription,
+    start: () => notesTranscribeAttachment(item.id),
+    subscribe,
+  });
+
+  return (
+    <div className="px-3 py-2 min-w-[260px] flex flex-col gap-2">
+      <div className="flex flex-col gap-1">
+        <AudioPlayer src={item.file_path} caption={item.original_name} />
+        <div className="text-[10px] text-white/40 font-mono tabular-nums">
+          {formatBytes(item.size_bytes)}
+        </div>
+      </div>
+      <TranscriptArea
+        transcript={transcript}
+        transcribing={status === 'running'}
+        failed={failed}
+        onRetry={transcribe}
+        onTranscribe={transcribe}
+        onEdit={(t) => notesSetAttachmentTranscription(item.id, t)}
+      />
+    </div>
+  );
 };

@@ -11,6 +11,8 @@ import {
   linkPreview,
   parseFileMeta,
   parseImageMeta,
+  setTranscription,
+  transcribeItem,
   type ClipboardItem,
 } from './api';
 
@@ -21,8 +23,8 @@ vi.mock('@tauri-apps/api/core', () => ({
 const mockInvoke = vi.mocked(invoke);
 
 const fixture = [
-  { id: 1, content: 'hello', created_at: 100, pinned: false },
-  { id: 2, content: 'world', created_at: 200, pinned: true },
+  { id: 1, content: 'hello', created_at: 100, pinned: false, transcription: null },
+  { id: 2, content: 'world', created_at: 200, pinned: true, transcription: 'hi' },
 ];
 
 describe('clipboard api', () => {
@@ -120,6 +122,7 @@ describe('clipboard api', () => {
       meta,
       created_at: 100,
       pinned: false,
+      transcription: null,
     });
 
     it('returns the parsed files array when meta is well-formed', () => {
@@ -145,6 +148,7 @@ describe('clipboard api', () => {
         meta: null,
         created_at: 0,
         pinned: false,
+        transcription: null,
       };
       expect(parseFileMeta(textRow)).toBeNull();
     });
@@ -169,8 +173,37 @@ describe('clipboard api', () => {
         meta: '{"path":"/tmp/a","w":1,"h":1}',
         created_at: 0,
         pinned: false,
+        transcription: null,
       };
       expect(parseImageMeta(row)).toBeNull();
+    });
+  });
+
+  describe('setTranscription', () => {
+    it('calls clipboard_set_transcription with id and text', async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+      await setTranscription(5, 'hello there');
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_set_transcription', {
+        id: 5,
+        transcription: 'hello there',
+      });
+    });
+
+    it('passes null to clear the transcription', async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+      await setTranscription(5, null);
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_set_transcription', {
+        id: 5,
+        transcription: null,
+      });
+    });
+  });
+
+  describe('transcribeItem', () => {
+    it('calls clipboard_transcribe_item with id', async () => {
+      mockInvoke.mockResolvedValueOnce(undefined);
+      await transcribeItem(99);
+      expect(mockInvoke).toHaveBeenCalledWith('clipboard_transcribe_item', { id: 99 });
     });
   });
 });

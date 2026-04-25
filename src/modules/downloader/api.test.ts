@@ -19,7 +19,9 @@ import {
   setDownloadsDir,
   setMaxParallel,
   setRateLimit,
+  setTranscription,
   start,
+  transcribeJob,
   updateYtDlp,
   ytDlpVersion,
 } from './api';
@@ -192,6 +194,27 @@ describe('downloader/api invoke wrappers', () => {
     expect(invoke).toHaveBeenCalledWith('dl_ytdlp_version');
     expect(invoke).toHaveBeenCalledWith('dl_update_binary');
     expect(invoke).toHaveBeenCalledWith('dl_purge_cookies');
+  });
+
+  it('setTranscription sends { id, transcription } with text', async () => {
+    await setTranscription(3, 'Hello world');
+    expect(invoke).toHaveBeenCalledWith('dl_set_transcription', {
+      id: 3,
+      transcription: 'Hello world',
+    });
+  });
+
+  it('setTranscription sends null to clear', async () => {
+    await setTranscription(3, null);
+    expect(invoke).toHaveBeenCalledWith('dl_set_transcription', {
+      id: 3,
+      transcription: null,
+    });
+  });
+
+  it('transcribeJob sends { id }', async () => {
+    await transcribeJob(5);
+    expect(invoke).toHaveBeenCalledWith('dl_transcribe_job', { id: 5 });
   });
 
   it('setters forward named args', async () => {

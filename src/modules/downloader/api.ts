@@ -52,6 +52,7 @@ export type DownloadJob = {
   error: string | null;
   created_at: number;
   completed_at: number | null;
+  transcription: string | null;
 };
 
 export const detect = (url: string): Promise<DetectedVideo> => invoke('dl_detect', { url });
@@ -118,6 +119,17 @@ export const setRateLimit = (value: string | null): Promise<void> =>
 
 export const pruneHistory = (olderThanDays: number): Promise<number> =>
   invoke('dl_prune_history', { olderThanDays });
+
+/** Directly set (or clear) the transcription text for a job.
+ *  Pass `null` to wipe an existing transcription. */
+export const setTranscription = (id: number, transcription: string | null): Promise<void> =>
+  invoke('dl_set_transcription', { id, transcription });
+
+/** Kick off Whisper transcription for a completed audio-job in the background.
+ *  Returns immediately; listen for `downloader:transcribing`, `downloader:job_updated`,
+ *  and `downloader:transcribe_failed` events for progress/result. */
+export const transcribeJob = (id: number): Promise<void> =>
+  invoke('dl_transcribe_job', { id });
 
 export const platformBadge = (p: Platform | string): { label: string; bg: string; fg: string } => {
   const known: Record<string, { label: string; bg: string; fg: string }> = {

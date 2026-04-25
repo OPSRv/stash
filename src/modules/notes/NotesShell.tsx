@@ -31,6 +31,7 @@ import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfir
 import { copyText } from '../../shared/util/clipboard';
 import { revealFile } from '../../shared/util/revealFile';
 import { NoteAttachmentsPanel } from './NoteAttachmentsPanel';
+import { NoteAudioStrip } from './NoteAudioStrip';
 import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
 import { SaveStatusPill, type SaveStatus } from './SaveStatusPill';
@@ -75,16 +76,9 @@ const RailButton = ({
   title: string;
   children: ReactNode;
 }) => (
-  <Tooltip label={title} side="right">
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={title}
-      className="ring-focus w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors t-secondary hover:t-primary"
-    >
-      {children}
-    </button>
-  </Tooltip>
+  <IconButton onClick={onClick} title={title} tooltipSide="right">
+    {children}
+  </IconButton>
 );
 
 const iso = (ts: number) => {
@@ -1165,6 +1159,16 @@ export const NotesShell = () => {
                 )}
               </div>
             </div>
+            {active && (
+              <NoteAudioStrip
+                note={active}
+                onNoteUpdated={() => {
+                  void notesGet(active.id).then((fresh) => {
+                    if (fresh) setActiveNote(fresh);
+                  });
+                }}
+              />
+            )}
             {activeId != null && (
               <NoteAttachmentsPanel
                 noteId={activeId}

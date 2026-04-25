@@ -17,6 +17,7 @@ pub struct DownloadJob {
     pub error: Option<String>,
     pub created_at: i64,
     pub completed_at: Option<i64>,
+    pub transcription: Option<String>,
 }
 
 pub struct JobRepo {
@@ -40,11 +41,22 @@ impl JobRepo {
                 bytes_done     INTEGER,
                 error          TEXT,
                 created_at     INTEGER NOT NULL,
-                completed_at   INTEGER
+                completed_at   INTEGER,
+                transcription  TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_download_jobs_created
                 ON download_jobs(created_at DESC);",
         )?;
+        // Idempotent migration: add `transcription` column to pre-existing DBs.
+        let has_transcription = conn
+            .prepare("PRAGMA table_info(download_jobs)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .any(|name| name.as_deref() == Ok("transcription"));
+        if !has_transcription {
+            conn.execute_batch(
+                "ALTER TABLE download_jobs ADD COLUMN transcription TEXT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -146,6 +158,14 @@ impl JobRepo {
     /// `cutoff_ts` (unix seconds). Rows without a completed_at are left
     /// alone. Returns how many rows were removed. Files on disk are not
     /// touched — only DB bookkeeping.
+    pub fn set_transcription(&self, id: i64, transcription: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE download_jobs SET transcription = ?1 WHERE id = ?2",
+            params![transcription, id],
+        )?;
+        Ok(())
+    }
+
     pub fn prune_completed_older_than(&mut self, cutoff_ts: i64) -> Result<usize> {
         Ok(self.conn.execute(
             "DELETE FROM download_jobs
@@ -172,6 +192,7 @@ impl JobRepo {
             error: row.get("error")?,
             created_at: row.get("created_at")?,
             completed_at: row.get("completed_at")?,
+            transcription: row.get("transcription")?,
         })
     }
 }
@@ -288,5 +309,74 @@ mod tests {
         let id = repo.create("u", "g", None, None, None, 1).unwrap();
         repo.delete(id).unwrap();
         assert!(repo.get(id).unwrap().is_none());
+    }
+
+    #[test]
+    fn set_transcription_stores_and_clears_text() {
+        let mut repo = fresh();
+        let id = repo.create("u", "g", None, None, None, 1).unwrap();
+        repo.set_completed(id, "/audio/a.mp3", 99).unwrap();
+
+        // Initially no transcription.
+        assert!(repo.get(id).unwrap().unwrap().transcription.is_none());
+
+        // Set transcription.
+        repo.set_transcription(id, Some("Hello, world.")).unwrap();
+        let job = repo.get(id).unwrap().unwrap();
+        assert_eq!(job.transcription.as_deref(), Some("Hello, world."));
+
+        // Clear transcription.
+        repo.set_transcription(id, None).unwrap();
+        let job = repo.get(id).unwrap().unwrap();
+        assert!(job.transcription.is_none());
+    }
+
+    #[test]
+    fn migration_adds_column_to_db_without_it() {
+        // Simulate a pre-existing DB that lacks the transcription column.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE download_jobs (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                url          TEXT NOT NULL,
+                platform     TEXT NOT NULL,
+                title        TEXT,
+                thumbnail_url TEXT,
+                format_id    TEXT,
+                target_path  TEXT,
+                status       TEXT NOT NULL DEFAULT 'pending',
+                progress     REAL NOT NULL DEFAULT 0,
+                bytes_total  INTEGER,
+                bytes_done   INTEGER,
+                error        TEXT,
+                created_at   INTEGER NOT NULL,
+                completed_at INTEGER
+            );",
+        )
+        .unwrap();
+        // Opening with JobRepo::new must survive even though the column is absent.
+        let repo = JobRepo::new(conn).unwrap();
+        // After migration we can write + read the new column.
+        let id = repo.conn.last_insert_rowid(); // just to borrow conn; col is 0 here
+        drop(id);
+        // Real check: insert a row and verify transcription round-trips.
+        repo.conn
+            .execute(
+                "INSERT INTO download_jobs (url, platform, created_at, status, progress)
+                 VALUES ('u','g',1,'pending',0)",
+                [],
+            )
+            .unwrap();
+        let new_id = repo.conn.last_insert_rowid();
+        repo.set_transcription(new_id, Some("migrated")).unwrap();
+        let txt: Option<String> = repo
+            .conn
+            .query_row(
+                "SELECT transcription FROM download_jobs WHERE id=?1",
+                rusqlite::params![new_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(txt.as_deref(), Some("migrated"));
     }
 }

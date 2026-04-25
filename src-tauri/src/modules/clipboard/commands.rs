@@ -6,7 +6,7 @@ use rusqlite::Result;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 /// In-memory cache for LinkPreview lookups. Keyed by URL. Stores both hits
 /// (Some) and misses (None) so the UI never re-hammers a URL that doesn't
@@ -356,6 +356,129 @@ pub fn clipboard_paste(
     Ok(())
 }
 
+/// Manually set (or clear) the stored transcription for a clipboard item.
+/// Pass `None` (null from JS) to clear.
+#[tauri::command]
+pub fn clipboard_set_transcription(
+    app: AppHandle,
+    state: State<'_, Arc<ClipboardState>>,
+    id: i64,
+    transcription: Option<String>,
+) -> std::result::Result<(), String> {
+    state
+        .repo
+        .lock()
+        .unwrap()
+        .set_transcription(id, transcription.as_deref())
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("clipboard:item_updated", id);
+    Ok(())
+}
+
+/// Resolve the single audio file path from a clipboard item's `meta` JSON.
+/// Returns `Err` if the item doesn't exist, has no meta, or doesn't contain
+/// exactly one audio file (MIME starts with `audio/`).
+fn single_audio_path(
+    state: &ClipboardState,
+    id: i64,
+) -> std::result::Result<PathBuf, String> {
+    let item = state
+        .repo
+        .lock()
+        .unwrap()
+        .get(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("clipboard item {id} not found"))?;
+    let meta_str = item
+        .meta
+        .ok_or_else(|| "no single audio file".to_string())?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&meta_str).map_err(|_| "no single audio file".to_string())?;
+    let files = parsed
+        .get("files")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "no single audio file".to_string())?;
+    // Collect files whose MIME type is audio/* (or whose extension is an
+    // audio extension as a fallback when mime is absent).
+    let audio_files: Vec<&serde_json::Value> = files
+        .iter()
+        .filter(|f| {
+            // Primary: MIME starts with "audio/"
+            if let Some(mime) = f.get("mime").and_then(|m| m.as_str()) {
+                return mime.starts_with("audio/");
+            }
+            // Fallback: check the file extension
+            if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
+                let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+                return matches!(
+                    ext.as_str(),
+                    "m4a" | "mp3" | "wav" | "ogg" | "opus" | "flac" | "aac"
+                );
+            }
+            false
+        })
+        .collect();
+    if audio_files.len() != 1 {
+        return Err("no single audio file".to_string());
+    }
+    let path = audio_files[0]
+        .get("path")
+        .and_then(|p| p.as_str())
+        .ok_or_else(|| "no single audio file".to_string())?;
+    Ok(PathBuf::from(path))
+}
+
+/// Kick off background transcription for a clipboard audio item.
+/// Returns immediately after spawning. Progress is signalled via events:
+/// - `clipboard:transcribing`  `{id}` — job started
+/// - `clipboard:item_updated`  `{id}` — transcription saved successfully
+/// - `clipboard:transcribe_failed` `{id, error}` — Whisper returned an error
+#[tauri::command]
+pub async fn clipboard_transcribe_item(
+    app: AppHandle,
+    state: State<'_, Arc<ClipboardState>>,
+    id: i64,
+) -> std::result::Result<(), String> {
+    let audio_path = single_audio_path(&state, id)?;
+
+    let _ = app.emit("clipboard:transcribing", id);
+
+    let state_clone = Arc::clone(&state);
+    let app_clone = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match crate::modules::whisper::commands::transcribe_with_active_model(
+            &app_clone,
+            audio_path,
+            None,
+        )
+        .await
+        {
+            Ok(text) => {
+                let trimmed = text.trim().to_string();
+                if trimmed.is_empty() {
+                    let _ = app_clone.emit(
+                        "clipboard:transcribe_failed",
+                        serde_json::json!({ "id": id, "error": "empty transcription" }),
+                    );
+                    return;
+                }
+                if let Ok(mut repo) = state_clone.repo.lock() {
+                    let _ = repo.set_transcription(id, Some(&trimmed));
+                }
+                let _ = app_clone.emit("clipboard:item_updated", id);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "clipboard transcription failed");
+                let _ = app_clone.emit(
+                    "clipboard:transcribe_failed",
+                    serde_json::json!({ "id": id, "error": e }),
+                );
+            }
+        }
+    });
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 fn simulate_cmd_v() -> std::result::Result<(), String> {
     use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -517,5 +640,81 @@ mod tests {
         delete_item(&state, id).unwrap();
 
         assert!(list_items(&state, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn single_audio_path_returns_path_for_single_audio_file() {
+        let state = fresh_state();
+        let id = state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_files(
+                "files:audio1",
+                r#"{"files":[{"path":"/tmp/rec.m4a","name":"rec.m4a","mime":"audio/mp4"}]}"#,
+                1,
+            )
+            .unwrap();
+        let path = single_audio_path(&state, id).unwrap();
+        assert_eq!(path, PathBuf::from("/tmp/rec.m4a"));
+    }
+
+    #[test]
+    fn single_audio_path_errors_for_multi_file_item() {
+        let state = fresh_state();
+        let id = state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_files(
+                "files:multi",
+                r#"{"files":[
+                    {"path":"/tmp/a.m4a","name":"a.m4a","mime":"audio/mp4"},
+                    {"path":"/tmp/b.m4a","name":"b.m4a","mime":"audio/mp4"}
+                ]}"#,
+                2,
+            )
+            .unwrap();
+        assert!(single_audio_path(&state, id).is_err());
+    }
+
+    #[test]
+    fn single_audio_path_errors_for_non_audio_file() {
+        let state = fresh_state();
+        let id = state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_files(
+                "files:pdf",
+                r#"{"files":[{"path":"/tmp/doc.pdf","name":"doc.pdf","mime":"application/pdf"}]}"#,
+                3,
+            )
+            .unwrap();
+        assert!(single_audio_path(&state, id).is_err());
+    }
+
+    #[test]
+    fn single_audio_path_errors_for_text_item() {
+        let state = fresh_state();
+        let id = state.repo.lock().unwrap().insert_text("plain text", 4).unwrap();
+        assert!(single_audio_path(&state, id).is_err());
+    }
+
+    #[test]
+    fn single_audio_path_falls_back_to_extension_when_mime_absent() {
+        let state = fresh_state();
+        let id = state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_files(
+                "files:nomine",
+                r#"{"files":[{"path":"/tmp/voice.wav","name":"voice.wav"}]}"#,
+                5,
+            )
+            .unwrap();
+        let path = single_audio_path(&state, id).unwrap();
+        assert_eq!(path, PathBuf::from("/tmp/voice.wav"));
     }
 }
