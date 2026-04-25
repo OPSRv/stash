@@ -306,8 +306,12 @@ fn mime_from_extension(p: &Path) -> Option<String> {
     Some(m.to_string())
 }
 
-const MAX_AUDIO_BYTES: usize = 25 * 1024 * 1024;
-const MAX_IMAGE_BYTES: usize = 15 * 1024 * 1024;
+// Stash is single-user; these caps are speed-bumps against runaway
+// drops/pastes (e.g. accidentally embedding a 4 K screen recording),
+// not abuse defences. Picked to fit the realistic worst case:
+// hour-plus podcast audio + RAW photos / iPhone HEIF bursts.
+const MAX_AUDIO_BYTES: usize = 1024 * 1024 * 1024;
+const MAX_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 const ALLOWED_IMAGE_EXT: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif",
 ];
@@ -346,7 +350,10 @@ pub fn notes_save_audio_bytes(
         return Err("empty audio payload".into());
     }
     if bytes.len() > MAX_AUDIO_BYTES {
-        return Err("audio payload exceeds 25 MiB limit".into());
+        return Err(format!(
+            "audio payload exceeds {} MB limit",
+            MAX_AUDIO_BYTES / 1024 / 1024
+        ));
     }
     let ext = sanitize_ext(&ext)?;
     let dir = audio_dir(&app)?;
@@ -373,7 +380,10 @@ pub fn notes_save_audio_file(app: tauri::AppHandle, path: String) -> Result<Stri
     }
     let meta = std::fs::metadata(src).map_err(|e| e.to_string())?;
     if (meta.len() as usize) > MAX_AUDIO_BYTES {
-        return Err("audio file exceeds 25 MiB limit".into());
+        return Err(format!(
+            "audio file exceeds {} MB limit",
+            MAX_AUDIO_BYTES / 1024 / 1024
+        ));
     }
     let ext = src
         .extension()
@@ -404,7 +414,10 @@ pub fn notes_save_image_bytes(
         return Err("empty image payload".into());
     }
     if bytes.len() > MAX_IMAGE_BYTES {
-        return Err("image payload exceeds 15 MiB limit".into());
+        return Err(format!(
+            "image payload exceeds {} MB limit",
+            MAX_IMAGE_BYTES / 1024 / 1024
+        ));
     }
     let ext = sanitize_image_ext(&ext)?;
     let dir = image_dir(&app)?;
@@ -427,7 +440,10 @@ pub fn notes_save_image_file(app: tauri::AppHandle, path: String) -> Result<Stri
     }
     let meta = std::fs::metadata(src).map_err(|e| e.to_string())?;
     if (meta.len() as usize) > MAX_IMAGE_BYTES {
-        return Err("image file exceeds 15 MiB limit".into());
+        return Err(format!(
+            "image file exceeds {} MB limit",
+            MAX_IMAGE_BYTES / 1024 / 1024
+        ));
     }
     let ext = src
         .extension()
