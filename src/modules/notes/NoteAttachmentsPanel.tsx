@@ -256,10 +256,19 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
         </p>
       )}
       <ul className="flex flex-wrap gap-2">
-        {items.map((a) => (
+        {items.map((a) => {
+          // Audio attachments take the full row — the waveform reads
+          // poorly when squeezed to 260 px next to a thumbnail, and
+          // the inline transcript wants the horizontal real estate.
+          // Other kinds (image / video / file) keep flex-wrap'ing so
+          // a few small items can sit side-by-side.
+          const fullRow = kindOf(a) === 'audio';
+          return (
           <li
             key={a.id}
-            className="group relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center"
+            className={`group relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center ${
+              fullRow ? 'w-full' : ''
+            }`}
           >
             <AttachmentBody
                   item={a}
@@ -296,7 +305,8 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
               </IconButton>
             </div>
           </li>
-        ))}
+        );
+        })}
       </ul>
     </div>
   );
@@ -392,7 +402,7 @@ const AudioAttachmentBody = ({
   });
 
   return (
-    <div className="px-3 py-2 min-w-[260px] flex flex-col gap-2">
+    <div className="px-3 py-2 w-full flex flex-col gap-2">
       <div className="flex flex-col gap-1">
         <AudioPlayer src={item.file_path} caption={item.original_name} />
         <div className="text-[10px] text-white/40 font-mono tabular-nums">

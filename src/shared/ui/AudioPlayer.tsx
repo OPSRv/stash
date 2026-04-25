@@ -108,7 +108,12 @@ const loadBytes = async (src: string): Promise<Uint8Array> => {
 export const AudioPlayer = ({
   src,
   loader = 'url',
-  display = 'compact',
+  // Waveform is the default — even in dense lists a small bar chart
+  // reads better than a hairline progress strip, and the visual
+  // "this is audio" cue beats saving 16 px of vertical real estate.
+  // Pass `display="compact"` when a callsite genuinely needs the
+  // hairline variant (currently nobody does).
+  display = 'waveform',
   durationHint,
   caption,
   className,

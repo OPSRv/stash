@@ -105,8 +105,13 @@ export const TranscriptArea = ({
       {/* ── Transcript read-only view ──────────────────────────────── */}
       {transcript && !editing && (
         <div className="flex items-start gap-2 group/transcript">
+          {/* `max-h` + `overflow-y-auto` so a 10-minute lecture
+              transcript scrolls inside its bubble instead of pushing
+              the surrounding layout off-screen. The shared
+              `nice-scroll` skin keeps the bar from looking macOS-12
+              chunky. */}
           <p
-            className="flex-1 text-body text-white/90 whitespace-pre-wrap bg-white/3 rounded-md px-3 py-2 border border-white/5"
+            className="flex-1 min-w-0 max-h-[260px] overflow-y-auto nice-scroll text-body text-white/90 whitespace-pre-wrap bg-white/3 rounded-md px-3 py-2 border border-white/5"
             onDoubleClick={() => onEdit && setEditing(true)}
             title={onEdit ? 'Double-click to edit' : undefined}
           >
