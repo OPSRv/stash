@@ -32,19 +32,30 @@ pub fn diarize_samples(
     segmentation_model: &Path,
     embedding_model: &Path,
 ) -> Result<Vec<SpeakerSegment>, String> {
+    // sherpa-onnx's clustering treats `num_clusters > 0` as "force
+    // exactly K speakers" and `<= 0` as "auto via threshold". sherpa-rs
+    // 0.6 maps `None` to `4` via its own `unwrap_or(4)`, which silently
+    // pins everything to four fixed clusters and then collapses most
+    // recordings to one identity. Pass `-1` explicitly to opt back
+    // into threshold-based clustering.
+    //
+    // Threshold of 0.5 is the upstream default; lower values split
+    // more aggressively. 0.4 is a small step in that direction —
+    // enough to separate close-but-clearly-distinct voices on short
+    // recordings without producing nonsense splits inside a single
+    // speaker's longer utterance.
     let mut d = Diarize::new(
         segmentation_model,
         embedding_model,
         DiarizeConfig {
-            // -1 lets the clustering step decide via the threshold —
-            // a 1-on-1 voice note collapses to one cluster, a meeting
-            // recording can land anywhere from 2 to 10. Picking a
-            // hard-coded number would either over-split monologues or
-            // under-split conversations.
-            num_clusters: None,
-            threshold: Some(0.5),
-            min_duration_on: Some(0.0),
-            min_duration_off: Some(0.0),
+            num_clusters: Some(-1),
+            threshold: Some(0.4),
+            // Pyannote returns very short fragments around silence —
+            // requiring at least 0.3 s of speech and 0.5 s of silence
+            // before a turn break stops the diarizer from churning
+            // out two-frame "speakers" on consonants.
+            min_duration_on: Some(0.3),
+            min_duration_off: Some(0.5),
             provider: None,
             debug: false,
         },
@@ -185,9 +196,6 @@ pub async fn transcribe_with_optional_diarization(
                 return Ok(flat_text(&segments));
             }
         };
-        // Single speaker means diarization adds no information —
-        // skip the "Спікер 1:" prefix in that case so a plain voice
-        // note stays clean.
         let unique_speakers = {
             let mut set = std::collections::HashSet::new();
             for s in &speakers {
@@ -195,6 +203,15 @@ pub async fn transcribe_with_optional_diarization(
             }
             set.len()
         };
+        tracing::info!(
+            speaker_segments = speakers.len(),
+            distinct = unique_speakers,
+            whisper_segments = segments.len(),
+            "diarization done"
+        );
+        // Single speaker means diarization adds no information —
+        // skip the "Спікер 1:" prefix in that case so a plain voice
+        // note stays clean.
         if unique_speakers <= 1 {
             return Ok(flat_text(&segments));
         }
