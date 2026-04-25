@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
+import { useCallback, useRef, useState, type ClipboardEvent, type KeyboardEvent, type RefObject } from 'react';
 import { IconButton } from '../../shared/ui/IconButton';
 import { Spinner } from '../../shared/ui/Spinner';
 import { Textarea } from '../../shared/ui/Textarea';
@@ -20,6 +20,7 @@ import {
   TableIcon,
   TranslateIcon,
 } from '../../shared/ui/icons';
+import { notesSaveImageBytes } from './api';
 import { translateForNote } from './noteTranslate';
 
 export type NotesViewMode = 'edit' | 'split' | 'preview';
@@ -37,6 +38,8 @@ type Props = {
   onUndo?: () => void;
   /** Called when the user presses ⌘⇧Z — delegate to the parent's redo stack. */
   onRedo?: () => void;
+  /** Called after an image is pasted — lets the parent surface a toast. */
+  onImagePasted?: (ok: boolean, message?: string) => void;
 };
 
 type Action =
@@ -202,6 +205,7 @@ export const NoteEditor = ({
   translateTarget = 'uk',
   onUndo,
   onRedo,
+  onImagePasted,
 }: Props) => {
   const localRef = useRef<HTMLTextAreaElement | null>(null);
   const ref = textareaRef ?? localRef;
@@ -237,6 +241,38 @@ export const NoteEditor = ({
       setTranslating(false);
     }
   }, [ref, translating, value, onChange, translateTarget, onTranslateResult]);
+
+  const onPaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const el = ref.current;
+      if (!el) return;
+      const items = Array.from(e.clipboardData?.items ?? []);
+      const imgItem = items.find((it) => it.type.startsWith('image/'));
+      if (!imgItem) return;
+      e.preventDefault();
+      const blob = imgItem.getAsFile();
+      if (!blob) return;
+      const ext = imgItem.type.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
+      blob
+        .arrayBuffer()
+        .then((buf) => notesSaveImageBytes(new Uint8Array(buf), ext))
+        .then((path) => {
+          const cursor = el.selectionStart;
+          const snippet = `![image](${path})`;
+          const next = value.slice(0, cursor) + snippet + value.slice(el.selectionEnd);
+          onChange(next);
+          requestAnimationFrame(() => {
+            el.focus();
+            el.setSelectionRange(cursor + snippet.length, cursor + snippet.length);
+          });
+          onImagePasted?.(true);
+        })
+        .catch((err) => {
+          onImagePasted?.(false, String(err));
+        });
+    },
+    [ref, value, onChange, onImagePasted],
+  );
 
   const run = useCallback(
     (action: Action) => {
@@ -443,6 +479,7 @@ export const NoteEditor = ({
         value={value}
         onChange={(e) => onChange(e.currentTarget.value)}
         onKeyDown={onKeyDown}
+        onPaste={onPaste}
         placeholder={placeholder}
         className="flex-1 resize-none px-5 py-5 t-primary text-body font-mono leading-relaxed min-h-0"
         spellCheck={false}

@@ -1199,6 +1199,11 @@ export const NotesShell = () => {
                     textareaRef={editorRef}
                     onUndo={handleUndo}
                     onRedo={handleRedo}
+                    onImagePasted={(ok, message) =>
+                      ok
+                        ? toast({ title: 'Image pasted', variant: 'success', durationMs: 1600 })
+                        : toast({ title: 'Paste failed', description: message, variant: 'error' })
+                    }
                     onTranslateResult={(r) =>
                       r.ok
                         ? toast({ title: 'Translated', variant: 'success', durationMs: 1600 })
