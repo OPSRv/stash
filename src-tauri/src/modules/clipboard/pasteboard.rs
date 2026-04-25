@@ -224,6 +224,52 @@ pub fn write_file_urls(_paths: &[PathBuf]) -> Result<(), String> {
     Err("write_file_urls is macOS-only".into())
 }
 
+/// Load `path` as an `NSImage` and place it on the general pasteboard.
+/// `NSImage` conforms to `NSPasteboardWriting`, so apps reading either
+/// `NSPasteboardTypeTIFF` or `NSPasteboardTypePNG` (Notes, Pages, Mail,
+/// Slack, Tot, Preview's "New from Clipboard"…) all see the image and
+/// pick the representation they prefer.
+///
+/// Empty / non-image files come back as a load failure rather than
+/// silently writing junk; the frontend toasts the message.
+#[cfg(target_os = "macos")]
+pub fn write_image_from_path(path: &std::path::Path) -> Result<(), String> {
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSImage, NSPasteboard, NSPasteboardWriting};
+    use objc2_foundation::{NSArray, NSString};
+
+    if !path.is_file() {
+        return Err(format!("not a file: {}", path.display()));
+    }
+    let ns_path = NSString::from_str(&path.to_string_lossy());
+    let image = NSImage::initByReferencingFile(NSImage::alloc(), &ns_path)
+        .ok_or_else(|| format!("could not load image: {}", path.display()))?;
+    // `isValid` is false for non-image files (e.g. text passed in by
+    // mistake) — fail loud instead of clearing the pasteboard.
+    if !image.isValid() {
+        return Err(format!("could not decode image: {}", path.display()));
+    }
+
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    let proto: Retained<ProtocolObject<dyn NSPasteboardWriting>> =
+        ProtocolObject::from_retained(image);
+    let arr: Retained<NSArray<ProtocolObject<dyn NSPasteboardWriting>>> =
+        NSArray::from_retained_slice(&[proto]);
+    if pb.writeObjects(&arr) {
+        Ok(())
+    } else {
+        Err("NSPasteboard.writeObjects returned false".into())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn write_image_from_path(_path: &std::path::Path) -> Result<(), String> {
+    Err("write_image_from_path is macOS-only".into())
+}
+
 /// Decode a `file://…` URL into a filesystem path. Handles the usual
 /// percent-encoding (spaces, Unicode) via the `url` crate AND the
 /// macOS-specific `/.file/id=X.Y` **file-reference URLs** that Finder

@@ -73,7 +73,14 @@ export const ImageThumbnail = ({
           {caption}
         </p>
       )}
-      {open && !broken && <Lightbox src={url} alt={label} onClose={() => setOpen(false)} />}
+      {open && !broken && (
+        <Lightbox
+          src={url}
+          alt={label}
+          path={src.startsWith('/') ? src : undefined}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   );
 };

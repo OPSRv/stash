@@ -496,10 +496,62 @@ fn simulate_cmd_v() -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// Place an image file on the system clipboard so the user can paste
+/// it into Notes / Slack / Mail / Telegram-Web etc. The path is the
+/// raw filesystem location of an image (jpg / png / heic / tiff /
+/// webp — anything ImageIO recognises). Used by the in-popup image
+/// viewer's right-click menu.
+#[tauri::command]
+pub fn clipboard_copy_image_from_path(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    pasteboard::write_image_from_path(&p)
+}
+
+/// Save (copy) an arbitrary file from `src` to a user-chosen `dst`.
+/// Used by the image viewer's "Save image as…" menu item — the
+/// frontend picks the destination via the dialog plugin and we just
+/// stream the bytes across.
+#[tauri::command]
+pub fn save_file_to(src: String, dst: String) -> Result<(), String> {
+    let src = PathBuf::from(src);
+    let dst = PathBuf::from(dst);
+    if !src.is_file() {
+        return Err(format!("source not found: {}", src.display()));
+    }
+    if let Some(parent) = dst.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
+        }
+    }
+    std::fs::copy(&src, &dst)
+        .map_err(|e| format!("copy {} → {}: {e}", src.display(), dst.display()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn save_file_to_copies_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("a.png");
+        std::fs::write(&src, b"\x89PNG\r\n").unwrap();
+        let dst = dir.path().join("nested/copy.png");
+        save_file_to(src.display().to_string(), dst.display().to_string()).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"\x89PNG\r\n");
+    }
+
+    #[test]
+    fn save_file_to_errors_when_source_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let dst = dir.path().join("out.png");
+        let err =
+            save_file_to("/nonexistent/path.png".into(), dst.display().to_string()).unwrap_err();
+        assert!(err.contains("source not found"));
+    }
 
     fn fresh_state() -> ClipboardState {
         let repo = ClipboardRepo::new(Connection::open_in_memory().unwrap()).unwrap();

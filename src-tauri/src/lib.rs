@@ -121,10 +121,11 @@ use modules::ai::{
 };
 use modules::clipboard::{
     commands::{
-        clipboard_clear, clipboard_copy_only, clipboard_delete, clipboard_link_preview,
-        clipboard_list, clipboard_paste, clipboard_prune_files, clipboard_search,
-        clipboard_set_transcription, clipboard_toggle_pin, clipboard_transcribe_item,
-        prune_orphan_file_rows, ClipboardState, LinkPreviewState,
+        clipboard_clear, clipboard_copy_image_from_path, clipboard_copy_only,
+        clipboard_delete, clipboard_link_preview, clipboard_list, clipboard_paste,
+        clipboard_prune_files, clipboard_search, clipboard_set_transcription,
+        clipboard_toggle_pin, clipboard_transcribe_item, prune_orphan_file_rows,
+        save_file_to, ClipboardState, LinkPreviewState,
     },
     monitor::{ArboardReader, Monitor},
     repo::ClipboardRepo,
@@ -457,6 +458,8 @@ pub fn run() {
             clipboard_link_preview,
             clipboard_set_transcription,
             clipboard_transcribe_item,
+            clipboard_copy_image_from_path,
+            save_file_to,
             dl_detect,
             dl_detect_quick,
             dl_start,
