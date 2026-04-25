@@ -75,6 +75,12 @@ export const aiAppendMessage = (args: {
     stopped: args.stopped ?? null,
   });
 
+/** Send a prompt through the tool-enabled assistant backend. The caller must
+ *  have already persisted the user message; this returns the assistant reply
+ *  (already written to disk) so the UI can append it. */
+export const aiChatSend = (sessionId: string, prompt: string): Promise<Message> =>
+  invoke('ai_chat_send', { sessionId, prompt });
+
 export const aiGetApiKey = (provider: AiProvider): Promise<string | null> =>
   invoke('ai_get_api_key', { provider });
 

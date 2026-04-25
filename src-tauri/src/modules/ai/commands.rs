@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::State;
@@ -150,4 +151,40 @@ pub fn ai_delete_api_key(state: State<'_, AiState>, provider: String) -> Result<
 #[tauri::command]
 pub fn ai_has_api_key(state: State<'_, AiState>, provider: String) -> Result<bool, String> {
     Ok(state.secrets.get(&provider)?.is_some())
+}
+
+/// Send a chat message through the full tool-enabled assistant (same loop used
+/// by Telegram and the CLI). The user message has already been persisted by the
+/// caller; this command runs the LLM + tool round-trips, persists the assistant
+/// reply to the AI session, and returns it so the caller can append it to the UI.
+#[tauri::command]
+pub async fn ai_chat_send(
+    app: tauri::AppHandle,
+    state: State<'_, AiState>,
+    session_id: String,
+    prompt: String,
+) -> Result<Message, String> {
+    use tauri::Manager;
+
+    let tg_state = app
+        .try_state::<Arc<crate::modules::telegram::state::TelegramState>>()
+        .ok_or_else(|| "assistant state not initialised".to_string())?;
+
+    let reply =
+        crate::modules::telegram::assistant::handle_user_text(&app, &*tg_state, &prompt)
+            .await
+            .map_err(|e| e.to_string())?;
+
+    let id = Uuid::new_v4().to_string();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .append_message(&id, &session_id, "assistant", &reply.text, ts, reply.truncated)
+        .map_err(|e| e.to_string())
 }

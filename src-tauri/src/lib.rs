@@ -111,7 +111,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use modules::ai::{
     commands::{
-        ai_append_message, ai_create_session, ai_delete_api_key, ai_delete_session,
+        ai_append_message, ai_chat_send, ai_create_session, ai_delete_api_key, ai_delete_session,
         ai_find_session_by_context, ai_get_api_key, ai_has_api_key, ai_list_messages,
         ai_list_sessions, ai_rename_session, ai_set_api_key,
     },
@@ -602,6 +602,7 @@ pub fn run() {
             ai_set_api_key,
             ai_delete_api_key,
             ai_has_api_key,
+            ai_chat_send,
             telegram_set_token,
             telegram_clear_token,
             telegram_has_token,

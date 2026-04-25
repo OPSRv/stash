@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { streamText } from 'ai';
 
 import type { AiSettings } from './useAiSettings';
-import { aiAppendMessage, aiListMessages, aiRenameSession, type Message } from './api';
-import { buildModel } from './provider';
+import { aiAppendMessage, aiChatSend, aiListMessages, aiRenameSession, type Message } from './api';
 
 export type ChatSendError =
   | { kind: 'no-model' }
@@ -49,10 +47,10 @@ const autoTitleFrom = (prompt: string): string => {
   return first.slice(0, 40) || 'New chat';
 };
 
-/** Shared chat-driver logic. Manages message loading for a given session,
- *  streaming an assistant response, and persisting both sides. Used by the
- *  main AI tab (via `AiShell`'s future adoption) and by per-feature chat
- *  panels like the notes sidebar. */
+/** Shared chat-driver logic. Routes every send through the Rust assistant
+ *  backend so all Stash tools (battery, metronome, pomodoro, music, …) are
+ *  available. Manages message loading for a given session and persisting both
+ *  sides. Used by the main AI tab and by per-feature chat panels. */
 export const useAiChat = ({
   sessionId,
   settings,
@@ -63,7 +61,8 @@ export const useAiChat = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  // Cancellation flag: stop() sets this so we discard a late response.
+  const cancelledRef = useRef(false);
 
   const reload = useCallback(async () => {
     if (!sessionId) {
@@ -103,7 +102,9 @@ export const useAiChat = ({
   }, [sessionId]);
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    cancelledRef.current = true;
+    setIsStreaming(false);
+    setStreamingContent(null);
   }, []);
 
   const send = useCallback(
@@ -119,6 +120,7 @@ export const useAiChat = ({
       const session = sessionId ? { id: sessionId } : await ensureSession();
       if (!session) return;
 
+      // Persist + show user message immediately so the UI feels responsive.
       const userMsg = await aiAppendMessage({
         sessionId: session.id,
         role: 'user',
@@ -126,10 +128,7 @@ export const useAiChat = ({
       });
       setMessages((m) => [...m, userMsg]);
 
-      // First message in a brand-new session: auto-title from the prompt.
-      // We detect "first message" via the prior-messages list length rather
-      // than a session-creation flag so retrying a never-titled session
-      // still gets one on the next send.
+      // Auto-title on the first message in a fresh session.
       const isFirstMessage = messages.length === 0;
       if (isFirstMessage) {
         const title = autoTitleFrom(prompt);
@@ -143,80 +142,39 @@ export const useAiChat = ({
         return;
       }
 
-      let model;
-      try {
-        model = await buildModel(
-          {
-            provider: settings.aiProvider,
-            model: settings.aiModel,
-            baseUrl: settings.aiBaseUrl,
-          },
-          key,
-        );
-      } catch (e) {
-        onError?.({
-          kind: 'model-invalid',
-          message: e instanceof Error ? e.message : String(e),
-        });
-        return;
-      }
-
-      const abort = new AbortController();
-      abortRef.current = abort;
+      cancelledRef.current = false;
       setIsStreaming(true);
-      setStreamingContent('');
+      setStreamingContent(null);
 
-      let acc = '';
       try {
-        const result = streamText({
-          model,
-          system: settings.aiSystemPrompt || undefined,
-          messages: [...messages, userMsg].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          abortSignal: abort.signal,
-        });
-        for await (const chunk of result.textStream) {
-          acc += chunk;
-          setStreamingContent(acc);
+        // Route through the Rust assistant so tools are available.
+        const asstMsg = await aiChatSend(session.id, prompt);
+        if (!cancelledRef.current) {
+          setMessages((m) => [...m, asstMsg]);
         }
       } catch (e) {
-        if (!abort.signal.aborted) {
+        if (!cancelledRef.current) {
           onError?.({
             kind: 'stream-failed',
             message: e instanceof Error ? e.message : String(e),
           });
         }
+      } finally {
+        setIsStreaming(false);
+        setStreamingContent(null);
+        cancelledRef.current = false;
       }
-
-      const stopped = abort.signal.aborted;
-      if (acc.length > 0) {
-        const persisted = await aiAppendMessage({
-          sessionId: session.id,
-          role: 'assistant',
-          content: acc,
-          stopped,
-        }).catch(() => null);
-        if (persisted) setMessages((m) => [...m, persisted]);
-      }
-
-      setIsStreaming(false);
-      setStreamingContent(null);
-      abortRef.current = null;
     },
     [
       ensureSession,
       isStreaming,
-      messages,
+      messages.length,
       onError,
       onSessionTitled,
       sessionId,
       settings.aiApiKeys,
-      settings.aiBaseUrl,
       settings.aiModel,
       settings.aiProvider,
-      settings.aiSystemPrompt,
     ],
   );
 
