@@ -18,6 +18,7 @@ import { GeneralTab } from './GeneralTab';
 import { NotesTab } from './NotesTab';
 import { TelegramTab } from './TelegramTab';
 import { TerminalTab } from './TerminalTab';
+import { consumeSettingsSection } from './pendingSettingsSection';
 import { WebTab } from './WebTab';
 import { DEFAULT_SETTINGS, loadSettings, saveSetting, type Settings } from './store';
 import { applyTheme, broadcastTheme } from './theme';
@@ -159,11 +160,20 @@ export const SettingsShell = () => {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [autostartOn, setAutostartOn] = useState(false);
 
-  // Cross-tab deep-link: other modules can dispatch
-  // `stash:settings-section` with a Tab id to scroll users straight to
-  // the right section after the Settings popup mounts. Used by the
-  // Telegram Inbox gear so clicking ⚙ jumps to Settings → Telegram.
+  // Cross-tab deep-link. Two paths:
+  //
+  // 1. Caller about to navigate to Settings stashes the requested
+  //    section via `requestSettingsSection`; we drain it on mount.
+  //    Solves the race where dispatching `stash:settings-section`
+  //    right after `stash:navigate` fires before this listener is
+  //    registered (Settings is lazy-mounted), and the section was
+  //    silently lost.
+  // 2. Live event for callers that already know Settings is open.
   useEffect(() => {
+    const queued = consumeSettingsSection();
+    if (queued && tabs.some((t) => t.id === queued)) {
+      setTab(queued as Tab);
+    }
     const onSection = (e: Event) => {
       const detail = (e as CustomEvent<string>).detail;
       if (!detail) return;

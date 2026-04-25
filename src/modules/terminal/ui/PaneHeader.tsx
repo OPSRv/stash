@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { requestSettingsSection } from '../../../settings/pendingSettingsSection';
 import { ContextMenu, type ContextMenuItem } from '../../../shared/ui/ContextMenu';
 import { DragDots } from '../../../shared/ui/DragDots';
 import { IconButton } from '../../../shared/ui/IconButton';
@@ -118,11 +119,9 @@ export const PaneHeader = ({
       kind: 'action' as const,
       label: 'Manage commands…',
       onSelect: () => {
+        requestSettingsSection('terminal');
         window.dispatchEvent(
           new CustomEvent('stash:navigate', { detail: 'settings' }),
-        );
-        window.dispatchEvent(
-          new CustomEvent('stash:settings-section', { detail: 'terminal' }),
         );
       },
     },

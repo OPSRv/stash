@@ -1,4 +1,5 @@
 import { Button } from '../../shared/ui/Button';
+import { requestSettingsSection } from '../../settings/pendingSettingsSection';
 import { InboxPanel } from './sections/InboxPanel';
 
 /// Inbox-only Telegram view. Connection/alerts/memory/prompt moved to
@@ -7,13 +8,12 @@ import { InboxPanel } from './sections/InboxPanel';
 /// through Settings every time would be punishing.
 export function TelegramShell() {
   const openSettings = () => {
+    // Stash the requested section *before* navigating; SettingsShell
+    // consumes it on mount. The microtask-based event dispatch was
+    // racing the lazy mount and silently dropping the section hop —
+    // the user landed on plain Settings, not Settings → Telegram.
+    requestSettingsSection('telegram');
     window.dispatchEvent(new CustomEvent('stash:navigate', { detail: 'settings' }));
-    // Let the Settings shell mount before we ask it to switch section.
-    queueMicrotask(() => {
-      window.dispatchEvent(
-        new CustomEvent('stash:settings-section', { detail: 'telegram' }),
-      );
-    });
   };
 
   return (

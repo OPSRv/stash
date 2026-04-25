@@ -5,6 +5,7 @@ import { appDataDir, join } from '@tauri-apps/api/path';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { invoke } from '@tauri-apps/api/core';
 
+import { requestSettingsSection } from '../../../settings/pendingSettingsSection';
 import { accent } from '../../../shared/theme/accent';
 import { Badge } from '../../../shared/ui/Badge';
 import { IconButton } from '../../../shared/ui/IconButton';
@@ -93,12 +94,11 @@ const navigateTo = (tab: string) => {
 };
 
 const openSettingsTelegram = () => {
+  // See `pendingSettingsSection` for why we don't dispatch the
+  // section event here directly — the lazy Settings tab mount runs
+  // *after* the microtask, so a fresh section listener never sees it.
+  requestSettingsSection('telegram');
   navigateTo('settings');
-  queueMicrotask(() =>
-    window.dispatchEvent(
-      new CustomEvent('stash:settings-section', { detail: 'telegram' }),
-    ),
-  );
 };
 
 const isPaired = (s: ConnectionStatus | null) => s?.kind === 'paired';
