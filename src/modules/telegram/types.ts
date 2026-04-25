@@ -44,6 +44,24 @@ export type AiSettings = {
   /// When true the assistant runs on every voice-note transcript.
   /// Default `true` — matches the original behaviour.
   reply_on_voice: boolean;
+  /// When true voice/video/video_note transcripts are routed through
+  /// the speaker-diarization pipeline before storage. Default `false`
+  /// — the model pair downloads on first opt-in.
+  diarization_enabled: boolean;
+};
+
+/// Status of the on-disk diarization model pair.
+export type DiarModelStatus = {
+  kind: 'segmentation' | 'embedding';
+  label: string;
+  size_bytes: number;
+  downloaded: boolean;
+  local_path: string | null;
+};
+
+export type DiarStatus = {
+  ready: boolean;
+  models: DiarModelStatus[];
 };
 
 export type MemoryRow = {

@@ -24,6 +24,11 @@ pub const DEFAULT_BATTERY_THRESHOLD: u32 = 20;
 pub const KEY_AI_SYSTEM_PROMPT: &str = "ai.system_prompt";
 pub const KEY_AI_CONTEXT_WINDOW: &str = "ai.context_window";
 pub const KEY_AI_REPLY_ON_VOICE: &str = "ai.reply_on_voice";
+/// When `true`, every voice/video/video_note transcript runs through
+/// the speaker-diarization pipeline (pyannote + 3D-Speaker) so the
+/// stored transcript is labeled "Спікер 1: … / Спікер 2: …" instead
+/// of one flat block.
+pub const KEY_AI_DIARIZATION: &str = "ai.diarization_enabled";
 
 pub const DEFAULT_AI_SYSTEM_PROMPT: &str =
     "You are Oleksandr's Stash assistant, talking back through Telegram. \
@@ -115,6 +120,12 @@ pub struct AiSettings {
     /// sees the plain 📝 transcript and can trigger AI manually.
     /// Defaults to `true` — this is the original behaviour.
     pub reply_on_voice: bool,
+    /// When `true`, transcripts of voice/video/video_note messages are
+    /// labeled per speaker by the diarization pipeline. Defaults to
+    /// `false` because the model pair has to be downloaded first
+    /// (~24 MB) — flipping the toggle in the UI triggers the
+    /// download, then enables this flag.
+    pub diarization_enabled: bool,
 }
 
 impl AiSettings {
@@ -137,10 +148,16 @@ impl AiSettings {
             .and_then(|r| r.kv_get(KEY_AI_REPLY_ON_VOICE).ok().flatten())
             .map(|s| s != "0")
             .unwrap_or(true);
+        let diarization_enabled = repo
+            .as_ref()
+            .and_then(|r| r.kv_get(KEY_AI_DIARIZATION).ok().flatten())
+            .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
         Self {
             system_prompt,
             context_window,
             reply_on_voice,
+            diarization_enabled,
         }
     }
 
@@ -160,6 +177,8 @@ impl AiSettings {
         )
         .map_err(|e| e.to_string())?;
         repo.kv_set(KEY_AI_REPLY_ON_VOICE, &bool_to_kv(self.reply_on_voice))
+            .map_err(|e| e.to_string())?;
+        repo.kv_set(KEY_AI_DIARIZATION, &bool_to_kv(self.diarization_enabled))
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -238,6 +257,9 @@ mod tests {
         // reply_on_voice defaults on so existing users keep the
         // pre-toggle behaviour (transcript + AI reply).
         assert!(ai.reply_on_voice);
+        // diarization_enabled defaults off — model files aren't
+        // shipped, the user opts in once and the download kicks off.
+        assert!(!ai.diarization_enabled);
     }
 
     #[test]
@@ -247,6 +269,7 @@ mod tests {
             system_prompt: "You are a snarky cat.".into(),
             context_window: 80,
             reply_on_voice: false,
+            diarization_enabled: true,
         };
         ai.save(&s).unwrap();
         let reloaded = AiSettings::load(&s);
@@ -260,6 +283,7 @@ mod tests {
             system_prompt: "p".into(),
             context_window: 9999,
             reply_on_voice: true,
+            diarization_enabled: false,
         }
         .save(&s)
         .unwrap();
@@ -269,6 +293,7 @@ mod tests {
             system_prompt: "p".into(),
             context_window: 1,
             reply_on_voice: true,
+            diarization_enabled: false,
         }
         .save(&s)
         .unwrap();
@@ -282,6 +307,7 @@ mod tests {
             system_prompt: "   ".into(),
             context_window: 50,
             reply_on_voice: true,
+            diarization_enabled: false,
         }
         .save(&s)
         .unwrap();

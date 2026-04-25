@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 
 import { Button } from '../../../shared/ui/Button';
 import { Textarea } from '../../../shared/ui/Textarea';
 import { Toggle } from '../../../shared/ui/Toggle';
 import { SliderField } from '../../../settings/SliderField';
 import * as api from '../api';
-import type { AiSettings } from '../types';
+import type { AiSettings, DiarStatus } from '../types';
 
 const DEFAULT_PROMPT =
   'You are a helpful assistant for Oleksandr inside Telegram. \
@@ -137,6 +138,102 @@ export function AiPromptPanel() {
           label="AI reply on voice"
         />
       </div>
+
+      <DiarizationRow
+        enabled={settings.diarization_enabled}
+        onChange={(v) => schedule({ ...settings, diarization_enabled: v })}
+        onError={(e) => setError(e)}
+      />
     </>
+  );
+}
+
+type DiarizationRowProps = {
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+  onError: (e: string) => void;
+};
+
+/// Speaker-diarization toggle. Flipping it on auto-downloads the
+/// pyannote + 3D-Speaker ONNX pair (~24 MB) on first use; the toggle
+/// itself only flips after the download succeeds so users don't end
+/// up with the flag enabled but the models missing.
+function DiarizationRow({ enabled, onChange, onError }: DiarizationRowProps) {
+  const [status, setStatus] = useState<DiarStatus | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<{ received: number; total: number } | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await api.diarizationStatus());
+    } catch (e) {
+      onError(e instanceof Error ? e.message : String(e));
+    }
+  }, [onError]);
+
+  useEffect(() => {
+    void refresh();
+    let unlisten: (() => void) | undefined;
+    listen<{ id: string; received: number; total: number; done: boolean }>(
+      'diarization:download',
+      (e) => {
+        setProgress({ received: e.payload.received, total: e.payload.total });
+        if (e.payload.done) void refresh();
+      },
+    ).then((u) => {
+      unlisten = u;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [refresh]);
+
+  const handleToggle = async (next: boolean) => {
+    if (next && status && !status.ready) {
+      setDownloading(true);
+      try {
+        await api.diarizationDownload();
+        onChange(true);
+      } catch (e) {
+        onError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDownloading(false);
+        setProgress(null);
+        void refresh();
+      }
+      return;
+    }
+    onChange(next);
+  };
+
+  const totalSize = status?.models.reduce((acc, m) => acc + m.size_bytes, 0) ?? 0;
+  const sizeMb = (totalSize / 1024 / 1024).toFixed(0);
+  const pct =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.received / progress.total) * 100))
+      : null;
+
+  return (
+    <div className="py-3 flex items-start justify-between gap-4">
+      <div>
+        <div className="t-primary text-body font-medium">Розрізняти спікерів</div>
+        <div className="t-tertiary text-meta">
+          {status?.ready
+            ? 'Транскрипт голосових і відео розмічається на «Спікер 1 / 2 / …». Pyannote + 3D-Speaker, локально.'
+            : `Перший раз завантажить ~${sizeMb} MB моделей (pyannote + 3D-Speaker).`}
+          {downloading && pct !== null && (
+            <span className="ml-2 t-secondary">downloading {pct}%</span>
+          )}
+        </div>
+      </div>
+      <Toggle
+        checked={enabled}
+        onChange={(v) => {
+          if (downloading) return;
+          void handleToggle(v);
+        }}
+        label="Speaker diarization"
+      />
+    </div>
   );
 }

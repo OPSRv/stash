@@ -1,5 +1,6 @@
 pub mod ai;
 pub mod clipboard;
+pub mod diarization;
 pub mod downloader;
 pub mod ipc;
 pub mod metronome;

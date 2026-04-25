@@ -182,6 +182,9 @@ use modules::system::commands::{
     system_scan_node_modules, system_set_display_brightness, system_set_display_hidden,
     system_sleep_displays, system_sleep_now, system_toggle_launch_agent, system_trash_path,
 };
+use modules::diarization::{
+    diarization_delete, diarization_download, diarization_status, DiarizationState,
+};
 use modules::telegram::commands::{
     telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
     telegram_delete_memory, telegram_get_ai_settings, telegram_get_notification_settings,
@@ -624,6 +627,9 @@ pub fn run() {
             telegram_set_ai_settings,
             telegram_list_memory,
             telegram_delete_memory,
+            diarization_status,
+            diarization_download,
+            diarization_delete,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,
             modules::ipc::install::stash_cli_uninstall,
@@ -763,6 +769,7 @@ pub fn run() {
             // tracks the active model id.
             let whisper_cfg = data_dir.join("whisper").join("state.json");
             app.manage(WhisperStateHandle::new(whisper_cfg));
+            app.manage(DiarizationState::new());
 
             // Terminal — PTY session lazily opened by the first `pty_open`
             // call from the frontend (once the xterm fit addon knows the

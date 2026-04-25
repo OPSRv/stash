@@ -643,11 +643,16 @@ async fn handle_media(
         // surface a per-row spinner while Whisper chews on the file.
         use tauri::Emitter;
         let _ = app.emit("telegram:transcribing", inbox_id);
+        // Diarization toggle is read once per recording — flipping
+        // it later won't retro-label this transcript, but the next
+        // one will pick up the change.
+        let diarize = super::settings::AiSettings::load(state).diarization_enabled;
         tauri::async_runtime::spawn(async move {
-            match crate::modules::whisper::commands::transcribe_with_active_model(
+            match crate::modules::diarization::pipeline::transcribe_with_optional_diarization(
                 &app_for_task,
                 audio_abs,
                 None,
+                diarize,
             )
             .await
             {

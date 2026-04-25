@@ -36,6 +36,38 @@ fn is_downloaded(path: &PathBuf, expected: u64) -> bool {
         .unwrap_or(false)
 }
 
+/// Resolve the active whisper model's on-disk path. Returns `Err` when
+/// no model is active or the active one isn't downloaded yet. Exposed
+/// so cross-module orchestrators (e.g. the diarization pipeline) can
+/// pick up the same model without re-implementing the lookup.
+pub fn resolve_active_model(app: &AppHandle) -> Result<PathBuf, String> {
+    let state: tauri::State<'_, WhisperStateHandle> = app.state();
+    let active = state
+        .config
+        .lock()
+        .unwrap()
+        .active_model_id
+        .clone()
+        .ok_or_else(|| "no active whisper model — download one first".to_string())?;
+    drop(state);
+    let spec = catalog::find(&active).ok_or_else(|| format!("unknown model: {active}"))?;
+    let model = model_path(app, &active)?;
+    if !is_downloaded(&model, spec.size_bytes) {
+        return Err("active model is not downloaded".into());
+    }
+    Ok(model)
+}
+
+/// Default thread count for whisper.cpp. Half the cores keeps the UI
+/// snappy while leaving plenty of headroom for the rest of the app.
+pub fn default_threads() -> i32 {
+    (std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        / 2)
+    .max(2) as i32
+}
+
 /// Transcribe `audio` using whichever model the user has made active in
 /// the Whisper tab. Returns the text. Used by the Telegram inbox (voice
 /// auto-transcription) and future cross-module integrations — one place

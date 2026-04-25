@@ -65,9 +65,9 @@ impl std::error::Error for PipelineError {}
 
 /// Decoded audio, mixed down to mono f32 at the source sample rate. Kept
 /// intermediate so we can resample once before handing to whisper.
-struct DecodedPcm {
-    samples: Vec<f32>,
-    sample_rate: u32,
+pub struct DecodedPcm {
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
 }
 
 /// Decode any Symphonia-supported container (webm/opus, mp4/aac, ogg, wav,
@@ -181,7 +181,7 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
 /// `afconvert` — built into every macOS — into a plain 16-bit WAV that
 /// symphonia decodes without complaint. Costs one temp file and a sub-
 /// second subprocess, only on the failure path.
-fn decode_with_macos_fallback(path: &Path) -> Result<DecodedPcm, PipelineError> {
+pub fn decode_with_macos_fallback(path: &Path) -> Result<DecodedPcm, PipelineError> {
     match decode(path) {
         Ok(pcm) => Ok(pcm),
         Err(e) if should_try_afconvert(&e) => {
@@ -416,7 +416,7 @@ fn append_mono_f32(buf: &AudioBufferRef<'_>, out: &mut Vec<f32>) {
 
 /// Resample to `WHISPER_SAMPLE_RATE`. Uses `rubato`'s SincFixedIn, which is
 /// high-quality and plenty fast for single-shot offline transcription.
-fn resample_to_16k(pcm: DecodedPcm) -> Result<Vec<f32>, PipelineError> {
+pub fn resample_to_16k(pcm: DecodedPcm) -> Result<Vec<f32>, PipelineError> {
     if pcm.sample_rate == WHISPER_SAMPLE_RATE {
         return Ok(pcm.samples);
     }
@@ -445,6 +445,88 @@ fn resample_to_16k(pcm: DecodedPcm) -> Result<Vec<f32>, PipelineError> {
             .map_err(|e| PipelineError::Resample(e.to_string()))?;
         out.extend_from_slice(&processed[0]);
         cursor = end;
+    }
+    Ok(out)
+}
+
+/// One whisper-emitted utterance with its start/end times in seconds.
+/// The diarization merger uses these timestamps to label each segment
+/// with the dominant speaker; the public `transcribe` API still returns
+/// joined text and is unaffected.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WhisperSegment {
+    pub t_start: f32,
+    pub t_end: f32,
+    pub text: String,
+}
+
+/// Decode + resample `audio_path` to 16 kHz mono PCM. Exposed so the
+/// telegram diarization path can hand the same buffer to whisper and
+/// to the speaker-diarization pipeline without re-decoding the file.
+pub fn load_samples_16k_mono(audio_path: &Path) -> Result<Vec<f32>, PipelineError> {
+    let pcm = decode_with_macos_fallback(audio_path)?;
+    resample_to_16k(pcm)
+}
+
+/// Transcribe pre-decoded 16 kHz mono PCM samples and return one
+/// `WhisperSegment` per utterance. The `transcribe` wrapper below
+/// joins these into a flat string for callers that don't need the
+/// timestamps.
+pub fn transcribe_samples_segments(
+    samples_16k_mono: &[f32],
+    model_path: &Path,
+    language: &str,
+    n_threads: i32,
+) -> Result<Vec<WhisperSegment>, PipelineError> {
+    silence_whisper_logs();
+    let ctx = WhisperContext::new_with_params(
+        model_path.to_string_lossy().as_ref(),
+        WhisperContextParameters::default(),
+    )
+    .map_err(|e| PipelineError::Whisper(e.to_string()))?;
+    let mut state = ctx
+        .create_state()
+        .map_err(|e| PipelineError::Whisper(e.to_string()))?;
+
+    let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+    if language != "auto" {
+        params.set_language(Some(language));
+    }
+    params.set_translate(false);
+    params.set_print_special(false);
+    params.set_print_progress(false);
+    params.set_print_realtime(false);
+    params.set_print_timestamps(false);
+    params.set_n_threads(n_threads.max(1));
+    params.set_temperature(0.0);
+    params.set_no_context(true);
+    params.set_suppress_blank(true);
+    params.set_suppress_nst(true);
+    params.set_no_speech_thold(0.6);
+    params.set_single_segment(false);
+
+    state
+        .full(params, samples_16k_mono)
+        .map_err(|e| PipelineError::Whisper(e.to_string()))?;
+
+    let n = state
+        .full_n_segments()
+        .map_err(|e| PipelineError::Whisper(e.to_string()))?;
+    let mut out = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        let text = state
+            .full_get_segment_text(i)
+            .map_err(|e| PipelineError::Whisper(e.to_string()))?;
+        // whisper.cpp returns t0/t1 in centiseconds (10 ms units).
+        let t0 = state
+            .full_get_segment_t0(i)
+            .map_err(|e| PipelineError::Whisper(e.to_string()))? as f32
+            / 100.0;
+        let t1 = state
+            .full_get_segment_t1(i)
+            .map_err(|e| PipelineError::Whisper(e.to_string()))? as f32
+            / 100.0;
+        out.push(WhisperSegment { t_start: t0, t_end: t1, text });
     }
     Ok(out)
 }

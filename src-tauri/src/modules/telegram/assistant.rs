@@ -676,6 +676,7 @@ mod tests {
             system_prompt: "p".into(),
             context_window: 10,
             reply_on_voice: true,
+            diarization_enabled: false,
         }
         .save(state.as_ref())
         .unwrap();
@@ -715,6 +716,7 @@ mod tests {
             system_prompt: "be brief".into(),
             reply_on_voice: true,
             context_window: 50,
+            diarization_enabled: false,
         }
         .save(state.as_ref())
         .unwrap();

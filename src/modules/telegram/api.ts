@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   AiSettings,
   ConnectionStatus,
+  DiarStatus,
   InboxItem,
   MemoryRow,
   NotificationSettings,
@@ -75,3 +76,16 @@ export const listMemory = (): Promise<MemoryRow[]> =>
 
 export const deleteMemory = (id: number): Promise<boolean> =>
   invoke('telegram_delete_memory', { id });
+
+/// Diarization model status — which ONNX files are on disk and ready
+/// for the speaker-labeling pipeline.
+export const diarizationStatus = (): Promise<DiarStatus> =>
+  invoke('diarization_status');
+
+/// Download whichever segmentation/embedding files are missing.
+/// Emits `diarization:download` events with `{id, received, total, done}`.
+export const diarizationDownload = (): Promise<void> =>
+  invoke('diarization_download');
+
+export const diarizationDelete = (): Promise<void> =>
+  invoke('diarization_delete');

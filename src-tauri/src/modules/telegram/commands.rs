@@ -502,8 +502,12 @@ pub async fn telegram_retry_transcribe(
     // returns immediately and the UI stays responsive.
     tauri::async_runtime::spawn(async move {
         let result: Result<String, String> = if runs_whisper {
-            crate::modules::whisper::commands::transcribe_with_active_model(
-                &app_clone, abs, None,
+            // Pull the live diarization toggle so a retry honours the
+            // user's current preference even if it's been flipped
+            // since the original recording landed.
+            let diarize = super::settings::AiSettings::load(&state_clone).diarization_enabled;
+            crate::modules::diarization::pipeline::transcribe_with_optional_diarization(
+                &app_clone, abs, None, diarize,
             )
             .await
         } else {
