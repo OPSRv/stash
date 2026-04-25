@@ -2,8 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 import { ConnectionPanel } from './ConnectionPanel';
+
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  writeText: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe('<ConnectionPanel />', () => {
   beforeEach(() => {
@@ -54,6 +59,29 @@ describe('<ConnectionPanel />', () => {
     render(<ConnectionPanel />);
     const codeEl = await screen.findByLabelText(/pairing code/i);
     expect(codeEl).toHaveTextContent('654321');
+  });
+
+  it('copies the /pair command to clipboard when the copy button is clicked', async () => {
+    const user = userEvent.setup();
+    vi.mocked(writeText).mockClear();
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_status')
+        return {
+          kind: 'pairing',
+          code: '654321',
+          expires_at: Math.floor(Date.now() / 1000) + 300,
+        };
+      return undefined;
+    });
+    render(<ConnectionPanel />);
+    await screen.findByLabelText(/pairing code/i);
+    await user.click(screen.getByTestId('copy-pair-code'));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('/pair 654321'),
+    );
+    expect(
+      await screen.findByRole('status'),
+    ).toHaveTextContent(/Скопійовано/);
   });
 
   it('offers a Start Pairing button when token-only and starts on click', async () => {

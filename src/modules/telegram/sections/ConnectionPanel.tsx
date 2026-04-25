@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
 
 import { Button } from '../../../shared/ui/Button';
+import { IconButton } from '../../../shared/ui/IconButton';
+import { CopyIcon } from '../../../shared/ui/icons';
 import { Input } from '../../../shared/ui/Input';
 import { SettingRow } from '../../../settings/SettingRow';
+import { copyText } from '../../../shared/util/clipboard';
 import * as api from '../api';
 import type { ConnectionStatus } from '../types';
 
@@ -164,6 +167,15 @@ function PairingRow({
 
   const mm = Math.floor(remaining / 60);
   const ss = (remaining % 60).toString().padStart(2, '0');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1_500);
+    return () => clearTimeout(id);
+  }, [copied]);
+  const onCopy = async () => {
+    if (await copyText(`/pair ${code}`)) setCopied(true);
+  };
 
   return (
     <div className="flex items-start justify-between gap-4 py-3">
@@ -172,11 +184,29 @@ function PairingRow({
         <div className="t-tertiary text-meta">
           Send <code>/pair {code}</code> to your bot within {mm}:{ss}.
         </div>
-        <div
-          aria-label="pairing code"
-          className="mt-2 text-3xl font-mono tracking-wider"
-        >
-          {code}
+        <div className="mt-2 flex items-center gap-2">
+          <div
+            aria-label="pairing code"
+            className="text-3xl font-mono tracking-wider"
+          >
+            {code}
+          </div>
+          <IconButton
+            title={copied ? 'Скопійовано' : 'Скопіювати /pair команду'}
+            onClick={onCopy}
+            data-testid="copy-pair-code"
+          >
+            <CopyIcon size={14} />
+          </IconButton>
+          {copied && (
+            <span
+              className="text-meta t-tertiary"
+              role="status"
+              aria-live="polite"
+            >
+              Скопійовано
+            </span>
+          )}
         </div>
       </div>
       <div className="shrink-0">
