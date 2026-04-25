@@ -18,6 +18,9 @@ crate-type = ["cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Resolve `~/Library/Caches/...` from the build script that stages
+# sherpa-onnx dylibs into `sherpa-libs/` for the macOS bundle.
+dirs-next = "2"
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png", "macos-private-api", "unstable"] }
