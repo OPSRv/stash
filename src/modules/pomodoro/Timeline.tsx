@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu, type ContextMenuItem } from '../../shared/ui/ContextMenu';
+import { IconButton } from '../../shared/ui/IconButton';
+import { Input } from '../../shared/ui/Input';
 import type { Block, Posture } from './api';
 
 export type TimelineMode = 'edit' | 'playing';
@@ -348,7 +350,7 @@ export const Timeline = ({
               <div className="pom-block-progress" aria-hidden />
               <div className="pom-block-name">
                 {editingId === block.id ? (
-                  <input
+                  <Input
                     data-role="no-drag"
                     autoFocus
                     defaultValue={block.name}
@@ -360,26 +362,31 @@ export const Timeline = ({
                     className="pom-name-input"
                     style={{ fontSize: 12, width: '100%' }}
                     aria-label="Block name"
+                    size="sm"
                   />
                 ) : (
                   block.name
                 )}
               </div>
               <div className="pom-block-meta">
-                <button
-                  type="button"
-                  data-role="no-drag"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (editable) cyclePosture(block);
-                  }}
-                  aria-label={`Posture: ${block.posture}`}
-                  title={editable ? 'Click to cycle posture' : block.posture}
-                  style={{ fontSize: 11, cursor: editable ? 'pointer' : 'default' }}
-                >
-                  {POSTURE_EMOJI[block.posture]}
-                </button>
+                <span data-role="no-drag" onPointerDown={(e) => e.stopPropagation()}>
+                  <IconButton
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (editable) cyclePosture(block);
+                    }}
+                    title={editable ? 'Click to cycle posture' : block.posture}
+                    tooltipSide="bottom"
+                    stopPropagation={false}
+                  >
+                    <span
+                      aria-label={`Posture: ${block.posture}`}
+                      style={{ fontSize: 11, cursor: editable ? 'pointer' : 'default' }}
+                    >
+                      {POSTURE_EMOJI[block.posture]}
+                    </span>
+                  </IconButton>
+                </span>
                 <span>{Math.round(block.duration_sec / 60)}m</span>
               </div>
               {editable && (

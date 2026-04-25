@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { accent } from '../../shared/theme/accent';
 import { Button } from '../../shared/ui/Button';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { IconButton } from '../../shared/ui/IconButton';
+import { Input } from '../../shared/ui/Input';
 
 import type { Session } from './api';
 
@@ -99,8 +101,9 @@ export const SessionSidebar = ({
                   </div>
                   <div className="flex-1 min-w-0">
                     {isRenaming ? (
-                      <input
+                      <Input
                         autoFocus
+                        size="sm"
                         value={renameValue}
                         onChange={(e) => setRenameValue(e.currentTarget.value)}
                         onBlur={commitRename}
@@ -109,8 +112,8 @@ export const SessionSidebar = ({
                           else if (e.key === 'Escape') setRenamingId(null);
                         }}
                         onClick={(e) => e.stopPropagation()}
-                        className="input-field w-full px-2 py-0.5 rounded-md text-body"
                         aria-label="Rename chat"
+                        className="w-full"
                       />
                     ) : (
                       <>
@@ -141,31 +144,34 @@ export const SessionSidebar = ({
                     )}
                   </div>
                   {!isRenaming && (
-                    <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
-                      <button
-                        type="button"
-                        aria-label="Rename"
+                    <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 flex items-center gap-0.5 transition-opacity">
+                      <IconButton
                         title="Rename"
                         onClick={(e) => {
                           e.stopPropagation();
                           startRename(s);
                         }}
-                        className="t-tertiary hover:t-primary px-1.5 py-0.5 rounded-md text-meta"
+                        tooltipSide="bottom"
                       >
-                        ✎
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Delete"
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </IconButton>
+                      <IconButton
                         title="Delete"
+                        tone="danger"
                         onClick={(e) => {
                           e.stopPropagation();
                           setDeletingId(s.id);
                         }}
-                        className="t-tertiary hover:text-red-400 px-1.5 py-0.5 rounded-md text-meta"
+                        tooltipSide="bottom"
                       >
-                        ×
-                      </button>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </IconButton>
                     </div>
                   )}
                 </div>

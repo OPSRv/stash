@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '../../shared/ui/Button';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { IconButton } from '../../shared/ui/IconButton';
+import { Input } from '../../shared/ui/Input';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { Toggle } from '../../shared/ui/Toggle';
 import { useToast } from '../../shared/ui/Toast';
@@ -316,7 +319,7 @@ export const PomodoroShell = () => {
     <div className="pom-root flex flex-col h-full">
       {/* --- Header (назва + kind + total + save) --- */}
       <header className="flex items-center gap-3 px-4 py-2.5 border-b hair relative z-10">
-        <input
+        <Input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -324,6 +327,7 @@ export const PomodoroShell = () => {
           className="pom-name-input flex-1 min-w-0"
           disabled={isActive}
           aria-label="Preset name"
+          size="sm"
         />
         <SegmentedControl<PresetKind>
           size="sm"
@@ -335,15 +339,14 @@ export const PomodoroShell = () => {
         <span className="t-tertiary text-meta font-mono tabular-nums shrink-0">
           {totalMin}m · {shownBlocks.length} {shownBlocks.length === 1 ? 'block' : 'blocks'}
         </span>
-        <button
-          type="button"
+        <Button
           onClick={handleSave}
           disabled={!name.trim() || blocks.length === 0 || isActive}
           className="pom-save-pill"
           data-testid="pom-save-preset"
         >
           {loadedPresetId != null ? 'Update' : '+ Save'}
-        </button>
+        </Button>
       </header>
 
       {/* --- Banner (transition hint) --- */}
@@ -356,14 +359,13 @@ export const PomodoroShell = () => {
             {transitionText(banner.from, banner.to)}
           </span>
           <span className="t-tertiary text-meta">→ {banner.block}</span>
-          <button
-            type="button"
+          <Button
             onClick={() => setBanner(null)}
             className="pom-pill"
             style={{ height: 24, padding: '0 10px', fontSize: 10 }}
           >
             Got it
-          </button>
+          </Button>
         </div>
       )}
 
@@ -385,42 +387,39 @@ export const PomodoroShell = () => {
               {formatMmSs(snapshot.remaining_ms)}
             </div>
             <div className="flex items-center gap-2 relative z-10">
-              <button
-                type="button"
+              <IconButton
                 onClick={() => handleJumpTo(snapshot.current_idx - 1)}
                 disabled={!canGoBack}
-                aria-label="Previous block"
-                className="pom-pill pom-icon-pill"
+                title="Previous block"
+                tooltipSide="bottom"
               >
                 <PrevIcon size={13} />
-              </button>
-              <button
-                type="button"
+              </IconButton>
+              <Button
                 onClick={handlePauseResume}
                 data-running={isRunning}
                 aria-label={isRunning ? 'Pause' : 'Resume'}
                 className="pom-pill pom-pill-primary"
+                leadingIcon={isRunning ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
               >
-                {isRunning ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
                 <span>{isRunning ? 'PAUSE' : 'RESUME'}</span>
-              </button>
-              <button
-                type="button"
+              </Button>
+              <IconButton
                 onClick={() => handleJumpTo(snapshot.current_idx + 1)}
                 disabled={!canGoForward}
-                aria-label="Next block"
-                className="pom-pill pom-icon-pill"
+                title="Next block"
+                tooltipSide="bottom"
               >
                 <NextIcon size={13} />
-              </button>
-              <button
-                type="button"
+              </IconButton>
+              <IconButton
                 onClick={() => setConfirmStop(true)}
-                aria-label="Stop session"
-                className="pom-pill pom-pill-danger pom-icon-pill"
+                title="Stop session"
+                tone="danger"
+                tooltipSide="bottom"
               >
                 <StopCircleIcon size={13} />
-              </button>
+              </IconButton>
             </div>
             <div className="t-tertiary text-meta font-mono tabular-nums relative z-10">
               {Math.floor(elapsedSec / 60)}m / {totalMin}m
@@ -433,16 +432,15 @@ export const PomodoroShell = () => {
               {totalMin}
               <span style={{ fontSize: 40, marginLeft: 6 }}>m</span>
             </div>
-            <button
-              type="button"
+            <Button
               onClick={handleStart}
               disabled={blocks.length === 0}
               className="pom-pill pom-pill-primary relative z-10"
               data-testid="pom-start"
+              leadingIcon={<PlayIcon size={12} />}
             >
-              <PlayIcon size={12} />
               <span>START</span>
-            </button>
+            </Button>
           </>
         )}
       </div>
@@ -463,9 +461,8 @@ export const PomodoroShell = () => {
         <div className="pom-palette shrink-0">
           <span className="section-label shrink-0">Add</span>
           {PALETTE.map((p) => (
-            <button
+            <Button
               key={p.posture}
-              type="button"
               onClick={() => applyPalette(p.posture, p.duration_sec)}
               data-posture={p.posture}
               className="pom-palette-btn"
@@ -473,7 +470,7 @@ export const PomodoroShell = () => {
             >
               <span aria-hidden>{p.emoji}</span>
               <span>+ {p.label}</span>
-            </button>
+            </Button>
           ))}
           <div className="flex-1" />
           <span className="t-tertiary text-meta italic">
@@ -516,8 +513,7 @@ export const PomodoroShell = () => {
           ) : (
             presets.map((p) => (
               <div key={p.id} className="shrink-0 inline-flex items-center gap-1">
-                <button
-                  type="button"
+                <Button
                   onClick={() => handleLoadPreset(p)}
                   disabled={isActive}
                   data-active={loadedPresetId === p.id}
@@ -529,17 +525,16 @@ export const PomodoroShell = () => {
                   <span className="t-tertiary font-mono">
                     {Math.round(p.blocks.reduce((s, b) => s + b.duration_sec, 0) / 60)}m
                   </span>
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <IconButton
                   onClick={() => setConfirmDelete(p)}
                   disabled={isActive}
-                  aria-label={`Delete preset ${p.name}`}
-                  className="pom-pill pom-icon-pill"
-                  style={{ height: 22, width: 22 }}
+                  title={`Delete preset ${p.name}`}
+                  tone="danger"
+                  tooltipSide="bottom"
                 >
                   <TrashIcon size={10} />
-                </button>
+                </IconButton>
               </div>
             ))
           )}

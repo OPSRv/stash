@@ -80,8 +80,8 @@ describe('WebShell (Arc-style sidebar)', () => {
     renderShell();
     expect(screen.getByRole('button', { name: 'Add web tab' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Close ChatGPT' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Close Gemini' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Close ChatGPT/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Close Gemini/ })).toBeInTheDocument();
   });
 
   test('Collapse button hides labels and shrinks the sidebar', () => {
@@ -90,7 +90,7 @@ describe('WebShell (Arc-style sidebar)', () => {
     fireEvent.click(collapseBtn);
     // The close buttons and the "ChatGPT" visible text disappear when
     // collapsed — the label is moved to the aria-label of the tab itself.
-    expect(screen.queryByRole('button', { name: 'Close ChatGPT' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Close ChatGPT/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Expand sidebar' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'ChatGPT' })).toBeInTheDocument();
   });
@@ -159,7 +159,7 @@ describe('WebShell (Arc-style sidebar)', () => {
     vi.mocked(writeText).mockClear();
     renderShell();
     // Hover doesn't matter in jsdom (no hover); the button is in the DOM, just disabled visually.
-    const btn = screen.getByLabelText('Copy URL of ChatGPT');
+    const btn = screen.getByLabelText(/^Copy URL of ChatGPT/);
     fireEvent.click(btn);
     expect(vi.mocked(writeText)).toHaveBeenCalledWith('https://chat.openai.com');
   });

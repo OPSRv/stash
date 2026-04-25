@@ -1,3 +1,4 @@
+import { Button } from '../../../shared/ui/Button';
 import { SegmentedControl } from '../../../shared/ui/SegmentedControl';
 import {
   DENOMINATORS,
@@ -23,15 +24,16 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
   return (
     <div className="flex items-center gap-4 px-5 py-2.5 border-t hair">
       <div className="flex items-center gap-1" aria-label="Time signature">
-        <button
-          type="button"
+        <Button
+          size="sm"
+          shape="square"
           onClick={() => setNumerator(state.numerator - 1)}
           disabled={state.numerator <= NUMERATOR_MIN}
           aria-label="Decrease numerator"
-          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.06] disabled:opacity-30 transition-colors"
+          className="w-6"
         >
           −
-        </button>
+        </Button>
         <div
           className="t-primary font-semibold text-body tabular-nums text-center"
           style={{ minWidth: 44, letterSpacing: '0.02em' }}
@@ -40,15 +42,16 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
         >
           {state.numerator}/{state.denominator}
         </div>
-        <button
-          type="button"
+        <Button
+          size="sm"
+          shape="square"
           onClick={() => setNumerator(state.numerator + 1)}
           disabled={state.numerator >= NUMERATOR_MAX}
           aria-label="Increase numerator"
-          className="h-7 w-6 rounded-md t-secondary hover:t-primary hover:bg-white/[0.06] disabled:opacity-30 transition-colors"
+          className="w-6"
         >
           +
-        </button>
+        </Button>
         <div className="ml-2">
           <SegmentedControl<string>
             ariaLabel="Denominator"
@@ -64,9 +67,8 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
         {SUBDIVISIONS.map((s) => {
           const on = state.subdivision === s.value;
           return (
-            <button
+            <Button
               key={s.value}
-              type="button"
               role="radio"
               aria-checked={on}
               aria-label={s.title}
@@ -75,7 +77,7 @@ export const Controls = ({ state, onPatch }: ControlsProps) => {
               className="metro-sub-btn px-2 text-body"
             >
               {s.label}
-            </button>
+            </Button>
           );
         })}
       </div>

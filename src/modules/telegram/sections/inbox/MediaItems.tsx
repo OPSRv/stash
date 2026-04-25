@@ -1,4 +1,5 @@
 import { AudioPlayer } from '../../../../shared/ui/AudioPlayer';
+import { Button } from '../../../../shared/ui/Button';
 import { FileChip, formatBytes } from '../../../../shared/ui/FileChip';
 import { ImageThumbnail } from '../../../../shared/ui/ImageThumbnail';
 import { InlineVideo } from '../../../../shared/ui/InlineVideo';
@@ -98,19 +99,20 @@ export const TextItem = ({ content }: TextItemProps) => {
         <>
           <LinkEmbed href={first} />
           <div className="flex items-center gap-2 text-meta">
-            <button
-              type="button"
+            <Button
+              size="xs"
+              variant="soft"
+              tone="accent"
+              title={`Send ${first} to Downloader`}
               onClick={() => {
                 setPendingDownloaderUrl(first);
                 window.dispatchEvent(
                   new CustomEvent('stash:navigate', { detail: 'downloads' }),
                 );
               }}
-              className="px-2 py-0.5 rounded bg-[rgba(var(--stash-accent-rgb),0.15)] hover:bg-[rgba(var(--stash-accent-rgb),0.25)] text-[rgb(var(--stash-accent-rgb))] transition-colors"
-              title={`Send ${first} to Downloader`}
             >
               ⤓ Download
-            </button>
+            </Button>
             {urls.length > 1 && (
               <span className="text-white/40">+{urls.length - 1} more</span>
             )}

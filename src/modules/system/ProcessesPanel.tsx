@@ -161,21 +161,23 @@ export const ProcessesPanel = () => {
             Sort:
           </span>
           {(['rss', 'cpu', 'name'] as const).map((k) => {
-            const active = sortKey === k;
+            const isActive = sortKey === k;
             const label = k === 'rss' ? 'RAM' : k === 'cpu' ? 'CPU' : 'Name';
             const arrow = k === 'name' ? '↑' : '↓';
             return (
-              <button
+              <Button
                 key={k}
-                type="button"
                 role="radio"
-                aria-checked={active}
+                aria-checked={isActive}
                 onClick={() => setSortKey(k)}
-                className={`px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${active ? 't-primary font-medium' : 't-tertiary hover:t-secondary'}`}
+                variant="ghost"
+                tone="neutral"
+                size="xs"
+                className={isActive ? 't-primary font-medium' : 't-tertiary'}
               >
                 {label}
-                {active && <span aria-hidden className="text-[10px]">{arrow}</span>}
-              </button>
+                {isActive && <span aria-hidden className="text-[10px]">{arrow}</span>}
+              </Button>
             );
           })}
         </div>

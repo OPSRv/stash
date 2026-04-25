@@ -104,15 +104,14 @@ export const AppearanceTab = ({ settings, onChange }: AppearanceTabProps) => {
             const swatch = ACCENTS[key];
             const isSelected = settings.themeAccent === key;
             return (
-              <button
+              <Button
                 key={key}
-                type="button"
                 role="radio"
                 aria-checked={isSelected}
                 onClick={() => onChange('themeAccent', key)}
-                title={swatch.label}
+                title={`Accent ${swatch.label}`}
                 aria-label={`Accent ${swatch.label}`}
-                className="w-9 h-9 rounded-xl transition-transform"
+                className="!w-9 !h-9 !p-0 !rounded-xl !border-0 transition-transform"
                 style={{
                   background: swatch.hex,
                   outline: isSelected

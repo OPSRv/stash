@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { Button } from '../../shared/ui/Button';
 import { PauseIcon, PlayIcon } from '../../shared/ui/icons';
 import './metronome.css';
 import { metronomeGetState, metronomeSaveState } from './api';
@@ -219,25 +220,23 @@ export const MetronomeShell = () => {
             onToggleAccent={toggleAccent}
           />
           <div className="flex items-center gap-2">
-            <button
-              type="button"
+            <Button
               onClick={engine.toggle}
               aria-label={engine.isPlaying ? 'Pause metronome' : 'Play metronome'}
               aria-pressed={engine.isPlaying}
               data-playing={engine.isPlaying}
               className="metro-tap metro-tap-play"
+              leadingIcon={engine.isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
             >
-              {engine.isPlaying ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
-              <span>{engine.isPlaying ? 'STOP' : 'PLAY'}</span>
-            </button>
-            <button
-              type="button"
+              {engine.isPlaying ? 'STOP' : 'PLAY'}
+            </Button>
+            <Button
               onClick={tap}
               className="metro-tap"
               data-testid="tap-tempo"
             >
               TAP
-            </button>
+            </Button>
           </div>
         </div>
       </div>

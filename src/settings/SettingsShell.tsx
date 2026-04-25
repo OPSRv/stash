@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
+import { Button } from '../shared/ui/Button';
 import {
   setCookiesBrowser,
   setDownloadsDir,
@@ -262,18 +263,21 @@ export const SettingsShell = () => {
         {tabs.map((t) => {
           const isActive = tab === t.id;
           return (
-            <button
+            <Button
               key={t.id}
               role="tab"
               aria-selected={isActive}
               onClick={() => setTab(t.id)}
-              className={`inline-flex items-center gap-2 px-2 py-1.5 rounded-md text-meta font-medium transition-colors cursor-pointer text-left ${
-                isActive ? 't-primary bg-white/[0.06]' : 't-secondary hover:bg-white/[0.04]'
+              size="sm"
+              variant="ghost"
+              fullWidth
+              className={`!justify-start gap-2 text-meta font-medium cursor-pointer ${
+                isActive ? 't-primary !bg-white/[0.06]' : 't-secondary'
               }`}
+              leadingIcon={t.icon}
             >
-              <span className="inline-flex shrink-0">{t.icon}</span>
               {t.label}
-            </button>
+            </Button>
           );
         })}
       </nav>

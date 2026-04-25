@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatDuration } from '../../../shared/format/duration';
+import { Button } from '../../../shared/ui/Button';
 import { IconButton } from '../../../shared/ui/IconButton';
+import { Input } from '../../../shared/ui/Input';
+import { RangeSlider } from '../../../shared/ui/RangeSlider';
 import { CloseIcon, PauseIcon, PlayIcon } from '../../../shared/ui/icons';
 import { parseYouTubeId, useYouTubePlayer } from '../hooks/useYouTubePlayer';
 
@@ -110,8 +113,7 @@ export const BackingTrack = ({ volume, onVolume }: Props) => {
     }
   };
 
-  const onSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const t = Number(e.target.value);
+  const onSeek = (t: number) => {
     if (source.kind === 'file' && audioRef.current) audioRef.current.currentTime = t;
     if (source.kind === 'youtube') yt.seek(t);
   };
@@ -125,34 +127,33 @@ export const BackingTrack = ({ volume, onVolume }: Props) => {
     >
       {source.kind === 'none' ? (
         <div className="flex items-center gap-2">
-          <button
-            type="button"
+          <Button
+            size="sm"
             onClick={() => fileInputRef.current?.click()}
-            className="t-secondary hover:t-primary text-meta px-2 py-1 rounded-md hover:bg-white/[0.04]"
           >
             Open file
-          </button>
+          </Button>
           <span className="t-tertiary text-meta">or</span>
-          <input
-            type="text"
+          <Input
+            size="sm"
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') acceptUrl();
             }}
             placeholder="paste YouTube link"
-            className="input flex-1 text-body rounded-md px-2 py-1"
+            className="flex-1"
             data-testid="yt-url-input"
           />
           {urlInput && (
-            <button
-              type="button"
+            <Button
+              size="sm"
               onClick={acceptUrl}
               disabled={resolving || !parseYouTubeId(urlInput)}
-              className="text-meta px-2 py-1 rounded-md t-primary bg-white/[0.08] hover:bg-white/[0.12] disabled:opacity-40"
+              loading={resolving}
             >
               {resolving ? 'Loading…' : 'Load'}
-            </button>
+            </Button>
           )}
           <span className="t-tertiary text-meta ml-1">drop MP3 anywhere</span>
         </div>
@@ -164,34 +165,26 @@ export const BackingTrack = ({ volume, onVolume }: Props) => {
           <div className="t-secondary text-meta truncate flex-1 min-w-0">
             {source.kind === 'file' ? source.name : source.title}
           </div>
-          <input
-            type="range"
+          <RangeSlider
+            value={currentTime}
+            onChange={onSeek}
             min={0}
             max={Math.max(0.01, duration)}
             step={0.1}
-            value={currentTime}
-            onChange={onSeek}
-            className="metro-slider"
-            style={{
-              flex: '0 0 200px',
-              ['--metro-pct' as string]: `${Math.round(
-                (currentTime / Math.max(0.01, duration)) * 100,
-              )}%`,
-            }}
-            aria-label="Track position"
+            label="Track position"
+            className="flex-none"
+            style={{ width: 200 }}
           />
           <span className="t-tertiary text-meta font-mono">
             {formatTime(currentTime)} / {formatTime(duration)}
           </span>
-          <input
-            type="range"
+          <RangeSlider
+            value={Math.round(volume * 100)}
+            onChange={(v) => onVolume(v / 100)}
             min={0}
             max={100}
-            value={Math.round(volume * 100)}
-            onChange={(e) => onVolume(Number(e.target.value) / 100)}
-            className="metro-slider"
-            style={{ width: 60, ['--metro-pct' as string]: `${Math.round(volume * 100)}%` }}
-            aria-label="Track volume"
+            label="Track volume"
+            style={{ width: 60 }}
           />
           <IconButton onClick={close} title="Close track">
             <CloseIcon size={11} />

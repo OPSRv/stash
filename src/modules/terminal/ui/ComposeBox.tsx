@@ -1,6 +1,7 @@
 import { forwardRef, useRef, useState } from 'react';
 
 import { Button } from '../../../shared/ui/Button';
+import { Textarea } from '../../../shared/ui/Textarea';
 import { Tooltip } from '../../../shared/ui/Tooltip';
 import {
   CloseIcon,
@@ -243,7 +244,8 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
             )}
           </div>
         </div>
-        <textarea
+        <Textarea
+          bare
           ref={ref}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -286,7 +288,7 @@ export const ComposeBox = forwardRef<HTMLTextAreaElement, ComposeBoxProps>(
             }
           }}
           placeholder="Message · ⏎ send · ⇧⏎ newline · ⌥⏎ insert · Esc back"
-          className="w-full resize-none rounded-md px-2 py-1.5 text-body font-mono outline-none t-primary"
+          className="w-full resize-none rounded-md px-2 py-1.5 text-body font-mono t-primary"
           style={{
             // Darker recess against the frosted compose strip so the
             // textarea reads as a proper input field. Still translucent

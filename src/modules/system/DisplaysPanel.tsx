@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
+import { RangeSlider } from '../../shared/ui/RangeSlider';
 import { Spinner } from '../../shared/ui/Spinner';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { useToast } from '../../shared/ui/Toast';
@@ -43,20 +44,29 @@ const BrightnessSlider = ({ value, onChange, onCommit, disabled, note }: Brightn
     <div>
       <div className="flex items-center gap-2">
         <SunIcon />
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={pct}
-          disabled={disabled}
-          onChange={(e) => onChange(Number(e.currentTarget.value) / 100)}
-          onPointerUp={(e) => onCommit(Number(e.currentTarget.value) / 100)}
-          onKeyUp={(e) => onCommit(Number(e.currentTarget.value) / 100)}
-          className="flex-1 accent-[color:var(--stash-accent)]"
-          style={{ height: 4 }}
-          aria-label="Brightness"
-        />
+        {/* Wrap in a div so pointer-up / key-up bubble up for commit */}
+        <div
+          className="flex-1"
+          onPointerUp={(e) => {
+            const input = e.currentTarget.querySelector('input');
+            if (input) onCommit(Number(input.value) / 100);
+          }}
+          onKeyUp={(e) => {
+            const input = e.currentTarget.querySelector('input');
+            if (input) onCommit(Number(input.value) / 100);
+          }}
+        >
+          <RangeSlider
+            value={pct}
+            min={0}
+            max={100}
+            step={1}
+            label="Brightness"
+            disabled={disabled}
+            onChange={(v) => onChange(v / 100)}
+            className="w-full"
+          />
+        </div>
         <span className="t-primary text-body tabular-nums font-medium w-[38px] text-right">
           {pct}%
         </span>

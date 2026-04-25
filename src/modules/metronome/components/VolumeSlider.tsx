@@ -1,3 +1,5 @@
+import { RangeSlider } from '../../../shared/ui/RangeSlider';
+
 interface VolumeSliderProps {
   value: number;
   onChange: (value: number) => void;
@@ -6,7 +8,6 @@ interface VolumeSliderProps {
 }
 
 /// Compact percentage slider used in the Metronome controls row.
-/// Track fill is driven by a CSS var so the gradient follows the value.
 export const VolumeSlider = ({ value, onChange, label, testId }: VolumeSliderProps) => {
   const pct = Math.round(value * 100);
   return (
@@ -20,16 +21,14 @@ export const VolumeSlider = ({ value, onChange, label, testId }: VolumeSliderPro
           {pct}
         </span>
       </span>
-      <input
-        type="range"
+      <RangeSlider
+        value={pct}
+        onChange={(v) => onChange(v / 100)}
         min={0}
         max={100}
-        value={pct}
-        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        label={label}
         data-testid={testId}
-        aria-label={label}
-        className="metro-slider"
-        style={{ width: '100%', ['--metro-pct' as string]: `${pct}%` }}
+        style={{ width: '100%' }}
       />
     </label>
   );

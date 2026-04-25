@@ -1,0 +1,96 @@
+/* Shared range slider look — accent-filled track + white thumb with accent halo.
+   Lifted from the metronome's .metro-slider so every range input in the app
+   shares one look. Percent fill driven by --stash-range-pct inline style. */
+
+.stash-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.stash-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--stash-accent-rgb), 0.8) 0%,
+      rgba(var(--stash-accent-rgb), 0.8) var(--stash-range-pct, 50%),
+      rgba(255, 255, 255, 0.1) var(--stash-range-pct, 50%),
+      rgba(255, 255, 255, 0.1) 100%
+    );
+}
+
+.light .stash-range::-webkit-slider-runnable-track {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(var(--stash-accent-rgb), 0.85) 0%,
+      rgba(var(--stash-accent-rgb), 0.85) var(--stash-range-pct, 50%),
+      rgba(20, 22, 28, 0.12) var(--stash-range-pct, 50%),
+      rgba(20, 22, 28, 0.12) 100%
+    );
+}
+
+.stash-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4.5px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(var(--stash-accent-rgb), 0.8),
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 0 10px rgba(var(--stash-accent-rgb), 0.6);
+  transition: transform 120ms var(--easing-standard);
+}
+
+.stash-range:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.stash-range::-moz-range-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.stash-range::-moz-range-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(var(--stash-accent-rgb), 0.8);
+}
+
+.stash-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(var(--stash-accent-rgb), 0.8),
+    0 2px 6px rgba(0, 0, 0, 0.35),
+    0 0 10px rgba(var(--stash-accent-rgb), 0.6);
+}
+
+.stash-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.stash-range--no-fill::-webkit-slider-runnable-track {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.light .stash-range--no-fill::-webkit-slider-runnable-track {
+  background: rgba(20, 22, 28, 0.12);
+}
+
+.stash-range--no-fill::-moz-range-progress {
+  background: rgba(255, 255, 255, 0.1);
+}

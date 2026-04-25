@@ -3,6 +3,7 @@ import { streamText } from 'ai';
 import { listen } from '@tauri-apps/api/event';
 
 import { Badge } from '../../shared/ui/Badge';
+import { IconButton } from '../../shared/ui/IconButton';
 import { useToast } from '../../shared/ui/Toast';
 import { useVoiceRecorder } from '../../shared/hooks/useVoiceRecorder';
 
@@ -378,12 +379,10 @@ export const AiShell = () => {
         />
         <section className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center gap-2 px-3 py-1.5 border-b hair">
-            <button
-              type="button"
+            <IconButton
               onClick={() => setSidebarExpanded((v) => !v)}
-              aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
-              title={sidebarExpanded ? 'Collapse' : 'Expand'}
-              className="ring-focus w-6 h-6 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors shrink-0"
+              title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+              tooltipSide="bottom"
             >
               <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
                 <path
@@ -395,7 +394,7 @@ export const AiShell = () => {
                   strokeLinejoin="round"
                 />
               </svg>
-            </button>
+            </IconButton>
           </div>
           {notConfigured ? (
             configPrompt

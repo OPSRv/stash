@@ -12,6 +12,7 @@ type IconButtonProps = {
    *  most icon buttons live near the top of a scroll container, and a
    *  top-placed tooltip would clip behind the tabs bar above. */
   tooltipSide?: 'top' | 'bottom' | 'left' | 'right';
+  'data-testid'?: string;
 };
 
 export const IconButton = ({
@@ -22,6 +23,7 @@ export const IconButton = ({
   stopPropagation = true,
   disabled = false,
   tooltipSide = 'bottom',
+  'data-testid': dataTestId,
 }: IconButtonProps) => {
   const toneClass = tone === 'danger' ? 't-primary hover:text-red-400' : 't-primary hover:t-primary';
   return (
@@ -34,6 +36,7 @@ export const IconButton = ({
           if (stopPropagation) e.stopPropagation();
           onClick(e);
         }}
+        data-testid={dataTestId}
         className={`ring-focus w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/[0.04] ${toneClass}`}
       >
         {children}

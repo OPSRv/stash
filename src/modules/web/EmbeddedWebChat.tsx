@@ -8,6 +8,7 @@ import { userAgentFor } from '../../shared/browserUA';
 import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 import { MoreHorizontalIcon } from '../../shared/ui/icons';
+import { IconButton } from '../../shared/ui/IconButton';
 import { Tooltip } from '../../shared/ui/Tooltip';
 import { Input } from '../../shared/ui/Input';
 import { useToast } from '../../shared/ui/Toast';
@@ -455,28 +456,34 @@ export const EmbeddedWebChat = ({
         className="px-2 py-1.5 flex items-center gap-1 border-b hair"
         style={{ background: 'var(--color-bg)' }}
       >
-        <NavIconButton onClick={goBack} title="Back (⌘[)" ariaLabel="Back">
-          <path d="M9 2 L4 7 L9 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </NavIconButton>
-        <NavIconButton onClick={goForward} title="Forward (⌘])" ariaLabel="Forward">
-          <path d="M5 2 L10 7 L5 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-        </NavIconButton>
-        <NavIconButton
+        <IconButton onClick={goBack} title="Back (⌘[)" tooltipSide="bottom">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M9 2 L4 7 L9 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </IconButton>
+        <IconButton onClick={goForward} title="Forward (⌘])" tooltipSide="bottom">
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path d="M5 2 L10 7 L5 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </IconButton>
+        <IconButton
           onClick={() => {
             reload().catch(() => {});
           }}
           title="Reload (⌘R)"
-          ariaLabel="Reload"
+          tooltipSide="bottom"
         >
-          <path
-            d="M11.5 4.5 A4 4 0 1 0 12 8"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-          <path d="M11.5 2 V5 H8.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </NavIconButton>
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+            <path
+              d="M11.5 4.5 A4 4 0 1 0 12 8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+            <path d="M11.5 2 V5 H8.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </IconButton>
 
         <div
           className="flex-1 min-w-0 mx-1 flex items-center rounded-md"
@@ -524,17 +531,13 @@ export const EmbeddedWebChat = ({
           )}
         </div>
 
-        <Tooltip label="More" side="bottom">
-          <button
-            type="button"
-            aria-label="More actions"
-            aria-haspopup="menu"
-            onClick={(e) => void openOverflowMenu(e.currentTarget)}
-            className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
-          >
-            <MoreHorizontalIcon />
-          </button>
-        </Tooltip>
+        <IconButton
+          title="More actions"
+          tooltipSide="bottom"
+          onClick={(e) => void openOverflowMenu(e.currentTarget as HTMLElement)}
+        >
+          <MoreHorizontalIcon />
+        </IconButton>
       </div>
       <div
         ref={sizerRef}
@@ -574,29 +577,4 @@ export const EmbeddedWebChat = ({
     </div>
   );
 };
-
-const NavIconButton = ({
-  onClick,
-  title,
-  ariaLabel,
-  children,
-}: {
-  onClick: () => void;
-  title: string;
-  ariaLabel: string;
-  children: React.ReactNode;
-}) => (
-  <Tooltip label={title} side="bottom">
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      className="w-7 h-7 rounded-md flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] transition-colors"
-    >
-      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-        {children}
-      </svg>
-    </button>
-  </Tooltip>
-);
 

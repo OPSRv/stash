@@ -96,15 +96,16 @@ export const TranslatorComposer = ({
             options={TARGET_LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
           />
         </div>
-        <button
-          type="button"
+        <Button
+          variant="outline"
+          tone="neutral"
+          size="sm"
           onClick={onToggleHistory}
-          className="input-field ring-focus rounded-md px-2 py-1 text-meta inline-flex items-center gap-1.5"
           title="Show history"
           aria-label="Show translation history"
+          leadingIcon={<HistoryIcon size={12} />}
         >
-          <HistoryIcon size={12} />
-          <span>History</span>
+          History
           {historyCount > 0 && (
             <span
               className="text-meta rounded-full px-1.5 leading-[1.2]"
@@ -116,7 +117,7 @@ export const TranslatorComposer = ({
               {historyCount}
             </span>
           )}
-        </button>
+        </Button>
       </div>
 
       <div className="mx-3 mb-2 grid grid-cols-2 grid-rows-1 gap-2 flex-1 min-h-0">
@@ -124,15 +125,13 @@ export const TranslatorComposer = ({
           <div className="flex items-center justify-between mb-1">
             <SectionLabel>{fromLabel}</SectionLabel>
             {hasDraft && (
-              <button
-                type="button"
+              <IconButton
                 onClick={onClearDraft}
-                className="t-tertiary hover:t-primary text-meta ring-focus rounded"
                 title="Clear (Esc)"
-                aria-label="Clear source"
+                tooltipSide="bottom"
               >
                 <CloseIcon size={12} />
-              </button>
+              </IconButton>
             )}
           </div>
           <Textarea

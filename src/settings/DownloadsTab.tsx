@@ -76,20 +76,13 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
         description={settings.downloadsFolder ?? 'Default: ~/Movies/Stash'}
         control={
           <div className="flex items-center gap-2">
-            <button
-              onClick={pickFolder}
-              className="px-3 py-1 rounded-md t-primary text-meta"
-              style={{ background: 'rgba(255,255,255,0.06)' }}
-            >
+            <Button size="sm" onClick={pickFolder}>
               Choose…
-            </button>
+            </Button>
             {settings.downloadsFolder && (
-              <button
-                onClick={() => onChange('downloadsFolder', null)}
-                className="t-tertiary text-meta hover:t-secondary"
-              >
+              <Button size="sm" tone="neutral" onClick={() => onChange('downloadsFolder', null)}>
                 Reset
-              </button>
+              </Button>
             )}
           </div>
         }

@@ -10,6 +10,7 @@ import '@xterm/xterm/css/xterm.css';
 import './terminal-animations.css';
 
 import { Button } from '../../shared/ui/Button';
+import { IconButton } from '../../shared/ui/IconButton';
 import { CloseIcon, SearchIcon } from '../../shared/ui/icons';
 import { accent } from '../../shared/theme/accent';
 import { loadSettings } from '../../settings/store';
@@ -785,14 +786,13 @@ export const TerminalPane = ({
           <Button size="xs" variant="ghost" onClick={() => runSearch('next')}>
             Next
           </Button>
-          <button
-            type="button"
+          <IconButton
             onClick={closeSearch}
-            aria-label="Close search"
-            className="w-6 h-6 rounded-md flex items-center justify-center t-tertiary hover:t-primary hover:bg-white/[0.06]"
+            title="Close search"
+            tooltipSide="bottom"
           >
             <CloseIcon size={10} />
-          </button>
+          </IconButton>
         </div>
       )}
       {dead && (

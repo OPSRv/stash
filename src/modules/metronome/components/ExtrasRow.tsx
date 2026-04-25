@@ -1,3 +1,5 @@
+import { Button } from '../../../shared/ui/Button';
+import { IconButton } from '../../../shared/ui/IconButton';
 import { Toggle } from '../../../shared/ui/Toggle';
 import {
   BPM_MAX,
@@ -55,28 +57,30 @@ const StepperCell = ({
       }}
     >
       <div className="flex items-center justify-between gap-1">
-        <button
-          type="button"
+        <Button
+          size="xs"
+          shape="square"
           aria-label={`Decrease ${label}`}
           onClick={() => bump(-1)}
           disabled={value <= min}
-          className="w-5 h-5 flex items-center justify-center rounded t-tertiary hover:t-primary hover:bg-white/[0.08] disabled:opacity-30"
+          className="w-5 h-5"
         >
           −
-        </button>
+        </Button>
         <span className="t-primary text-body font-medium tabular-nums">
           {value}
           {unit ? <span className="t-tertiary text-meta ml-0.5">{unit}</span> : null}
         </span>
-        <button
-          type="button"
+        <Button
+          size="xs"
+          shape="square"
           aria-label={`Increase ${label}`}
           onClick={() => bump(1)}
           disabled={value >= max}
-          className="w-5 h-5 flex items-center justify-center rounded t-tertiary hover:t-primary hover:bg-white/[0.08] disabled:opacity-30"
+          className="w-5 h-5"
         >
           +
-        </button>
+        </Button>
       </div>
       <span className="t-tertiary text-meta uppercase tracking-wider text-center mt-0.5">
         {label}
@@ -191,14 +195,14 @@ export const ExtrasRow = ({ state, onPatch }: Props) => {
             {presets.length ? 'Click a chip to apply' : 'Save your current settings'}
           </span>
         </div>
-        <button
-          type="button"
+        <Button
+          size="sm"
           onClick={saveCurrent}
           data-testid="preset-save"
           className="metro-save-preset shrink-0"
         >
           + Save current
-        </button>
+        </Button>
         <div
           className="flex items-center gap-1.5 overflow-x-auto nice-scroll flex-1 min-w-0"
           data-testid="preset-chips"
@@ -208,23 +212,23 @@ export const ExtrasRow = ({ state, onPatch }: Props) => {
               key={p.id}
               className="metro-preset-chip group gap-0.5"
             >
-              <button
-                type="button"
+              <Button
+                size="xs"
                 onClick={() => applyPreset(p)}
-                className="pl-2.5 pr-1 py-0.5 text-meta t-primary tabular-nums"
+                className="pl-2.5 pr-1 py-0.5"
                 data-testid={`preset-chip-${p.id}`}
               >
                 {p.name}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <IconButton
                 onClick={() => deletePreset(p.id)}
-                aria-label={`Delete preset ${p.name}`}
-                className="w-4 h-4 mr-1 rounded-full t-tertiary hover:t-primary hover:bg-white/[0.12] text-[10px] leading-none flex items-center justify-center"
+                title={`Delete preset ${p.name}`}
+                tone="danger"
+                tooltipSide="top"
                 data-testid={`preset-delete-${p.id}`}
               >
                 ×
-              </button>
+              </IconButton>
             </div>
           ))}
           {!presets.length && (

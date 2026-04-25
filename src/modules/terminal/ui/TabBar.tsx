@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { IconButton } from '../../../shared/ui/IconButton';
 import { Tooltip } from '../../../shared/ui/Tooltip';
 
 import { MAX_TABS, type DropPosition, type Tab } from '../types';
@@ -209,54 +210,35 @@ export const TabBar = ({
                   />
                 )}
               {tabs.length > 1 && (
-                <Tooltip label="Close tab" side="bottom">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onClose(t.id);
-                    }}
-                    aria-label={`Close ${label}`}
-                    className="w-4 h-4 flex items-center justify-center rounded-sm t-tertiary opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:t-primary hover:bg-white/[0.08] shrink-0"
-                    style={{
-                      fontSize: 12,
-                      lineHeight: 1,
-                      opacity: active ? 1 : undefined,
-                    }}
+                <span
+                  className={`shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity${active ? ' !opacity-100' : ''}`}
+                >
+                  <IconButton
+                    onClick={() => onClose(t.id)}
+                    title={`Close ${label}`}
+                    tooltipSide="bottom"
+                    data-testid={`terminal-tab-close-${t.id}`}
                   >
                     ×
-                  </button>
-                </Tooltip>
+                  </IconButton>
+                </span>
               )}
             </div>
           );
         })}
-        <Tooltip
-          label={
+        <IconButton
+          onClick={onAdd}
+          disabled={tabs.length >= MAX_TABS}
+          title={
             tabs.length >= MAX_TABS
               ? `Max ${MAX_TABS} tabs`
               : 'New shell (open another terminal session)'
           }
-          side="bottom"
-        >
-        <button
-          type="button"
-          onClick={onAdd}
-          disabled={tabs.length >= MAX_TABS}
-          aria-label="New shell"
-          className="shrink-0 flex items-center justify-center t-tertiary hover:t-primary hover:bg-white/[0.08] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
-          style={{
-            width: 28,
-            height: 'auto',
-            fontSize: 16,
-            lineHeight: 1,
-            alignSelf: 'stretch',
-          }}
+          tooltipSide="bottom"
           data-testid="terminal-tab-new"
         >
           +
-        </button>
-        </Tooltip>
+        </IconButton>
       </div>
       <div
         className="terminal-tabbar-fade terminal-tabbar-fade-left"

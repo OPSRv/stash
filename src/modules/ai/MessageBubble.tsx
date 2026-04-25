@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { accent } from '../../shared/theme/accent';
+import { Button } from '../../shared/ui/Button';
 import { LazyMarkdown } from '../../shared/ui/LazyMarkdown';
 import { copyText } from '../../shared/util/clipboard';
 
@@ -43,15 +44,16 @@ export const MessageBubble = ({ message, showStoppedHint = true }: Props) => {
         {message.stopped && showStoppedHint && (
           <div className="t-tertiary text-meta italic mt-1">(stopped)</div>
         )}
-        <button
-          type="button"
+        <Button
+          size="xs"
+          variant="solid"
+          tone="neutral"
           onClick={onCopy}
           aria-label="Copy message"
-          className="absolute -top-2 -right-2 text-meta px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-          style={{ background: 'rgba(0,0,0,0.45)', color: 'white' }}
+          className="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
         >
           {copied ? 'Copied' : 'Copy'}
-        </button>
+        </Button>
       </div>
     </div>
   );

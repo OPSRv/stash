@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamText } from 'ai';
 
 import { Button } from '../../shared/ui/Button';
+import { Textarea } from '../../shared/ui/Textarea';
 import { Tooltip } from '../../shared/ui/Tooltip';
 import { CloseIcon, SendToAiIcon, StopCircleIcon } from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
@@ -281,7 +282,8 @@ export const NoteAiBar = ({
           </Tooltip>
         </div>
       </div>
-      <textarea
+      <Textarea
+        bare
         ref={textareaRef}
         value={input}
         onChange={(e) => setInput(e.currentTarget.value)}
@@ -309,7 +311,7 @@ export const NoteAiBar = ({
         disabled={!aiReady || isStreaming}
         rows={2}
         maxLength={8000}
-        className="w-full resize-none rounded-md px-2 py-1.5 text-body outline-none t-primary nice-scroll"
+        className="w-full resize-none rounded-md px-2 py-1.5 text-body t-primary nice-scroll"
         style={{
           // Dark recess matching Terminal's compose textarea.
           background: 'rgba(0, 0, 0, 0.28)',

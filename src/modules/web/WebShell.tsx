@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 import { saveSetting, type WebChatService } from '../../settings/store';
+import { IconButton } from '../../shared/ui/IconButton';
 import { Input } from '../../shared/ui/Input';
 import { Tooltip } from '../../shared/ui/Tooltip';
 import { useToast } from '../../shared/ui/Toast';
@@ -602,16 +603,14 @@ export const WebShell = () => {
           </Tooltip>
         )}
         {!isRenaming && !collapsed && (
-          <>
-            <Tooltip label="Copy URL (⌘⇧C)" side="right">
-            <button
-              type="button"
-              aria-label={`Copy URL of ${s.label}`}
+          <div className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            <IconButton
               onClick={(e) => {
                 e.stopPropagation();
                 copyServiceUrl(s).catch(() => {});
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:t-primary px-1.5 py-1 rounded-md transition-opacity"
+              title={`Copy URL of ${s.label} (⌘⇧C)`}
+              tooltipSide="right"
             >
               <svg
                 width="12"
@@ -629,22 +628,21 @@ export const WebShell = () => {
                 <path d="M12 3a10 10 0 0 1 0 18" />
                 <path d="M12 3a10 10 0 0 0 0 18" />
               </svg>
-            </button>
-            </Tooltip>
-            <Tooltip label={`Close ${s.label} (free RAM; reopens on click)`} side="right">
-            <button
-              type="button"
-              aria-label={`Close ${s.label}`}
+            </IconButton>
+            <IconButton
               onClick={(e) => {
                 e.stopPropagation();
                 closeService(s.id).catch(() => {});
               }}
-              className="opacity-0 group-hover:opacity-100 focus:opacity-100 t-tertiary hover:text-red-400 px-1.5 py-1 mr-0.5 rounded-md text-meta transition-opacity"
+              title={`Close ${s.label} (free RAM; reopens on click)`}
+              tone="danger"
+              tooltipSide="right"
             >
-              ×
-            </button>
-            </Tooltip>
-          </>
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                <path d="M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5" />
+              </svg>
+            </IconButton>
+          </div>
         )}
         {indicatorSide && (
           <span
