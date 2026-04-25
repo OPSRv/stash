@@ -34,22 +34,23 @@ pub fn diarize_samples(
 ) -> Result<Vec<SpeakerSegment>, String> {
     // sherpa-onnx's clustering treats `num_clusters > 0` as "force
     // exactly K speakers" and `<= 0` as "auto via threshold". sherpa-rs
-    // 0.6 maps `None` to `4` via its own `unwrap_or(4)`, which silently
-    // pins everything to four fixed clusters and then collapses most
-    // recordings to one identity. Pass `-1` explicitly to opt back
-    // into threshold-based clustering.
+    // 0.6 maps `None` to `4` via its own `unwrap_or(4)`, which would
+    // silently pin every recording to four clusters; pass `-1`
+    // explicitly to opt into threshold-based clustering.
     //
-    // Threshold of 0.5 is the upstream default; lower values split
-    // more aggressively. 0.4 is a small step in that direction —
-    // enough to separate close-but-clearly-distinct voices on short
-    // recordings without producing nonsense splits inside a single
-    // speaker's longer utterance.
+    // The threshold is a *cosine-distance* upper bound for merging:
+    // higher = more lenient merge = fewer distinct speakers, lower =
+    // stricter = more speakers. Upstream default is 0.5; for the
+    // expressive Ukrainian / English voices Stash sees in practice
+    // that's a touch too low and over-splits a 2-person recording
+    // into 3-4 clusters. 0.6 holds the same conversation together
+    // without merging genuinely different voices.
     let mut d = Diarize::new(
         segmentation_model,
         embedding_model,
         DiarizeConfig {
             num_clusters: Some(-1),
-            threshold: Some(0.4),
+            threshold: Some(0.6),
             // Pyannote returns very short fragments around silence —
             // requiring at least 0.3 s of speech and 0.5 s of silence
             // before a turn break stops the diarizer from churning
