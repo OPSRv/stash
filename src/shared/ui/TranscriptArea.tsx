@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 
 import { Button } from './Button';
+import { IconButton } from './IconButton';
+import { PencilIcon } from './icons';
 import { Spinner } from './Spinner';
 import { Textarea } from './Textarea';
 
@@ -104,29 +106,27 @@ export const TranscriptArea = ({
 
       {/* ── Transcript read-only view ──────────────────────────────── */}
       {transcript && !editing && (
-        <div className="flex items-start gap-2 group/transcript">
+        <div className="relative group/transcript w-full">
           {/* `max-h` + `overflow-y-auto` so a 10-minute lecture
               transcript scrolls inside its bubble instead of pushing
               the surrounding layout off-screen. The shared
               `nice-scroll` skin keeps the bar from looking macOS-12
               chunky. */}
           <p
-            className="flex-1 min-w-0 max-h-[260px] overflow-y-auto nice-scroll text-body text-white/90 whitespace-pre-wrap bg-white/3 rounded-md px-3 py-2 border border-white/5"
+            className="w-full max-h-[260px] overflow-y-auto nice-scroll text-body text-white/90 whitespace-pre-wrap bg-white/3 rounded-md px-3 py-2 border border-white/5"
             onDoubleClick={() => onEdit && setEditing(true)}
             title={onEdit ? 'Double-click to edit' : undefined}
           >
             {transcript}
           </p>
           {onEdit && (
-            <div className="opacity-0 group-hover/transcript:opacity-100 focus-within:opacity-100 transition-opacity mt-1">
-              <Button
-                size="xs"
-                variant="ghost"
+            <div className="absolute top-1 right-1 opacity-0 group-hover/transcript:opacity-100 focus-within:opacity-100 transition-opacity">
+              <IconButton
                 onClick={() => setEditing(true)}
-                aria-label={labels.edit}
+                title={labels.edit}
               >
-                edit
-              </Button>
+                <PencilIcon size={12} />
+              </IconButton>
             </div>
           )}
         </div>

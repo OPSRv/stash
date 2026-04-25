@@ -356,14 +356,20 @@ const WaveformDisplay = ({
 
   return (
     <div
-      className={`my-3 rounded-lg px-3 py-2.5 flex items-center gap-3 w-full ${className ?? ''}`}
+      className={`my-3 rounded-lg px-3 py-2.5 flex flex-col gap-2 w-full ${className ?? ''}`}
       style={{
         background: accent(0.08),
         border: `1px solid ${accent(0.22)}`,
       }}
       data-testid="audio-waveform"
     >
-      <div className="shrink-0">
+      {caption && (
+        <div className="flex items-center gap-2 t-secondary text-meta">
+          <WaveformIcon size={12} className="shrink-0" />
+          <span className="truncate flex-1">{caption}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-3">
         <IconButton
           onClick={onToggle}
           title={
@@ -380,17 +386,8 @@ const WaveformDisplay = ({
         >
           {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
         </IconButton>
-      </div>
-      <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-        <div className="flex items-center gap-2 t-secondary text-meta">
-          <WaveformIcon size={12} />
-          <span className="truncate flex-1">{caption || 'audio'}</span>
-          <span className="tabular-nums shrink-0">
-            {fmt(current)} / {duration > 0 ? fmt(duration) : '…'}
-          </span>
-        </div>
         <div
-          className="flex items-end gap-[2px] h-10 cursor-pointer select-none overflow-hidden"
+          className="flex-1 min-w-0 flex items-end gap-[2px] h-10 cursor-pointer select-none overflow-hidden"
           aria-hidden
           onPointerDown={onDown}
           onPointerMove={onMove}
@@ -412,19 +409,22 @@ const WaveformDisplay = ({
             );
           })}
         </div>
-        {loadError && (
-          <span
-            className="text-meta truncate"
-            style={{ color: 'rgba(239, 68, 68, 0.95)' }}
-            title={`${loadError}\n\nsrc: ${src}`}
-          >
-            Can&rsquo;t load audio: {loadError}
-          </span>
-        )}
-        {!ready && !loadError && (
-          <span className="t-tertiary text-meta">Loading audio…</span>
-        )}
+        <span className="tabular-nums shrink-0 t-secondary text-meta">
+          {fmt(current)} / {duration > 0 ? fmt(duration) : '…'}
+        </span>
       </div>
+      {loadError && (
+        <span
+          className="text-meta truncate"
+          style={{ color: 'rgba(239, 68, 68, 0.95)' }}
+          title={`${loadError}\n\nsrc: ${src}`}
+        >
+          Can&rsquo;t load audio: {loadError}
+        </span>
+      )}
+      {!ready && !loadError && (
+        <span className="t-tertiary text-meta">Loading audio…</span>
+      )}
       {children}
     </div>
   );

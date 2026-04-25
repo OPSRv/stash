@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
 import { Button } from '../shared/ui/Button';
+import { accent } from '../shared/theme/accent';
 import {
   setCookiesBrowser,
   setDownloadsDir,
@@ -281,9 +282,16 @@ export const SettingsShell = () => {
               size="sm"
               variant="ghost"
               fullWidth
-              className={`!justify-start gap-2 text-meta font-medium cursor-pointer ${
-                isActive ? 't-primary !bg-white/[0.06]' : 't-secondary'
+              className={`relative !justify-start gap-2 text-meta font-medium cursor-pointer ${
+                isActive
+                  ? 'pl-3 before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r before:bg-[var(--stash-accent)]'
+                  : 't-secondary'
               }`}
+              style={
+                isActive
+                  ? { background: accent(0.14), color: 'var(--stash-accent)' }
+                  : undefined
+              }
               leadingIcon={t.icon}
             >
               {t.label}

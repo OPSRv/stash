@@ -12,6 +12,8 @@ type SelectProps<T extends string> = {
   disabled?: boolean;
   /** Where the popup opens. `auto` flips up when there isn't enough room below. */
   placement?: 'bottom' | 'top' | 'auto';
+  /** Trigger size. `sm` matches inline header controls (text-meta, h-7). */
+  size?: 'sm' | 'md';
 };
 
 export const Select = <T extends string>({
@@ -22,6 +24,7 @@ export const Select = <T extends string>({
   placeholder,
   disabled,
   placement = 'bottom',
+  size = 'md',
 }: SelectProps<T>) => {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -155,7 +158,11 @@ export const Select = <T extends string>({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={onTriggerKey}
-        className="input-field ring-focus rounded-md h-9 pl-2.5 pr-2 text-body inline-flex items-center gap-2 min-w-[120px] text-left disabled:opacity-40 disabled:cursor-not-allowed"
+        className={`input-field ring-focus rounded-md inline-flex items-center gap-2 text-left disabled:opacity-40 disabled:cursor-not-allowed ${
+          size === 'sm'
+            ? 'h-7 pl-2 pr-1.5 text-meta min-w-[88px]'
+            : 'h-9 pl-2.5 pr-2 text-body min-w-[120px]'
+        }`}
       >
         <span className="truncate flex-1">{selected?.label ?? placeholder ?? ''}</span>
         <ChevronIcon open={open} />
@@ -167,9 +174,9 @@ export const Select = <T extends string>({
           role="listbox"
           tabIndex={-1}
           onKeyDown={onListKey}
-          className={`select-popup absolute z-50 left-0 min-w-full max-h-60 overflow-y-auto nice-scroll rounded-md py-1 text-body outline-none ${
-            resolvedPlacement === 'top' ? 'bottom-full mb-1' : 'mt-1'
-          }`}
+          className={`select-popup absolute z-50 left-0 min-w-full max-h-60 overflow-y-auto nice-scroll rounded-md py-1 outline-none ${
+            size === 'sm' ? 'text-meta' : 'text-body'
+          } ${resolvedPlacement === 'top' ? 'bottom-full mb-1' : 'mt-1'}`}
           style={{ minWidth: triggerRef.current?.offsetWidth }}
         >
           {options.map((o, idx) => {
@@ -186,7 +193,9 @@ export const Select = <T extends string>({
                   e.preventDefault(); // keep focus on list
                   commit(idx);
                 }}
-                className="px-2.5 py-1 cursor-pointer flex items-center gap-2"
+                className={`cursor-pointer flex items-center gap-2 ${
+                  size === 'sm' ? 'px-2 py-0.5' : 'px-2.5 py-1'
+                }`}
                 style={{
                   background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
                 }}

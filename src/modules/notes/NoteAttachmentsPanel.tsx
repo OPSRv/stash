@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 import { AudioPlayer } from '../../shared/ui/AudioPlayer';
+import { Badge } from '../../shared/ui/Badge';
 import { Button } from '../../shared/ui/Button';
 import { FileChip, formatBytes } from '../../shared/ui/FileChip';
 import { IconButton } from '../../shared/ui/IconButton';
@@ -263,54 +264,106 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
           // Other kinds (image / video / file) keep flex-wrap'ing so
           // a few small items can sit side-by-side.
           const fullRow = kindOf(a) === 'audio';
-          return (
-          <li
-            key={a.id}
-            className={`group relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center ${
-              fullRow ? 'w-full' : ''
-            }`}
-          >
-            <AttachmentBody
+          const actions = (
+            <AttachmentActions
+              item={a}
+              busy={busy}
+              onEmbedMarkdown={onEmbedMarkdown}
+              onRemove={remove}
+            />
+          );
+          if (fullRow) {
+            return (
+              <li
+                key={a.id}
+                className="group w-full rounded-lg border border-white/8 bg-white/3 px-3 py-2.5 flex flex-col gap-2"
+              >
+                <div className="flex items-center gap-2">
+                  <Badge color="#4A8BEA" bg="#4A8BEA1a" className="uppercase tracking-wider">
+                    Audio
+                  </Badge>
+                  <span
+                    className="t-secondary text-meta truncate min-w-0 flex-1"
+                    title={a.original_name}
+                  >
+                    {a.original_name || basename(a.file_path)}
+                  </span>
+                  <span className="t-tertiary text-meta tabular-nums shrink-0">
+                    {formatBytes(a.size_bytes)}
+                  </span>
+                  <div className="ml-1 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    {actions}
+                  </div>
+                </div>
+                <AttachmentBody
                   item={a}
                   onRefreshAndGetTranscription={onRefreshAndGetTranscription}
                 />
-            <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-              {onEmbedMarkdown && (
-                <IconButton
-                  title="Embed in note body as markdown"
-                  onClick={() => onEmbedMarkdown(markdownForAttachment(a))}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M4 6h16M4 12h10M4 18h16" />
-                  </svg>
-                </IconButton>
-              )}
-              <IconButton
-                title="Reveal in Finder"
-                onClick={() => void revealInFinder(a.file_path)}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
-                </svg>
-              </IconButton>
-              <IconButton
-                title="Remove attachment"
-                tone="danger"
-                onClick={() => void remove(a.id)}
-                disabled={busy}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6" />
-                </svg>
-              </IconButton>
-            </div>
-          </li>
-        );
+              </li>
+            );
+          }
+          return (
+            <li
+              key={a.id}
+              className="group relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center"
+            >
+              <AttachmentBody
+                item={a}
+                onRefreshAndGetTranscription={onRefreshAndGetTranscription}
+              />
+              <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                {actions}
+              </div>
+            </li>
+          );
         })}
       </ul>
     </div>
   );
 };
+
+const AttachmentActions = ({
+  item,
+  busy,
+  onEmbedMarkdown,
+  onRemove,
+}: {
+  item: NoteAttachment;
+  busy: boolean;
+  onEmbedMarkdown?: (snippet: string) => void;
+  onRemove: (id: number) => Promise<void> | void;
+}) => (
+  <>
+    {onEmbedMarkdown && (
+      <IconButton
+        title="Embed in note body as markdown"
+        onClick={() => onEmbedMarkdown(markdownForAttachment(item))}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M4 6h16M4 12h10M4 18h16" />
+        </svg>
+      </IconButton>
+    )}
+    <IconButton
+      title="Reveal in Finder"
+      onClick={() => void revealInFinder(item.file_path)}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
+      </svg>
+    </IconButton>
+    <IconButton
+      title="Remove attachment"
+      tone="danger"
+      onClick={() => void onRemove(item.id)}
+      disabled={busy}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M6 6v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V6" />
+      </svg>
+    </IconButton>
+  </>
+);
 
 const AttachmentBody = ({
   item,
@@ -402,13 +455,8 @@ const AudioAttachmentBody = ({
   });
 
   return (
-    <div className="px-3 py-2 w-full flex flex-col gap-2">
-      <div className="flex flex-col gap-1">
-        <AudioPlayer src={item.file_path} caption={item.original_name} />
-        <div className="text-[10px] text-white/40 font-mono tabular-nums">
-          {formatBytes(item.size_bytes)}
-        </div>
-      </div>
+    <div className="w-full flex flex-col gap-2">
+      <AudioPlayer src={item.file_path} />
       <TranscriptArea
         transcript={transcript}
         transcribing={status === 'running'}

@@ -93,6 +93,7 @@ export const TranslatorComposer = ({
             label="Target language"
             value={target}
             onChange={onTargetChange}
+            size="sm"
             options={TARGET_LANGUAGES.map((l) => ({ value: l.code, label: l.label }))}
           />
         </div>

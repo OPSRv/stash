@@ -25,7 +25,7 @@ export const CompletedList = ({
   // explains *why* instead of making users wonder.
   const busy = extractingId != null;
   return (
-    <div className="mx-3 rounded-xl overflow-hidden border border-white/[0.05]">
+    <div className="mx-3 rounded-xl border border-white/[0.05]">
       {jobs.map((job, i) => {
         const isMe = extractingId === job.id;
         return (
