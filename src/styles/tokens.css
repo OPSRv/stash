@@ -842,6 +842,36 @@
 
 }
 
+/* Music tab equalizer animation — 3 staggered bars that bounce when playing.
+   Anchored at the bottom via transform-origin so all bars share a baseline. */
+@keyframes music-eq-bounce {
+  0%, 100% { transform: scaleY(0.25); }
+  50%       { transform: scaleY(1); }
+}
+
+.music-eq-bar {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  transform: scaleY(0.4);
+}
+
+[data-playing="true"] .music-eq-bar-1 {
+  animation: music-eq-bounce 0.7s ease-in-out infinite;
+}
+[data-playing="true"] .music-eq-bar-2 {
+  animation: music-eq-bounce 0.7s ease-in-out 0.18s infinite;
+}
+[data-playing="true"] .music-eq-bar-3 {
+  animation: music-eq-bounce 0.7s ease-in-out 0.36s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-playing="true"] .music-eq-bar {
+    animation: none;
+    transform: scaleY(0.8);
+  }
+}
+
 /* Scrollbars — thin, theme-tinted, unlayered so they beat any lingering UA
    or layered rule. `html` prefix gives them non-zero specificity. */
 html ::-webkit-scrollbar,

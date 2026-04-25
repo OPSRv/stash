@@ -525,6 +525,7 @@ export const PopupShell = () => {
                 <span
                   className="inline-flex"
                   style={{ color: TAB_ICON_COLORS[m.id] ?? 'currentColor' }}
+                  data-playing={m.id === 'music' && nowPlaying?.playing ? 'true' : undefined}
                 >
                   {TAB_ICONS[m.id]}
                 </span>

@@ -108,20 +108,20 @@ export const TAB_ICONS: Record<string, ReactNode> = {
     </svg>
   ),
   music: (
+    /* Three equalizer bars. When the parent span has data-playing="true",
+       CSS in tokens.css drives a staggered scaleY animation (each bar at a
+       different phase). No motion when prefers-reduced-motion is set. */
     <svg
       width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      height="8"
+      viewBox="0 0 18 12"
+      fill="currentColor"
       aria-hidden
+      className="music-eq"
     >
-      <path d="M9 17V5l11-2v12" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="17" cy="15" r="3" />
+      <rect className="music-eq-bar music-eq-bar-1" x="0" y="0" width="4" height="12" rx="1" />
+      <rect className="music-eq-bar music-eq-bar-2" x="7" y="0" width="4" height="12" rx="1" />
+      <rect className="music-eq-bar music-eq-bar-3" x="14" y="0" width="4" height="12" rx="1" />
     </svg>
   ),
   metronome: (
