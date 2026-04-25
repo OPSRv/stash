@@ -971,12 +971,15 @@ code,
 .md-body h4, .md-body h5, .md-body h6,
 .notes-md h4, .notes-md h5, .notes-md h6 { font-size: 13px; font-weight: 600; margin: 6px 0 2px; }
 .md-body p, .notes-md p { margin: 6px 0; }
-.md-body ul, .md-body ol, .notes-md ul, .notes-md ol { margin: 4px 0; padding-left: 20px; }
-.md-body ul, .notes-md ul { list-style: disc; }
-.md-body ol, .notes-md ol { list-style: decimal; }
+.md-body ul, .md-body ol, .notes-md ul, .notes-md ol { margin: 4px 0; padding-left: 1.5em; }
+.md-body ul, .notes-md ul { list-style-type: disc; }
+/* Explicit list-style-type (not shorthand) + counter-reset ensures decimal markers
+   render correctly in WebKit even when Tailwind v4 preflight resets list-style. */
+.md-body ol, .notes-md ol { list-style-type: decimal; counter-reset: list-item; }
+.md-body ol li, .notes-md ol li { counter-increment: list-item; }
 .md-body li, .notes-md li { margin: 2px 0; }
 .md-body li.task-list-item,
-.notes-md li.task-list-item { list-style: none; margin-left: -18px; display: flex; align-items: flex-start; gap: 8px; }
+.notes-md li.task-list-item { list-style: none; margin-left: -1.25em; display: flex; align-items: flex-start; gap: 8px; }
 .md-body li.task-list-item input[type="checkbox"],
 .notes-md li.task-list-item input[type="checkbox"] { margin-top: 4px; }
 .md-body blockquote, .notes-md blockquote {

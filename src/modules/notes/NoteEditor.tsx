@@ -125,15 +125,31 @@ const applyAction = (
   const endBoundary = source.indexOf('\n', selectionEnd);
   const lineEnd = endBoundary === -1 ? source.length : endBoundary;
   const slab = source.slice(lineStart, lineEnd);
-  const updated = slab
-    .split('\n')
-    .map((line) => (line.startsWith(action.prefix) ? line : action.prefix + line))
-    .join('\n');
+  // Matches any list prefix so clicking a list button on a line that already
+  // has a DIFFERENT list type replaces the marker rather than prepending to it.
+  const anyListPrefixRe = /^(\s*)(- \[ \] |- \[x\] |- |\* |\d+\. )/i;
+  // For ordered prefixes (`1. `) accept any `\d+. ` as "already has it".
+  const isOrdered = /^\d+\. $/.test(action.prefix);
+  const hasPrefix = (l: string) => isOrdered ? /^\d+\. /.test(l) : l.startsWith(action.prefix);
+  const lines = slab.split('\n');
+  const allHave = lines.every(hasPrefix);
+  const updatedLines = lines.map((line) => {
+    if (allHave) {
+      const m = anyListPrefixRe.exec(line);
+      return m ? m[1] + line.slice(m[0].length) : line;
+    }
+    if (hasPrefix(line)) return line;
+    const m = anyListPrefixRe.exec(line);
+    if (m) return m[1] + action.prefix + line.slice(m[0].length);
+    return action.prefix + line;
+  });
+  const updated = updatedLines.join('\n');
   const next = source.slice(0, lineStart) + updated + source.slice(lineEnd);
   const delta = updated.length - slab.length;
+  const firstLineDelta = updatedLines[0].length - lines[0].length;
   return {
     next,
-    selStart: selectionStart + action.prefix.length,
+    selStart: Math.max(lineStart, selectionStart + firstLineDelta),
     selEnd: selectionEnd + delta,
   };
 };
