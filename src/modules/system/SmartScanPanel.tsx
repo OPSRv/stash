@@ -117,7 +117,7 @@ export const SmartScanPanel = () => {
           label: 'Local Time Machine snapshots',
           description: `${tmSnaps.length} snapshots taking up SSD space`,
           gradient: ['#d08cff', '#7a4bff'],
-          size: 0, // tmutil не віддає розмір; буде визначено по факту
+          size: 0, // tmutil does not report size; determined after cleanup
           enabled: tmSnaps.length > 0,
           selected: tmSnaps.length > 0,
           runClean: async () => {
@@ -153,7 +153,7 @@ export const SmartScanPanel = () => {
           label: 'Empty trash',
           description: 'All volumes · irreversible',
           gradient: ['#ff8a5b', '#ff3a6f'],
-          size: 0, // не знаємо заздалегідь (Finder рахує на запит)
+          size: 0, // unknown upfront (Finder calculates on demand)
           enabled: true,
           selected: false,
           runClean: async () => {

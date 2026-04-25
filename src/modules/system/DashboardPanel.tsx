@@ -460,7 +460,7 @@ export const DashboardPanel = () => {
 
       {/* Live network cards — one per active Wi-Fi/Ethernet interface. We
           hide them entirely when the first poll hasn't finished so the
-          user sees "Вільно…" placeholders only for the core 4 cards. */}
+          user sees loading placeholders only for the core 4 cards. */}
       {m && m.interfaces.length > 0 && (
         <>
           <div className="t-tertiary text-meta uppercase tracking-wider pt-1">
