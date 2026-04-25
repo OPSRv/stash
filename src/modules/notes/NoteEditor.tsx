@@ -33,6 +33,10 @@ type Props = {
   onTranslateResult?: (result: { ok: boolean; message?: string }) => void;
   /** ISO target language for the Translate button. Defaults to Ukrainian. */
   translateTarget?: string;
+  /** Called when the user presses ⌘Z — delegate to the parent's undo stack. */
+  onUndo?: () => void;
+  /** Called when the user presses ⌘⇧Z — delegate to the parent's redo stack. */
+  onRedo?: () => void;
 };
 
 type Action =
@@ -180,6 +184,8 @@ export const NoteEditor = ({
   textareaRef,
   onTranslateResult,
   translateTarget = 'uk',
+  onUndo,
+  onRedo,
 }: Props) => {
   const localRef = useRef<HTMLTextAreaElement | null>(null);
   const ref = textareaRef ?? localRef;
@@ -260,6 +266,12 @@ export const NoteEditor = ({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.metaKey || e.ctrlKey) {
       const key = e.key.toLowerCase();
+      if (key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) onRedo?.();
+        else onUndo?.();
+        return;
+      }
       if (key === 'b') {
         e.preventDefault();
         run(wrap('**', '**', 'bold'));

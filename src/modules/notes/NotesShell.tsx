@@ -1197,6 +1197,8 @@ export const NotesShell = () => {
                     onChange={onBodyChange}
                     placeholder="Write markdown — headings, lists, - [ ] checklists…"
                     textareaRef={editorRef}
+                    onUndo={handleUndo}
+                    onRedo={handleRedo}
                     onTranslateResult={(r) =>
                       r.ok
                         ? toast({ title: 'Translated', variant: 'success', durationMs: 1600 })
