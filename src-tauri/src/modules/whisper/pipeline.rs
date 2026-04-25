@@ -175,6 +175,66 @@ fn decode(path: &Path) -> Result<DecodedPcm, PipelineError> {
     })
 }
 
+/// Wrap [`decode`] with a macOS-only fallback: when symphonia rejects
+/// the codec (HE-AAC + SBR/PS, ALAC-in-mp4 and a few other Apple-only
+/// shapes that ship in TikTok / Instagram rips) we transcode through
+/// `afconvert` — built into every macOS — into a plain 16-bit WAV that
+/// symphonia decodes without complaint. Costs one temp file and a sub-
+/// second subprocess, only on the failure path.
+fn decode_with_macos_fallback(path: &Path) -> Result<DecodedPcm, PipelineError> {
+    match decode(path) {
+        Ok(pcm) => Ok(pcm),
+        Err(e) if should_try_afconvert(&e) => {
+            tracing::info!(
+                error = %e,
+                "symphonia rejected the container — retrying via afconvert"
+            );
+            let wav = afconvert_to_wav(path)?;
+            let result = decode(&wav);
+            let _ = std::fs::remove_file(&wav);
+            result
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Limit the fallback to errors that look like format/codec rejection;
+/// I/O errors and empty-file errors should bubble up as-is so we don't
+/// mask genuine failures with a slower retry.
+fn should_try_afconvert(e: &PipelineError) -> bool {
+    let msg = e.to_string().to_lowercase();
+    msg.contains("unsupported codec")
+        || msg.contains("unsupported feature")
+        || msg.contains("unsupported container")
+        || msg.contains("unknown sample rate")
+}
+
+/// Run `/usr/bin/afconvert` to transcode any Audio Toolbox-readable
+/// file to little-endian 16-bit WAV. Returns the path of the freshly
+/// written temp file — caller is responsible for removing it.
+fn afconvert_to_wav(path: &Path) -> Result<std::path::PathBuf, PipelineError> {
+    let temp = std::env::temp_dir().join(format!(
+        "stash-afconvert-{}-{}.wav",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let output = std::process::Command::new("/usr/bin/afconvert")
+        .args(["-f", "WAVE", "-d", "LEI16"])
+        .arg(path)
+        .arg(&temp)
+        .output()
+        .map_err(|e| PipelineError::Decode(format!("afconvert spawn: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PipelineError::Decode(format!(
+            "afconvert failed ({}): {}",
+            output.status,
+            stderr.trim()
+        )));
+    }
+    Ok(temp)
+}
+
 /// Peek the first few bytes to detect an OGG container carrying Opus.
 /// An Ogg page starts with `OggS`, and the first Opus packet carries
 /// an `OpusHead` magic 28 bytes into the first page. Reading 64 bytes
@@ -403,7 +463,7 @@ pub fn transcribe(
     n_threads: i32,
 ) -> Result<String, PipelineError> {
     silence_whisper_logs();
-    let pcm = decode(audio_path)?;
+    let pcm = decode_with_macos_fallback(audio_path)?;
     let samples = resample_to_16k(pcm)?;
 
     let ctx = WhisperContext::new_with_params(
@@ -458,6 +518,23 @@ mod tests {
     fn error_display_is_informative() {
         assert!(format!("{}", PipelineError::Empty).contains("no audio"));
         assert!(format!("{}", PipelineError::Io("x".into())).contains("x"));
+    }
+
+    #[test]
+    fn afconvert_fallback_only_triggers_on_format_errors() {
+        assert!(should_try_afconvert(&PipelineError::Decode(
+            "core (codec):unsupported codec".into()
+        )));
+        assert!(should_try_afconvert(&PipelineError::Decode(
+            "unsupported feature: HE-AAC v2".into()
+        )));
+        assert!(should_try_afconvert(&PipelineError::Decode(
+            "unknown sample rate".into()
+        )));
+        assert!(!should_try_afconvert(&PipelineError::Empty));
+        assert!(!should_try_afconvert(&PipelineError::Io(
+            "permission denied".into()
+        )));
     }
 
     fn write_tmp(bytes: &[u8]) -> std::path::PathBuf {
