@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ProcessesPanel } from './ProcessesPanel';
 import { Badge } from '../../shared/ui/Badge';
+import { IconButton } from '../../shared/ui/IconButton';
 import { Input } from '../../shared/ui/Input';
+import { SectionLabel } from '../../shared/ui/SectionLabel';
+import { PanelLeftIcon } from '../../shared/ui/icons';
 import { SmartScanPanel } from './SmartScanPanel';
 import { DockerPanel } from './DockerPanel';
 import { DisplaysPanel } from './DisplaysPanel';
@@ -264,9 +267,18 @@ const NavTile = ({
   </button>
 );
 
+const SIDEBAR_COLLAPSED_KEY = 'stash:system:sidebar-collapsed';
+
 export const SystemShell = () => {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [query, setQuery] = useState('');
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(() => {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch { return false; }
+  });
+  const setSidebarCollapsed = (v: boolean) => {
+    setSidebarCollapsedState(v);
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+  };
   const searchRef = useRef<HTMLInputElement | null>(null);
   const active = NAV.find((n) => n.id === tab) ?? NAV[0];
 
@@ -347,49 +359,92 @@ export const SystemShell = () => {
   return (
     <div className="flex h-full min-h-0">
       <aside
-        className="w-[176px] shrink-0 border-r hair flex flex-col"
+        className="relative shrink-0 border-r hair flex flex-col overflow-hidden transition-[width] duration-200 ease-out"
+        style={{ width: sidebarCollapsed ? 44 : 176 }}
         aria-label="System module sections"
       >
-        <div className="px-2 pt-2 pb-1">
-          <Input
-            ref={searchRef}
-            type="search"
-            role="searchbox"
-            size="sm"
-            placeholder="⌘F search…"
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
-          />
+        {/* Collapsed rail — expand button only */}
+        <div
+          className={`absolute inset-y-0 left-0 w-11 flex flex-col items-center py-2 gap-1 transition-opacity duration-150 ${
+            sidebarCollapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!sidebarCollapsed}
+        >
+          <IconButton
+            onClick={() => setSidebarCollapsed(false)}
+            title="Expand sidebar"
+            tooltipSide="right"
+          >
+            <PanelLeftIcon size={14} />
+          </IconButton>
+          {NAV.filter((n) => n.implemented).slice(0, 6).map((item) => (
+            <IconButton
+              key={item.id}
+              onClick={() => { setSidebarCollapsed(false); setTab(item.id); }}
+              title={item.label}
+              tooltipSide="right"
+              active={item.id === tab}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d={item.glyph} />
+              </svg>
+            </IconButton>
+          ))}
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-1.5 pb-2">
-          {groups.map((g) => {
-            const items = NAV.filter((n) => n.group === g).filter(
-              (n) => !filteredIds || filteredIds.has(n.id),
-            );
-            if (items.length === 0) return null;
-            return (
-              <div key={g} className="mb-2">
-                <div className="px-2 py-1 t-tertiary text-[10px] uppercase tracking-wider">
-                  {GROUP_LABEL[g]}
+
+        {/* Expanded panel */}
+        <div
+          className={`absolute inset-y-0 left-0 flex flex-col transition-opacity duration-150 ${
+            sidebarCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
+          }`}
+          style={{ width: 176 }}
+          aria-hidden={sidebarCollapsed}
+        >
+          <div className="px-1.5 pt-2 pb-1 flex items-center gap-1">
+            <Input
+              ref={searchRef}
+              type="search"
+              role="searchbox"
+              size="sm"
+              placeholder="⌘F search…"
+              value={query}
+              onChange={(e) => setQuery(e.currentTarget.value)}
+              className="flex-1"
+            />
+            <IconButton onClick={() => setSidebarCollapsed(true)} title="Collapse sidebar">
+              <PanelLeftIcon size={13} />
+            </IconButton>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-1.5 pb-2">
+            {groups.map((g) => {
+              const items = NAV.filter((n) => n.group === g).filter(
+                (n) => !filteredIds || filteredIds.has(n.id),
+              );
+              if (items.length === 0) return null;
+              return (
+                <div key={g} className="mb-2">
+                  <div className="px-2 py-1">
+                    <SectionLabel>{GROUP_LABEL[g]}</SectionLabel>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    {items.map((item) => (
+                      <NavTile
+                        key={item.id}
+                        item={item}
+                        active={item.id === tab}
+                        onClick={() => setTab(item.id)}
+                      />
+                    ))}
+                  </div>
                 </div>
-                <div className="flex flex-col gap-0.5">
-                  {items.map((item) => (
-                    <NavTile
-                      key={item.id}
-                      item={item}
-                      active={item.id === tab}
-                      onClick={() => setTab(item.id)}
-                    />
-                  ))}
-                </div>
+              );
+            })}
+            {filteredIds && filteredIds.size === 0 && (
+              <div className="px-2 py-3 t-tertiary text-meta">
+                Nothing found
               </div>
-            );
-          })}
-          {filteredIds && filteredIds.size === 0 && (
-            <div className="px-2 py-3 t-tertiary text-meta">
-              Nothing found
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </aside>
       <section className="flex-1 min-w-0 flex flex-col">{body}</section>
