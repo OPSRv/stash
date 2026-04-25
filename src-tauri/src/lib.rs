@@ -121,14 +121,17 @@ use modules::ai::{
 };
 use modules::clipboard::{
     commands::{
-        clipboard_clear, clipboard_copy_image_from_path, clipboard_copy_only,
-        clipboard_delete, clipboard_link_preview, clipboard_list, clipboard_paste,
-        clipboard_prune_files, clipboard_search, clipboard_set_transcription,
-        clipboard_toggle_pin, clipboard_transcribe_item, prune_orphan_file_rows,
-        save_file_to, ClipboardState, LinkPreviewState,
+        clipboard_clear, clipboard_copy_image_from_path, clipboard_copy_only, clipboard_delete,
+        clipboard_link_preview, clipboard_list, clipboard_paste, clipboard_prune_files,
+        clipboard_search, clipboard_set_transcription, clipboard_toggle_pin,
+        clipboard_transcribe_item, prune_orphan_file_rows, save_file_to, ClipboardState,
+        LinkPreviewState,
     },
     monitor::{ArboardReader, Monitor},
     repo::ClipboardRepo,
+};
+use modules::diarization::{
+    diarization_delete, diarization_download, diarization_status, DiarizationState,
 };
 use modules::downloader::{
     commands::{
@@ -152,9 +155,10 @@ use modules::notes::{
         notes_add_attachment, notes_create, notes_delete, notes_export_path, notes_get, notes_list,
         notes_list_attachments, notes_read_audio_path, notes_read_file, notes_read_image_path,
         notes_remove_attachment, notes_save_audio_bytes, notes_save_audio_file,
-        notes_save_image_bytes, notes_save_image_file, notes_search, notes_set_audio_transcription,
-        notes_set_attachment_transcription, notes_set_pinned, notes_transcribe_attachment,
-        notes_transcribe_note_audio, notes_update, notes_write_file, NotesState,
+        notes_save_image_bytes, notes_save_image_file, notes_search,
+        notes_set_attachment_transcription, notes_set_audio_transcription, notes_set_pinned,
+        notes_transcribe_attachment, notes_transcribe_note_audio, notes_update, notes_write_file,
+        NotesState,
     },
     repo::NotesRepo,
 };
@@ -183,17 +187,14 @@ use modules::system::commands::{
     system_scan_node_modules, system_set_display_brightness, system_set_display_hidden,
     system_sleep_displays, system_sleep_now, system_toggle_launch_agent, system_trash_path,
 };
-use modules::diarization::{
-    diarization_delete, diarization_download, diarization_status, DiarizationState,
-};
 use modules::telegram::commands::{
     telegram_cancel_pairing, telegram_clear_token, telegram_delete_inbox_item,
-    telegram_delete_memory, telegram_get_ai_settings, telegram_get_notification_settings,
-    telegram_has_token, telegram_list_inbox, telegram_list_memory, telegram_mark_inbox_routed,
-    telegram_retry_transcribe, telegram_reveal_inbox_file, telegram_send_inbox_to_notes,
-    telegram_send_text, telegram_set_ai_settings, telegram_set_inbox_limits,
-    telegram_set_inbox_transcript, telegram_set_notification_settings, telegram_set_token,
-    telegram_get_inbox_limits, telegram_start_pairing,
+    telegram_delete_memory, telegram_get_ai_settings, telegram_get_inbox_limits,
+    telegram_get_notification_settings, telegram_has_token, telegram_list_inbox,
+    telegram_list_memory, telegram_mark_inbox_routed, telegram_retry_transcribe,
+    telegram_reveal_inbox_file, telegram_send_inbox_to_notes, telegram_send_text,
+    telegram_set_ai_settings, telegram_set_inbox_limits, telegram_set_inbox_transcript,
+    telegram_set_notification_settings, telegram_set_token, telegram_start_pairing,
     telegram_status, telegram_unpair,
 };
 use modules::terminal::commands::{

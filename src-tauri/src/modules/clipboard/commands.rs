@@ -378,10 +378,7 @@ pub fn clipboard_set_transcription(
 /// Resolve the single audio file path from a clipboard item's `meta` JSON.
 /// Returns `Err` if the item doesn't exist, has no meta, or doesn't contain
 /// exactly one audio file (MIME starts with `audio/`).
-fn single_audio_path(
-    state: &ClipboardState,
-    id: i64,
-) -> std::result::Result<PathBuf, String> {
+fn single_audio_path(state: &ClipboardState, id: i64) -> std::result::Result<PathBuf, String> {
     let item = state
         .repo
         .lock()
@@ -447,9 +444,7 @@ pub async fn clipboard_transcribe_item(
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         match crate::modules::whisper::commands::transcribe_with_active_model(
-            &app_clone,
-            audio_path,
-            None,
+            &app_clone, audio_path, None,
         )
         .await
         {
@@ -749,7 +744,12 @@ mod tests {
     #[test]
     fn single_audio_path_errors_for_text_item() {
         let state = fresh_state();
-        let id = state.repo.lock().unwrap().insert_text("plain text", 4).unwrap();
+        let id = state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_text("plain text", 4)
+            .unwrap();
         assert!(single_audio_path(&state, id).is_err());
     }
 

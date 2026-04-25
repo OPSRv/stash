@@ -32,16 +32,18 @@ pub fn recognize_text(path: &Path) -> Result<String, String> {
     // SAFETY: well-formed URL + empty options dict. Vision keeps no
     // reference to either past performRequests.
     let handler = unsafe {
-        VNImageRequestHandler::initWithURL_options(VNImageRequestHandler::alloc(), &url, &empty_options)
+        VNImageRequestHandler::initWithURL_options(
+            VNImageRequestHandler::alloc(),
+            &url,
+            &empty_options,
+        )
     };
 
     let request = VNRecognizeTextRequest::new();
     request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
     request.setUsesLanguageCorrection(true);
-    let langs = NSArray::from_retained_slice(&[
-        NSString::from_str("uk-UA"),
-        NSString::from_str("en-US"),
-    ]);
+    let langs =
+        NSArray::from_retained_slice(&[NSString::from_str("uk-UA"), NSString::from_str("en-US")]);
     request.setRecognitionLanguages(&langs);
 
     // performRequests wants NSArray<VNRequest>. The recognize-text

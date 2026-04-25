@@ -95,10 +95,7 @@ fn stage_sherpa_dylibs() {
     // Release bundles ignore this entry — dyld tries each rpath in
     // order and the bundle's `@executable_path/../Frameworks` hits
     // first when the .app is moved off the dev machine.
-    println!(
-        "cargo:rustc-link-arg=-Wl,-rpath,{}",
-        src_lib.display()
-    );
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", src_lib.display());
     println!("cargo:rerun-if-changed={}", src_lib.display());
 }
 

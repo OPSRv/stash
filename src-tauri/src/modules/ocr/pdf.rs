@@ -51,8 +51,7 @@ pub fn extract_pdf_text(path: &Path) -> Result<String, String> {
             width: bounds.size.width * scale,
             height: bounds.size.height * scale,
         };
-        let nsimage =
-            unsafe { page.thumbnailOfSize_forBox(target, PDFDisplayBox::MediaBox) };
+        let nsimage = unsafe { page.thumbnailOfSize_forBox(target, PDFDisplayBox::MediaBox) };
         let Some(tiff) = nsimage.TIFFRepresentation() else {
             continue;
         };
@@ -60,11 +59,8 @@ pub fn extract_pdf_text(path: &Path) -> Result<String, String> {
         // Stage the TIFF on disk so we can hand Vision a URL — the
         // simplest path that doesn't require reaching into Core
         // Graphics for a CGImage.
-        let tmp = std::env::temp_dir().join(format!(
-            "stash-pdfocr-{}-{}.tiff",
-            std::process::id(),
-            i
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("stash-pdfocr-{}-{}.tiff", std::process::id(), i));
         let bytes = unsafe { tiff.as_bytes_unchecked() };
         if let Err(e) = std::fs::write(&tmp, bytes) {
             tracing::warn!(error = %e, "pdf-ocr: write tmp tiff failed");

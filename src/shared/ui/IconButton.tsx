@@ -2,7 +2,7 @@ import type { MouseEvent, ReactNode } from 'react';
 import { Tooltip } from './Tooltip';
 
 type IconButtonProps = {
-  onClick: (e: MouseEvent) => void;
+  onClick: (e: MouseEvent<HTMLElement>) => void;
   children: ReactNode;
   title?: string;
   tone?: 'default' | 'danger';

@@ -53,9 +53,7 @@ impl JobRepo {
             .query_map([], |row| row.get::<_, String>(1))?
             .any(|name| name.as_deref() == Ok("transcription"));
         if !has_transcription {
-            conn.execute_batch(
-                "ALTER TABLE download_jobs ADD COLUMN transcription TEXT;",
-            )?;
+            conn.execute_batch("ALTER TABLE download_jobs ADD COLUMN transcription TEXT;")?;
         }
         Ok(Self { conn })
     }

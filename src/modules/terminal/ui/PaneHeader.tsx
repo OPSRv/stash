@@ -237,7 +237,7 @@ export const PaneHeader = ({
             active={claudeRunning}
             title={
               claudeRunning
-                ? 'Claude Code is already running in this pane'
+                ? 'Launch Claude Code — already running in this pane'
                 : claudeCommand && claudeCommand.trim()
                   ? `Launch Claude Code (${claudeCommand.trim()}) and open Compose`
                   : 'Launch Claude Code — configure the command in Settings → Terminal'

@@ -33,7 +33,9 @@ pub fn is_ocr_able(kind: &str, mime: Option<&str>) -> bool {
 /// Returns the extracted text (already trimmed). Empty string is a
 /// valid result — the caller decides whether to record it.
 pub fn extract_text(path: &Path, mime: Option<&str>) -> Result<String, String> {
-    let is_pdf = mime.map(|m| m.eq_ignore_ascii_case("application/pdf")).unwrap_or(false)
+    let is_pdf = mime
+        .map(|m| m.eq_ignore_ascii_case("application/pdf"))
+        .unwrap_or(false)
         || path
             .extension()
             .and_then(|e| e.to_str())

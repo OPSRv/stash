@@ -645,11 +645,9 @@ mod tests {
                 2,
             )
             .unwrap();
-        repo.set_transcription(id, Some("transcribed text")).unwrap();
+        repo.set_transcription(id, Some("transcribed text"))
+            .unwrap();
         let items = repo.list(10).unwrap();
-        assert_eq!(
-            items[0].transcription.as_deref(),
-            Some("transcribed text")
-        );
+        assert_eq!(items[0].transcription.as_deref(), Some("transcribed text"));
     }
 }

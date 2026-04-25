@@ -92,10 +92,7 @@ pub fn diarize_samples(
 /// one) even though sherpa returns 0-based ids — and we re-number in
 /// detection order so "Speaker 0" doesn't suddenly appear when the
 /// clustering picks IDs out of order.
-pub fn merge_segments(
-    whisper: &[WhisperSegment],
-    speakers: &[SpeakerSegment],
-) -> String {
+pub fn merge_segments(whisper: &[WhisperSegment], speakers: &[SpeakerSegment]) -> String {
     if whisper.is_empty() {
         return String::new();
     }
@@ -182,8 +179,8 @@ pub async fn transcribe_with_optional_diarization(
 
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let samples = wp::load_samples_16k_mono(&audio).map_err(|e| e.to_string())?;
-        let segments =
-            wp::transcribe_samples_segments(&samples, &model, &lang, threads).map_err(|e| e.to_string())?;
+        let segments = wp::transcribe_samples_segments(&samples, &model, &lang, threads)
+            .map_err(|e| e.to_string())?;
         if !want_diarize {
             return Ok(flat_text(&segments));
         }
@@ -280,7 +277,10 @@ mod tests {
         ];
         let out = merge_segments(&ws_segs, &sp_segs);
         // Speaker 7 became 1 (first seen), speaker 12 became 2.
-        assert_eq!(out, "Спікер 1: Привіт. Як справи?\n\nСпікер 2: Добре, дякую.");
+        assert_eq!(
+            out,
+            "Спікер 1: Привіт. Як справи?\n\nСпікер 2: Добре, дякую."
+        );
     }
 
     #[test]
@@ -288,12 +288,19 @@ mod tests {
         let ws_segs = vec![ws(0.0, 1.0, "A"), ws(1.0, 2.0, "B")];
         let sp_segs: Vec<SpeakerSegment> = vec![];
         let out = merge_segments(&ws_segs, &sp_segs);
-        assert!(out.contains("A B"), "fallback should keep one speaker line: {out}");
+        assert!(
+            out.contains("A B"),
+            "fallback should keep one speaker line: {out}"
+        );
     }
 
     #[test]
     fn merge_collapses_consecutive_same_speaker() {
-        let ws_segs = vec![ws(0.0, 1.0, "one"), ws(1.0, 2.0, "two"), ws(2.0, 3.0, "three")];
+        let ws_segs = vec![
+            ws(0.0, 1.0, "one"),
+            ws(1.0, 2.0, "two"),
+            ws(2.0, 3.0, "three"),
+        ];
         let sp_segs = vec![sp(0.0, 3.0, 0)];
         let out = merge_segments(&ws_segs, &sp_segs);
         assert_eq!(out, "Спікер 1: one two three");

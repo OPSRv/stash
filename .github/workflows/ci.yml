@@ -50,11 +50,3 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
 
-  swift-helper:
-    name: Swift helper build
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: swift build
-        working-directory: helpers/recorder-swift
-        run: swift build -c release

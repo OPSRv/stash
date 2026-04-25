@@ -682,8 +682,8 @@ pub async fn notes_transcribe_note_audio(
     use tauri::Emitter;
     let audio_path = {
         let repo = state.repo.lock().unwrap();
-        let note = to_string_err(repo.get(note_id))?
-            .ok_or_else(|| format!("note {note_id} not found"))?;
+        let note =
+            to_string_err(repo.get(note_id))?.ok_or_else(|| format!("note {note_id} not found"))?;
         note.audio_path
             .ok_or_else(|| format!("note {note_id} has no audio_path"))?
     };
@@ -692,15 +692,16 @@ pub async fn notes_transcribe_note_audio(
         return Err(format!("audio file missing: {audio_path}"));
     }
 
-    let _ = app.emit("notes:audio_transcribing", serde_json::json!({ "note_id": note_id }));
+    let _ = app.emit(
+        "notes:audio_transcribing",
+        serde_json::json!({ "note_id": note_id }),
+    );
 
     let state_repo = std::sync::Arc::clone(&state.repo);
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         match crate::modules::whisper::commands::transcribe_with_active_model(
-            &app_clone,
-            path,
-            None,
+            &app_clone, path, None,
         )
         .await
         {
@@ -716,7 +717,10 @@ pub async fn notes_transcribe_note_audio(
                 if let Ok(mut repo) = state_repo.lock() {
                     let _ = repo.set_note_audio_transcription(note_id, Some(&trimmed));
                 }
-                let _ = app_clone.emit("notes:note_updated", serde_json::json!({ "note_id": note_id }));
+                let _ = app_clone.emit(
+                    "notes:note_updated",
+                    serde_json::json!({ "note_id": note_id }),
+                );
             }
             Err(e) => {
                 tracing::warn!(error = %e, note_id, "notes: whisper transcription failed");
@@ -767,9 +771,7 @@ pub async fn notes_transcribe_attachment(
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         match crate::modules::whisper::commands::transcribe_with_active_model(
-            &app_clone,
-            path,
-            None,
+            &app_clone, path, None,
         )
         .await
         {

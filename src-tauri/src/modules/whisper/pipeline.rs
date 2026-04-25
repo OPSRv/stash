@@ -526,7 +526,11 @@ pub fn transcribe_samples_segments(
             .full_get_segment_t1(i)
             .map_err(|e| PipelineError::Whisper(e.to_string()))? as f32
             / 100.0;
-        out.push(WhisperSegment { t_start: t0, t_end: t1, text });
+        out.push(WhisperSegment {
+            t_start: t0,
+            t_end: t1,
+            text,
+        });
     }
     Ok(out)
 }

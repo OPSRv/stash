@@ -130,10 +130,7 @@ impl NotesRepo {
             )?;
         }
         if !cols.iter().any(|c| c == "audio_transcription") {
-            conn.execute(
-                "ALTER TABLE notes ADD COLUMN audio_transcription TEXT",
-                [],
-            )?;
+            conn.execute("ALTER TABLE notes ADD COLUMN audio_transcription TEXT", [])?;
         }
         // note_attachments migrations.
         let attach_cols: Vec<String> = conn
@@ -639,7 +636,11 @@ mod tests {
         repo.set_note_audio_transcription(id, Some("hello world"))
             .unwrap();
         assert_eq!(
-            repo.get(id).unwrap().unwrap().audio_transcription.as_deref(),
+            repo.get(id)
+                .unwrap()
+                .unwrap()
+                .audio_transcription
+                .as_deref(),
             Some("hello world")
         );
         // Clear it.

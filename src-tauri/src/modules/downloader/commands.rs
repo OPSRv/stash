@@ -323,8 +323,8 @@ pub async fn dl_transcribe_job(
     // ── validate synchronously ──────────────────────────────────────────
     let audio_path: std::path::PathBuf = {
         let repo = state.jobs.lock().unwrap();
-        let job = to_string_err(repo.get(id))?
-            .ok_or_else(|| format!("download job {id} not found"))?;
+        let job =
+            to_string_err(repo.get(id))?.ok_or_else(|| format!("download job {id} not found"))?;
         if job.status != "completed" {
             return Err(format!(
                 "job {id} is '{}', not 'completed' — cannot transcribe",
@@ -347,9 +347,7 @@ pub async fn dl_transcribe_job(
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
         match crate::modules::whisper::commands::transcribe_with_active_model(
-            &app_clone,
-            audio_path,
-            None,
+            &app_clone, audio_path, None,
         )
         .await
         {

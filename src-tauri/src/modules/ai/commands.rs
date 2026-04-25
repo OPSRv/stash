@@ -170,10 +170,9 @@ pub async fn ai_chat_send(
         .try_state::<Arc<crate::modules::telegram::state::TelegramState>>()
         .ok_or_else(|| "assistant state not initialised".to_string())?;
 
-    let reply =
-        crate::modules::telegram::assistant::handle_user_text(&app, &*tg_state, &prompt)
-            .await
-            .map_err(|e| e.to_string())?;
+    let reply = crate::modules::telegram::assistant::handle_user_text(&app, &*tg_state, &prompt)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let id = Uuid::new_v4().to_string();
     let ts = SystemTime::now()
@@ -185,6 +184,13 @@ pub async fn ai_chat_send(
         .repo
         .lock()
         .map_err(|e| e.to_string())?
-        .append_message(&id, &session_id, "assistant", &reply.text, ts, reply.truncated)
+        .append_message(
+            &id,
+            &session_id,
+            "assistant",
+            &reply.text,
+            ts,
+            reply.truncated,
+        )
         .map_err(|e| e.to_string())
 }

@@ -259,7 +259,10 @@ pub enum CapVerdict {
 pub fn check_caps(size: Option<u64>, used_today: u64, per_file: u64, per_day: u64) -> CapVerdict {
     match size {
         None => CapVerdict::Unknown,
-        Some(s) if s > per_file => CapVerdict::OverPerFile { limit: per_file, size: s },
+        Some(s) if s > per_file => CapVerdict::OverPerFile {
+            limit: per_file,
+            size: s,
+        },
         Some(s) if used_today.saturating_add(s) > per_day => CapVerdict::OverPerDay {
             limit: per_day,
             used: used_today,
