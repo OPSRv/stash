@@ -462,16 +462,17 @@ async fn handle_media(
     now: i64,
 ) {
     use super::inbox::{
-        bump_used_bytes, check_caps, download_to, record_media, target_paths, today_str,
-        today_used_bytes, CapVerdict,
+        bump_used_bytes, check_caps, current_caps, download_to, record_media, target_paths,
+        today_str, today_used_bytes, CapVerdict,
     };
     use tauri::Manager;
 
     let chat_id = msg.chat.id.0;
     let day = today_str(now);
     let used = today_used_bytes(state, &day);
+    let (per_file, per_day) = current_caps(state);
 
-    match check_caps(intent.declared_size, used) {
+    match check_caps(intent.declared_size, used, per_file, per_day) {
         CapVerdict::OverPerFile { limit, size } => {
             state.sender.enqueue(
                 chat_id,

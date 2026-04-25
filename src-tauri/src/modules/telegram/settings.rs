@@ -30,6 +30,11 @@ pub const KEY_AI_REPLY_ON_VOICE: &str = "ai.reply_on_voice";
 /// of one flat block.
 pub const KEY_AI_DIARIZATION: &str = "ai.diarization_enabled";
 
+/// Inbox storage caps. Values are stored as plain MB integers so the
+/// kv table stays human-inspectable.
+pub const KEY_INBOX_PER_FILE_MB: &str = "inbox.per_file_mb";
+pub const KEY_INBOX_PER_DAY_MB: &str = "inbox.per_day_mb";
+
 pub const DEFAULT_AI_SYSTEM_PROMPT: &str =
     "You are Oleksandr's Stash assistant, talking back through Telegram. \
      Reply in the same language the user wrote in (default: Ukrainian). \
@@ -184,6 +189,62 @@ impl AiSettings {
     }
 }
 
+/// User-tunable inbox storage limits, in megabytes. Sent over IPC so
+/// the Settings UI can render two sliders. Both fields are clamped on
+/// save against the bounds in `inbox::MIN_*` / `MAX_*`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InboxLimits {
+    pub per_file_mb: u32,
+    pub per_day_mb: u32,
+}
+
+impl InboxLimits {
+    pub fn load(state: &TelegramState) -> Self {
+        use super::inbox::{
+            DEFAULT_PER_DAY_CAP, DEFAULT_PER_FILE_CAP, MAX_PER_DAY_MB, MAX_PER_FILE_MB,
+            MIN_PER_DAY_MB, MIN_PER_FILE_MB,
+        };
+        let read = |key: &str, default_mb: u32, lo: u32, hi: u32| -> u32 {
+            state
+                .repo
+                .lock()
+                .ok()
+                .and_then(|r| r.kv_get(key).ok().flatten())
+                .and_then(|s| s.parse::<u32>().ok())
+                .map(|v| v.clamp(lo, hi))
+                .unwrap_or(default_mb)
+        };
+        let default_pf = (DEFAULT_PER_FILE_CAP / 1024 / 1024) as u32;
+        let default_pd = (DEFAULT_PER_DAY_CAP / 1024 / 1024) as u32;
+        Self {
+            per_file_mb: read(
+                KEY_INBOX_PER_FILE_MB,
+                default_pf,
+                MIN_PER_FILE_MB,
+                MAX_PER_FILE_MB,
+            ),
+            per_day_mb: read(
+                KEY_INBOX_PER_DAY_MB,
+                default_pd,
+                MIN_PER_DAY_MB,
+                MAX_PER_DAY_MB,
+            ),
+        }
+    }
+
+    pub fn save(&self, state: &TelegramState) -> Result<(), String> {
+        use super::inbox::{MAX_PER_DAY_MB, MAX_PER_FILE_MB, MIN_PER_DAY_MB, MIN_PER_FILE_MB};
+        let pf = self.per_file_mb.clamp(MIN_PER_FILE_MB, MAX_PER_FILE_MB);
+        let pd = self.per_day_mb.clamp(MIN_PER_DAY_MB, MAX_PER_DAY_MB);
+        let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.kv_set(KEY_INBOX_PER_FILE_MB, &pf.to_string())
+            .map_err(|e| e.to_string())?;
+        repo.kv_set(KEY_INBOX_PER_DAY_MB, &pd.to_string())
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
 /// Context-window values outside `[10, 200]` tend to either starve the
 /// assistant of continuity or blow up prompt size — clamp rather than
 /// reject so an out-of-range slider move can't brick the UI.
@@ -312,6 +373,38 @@ mod tests {
         .save(&s)
         .unwrap();
         assert_eq!(AiSettings::load(&s).system_prompt, DEFAULT_AI_SYSTEM_PROMPT);
+    }
+
+    #[test]
+    fn inbox_limits_default_and_round_trip() {
+        let s = fresh();
+        let l = InboxLimits::load(&s);
+        assert_eq!(l.per_file_mb, 200, "default per-file is 200 MB");
+        assert_eq!(l.per_day_mb, 1024, "default per-day is 1 GB");
+
+        InboxLimits {
+            per_file_mb: 500,
+            per_day_mb: 4096,
+        }
+        .save(&s)
+        .unwrap();
+        let reloaded = InboxLimits::load(&s);
+        assert_eq!(reloaded.per_file_mb, 500);
+        assert_eq!(reloaded.per_day_mb, 4096);
+    }
+
+    #[test]
+    fn inbox_limits_clamp_against_bounds() {
+        let s = fresh();
+        InboxLimits {
+            per_file_mb: 0,
+            per_day_mb: 99_999,
+        }
+        .save(&s)
+        .unwrap();
+        let l = InboxLimits::load(&s);
+        assert_eq!(l.per_file_mb, super::super::inbox::MIN_PER_FILE_MB);
+        assert_eq!(l.per_day_mb, super::super::inbox::MAX_PER_DAY_MB);
     }
 
     #[test]

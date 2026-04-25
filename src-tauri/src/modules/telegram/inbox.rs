@@ -3,14 +3,19 @@
 //! and records a row in the `inbox` SQLite table.
 //!
 //! File caps:
-//! - Per-file limit: 20 MB. Hard ceiling — Telegram's default Bot API
-//!   refuses `getFile` for anything bigger, so raising this would just
-//!   trade a useful local error for a confusing remote one.
-//! - Per-day cumulative: 1 GB. Counter lives in the `kv` table under
-//!   `inbox_bytes_<YYYY-MM-DD>`; resets implicitly because each new day
-//!   has its own key. Stash is single-user, so the cap is more of a
-//!   "did I forward something I didn't mean to?" speed-bump than a
-//!   defence against abuse.
+//! - Per-file limit: 200 MB (default). Telegram's cloud Bot API
+//!   refuses `getFile` past 20 MB, but a self-hosted Bot API server
+//!   raises the ceiling to 2 GB — keeping the cap user-tunable lets
+//!   either world work without a code change.
+//! - Per-day cumulative: 1 GB (default). Counter lives in the `kv`
+//!   table under `inbox_bytes_<YYYY-MM-DD>`; resets implicitly because
+//!   each new day has its own key. Stash is single-user, so the cap is
+//!   a "did I forward something I didn't mean to?" speed-bump, not an
+//!   abuse defence.
+//!
+//! Both defaults are overridable via Settings → Telegram → AI Prompt
+//! → "Inbox limits"; the persisted overrides live in the same kv
+//! table under `inbox.per_file_mb` / `inbox.per_day_mb`.
 
 use std::path::{Path, PathBuf};
 
@@ -22,8 +27,49 @@ use uuid::Uuid;
 
 use super::state::TelegramState;
 
-pub const PER_FILE_CAP: u64 = 20 * 1024 * 1024;
-pub const PER_DAY_CAP: u64 = 1024 * 1024 * 1024;
+pub const DEFAULT_PER_FILE_CAP: u64 = 200 * 1024 * 1024;
+pub const DEFAULT_PER_DAY_CAP: u64 = 1024 * 1024 * 1024;
+
+/// Lower / upper bounds the UI clamps against. The lower bound stops
+/// a typo from disabling ingestion entirely; the upper one matches
+/// the maximum the self-hosted Bot API server can deliver (2 GB).
+pub const MIN_PER_FILE_MB: u32 = 1;
+pub const MAX_PER_FILE_MB: u32 = 2048;
+pub const MIN_PER_DAY_MB: u32 = 10;
+pub const MAX_PER_DAY_MB: u32 = 10_240;
+
+/// Resolve current caps from the kv table, falling back to the
+/// defaults above when the user hasn't tweaked them. Read on every
+/// incoming media message — cheap (single SQLite point query) and
+/// keeps slider changes effective on the very next file.
+pub fn current_caps(state: &super::state::TelegramState) -> (u64, u64) {
+    let read = |key: &str, default_bytes: u64, lo: u32, hi: u32| -> u64 {
+        let mb_opt = state
+            .repo
+            .lock()
+            .ok()
+            .and_then(|r| r.kv_get(key).ok().flatten())
+            .and_then(|s| s.parse::<u32>().ok());
+        match mb_opt {
+            Some(mb) => (mb.clamp(lo, hi) as u64) * 1024 * 1024,
+            None => default_bytes,
+        }
+    };
+    (
+        read(
+            "inbox.per_file_mb",
+            DEFAULT_PER_FILE_CAP,
+            MIN_PER_FILE_MB,
+            MAX_PER_FILE_MB,
+        ),
+        read(
+            "inbox.per_day_mb",
+            DEFAULT_PER_DAY_CAP,
+            MIN_PER_DAY_MB,
+            MAX_PER_DAY_MB,
+        ),
+    )
+}
 
 #[derive(Debug, Clone)]
 pub struct MediaIntent {
@@ -207,15 +253,15 @@ pub enum CapVerdict {
 }
 
 /// Cap gate. Caller should bail out early when verdict is not Ok.
-pub fn check_caps(size: Option<u64>, used_today: u64) -> CapVerdict {
+/// Caps are passed in (rather than read from constants) so tests
+/// don't have to mutate global state and the runtime can honour the
+/// user-tunable values from `current_caps`.
+pub fn check_caps(size: Option<u64>, used_today: u64, per_file: u64, per_day: u64) -> CapVerdict {
     match size {
         None => CapVerdict::Unknown,
-        Some(s) if s > PER_FILE_CAP => CapVerdict::OverPerFile {
-            limit: PER_FILE_CAP,
-            size: s,
-        },
-        Some(s) if used_today.saturating_add(s) > PER_DAY_CAP => CapVerdict::OverPerDay {
-            limit: PER_DAY_CAP,
+        Some(s) if s > per_file => CapVerdict::OverPerFile { limit: per_file, size: s },
+        Some(s) if used_today.saturating_add(s) > per_day => CapVerdict::OverPerDay {
+            limit: per_day,
             used: used_today,
             attempted: s,
         },
@@ -320,10 +366,13 @@ mod tests {
         assert_eq!(ymd_from_days(0), (1970, 1, 1));
     }
 
+    const PF: u64 = DEFAULT_PER_FILE_CAP;
+    const PD: u64 = DEFAULT_PER_DAY_CAP;
+
     #[test]
     fn caps_reject_oversize_single_file() {
         assert!(matches!(
-            check_caps(Some(PER_FILE_CAP + 1), 0),
+            check_caps(Some(PF + 1), 0, PF, PD),
             CapVerdict::OverPerFile { .. }
         ));
     }
@@ -331,19 +380,19 @@ mod tests {
     #[test]
     fn caps_reject_when_day_exceeded() {
         assert!(matches!(
-            check_caps(Some(2 * 1024 * 1024), PER_DAY_CAP - 1024 * 1024),
+            check_caps(Some(2 * 1024 * 1024), PD - 1024 * 1024, PF, PD),
             CapVerdict::OverPerDay { .. }
         ));
     }
 
     #[test]
     fn caps_allow_small_within_day() {
-        assert!(matches!(check_caps(Some(1024), 0), CapVerdict::Ok));
+        assert!(matches!(check_caps(Some(1024), 0, PF, PD), CapVerdict::Ok));
     }
 
     #[test]
     fn caps_unknown_when_size_missing() {
-        assert!(matches!(check_caps(None, 0), CapVerdict::Unknown));
+        assert!(matches!(check_caps(None, 0, PF, PD), CapVerdict::Unknown));
     }
 
     #[test]

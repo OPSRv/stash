@@ -258,6 +258,21 @@ pub fn telegram_set_ai_settings(
 }
 
 #[tauri::command]
+pub fn telegram_get_inbox_limits(
+    state: State<'_, Arc<TelegramState>>,
+) -> Result<super::settings::InboxLimits, String> {
+    Ok(super::settings::InboxLimits::load(state.as_ref()))
+}
+
+#[tauri::command]
+pub fn telegram_set_inbox_limits(
+    state: State<'_, Arc<TelegramState>>,
+    limits: super::settings::InboxLimits,
+) -> Result<(), String> {
+    limits.save(state.as_ref())
+}
+
+#[tauri::command]
 pub fn telegram_list_memory(
     state: State<'_, Arc<TelegramState>>,
 ) -> Result<Vec<super::repo::MemoryRow>, String> {

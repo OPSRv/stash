@@ -64,6 +64,14 @@ export type DiarStatus = {
   models: DiarModelStatus[];
 };
 
+/// User-tunable inbox storage caps. Both fields are megabytes; the
+/// backend clamps against `[1, 2048]` for per-file and `[10, 10240]`
+/// for per-day on save, so the UI doesn't have to police the bounds.
+export type InboxLimits = {
+  per_file_mb: number;
+  per_day_mb: number;
+};
+
 export type MemoryRow = {
   id: number;
   fact: string;

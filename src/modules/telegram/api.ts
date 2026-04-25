@@ -4,6 +4,7 @@ import type {
   ConnectionStatus,
   DiarStatus,
   InboxItem,
+  InboxLimits,
   MemoryRow,
   NotificationSettings,
   RouteTarget,
@@ -70,6 +71,12 @@ export const getAiSettings = (): Promise<AiSettings> =>
 
 export const setAiSettings = (settings: AiSettings): Promise<void> =>
   invoke('telegram_set_ai_settings', { settings });
+
+export const getInboxLimits = (): Promise<InboxLimits> =>
+  invoke('telegram_get_inbox_limits');
+
+export const setInboxLimits = (limits: InboxLimits): Promise<void> =>
+  invoke('telegram_set_inbox_limits', { limits });
 
 export const listMemory = (): Promise<MemoryRow[]> =>
   invoke('telegram_list_memory');

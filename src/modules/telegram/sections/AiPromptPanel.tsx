@@ -6,7 +6,7 @@ import { Textarea } from '../../../shared/ui/Textarea';
 import { Toggle } from '../../../shared/ui/Toggle';
 import { SliderField } from '../../../settings/SliderField';
 import * as api from '../api';
-import type { AiSettings, DiarStatus } from '../types';
+import type { AiSettings, DiarStatus, InboxLimits } from '../types';
 
 const DEFAULT_PROMPT =
   'You are a helpful assistant for Oleksandr inside Telegram. \
@@ -144,7 +144,89 @@ export function AiPromptPanel() {
         onChange={(v) => schedule({ ...settings, diarization_enabled: v })}
         onError={(e) => setError(e)}
       />
+
+      <InboxLimitsSection onError={(e) => setError(e)} />
     </>
+  );
+}
+
+type InboxLimitsSectionProps = {
+  onError: (e: string) => void;
+};
+
+/// Two sliders for the per-file and per-day inbox storage caps.
+/// Writes go through the same debounce pattern as the prompt editor
+/// — a quick drag doesn't fire a save per intermediate value.
+function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
+  const [limits, setLimits] = useState<InboxLimits | null>(null);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setLimits(await api.getInboxLimits());
+      } catch (e) {
+        onError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, [onError]);
+
+  const schedule = (next: InboxLimits) => {
+    setLimits(next);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      try {
+        await api.setInboxLimits(next);
+        setSavedNote('Saved');
+        setTimeout(() => setSavedNote(null), 1500);
+      } catch (e) {
+        onError(e instanceof Error ? e.message : String(e));
+      }
+    }, SAVE_DEBOUNCE_MS);
+  };
+
+  if (!limits) return null;
+
+  return (
+    <div className="py-3">
+      <div className="flex items-baseline justify-between mb-1.5">
+        <div className="t-primary text-body font-medium">Inbox limits</div>
+        {savedNote && <span className="t-tertiary text-meta">{savedNote}</span>}
+      </div>
+      <div className="t-tertiary text-meta mb-2">
+        Розмір файлів, які бот зберігає в інбокс. Telegram Bot API сам по
+        собі не віддає &gt;20 MB — підіймати має сенс при власному API-сервері.
+      </div>
+      <SliderField
+        label="Per-file"
+        description="Максимальний розмір одного файлу."
+        value={limits.per_file_mb}
+        min={1}
+        max={2048}
+        step={10}
+        onChange={(v) => schedule({ ...limits, per_file_mb: v })}
+        display={`${limits.per_file_mb} MB`}
+      />
+      <div className="h-2" />
+      <SliderField
+        label="Per-day"
+        description="Скільки байтів за добу бот узагалі завантажує."
+        value={limits.per_day_mb}
+        min={10}
+        max={10240}
+        step={50}
+        onChange={(v) => schedule({ ...limits, per_day_mb: v })}
+        display={
+          limits.per_day_mb >= 1024
+            ? `${(limits.per_day_mb / 1024).toFixed(1)} GB`
+            : `${limits.per_day_mb} MB`
+        }
+      />
+    </div>
   );
 }
 
