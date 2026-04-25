@@ -76,8 +76,13 @@ impl Assistant {
             .map_err(|e| LlmError::BadResponse(e.to_string()))?;
 
         // 2. Build message sequence: system → facts → history → user.
-        let mut messages: Vec<ChatMessage> = Vec::with_capacity(history.len() + 4);
+        let mut messages: Vec<ChatMessage> = Vec::with_capacity(history.len() + 5);
         messages.push(ChatMessage::system(&ai_settings.system_prompt));
+        // Wall-clock context. Without this LLMs default to whatever
+        // year sits in their training data and confidently answer
+        // "today's date" with stale values. Injected per turn so the
+        // first message after midnight already sees the new day.
+        messages.push(ChatMessage::system(current_time_prompt()));
         if !facts.is_empty() {
             let joined = facts
                 .iter()
@@ -226,6 +231,47 @@ impl Assistant {
         }
     }
 }
+
+/// Build a system line with the current local date / time so the
+/// model can answer "сьогодні / завтра / котра година" without making
+/// up a date from its training cut-off. Format mirrors what users
+/// expect from a chat assistant: ISO date, weekday, 24-hour clock,
+/// timezone offset. Pulled from `inbox::today_str` + a tiny clock
+/// helper so we don't add a chrono dependency.
+fn current_time_prompt() -> String {
+    use super::inbox::{local_offset_seconds_public, today_str};
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let offset = local_offset_seconds_public();
+    let local = now_secs + offset;
+    let date = today_str(now_secs);
+    let secs_in_day = local.rem_euclid(86_400);
+    let hh = secs_in_day / 3600;
+    let mm = (secs_in_day % 3600) / 60;
+    let weekday = WEEKDAYS[((local.div_euclid(86_400)) + 4).rem_euclid(7) as usize];
+    let sign = if offset >= 0 { '+' } else { '-' };
+    let off_h = offset.abs() / 3600;
+    let off_m = (offset.abs() % 3600) / 60;
+    format!(
+        "Current local time: {date} {hh:02}:{mm:02} ({weekday}, UTC{sign}{off_h:02}:{off_m:02}). \
+         Use this when the user asks about today, tomorrow, current date, weekday, etc."
+    )
+}
+
+/// 1970-01-01 was a Thursday. Indexing matches `(days + 4) mod 7`
+/// where Sunday = 0 — the offset turns the Thursday epoch into the
+/// canonical week-start used by `chrono::Weekday::num_days_from_sunday`.
+const WEEKDAYS: [&str; 7] = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
 
 /// Produce a short catalog of registered slash-commands so the model
 /// knows what it can dispatch through the `invoke_command` tool. The
@@ -709,7 +755,12 @@ mod tests {
         assert_eq!(msgs[0].role, Role::System);
         assert_eq!(msgs[0].content, "be brief");
         assert_eq!(msgs[1].role, Role::System);
-        assert!(msgs[1].content.contains("likes tea"));
+        assert!(
+            msgs[1].content.contains("Current local time"),
+            "second system message should be the wall-clock context"
+        );
+        assert_eq!(msgs[2].role, Role::System);
+        assert!(msgs[2].content.contains("likes tea"));
         assert_eq!(msgs.last().unwrap().role, Role::User);
         assert_eq!(msgs.last().unwrap().content, "hello");
     }
