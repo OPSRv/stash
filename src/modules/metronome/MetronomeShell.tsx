@@ -38,6 +38,7 @@ export const MetronomeShell = () => {
   const [activeBeat, setActiveBeat] = useState(-1);
   const saveTimerRef = useRef<number | null>(null);
   const loadedRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const engine = useMetronomeEngine(state);
 
@@ -145,9 +146,10 @@ export const MetronomeShell = () => {
     };
   }, [engine, patch]);
 
-  // Keyboard shortcuts (only when no input is focused).
+  // Keyboard shortcuts (only when this tab is active and no input is focused).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (rootRef.current?.closest('[hidden]')) return;
       const t = e.target as HTMLElement | null;
       const typing =
         t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
@@ -200,7 +202,7 @@ export const MetronomeShell = () => {
   }, [engine, state.bpm, state.numerator, state.denominator, setBpm, tap, patch]);
 
   return (
-    <div className="h-full w-full flex flex-col">
+    <div ref={rootRef} className="h-full w-full flex flex-col">
       <div
         className="metro-hero flex-1 flex items-center justify-center min-h-0 overflow-hidden"
         data-playing={engine.isPlaying}

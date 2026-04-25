@@ -78,6 +78,7 @@ export const PomodoroShell = () => {
   const [confirmDelete, setConfirmDelete] = useState<Preset | null>(null);
   const [banner, setBanner] = useState<Banner | null>(null);
   const bannerTimer = useRef<number | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [tgNotify, setTgNotify] = useState<boolean | null>(null);
   const [tgPaired, setTgPaired] = useState(false);
 
@@ -136,7 +137,7 @@ export const PomodoroShell = () => {
   const isPaused = snapshot.status === 'paused';
   const isActive = isRunning || isPaused;
 
-  // Коли йде сесія — показуємо саме її блоки + позицію; редагування вимикаємо.
+  // While a session is running, show session blocks + position; editing is disabled.
   const shownBlocks = isActive ? snapshot.blocks : blocks;
   const current = isActive ? snapshot.blocks[snapshot.current_idx] : null;
   const totalMs = current ? current.duration_sec * 1000 : 0;
@@ -170,7 +171,7 @@ export const PomodoroShell = () => {
 
   const handleBlocksChange = (next: Block[]) => {
     if (isActive) {
-      // Під час сесії не редагуємо блоки з таймлайна напряму — тільки jumps.
+      // During a session, blocks are not editable from the timeline — only jumps.
       return;
     }
     setBlocks(next);
@@ -253,20 +254,17 @@ export const PomodoroShell = () => {
     setConfirmStop(false);
   };
 
-  // Коли сесія закінчилась — beats стейт назад до чорнетки, якщо була.
+  // When the session ends, leave the draft as-is; just discard the session snapshot.
   useEffect(() => {
     if (!isActive && snapshot.blocks.length > 0 && snapshot.status === 'idle') {
-      // Залишаємо чорнетку як є; просто забуваємо сесійний snapshot (engine).
+      // nothing to do — draft is preserved, session snapshot is already cleared by engine
     }
   }, [isActive, snapshot.status, snapshot.blocks.length]);
 
-  // Коли сесія стартувала й ми завантажили чорнетку з preset-а — запам'ятати
-  // поточні блоки як «edit after session end».
-  // (простіше — нічого не робимо, draft не змінюється під час сесії)
-
-  // Гарячі клавіші: Space = play/pause, ⌘← / ⌘→ = skip, Esc = зняти banner.
+  // Hotkeys: Space = play/pause, ⌘← / ⌘→ = skip, Esc = dismiss banner.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (rootRef.current?.closest('[hidden]')) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       if (e.code === 'Space') {
@@ -302,8 +300,8 @@ export const PomodoroShell = () => {
   const canGoBack = isActive && snapshot.current_idx > 0;
   const canGoForward = isActive && snapshot.current_idx < snapshot.blocks.length - 1;
 
-  // Якщо змінили назву блока під час сесії через double-click — ігноруємо:
-  // для цього Timeline в playing-режимі просто не приймає onChange.
+  // Renaming blocks mid-session via double-click is ignored:
+  // Timeline does not forward onChange while playing.
 
   const handleRenameInSession = async (next: Block[]) => {
     if (!isActive) return;
@@ -313,11 +311,11 @@ export const PomodoroShell = () => {
       /* swallow */
     }
   };
-  void handleRenameInSession; // reserved (зараз редагування вимкнено в playing-mode)
+  void handleRenameInSession; // reserved (editing disabled in playing mode)
 
   return (
-    <div className="pom-root flex flex-col h-full">
-      {/* --- Header (назва + kind + total + save) --- */}
+    <div ref={rootRef} className="pom-root flex flex-col h-full">
+      {/* --- Header --- */}
       <header className="flex items-center gap-3 px-4 py-2.5 border-b hair relative z-10">
         <Input
           type="text"
@@ -456,7 +454,7 @@ export const PomodoroShell = () => {
         onJumpTo={handleJumpTo}
       />
 
-      {/* --- Palette (тільки в edit mode) --- */}
+      {/* --- Palette (edit mode only) --- */}
       {!isActive && (
         <div className="pom-palette shrink-0">
           <span className="section-label shrink-0">Add</span>
