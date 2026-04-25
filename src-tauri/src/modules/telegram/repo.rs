@@ -272,6 +272,20 @@ impl TelegramRepo {
         Ok(())
     }
 
+    /// Read just the stored transcript for a single inbox row. Used by
+    /// the voice-action inline buttons so they don't have to materialise
+    /// the entire row to grab one column.
+    pub fn inbox_transcript(&self, id: i64) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT transcript FROM inbox WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(|opt| opt.flatten())
+    }
+
     /// Return every (id, file_path) pair currently in the inbox so the
     /// caller can unlink files before dropping rows. Used by both the
     /// "clear all" command and the retention sweeper.

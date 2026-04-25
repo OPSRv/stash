@@ -2518,3 +2518,123 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
     ]);
     InlineKeyboard { rows }
 }
+
+// -------------------- voice action buttons --------------------
+
+/// Helper used by the voice-transcript flow in `transport.rs` to build
+/// the action keyboard that lands under each `📝 …` message. Each
+/// button's callback_data points at the `voice` command below.
+pub fn voice_action_keyboard(inbox_id: i64) -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![
+            vec![
+                InlineButton::new("🤖 Reply", format!("voice:reply:{inbox_id}")),
+                InlineButton::new("📋 Summary", format!("voice:summary:{inbox_id}")),
+            ],
+            vec![
+                InlineButton::new("🌐 EN", format!("voice:translate:{inbox_id}")),
+                InlineButton::new("✏️ Improve", format!("voice:improve:{inbox_id}")),
+            ],
+        ],
+    }
+}
+
+/// Inline-button handler for `voice:<action>:<inbox_id>`. Replaces the
+/// old "auto-reply on every transcript" flow — the transcript itself
+/// lands as plain text under the user's voice note, and any AI follow
+/// -up is opt-in per message via the buttons we attach to it.
+pub struct VoiceActionCmd {
+    state: Arc<TelegramState>,
+}
+
+impl VoiceActionCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for VoiceActionCmd {
+    fn name(&self) -> &'static str {
+        "voice"
+    }
+    fn description(&self) -> &'static str {
+        "Run an AI action over a recently-transcribed voice note"
+    }
+    fn usage(&self) -> &'static str {
+        "(driven by the inline buttons under each transcript)"
+    }
+
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        // args = "<action>:<inbox_id>". Empty action is treated as a
+        // no-op button (e.g. a ✕ "dismiss" we may add later) so the
+        // user can tap to clear the keyboard without errors.
+        let (action, id_str) = match args.split_once(':') {
+            Some(p) => p,
+            None => return Reply::text("⚠️ /voice: missing inbox id"),
+        };
+        let id: i64 = match id_str.parse() {
+            Ok(n) => n,
+            Err(_) => return Reply::text("⚠️ /voice: bad inbox id"),
+        };
+
+        let transcript = match self.state.repo.lock() {
+            Ok(repo) => repo.inbox_transcript(id).unwrap_or(None),
+            Err(e) => return Reply::text(format!("⚠️ /voice: {e}")),
+        };
+        let Some(transcript) = transcript.filter(|s| !s.trim().is_empty()) else {
+            return Reply::text(
+                "⚠️ Транскрипт уже видалено або порожній — спробуй надіслати голосове ще раз.",
+            );
+        };
+
+        let prompt = match action {
+            // "Reply" sends the transcript through the assistant as if
+            // the user had typed it themselves — preserves history,
+            // tool calls, the works.
+            "reply" => transcript.clone(),
+            "summary" => format!(
+                "Підсумуй коротко українською (1-3 речення), без преамбули, лише суть:\n\n{transcript}"
+            ),
+            "translate" => format!(
+                "Translate the following Ukrainian text to natural English. \
+                 Reply with the translation only, no commentary:\n\n{transcript}"
+            ),
+            "improve" => format!(
+                "Виправ граматику й стиль українською. Поверни лише виправлений текст:\n\n{transcript}"
+            ),
+            other => return Reply::text(format!("⚠️ /voice: unknown action `{other}`")),
+        };
+
+        match super::assistant::handle_user_text(&ctx.app, &self.state, &prompt).await {
+            Ok(reply) => {
+                let body = reply.text.trim();
+                if body.is_empty() {
+                    Reply::text("🤖 (нічого нового додати)")
+                } else {
+                    Reply::text(format!("🤖 {body}"))
+                }
+            }
+            Err(e) => Reply::text(format!("🤖 ⚠️ не вдалося опрацювати: {e}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod voice_action_tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_carries_inbox_id_in_every_callback() {
+        let kb = voice_action_keyboard(42);
+        let actions: Vec<&str> = kb
+            .rows
+            .iter()
+            .flat_map(|r| r.iter().map(|b| b.callback_data.as_str()))
+            .collect();
+        assert!(actions.contains(&"voice:reply:42"));
+        assert!(actions.contains(&"voice:summary:42"));
+        assert!(actions.contains(&"voice:translate:42"));
+        assert!(actions.contains(&"voice:improve:42"));
+    }
+}

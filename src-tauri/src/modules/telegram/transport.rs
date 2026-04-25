@@ -669,44 +669,20 @@ async fn handle_media(
                     }
                     let _ = app_for_task.emit("telegram:inbox_updated", inbox_id);
 
-                    // Send the transcript first as its own message so
-                    // the user can confirm Whisper heard them right
-                    // before the AI builds on it.
-                    state_for_task
-                        .sender
-                        .enqueue(chat_for_task, format!("📝 {trimmed}"));
-
-                    // Then pipe the transcript through the assistant —
-                    // but only when the user actually wants AI replies
-                    // on voice notes. Toggle lives in Settings →
-                    // Telegram → AI Prompt (`reply_on_voice`).
-                    let reply_enabled =
-                        super::settings::AiSettings::load(&state_for_task).reply_on_voice;
-                    if reply_enabled {
-                        match super::assistant::handle_user_text(
-                            &app_for_task,
-                            &state_for_task,
-                            &trimmed,
-                        )
-                        .await
-                        {
-                            Ok(reply) => {
-                                let body = reply.text.trim();
-                                if !body.is_empty() {
-                                    state_for_task
-                                        .sender
-                                        .enqueue(chat_for_task, format!("🤖 {body}"));
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(error = %e, "assistant on transcript failed");
-                                state_for_task.sender.enqueue(
-                                    chat_for_task,
-                                    format!("🤖 ⚠️ не вдалося опрацювати: {e}"),
-                                );
-                            }
-                        }
-                    }
+                    // Send the transcript with an action-picker
+                    // keyboard. The previous behaviour (auto-pipe
+                    // through the assistant on every recording) is
+                    // gone — every AI follow-up is now opt-in per
+                    // message via the buttons. Same dispatch the
+                    // text-mode chat already uses, so we don't have
+                    // a parallel code path for "what does AI do
+                    // with this text".
+                    let kb = super::module_cmds::voice_action_keyboard(inbox_id);
+                    state_for_task.sender.enqueue_with_keyboard(
+                        chat_for_task,
+                        format!("📝 {trimmed}"),
+                        Some(kb),
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "whisper transcription failed");

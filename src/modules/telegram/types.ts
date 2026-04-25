@@ -41,9 +41,6 @@ export type NotificationSettings = {
 export type AiSettings = {
   system_prompt: string;
   context_window: number;
-  /// When true the assistant runs on every voice-note transcript.
-  /// Default `true` — matches the original behaviour.
-  reply_on_voice: boolean;
   /// When true voice/video/video_note transcripts are routed through
   /// the speaker-diarization pipeline before storage. Default `false`
   /// — the model pair downloads on first opt-in.

@@ -851,6 +851,9 @@ pub fn run() {
                 modules::telegram::module_cmds::RemindCmd::new(Arc::clone(&telegram_state)),
             );
             telegram_state.register_command(
+                modules::telegram::module_cmds::VoiceActionCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
                 modules::telegram::module_cmds::RemindersCmd::new(Arc::clone(&telegram_state)),
             );
             telegram_state.register_command(

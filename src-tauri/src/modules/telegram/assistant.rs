@@ -675,7 +675,6 @@ mod tests {
         AiSettings {
             system_prompt: "p".into(),
             context_window: 10,
-            reply_on_voice: true,
             diarization_enabled: false,
         }
         .save(state.as_ref())
@@ -714,7 +713,6 @@ mod tests {
         let state = fresh_state();
         AiSettings {
             system_prompt: "be brief".into(),
-            reply_on_voice: true,
             context_window: 50,
             diarization_enabled: false,
         }

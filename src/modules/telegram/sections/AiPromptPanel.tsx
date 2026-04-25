@@ -127,20 +127,6 @@ export function AiPromptPanel() {
         />
       </div>
 
-      <div className="py-3 flex items-start justify-between gap-4">
-        <div>
-          <div className="t-primary text-body font-medium">AI reply on voice</div>
-          <div className="t-tertiary text-meta">
-            When off, voice notes only send a transcript — no AI reply.
-          </div>
-        </div>
-        <Toggle
-          checked={settings.reply_on_voice}
-          onChange={(v) => schedule({ ...settings, reply_on_voice: v })}
-          label="AI reply on voice"
-        />
-      </div>
-
       <DiarizationRow
         enabled={settings.diarization_enabled}
         onChange={(v) => schedule({ ...settings, diarization_enabled: v })}
