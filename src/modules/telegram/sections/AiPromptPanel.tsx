@@ -298,11 +298,21 @@ function DiarizationRow({ enabled, onChange, onError }: DiarizationRowProps) {
   return (
     <div className="py-3 flex items-start justify-between gap-4">
       <div>
-        <div className="t-primary text-body font-medium">Розрізняти спікерів</div>
+        <div className="t-primary text-body font-medium flex items-center gap-2">
+          Розрізняти спікерів
+          {status?.ready && (
+            <span
+              className="text-meta px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(95,200,138,0.15)', color: '#5fc88a' }}
+            >
+              ✓ Models ready
+            </span>
+          )}
+        </div>
         <div className="t-tertiary text-meta">
           {status?.ready
-            ? 'Транскрипт голосових і відео розмічається на «Спікер 1 / 2 / …». Pyannote + 3D-Speaker, локально.'
-            : `Перший раз завантажить ~${sizeMb} MB моделей (pyannote + 3D-Speaker).`}
+            ? 'Pyannote + 3D-Speaker, працює локально. Транскрипт буде розмічений «Спікер 1 / 2 / …».'
+            : `Перший раз завантажить близько ${sizeMb} MB моделей (pyannote + 3D-Speaker).`}
           {downloading && pct !== null && (
             <span className="ml-2 t-secondary">downloading {pct}%</span>
           )}

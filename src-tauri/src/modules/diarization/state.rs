@@ -42,18 +42,22 @@ pub fn embedding_path(app_data: &std::path::Path) -> PathBuf {
     models_dir(app_data).join(super::catalog::EMBEDDING.filename)
 }
 
-/// True when both ONNX files are on disk *and* their sizes look
-/// plausible. Used by the telegram voice path to decide whether to
-/// hand the buffer to the diarizer or skip with a graceful fallback.
+/// True when both ONNX files are on disk and at least look like real
+/// model blobs (≥ 1 MB each). We deliberately don't verify the exact
+/// size against the catalog: HuggingFace and GitHub releases sometimes
+/// re-encode files without bumping the URL, and a strict ±5 % check
+/// then turns a working download into a permanent "not ready" state.
+/// Sherpa itself reads the file at load time and fails loudly on a
+/// truly corrupt one, which is the right place for a hard check.
 pub fn models_ready(app_data: &std::path::Path) -> bool {
-    use super::catalog::{size_is_plausible, EMBEDDING, SEGMENTATION};
+    const MIN_MODEL_BYTES: u64 = 1024 * 1024;
     let s = segmentation_path(app_data);
     let e = embedding_path(app_data);
     let s_ok = std::fs::metadata(&s)
-        .map(|m| size_is_plausible(SEGMENTATION.size_bytes, m.len()))
+        .map(|m| m.len() >= MIN_MODEL_BYTES)
         .unwrap_or(false);
     let e_ok = std::fs::metadata(&e)
-        .map(|m| size_is_plausible(EMBEDDING.size_bytes, m.len()))
+        .map(|m| m.len() >= MIN_MODEL_BYTES)
         .unwrap_or(false);
     s_ok && e_ok
 }

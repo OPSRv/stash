@@ -44,8 +44,11 @@ pub fn diarization_status(app: AppHandle) -> Result<DiarStatus, String> {
         .iter()
         .map(|m| {
             let path = file_path_for(&data_dir, m);
+            // Mirrors `state::models_ready` — file present and ≥ 1 MB
+            // is the lenient threshold; sherpa load-time errors catch
+            // genuinely corrupt content.
             let downloaded = std::fs::metadata(&path)
-                .map(|meta| catalog::size_is_plausible(m.size_bytes, meta.len()))
+                .map(|meta| meta.len() >= 1024 * 1024)
                 .unwrap_or(false);
             DiarModelStatus {
                 kind: kind_str(m.kind),
@@ -75,10 +78,12 @@ pub async fn diarization_download(
     std::fs::create_dir_all(models_dir(&data_dir)).map_err(|e| format!("mkdir: {e}"))?;
 
     for m in ALL {
-        // Skip if already on disk at the right size.
+        // Skip when the file already looks usable. We don't compare
+        // against the catalog size — see `state::models_ready` for
+        // why exact-match was too strict.
         let path = file_path_for(&data_dir, m);
         if std::fs::metadata(&path)
-            .map(|meta| catalog::size_is_plausible(m.size_bytes, meta.len()))
+            .map(|meta| meta.len() >= 1024 * 1024)
             .unwrap_or(false)
         {
             let _ = app.emit(
@@ -188,12 +193,25 @@ async fn run_download(
     drop(file);
 
     let len = std::fs::metadata(&tmp).map_err(|e| e.to_string())?.len();
-    if !catalog::size_is_plausible(spec.size_bytes, len) {
+    // Only fail outright when the result is clearly broken (sub-1 MB
+    // chunks of garbage). Mismatches against the catalog `size_bytes`
+    // are common — HF / GitHub re-encode files without changing the
+    // URL — and they don't actually break sherpa, so we surface them
+    // as a `warn!` and keep going.
+    if len < 1024 * 1024 {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!(
-            "{}: downloaded {len} bytes, expected ~{}",
-            spec.label, spec.size_bytes
+            "{}: download produced only {len} bytes — looks corrupt",
+            spec.label
         ));
+    }
+    if !catalog::size_is_plausible(spec.size_bytes, len) {
+        tracing::warn!(
+            label = spec.label,
+            got = len,
+            expected = spec.size_bytes,
+            "downloaded model size differs from catalog — accepting anyway"
+        );
     }
     std::fs::rename(&tmp, final_path).map_err(|e| e.to_string())?;
     let _ = app.emit(
