@@ -123,17 +123,17 @@ pub fn emit_events(app: &AppHandle, events: &[EngineEvent]) {
         .rev()
         .find(|e| matches!(e, EngineEvent::SessionDone { .. }))
     {
-        let summary = format!("{} блоків · {} хв", blocks_completed, total_sec / 60);
+        let summary = format!("{} blocks · {} min", blocks_completed, total_sec / 60);
         let _ = app
             .notification()
             .builder()
-            .title("Сесія завершена")
+            .title("Session complete")
             .body(&summary)
             .show();
         crate::modules::telegram::notifier::notify_if_paired(
             app,
             crate::modules::telegram::notifier::Category::Pomodoro,
-            format!("🍅 Сесія завершена — {summary}"),
+            format!("🍅 Session complete — {summary}"),
         );
     }
 }

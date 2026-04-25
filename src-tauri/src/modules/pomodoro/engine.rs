@@ -289,14 +289,14 @@ fn nudge_text(posture: Posture) -> String {
 /// (which emits system notifications) and the frontend banner share wording.
 pub fn transition_text(from: Posture, to: Posture) -> String {
     match (from, to) {
-        (Posture::Sit, Posture::Stand) => "Підніми стіл — працюй стоячи".into(),
-        (Posture::Sit, Posture::Walk) => "Стартуй доріжку".into(),
-        (Posture::Stand, Posture::Sit) => "Сядь".into(),
-        (Posture::Stand, Posture::Walk) => "Стартуй доріжку".into(),
-        (Posture::Walk, Posture::Sit) => "Злізь з доріжки та сядь".into(),
-        (Posture::Walk, Posture::Stand) => "Злізь з доріжки, працюй стоячи".into(),
-        (a, b) if a == b => format!("Наступний блок — {}", posture_label(b)),
-        (_, b) => format!("Перехід → {}", posture_label(b)),
+        (Posture::Sit, Posture::Stand) => "Raise your desk — work standing".into(),
+        (Posture::Sit, Posture::Walk) => "Start the treadmill".into(),
+        (Posture::Stand, Posture::Sit) => "Sit down".into(),
+        (Posture::Stand, Posture::Walk) => "Start the treadmill".into(),
+        (Posture::Walk, Posture::Sit) => "Step off the treadmill and sit".into(),
+        (Posture::Walk, Posture::Stand) => "Step off the treadmill, work standing".into(),
+        (a, b) if a == b => format!("Next block — {}", posture_label(b)),
+        (_, b) => format!("Transition → {}", posture_label(b)),
     }
 }
 
@@ -524,15 +524,15 @@ mod tests {
     fn transition_text_is_posture_aware() {
         assert_eq!(
             transition_text(Posture::Sit, Posture::Stand),
-            "Підніми стіл — працюй стоячи"
+            "Raise your desk — work standing"
         );
         assert_eq!(
             transition_text(Posture::Sit, Posture::Walk),
-            "Стартуй доріжку"
+            "Start the treadmill"
         );
         assert_eq!(
             transition_text(Posture::Walk, Posture::Sit),
-            "Злізь з доріжки та сядь"
+            "Step off the treadmill and sit"
         );
     }
 }

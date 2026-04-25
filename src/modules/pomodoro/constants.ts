@@ -8,14 +8,14 @@ export const POSTURE_LABEL: Record<Posture, string> = {
 
 /** Matches the Rust `transition_text` copy — keep the two in sync. */
 export const transitionText = (from: Posture, to: Posture): string => {
-  if (from === 'sit' && to === 'stand') return 'Підніми стіл — працюй стоячи';
-  if (from === 'sit' && to === 'walk') return 'Стартуй доріжку';
-  if (from === 'stand' && to === 'sit') return 'Сядь';
-  if (from === 'stand' && to === 'walk') return 'Стартуй доріжку';
-  if (from === 'walk' && to === 'sit') return 'Злізь з доріжки та сядь';
-  if (from === 'walk' && to === 'stand') return 'Злізь з доріжки, працюй стоячи';
-  if (from === to) return `Наступний блок — ${POSTURE_LABEL[to]}`;
-  return `Перехід → ${POSTURE_LABEL[to]}`;
+  if (from === 'sit' && to === 'stand') return 'Raise your desk — work standing';
+  if (from === 'sit' && to === 'walk') return 'Start the treadmill';
+  if (from === 'stand' && to === 'sit') return 'Sit down';
+  if (from === 'stand' && to === 'walk') return 'Start the treadmill';
+  if (from === 'walk' && to === 'sit') return 'Step off the treadmill and sit';
+  if (from === 'walk' && to === 'stand') return 'Step off the treadmill, work standing';
+  if (from === to) return `Next block — ${POSTURE_LABEL[to]}`;
+  return `Transition → ${POSTURE_LABEL[to]}`;
 };
 
 export const formatMmSs = (ms: number): string => {
