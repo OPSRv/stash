@@ -2,12 +2,15 @@
 //! Telegram Bot API, stores the file under `<app_data>/telegram/inbox/<YYYY-MM-DD>/<uuid>.<ext>`
 //! and records a row in the `inbox` SQLite table.
 //!
-//! File caps (per §5.3 of the design):
-//! - Per-file limit: 20 MB. Rejected before the download call using the
-//!   metadata the Bot API hands back with every file reference.
-//! - Per-day cumulative: 50 MB. Counter lives in the `kv` table under
+//! File caps:
+//! - Per-file limit: 20 MB. Hard ceiling — Telegram's default Bot API
+//!   refuses `getFile` for anything bigger, so raising this would just
+//!   trade a useful local error for a confusing remote one.
+//! - Per-day cumulative: 1 GB. Counter lives in the `kv` table under
 //!   `inbox_bytes_<YYYY-MM-DD>`; resets implicitly because each new day
-//!   has its own key.
+//!   has its own key. Stash is single-user, so the cap is more of a
+//!   "did I forward something I didn't mean to?" speed-bump than a
+//!   defence against abuse.
 
 use std::path::{Path, PathBuf};
 
@@ -20,7 +23,7 @@ use uuid::Uuid;
 use super::state::TelegramState;
 
 pub const PER_FILE_CAP: u64 = 20 * 1024 * 1024;
-pub const PER_DAY_CAP: u64 = 50 * 1024 * 1024;
+pub const PER_DAY_CAP: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct MediaIntent {
