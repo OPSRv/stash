@@ -9,15 +9,15 @@ export type TimelineMode = 'edit' | 'playing';
 interface TimelineProps {
   blocks: Block[];
   mode: TimelineMode;
-  /** Edit-mode: емітиться щоразу, коли користувач reorder/resize/rename/змінив posture. */
+  /** Edit-mode: fired whenever the user reorders/resizes/renames/changes posture. */
   onChange?: (next: Block[]) => void;
-  /** Edit-mode: видалити блок з id. */
+  /** Edit-mode: delete block by id. */
   onDelete?: (id: string) => void;
-  /** Playing-mode: індекс поточного блока. */
+  /** Playing-mode: index of the current block. */
   currentIdx?: number;
-  /** Playing-mode: 0..1 прогрес поточного блока. */
+  /** Playing-mode: 0..1 progress through the current block. */
   progress?: number;
-  /** Playing-mode: стрибок на блок (для click-to-jump). */
+  /** Playing-mode: jump to a specific block index (click-to-jump). */
   onJumpTo?: (idx: number) => void;
 }
 
@@ -40,10 +40,10 @@ type DragState =
       originIdx: number;
       targetIdx: number;
       deltaX: number;
-      /** Центри всіх блоків у момент drag-start — вимірюються один раз,
-       * щоб layout-зсуви не плутали розрахунок target-позиції. */
+      /** Block centers captured at drag-start — measured once so layout shifts
+       * during the drag don't corrupt the target-position calculation. */
       centers: number[];
-      /** Left/right у viewport-координатах для drop-indicator. */
+      /** Left/right in viewport coordinates for the drop indicator. */
       rects: { left: number; right: number }[];
       timelineLeft: number;
     }
@@ -174,19 +174,29 @@ export const Timeline = ({
     });
   }, [blocks, onChange]);
 
+  // Stable ref wrappers so the useEffect below only re-attaches listeners when
+  // drag starts or stops — not on every pointer-move tick that recreates the
+  // callbacks above (which would create a brief gap where pointerup is missed).
+  const onPointerMoveRef = useRef(onPointerMove);
+  onPointerMoveRef.current = onPointerMove;
+  const endDragRef = useRef(endDrag);
+  endDragRef.current = endDrag;
+
   useEffect(() => {
     if (drag.kind === 'idle') return;
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', endDrag);
-    window.addEventListener('pointercancel', endDrag);
+    const handleMove = (e: PointerEvent) => onPointerMoveRef.current(e);
+    const handleEnd = () => endDragRef.current();
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleEnd);
+    window.addEventListener('pointercancel', handleEnd);
     return () => {
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', endDrag);
-      window.removeEventListener('pointercancel', endDrag);
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleEnd);
+      window.removeEventListener('pointercancel', handleEnd);
     };
-  }, [drag.kind, onPointerMove, endDrag]);
+  }, [drag.kind]);
 
-  // Зняття виділення при кліку поза блоками.
+  // Deselect when clicking outside any block.
   useEffect(() => {
     if (!selectedId) return;
     const onDocDown = (e: PointerEvent) => {
@@ -199,7 +209,7 @@ export const Timeline = ({
     return () => window.removeEventListener('pointerdown', onDocDown);
   }, [selectedId]);
 
-  // Гарячі клавіші для виділеного блока.
+  // Keyboard shortcuts for the selected block.
   useEffect(() => {
     if (!editable || !selectedId) return;
     const onKey = (e: KeyboardEvent) => {
@@ -235,7 +245,7 @@ export const Timeline = ({
     onChange?.(blocks.map((b) => (b.id === id ? { ...b, name: trimmed } : b)));
   };
 
-  // Ruler ticks: кожні 15 хв при <120м, інакше 30 хв.
+  // Ruler ticks: every 15 min for <120 min total, otherwise 30 min.
   const step = totalMin > 120 ? 30 : totalMin > 60 ? 15 : 10;
   const ticks: number[] = [];
   for (let t = 0; t <= totalMin; t += step) ticks.push(t);
