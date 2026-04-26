@@ -560,8 +560,10 @@ const InboxRow = ({
         onToggleSelect();
       }
     }}
-    className={`mx-2 my-0.5 px-3 py-2.5 rounded-lg transition-colors flex flex-col gap-2 group cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[rgb(var(--stash-accent-rgb))] ${
-      selected ? 'bg-[rgba(var(--stash-accent-rgb),0.18)]' : 'hover:bg-white/3'
+    className={`mx-3 my-1 px-3 py-2.5 rounded-lg border hair transition-colors flex flex-col gap-2 group cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[rgb(var(--stash-accent-rgb))] ${
+      selected
+        ? 'bg-[rgba(var(--stash-accent-rgb),0.18)] border-[rgb(var(--stash-accent-rgb))]/40'
+        : 'bg-white/[0.03] [.light_&]:bg-black/[0.02] hover:bg-white/[0.06] [.light_&]:hover:bg-black/[0.04]'
     }`}
   >
     <div className="flex items-center gap-2 text-meta text-white/40">

@@ -8,7 +8,7 @@ import { Textarea } from '../shared/ui/Textarea';
 import { useToast } from '../shared/ui/Toast';
 
 import { SettingRow } from './SettingRow';
-import { SettingsSectionHeader } from './SettingsSectionHeader';
+import { SettingsSection, SettingsTab } from './SettingsLayout';
 import type { AiProvider, Settings } from './store';
 
 interface AiTabProps {
@@ -117,10 +117,8 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
   };
 
   return (
-    <div className="max-w-[560px] mx-auto space-y-6">
-      <section>
-        <SettingsSectionHeader label="API" />
-        <div className="divide-y divide-white/5">
+    <SettingsTab>
+      <SettingsSection label="API">
         <SettingRow
           title="Provider"
           description="OpenAI / Anthropic / Google use their native APIs. Custom points at any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter, …)."
@@ -219,9 +217,9 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
               placeholder="e.g. Respond in Ukrainian. Be concise. Format code with language fences."
               value={settings.aiSystemPrompt}
               onChange={(e) => onChange('aiSystemPrompt', e.currentTarget.value)}
-              rows={3}
+              rows={2}
               maxLength={4000}
-              className="w-[420px]"
+              className="w-[360px] text-meta"
             />
           }
         />
@@ -252,8 +250,7 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
             </div>
           }
         />
-        </div>
-      </section>
-    </div>
+      </SettingsSection>
+    </SettingsTab>
   );
 };

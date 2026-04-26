@@ -34,6 +34,51 @@ describe('SettingsShell', () => {
     expect(screen.getByText('Stash')).toBeInTheDocument();
   });
 
+  it('exposes Browser (cookies) under General, not Downloads', async () => {
+    const user = userEvent.setup();
+    render(<SettingsShell />);
+    // General is the default tab; the BROWSER section ships there now.
+    expect(screen.getByText(/Default browser/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Forget$/ })).toBeInTheDocument();
+
+    // Downloads no longer hosts cookies.
+    await user.click(screen.getByRole('tab', { name: 'Downloads' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Bandwidth limit/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Default browser/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Forget$/ })).not.toBeInTheDocument();
+  });
+
+  it('shows window position controls under General, not Appearance', async () => {
+    const user = userEvent.setup();
+    render(<SettingsShell />);
+    expect(
+      screen.getByRole('button', { name: /Reset position/i }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Appearance' }));
+    await waitFor(() => {
+      expect(screen.getByText(/Translucency/)).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('button', { name: /Reset position/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('exposes the Data tab with backup + diagnostics actions', async () => {
+    const user = userEvent.setup();
+    render(<SettingsShell />);
+    await user.click(screen.getByRole('tab', { name: 'Data' }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Export backup/i }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /^Open…$/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Collect$/ })).toBeInTheDocument();
+  });
+
   it('wraps the folder picker with set_popup_auto_hide to keep the dialog open', async () => {
     const user = userEvent.setup();
     // Record the order of IPC calls relative to the native dialog.

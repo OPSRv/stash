@@ -2,7 +2,7 @@ import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
 
 import { SettingRow } from './SettingRow';
-import { SettingsSectionHeader } from './SettingsSectionHeader';
+import { SettingsSection, SettingsTab } from './SettingsLayout';
 import type { Settings, WebChatService } from './store';
 
 interface WebTabProps {
@@ -58,99 +58,96 @@ const moveService = (
   onChange('aiWebServices', next);
 };
 
-export const WebTab = ({ settings, onChange }: WebTabProps) => {
-  return (
-    <div className="max-w-[560px] mx-auto space-y-6">
-      <section>
-        <SettingsSectionHeader label="TABS" />
-        <div className="divide-y divide-white/5">
-          <SettingRow
-            title="Saved tabs"
-            description="Shown in the Web tab's tab bar. Each opens as a native child webview so your regular browser login carries over."
-            control={
-              <Button
-                size="sm"
-                variant="soft"
-                shape="square"
-                aria-label="Add tab"
-                title="Add tab"
-                onClick={() => {
-                  const nextId = freshServiceId(settings.aiWebServices);
-                  onChange('aiWebServices', [
-                    ...settings.aiWebServices,
-                    { id: nextId, label: 'New tab', url: 'https://' },
-                  ]);
-                }}
-              >
-                +
-              </Button>
-            }
-          />
-          <div className="py-1 space-y-1.5">
-            {settings.aiWebServices.map((s, i) => (
-              <div key={s.id + i} className="flex items-center gap-2">
-                <Input
-                  size="sm"
-                  aria-label="Tab label"
-                  placeholder="Label"
-                  value={s.label}
-                  onChange={(e) =>
-                    updateService(settings, onChange, i, { label: e.currentTarget.value })
-                  }
-                  className="w-[140px]"
-                />
-                <Input
-                  size="sm"
-                  aria-label="Tab URL"
-                  placeholder="https://"
-                  value={s.url}
-                  onChange={(e) =>
-                    updateService(settings, onChange, i, { url: e.currentTarget.value })
-                  }
-                  className="flex-1"
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  shape="square"
-                  disabled={i === 0}
-                  onClick={() => moveService(settings, onChange, i, i - 1)}
-                  aria-label="Move up"
-                  title="Move up"
-                >
-                  ↑
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  shape="square"
-                  disabled={i === settings.aiWebServices.length - 1}
-                  onClick={() => moveService(settings, onChange, i, i + 1)}
-                  aria-label="Move down"
-                  title="Move down"
-                >
-                  ↓
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  tone="danger"
-                  onClick={() =>
-                    onChange(
-                      'aiWebServices',
-                      settings.aiWebServices.filter((_, j) => j !== i),
-                    )
-                  }
-                  aria-label="Remove tab"
-                  title="Remove"
-                >
-                  ×
-                </Button>
-              </div>
-            ))}
+export const WebTab = ({ settings, onChange }: WebTabProps) => (
+  <SettingsTab>
+    <SettingsSection label="TABS" divided={false}>
+      <div className="divide-y divide-white/5 [.light_&]:divide-black/5">
+        <SettingRow
+          title="Saved tabs"
+          description="Shown in the Web tab's tab bar. Each opens as a native child webview so your regular browser login carries over."
+          control={
+            <Button
+              size="sm"
+              variant="soft"
+              shape="square"
+              aria-label="Add tab"
+              title="Add tab"
+              onClick={() => {
+                const nextId = freshServiceId(settings.aiWebServices);
+                onChange('aiWebServices', [
+                  ...settings.aiWebServices,
+                  { id: nextId, label: 'New tab', url: 'https://' },
+                ]);
+              }}
+            >
+              +
+            </Button>
+          }
+        />
+      </div>
+      <div className="py-1 space-y-1.5">
+        {settings.aiWebServices.map((s, i) => (
+          <div key={s.id + i} className="flex items-center gap-2">
+            <Input
+              size="sm"
+              aria-label="Tab label"
+              placeholder="Label"
+              value={s.label}
+              onChange={(e) =>
+                updateService(settings, onChange, i, { label: e.currentTarget.value })
+              }
+              className="w-[140px]"
+            />
+            <Input
+              size="sm"
+              aria-label="Tab URL"
+              placeholder="https://"
+              value={s.url}
+              onChange={(e) =>
+                updateService(settings, onChange, i, { url: e.currentTarget.value })
+              }
+              className="flex-1"
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              shape="square"
+              disabled={i === 0}
+              onClick={() => moveService(settings, onChange, i, i - 1)}
+              aria-label="Move up"
+              title="Move up"
+            >
+              ↑
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              shape="square"
+              disabled={i === settings.aiWebServices.length - 1}
+              onClick={() => moveService(settings, onChange, i, i + 1)}
+              aria-label="Move down"
+              title="Move down"
+            >
+              ↓
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              tone="danger"
+              onClick={() =>
+                onChange(
+                  'aiWebServices',
+                  settings.aiWebServices.filter((_, j) => j !== i),
+                )
+              }
+              aria-label="Remove tab"
+              title="Remove"
+            >
+              ×
+            </Button>
           </div>
-        </div>
-      </section>
-    </div>
-  );
-};
+        ))}
+      </div>
+    </SettingsSection>
+  </SettingsTab>
+);

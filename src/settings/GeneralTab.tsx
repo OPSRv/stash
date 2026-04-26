@@ -1,40 +1,27 @@
-import { Toggle } from '../shared/ui/Toggle';
-import { BackupSection } from './BackupSection';
-import { SettingRow } from './SettingRow';
-import { SettingsSectionHeader } from './SettingsSectionHeader';
+import { BrowserSection } from './BrowserSection';
+import { SettingsSection, SettingsTab } from './SettingsLayout';
 import { StashCliRow } from './StashCliRow';
+import { WindowSection } from './WindowSection';
+import type { Settings } from './store';
 
 interface GeneralTabProps {
+  settings: Settings;
+  onChange: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
   autostartOn: boolean;
   onToggleAutostart: (next: boolean) => void;
 }
 
-export const GeneralTab = ({ autostartOn, onToggleAutostart }: GeneralTabProps) => (
-  <div className="max-w-[560px] mx-auto space-y-6">
-    <section>
-      <SettingsSectionHeader label="STARTUP" />
-      <div className="divide-y divide-white/5">
-        <SettingRow
-          title="Launch at login"
-          description="Starts Stash quietly in the menubar when you log in."
-          control={
-            <Toggle
-              checked={autostartOn}
-              onChange={onToggleAutostart}
-              label="Launch at login"
-            />
-          }
-        />
-      </div>
-    </section>
-
-    <section>
-      <SettingsSectionHeader label="INTEGRATIONS" />
-      <div className="divide-y divide-white/5">
-        <StashCliRow />
-      </div>
-    </section>
-
-    <BackupSection />
-  </div>
+export const GeneralTab = ({
+  settings,
+  onChange,
+  autostartOn,
+  onToggleAutostart,
+}: GeneralTabProps) => (
+  <SettingsTab>
+    <WindowSection autostartOn={autostartOn} onToggleAutostart={onToggleAutostart} />
+    <BrowserSection settings={settings} onChange={onChange} />
+    <SettingsSection label="INTEGRATIONS">
+      <StashCliRow />
+    </SettingsSection>
+  </SettingsTab>
 );

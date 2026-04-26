@@ -6,13 +6,20 @@ import { IconButton } from './IconButton';
 import { PauseIcon, PlayIcon, WaveformIcon } from './icons';
 
 /// Load strategy.
-///  - `url`   : hand `src` directly to `<audio>`. Absolute paths get
-///              `convertFileSrc`; anything starting with a protocol
-///              (asset://, file://, http) passes through untouched.
-///  - `bytes` : read bytes via the Notes audio-reader and wrap in a
-///              Blob URL. Needed for the notes markdown path because
-///              WKWebView can't fetch `asset://` on some macOS builds.
-export type AudioLoader = 'url' | 'bytes';
+///  - `url`    : hand `src` directly to `<audio>`. Absolute paths get
+///               `convertFileSrc` (asset://); anything with a protocol
+///               (asset://, file://, http) passes through. Used by
+///               Telegram inbox media (lives in scope-allowed dirs).
+///  - `bytes`  : read all bytes via the Notes audio-reader up-front and
+///               wrap in a Blob URL. Used by short markdown voice notes.
+///               Don't use for big files — IPC `Vec<u8>` JSON-array
+///               serialisation is O(N) and freezes the main thread.
+///  - `stream` : resolve a `http://127.0.0.1:<port>/audio?…` URL via
+///               the Notes loopback media server, then stream as usual.
+///               The only path AVFoundation can open for large/streaming
+///               audio (asset:// fails for any sizeable file). Use this
+///               for note attachments.
+export type AudioLoader = 'url' | 'bytes' | 'stream';
 
 /// Visual variant.
 ///  - `compact`  : 32 px tall row with a slim progress bar + clock.
@@ -125,6 +132,8 @@ export const AudioPlayer = ({
   // For `bytes` loader: holds the Blob URL currently rendered.
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // For `stream` loader: holds the loopback URL minted by Rust.
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
 
   // Keep the caller-provided duration hint authoritative until the
   // audio element reports something more precise.
@@ -132,8 +141,11 @@ export const AudioPlayer = ({
     if (durationHint && durationHint > 0) setDuration(durationHint);
   }, [durationHint]);
 
+  const shouldLoadBytes = loader === 'bytes';
+  const shouldStream = loader === 'stream';
+
   useEffect(() => {
-    if (loader !== 'bytes') return;
+    if (!shouldLoadBytes) return;
     let revoke: string | null = null;
     let cancelled = false;
     setBlobUrl(null);
@@ -161,9 +173,41 @@ export const AudioPlayer = ({
       cancelled = true;
       if (revoke) URL.revokeObjectURL(revoke);
     };
-  }, [src, loader, durationHint]);
+  }, [src, shouldLoadBytes, durationHint]);
 
-  const audioUrl = loader === 'bytes' ? blobUrl : normaliseUrl(src);
+  useEffect(() => {
+    if (!shouldStream) return;
+    let cancelled = false;
+    setStreamUrl(null);
+    setLoadError(null);
+    setPlaying(false);
+    setCurrent(0);
+    if (!durationHint) setDuration(0);
+    let decoded = src;
+    try {
+      decoded = decodeURI(src);
+    } catch {
+      /* leave src as-is */
+    }
+    import('../../modules/notes/api')
+      .then(({ notesAudioStreamUrl }) => notesAudioStreamUrl(decoded))
+      .then((u) => {
+        if (!cancelled) setStreamUrl(u);
+      })
+      .catch((e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [src, shouldStream, durationHint]);
+
+  // Pick the live source for `<audio>`: bytes blob > stream URL > as-is.
+  const audioUrl = shouldLoadBytes
+    ? blobUrl
+    : shouldStream
+      ? streamUrl
+      : normaliseUrl(src);
 
   const toggle = () => {
     const a = audioRef.current;
@@ -187,6 +231,29 @@ export const AudioPlayer = ({
   const onEnded = () => {
     setPlaying(false);
     setCurrent(0);
+  };
+
+  /// Surface the underlying `MediaError` code so a generic "Decode
+  /// error" can't hide whether the problem is network/scope (code 2/4)
+  /// or the actual codec pipeline (code 3).
+  const formatMediaError = (el: HTMLAudioElement): string => {
+    const e = el.error;
+    if (!e) return 'Decode error';
+    const codeName =
+      e.code === 1
+        ? 'aborted'
+        : e.code === 2
+          ? 'network'
+          : e.code === 3
+            ? 'decode'
+            : e.code === 4
+              ? 'unsupported'
+              : `code-${e.code}`;
+    return e.message ? `${codeName}: ${e.message}` : codeName;
+  };
+
+  const onAudioError = (el: HTMLAudioElement) => {
+    setLoadError(formatMediaError(el));
   };
 
   const seekFromPointer = (clientX: number, rect: DOMRect) => {
@@ -224,10 +291,7 @@ export const AudioPlayer = ({
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
             onEnded={onEnded}
-            onError={(e) => {
-              const el = e.currentTarget;
-              setLoadError(el.error?.message || 'Decode error');
-            }}
+            onError={(e) => onAudioError(e.currentTarget)}
           />
         )}
       </WaveformDisplay>
@@ -291,10 +355,7 @@ export const AudioPlayer = ({
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onEnded={onEnded}
-          onError={(e) => {
-            const el = e.currentTarget;
-            setLoadError(el.error?.message || 'Decode error');
-          }}
+          onError={(e) => onAudioError(e.currentTarget)}
         />
       )}
       {loadError && (

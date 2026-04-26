@@ -21,10 +21,15 @@ html.light .sb-stage {
 
 /* Storybook renders stories inside an iframe whose body is transparent
  * by default; tokens.css keeps it transparent. Paint the canvas so the
- * "canvas-*" background addon values actually take effect. */
-html, body, #storybook-root {
+ * "canvas-*" background addon values actually take effect.
+ *
+ * tokens.css pins body to `overflow: hidden` + `height: 100%` so the real
+ * popup never rubber-bands. Inside Storybook that traps tall stories
+ * (e.g. settings panels) with no way to scroll — undo it for the iframe. */
+html, body, #storybook-root, #storybook-docs {
   height: auto;
   min-height: 100%;
+  overflow: auto;
 }
 
 /* Demo helper used across stories. */

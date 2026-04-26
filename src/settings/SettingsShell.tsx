@@ -14,6 +14,7 @@ import { AboutTab } from './AboutTab';
 import { AiTab } from './AiTab';
 import { AppearanceTab } from './AppearanceTab';
 import { ClipboardTab } from './ClipboardTab';
+import { DataTab } from './DataTab';
 import { DownloadsTab } from './DownloadsTab';
 import { GeneralTab } from './GeneralTab';
 import { NotesTab } from './NotesTab';
@@ -34,6 +35,7 @@ type Tab =
   | 'ai'
   | 'web'
   | 'telegram'
+  | 'data'
   | 'about';
 
 const Stroke = ({ d }: { d: string }) => (
@@ -137,6 +139,17 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
+      </svg>
+    ),
+  },
+  {
+    id: 'data',
+    label: 'Data',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <ellipse cx="12" cy="5" rx="8" ry="3" />
+        <path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
+        <path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6" />
       </svg>
     ),
   },
@@ -304,7 +317,12 @@ export const SettingsShell = () => {
         style={{ scrollbarGutter: 'stable' }}
       >
         {tab === 'general' && (
-          <GeneralTab autostartOn={autostartOn} onToggleAutostart={toggleAutostart} />
+          <GeneralTab
+            settings={settings}
+            onChange={update}
+            autostartOn={autostartOn}
+            onToggleAutostart={toggleAutostart}
+          />
         )}
         {tab === 'appearance' && <AppearanceTab settings={settings} onChange={update} />}
         {tab === 'clipboard' && <ClipboardTab settings={settings} onChange={update} />}
@@ -321,6 +339,7 @@ export const SettingsShell = () => {
         {tab === 'ai' && <AiTab settings={settings} onChange={update} />}
         {tab === 'web' && <WebTab settings={settings} onChange={update} />}
         {tab === 'telegram' && <TelegramTab />}
+        {tab === 'data' && <DataTab />}
         {tab === 'about' && <AboutTab />}
       </main>
     </div>

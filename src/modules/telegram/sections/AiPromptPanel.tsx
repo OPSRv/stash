@@ -101,7 +101,7 @@ export function AiPromptPanel() {
         </div>
         <Textarea
           id="tg-ai-prompt"
-          rows={6}
+          rows={4}
           value={settings.system_prompt}
           onChange={(e) => onPrompt(e.target.value)}
           aria-label="System prompt"

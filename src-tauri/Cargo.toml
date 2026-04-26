@@ -87,6 +87,11 @@ async-trait = "0.1"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Synchronous, dependency-light HTTP server. Used by the Notes module to
+# expose audio attachments at `http://127.0.0.1:<port>/audio?...` so
+# WKWebView/AVFoundation can stream them — `asset://` cannot be opened
+# by AVFoundation, which breaks playback for large/streaming media.
+tiny_http = "0.12"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"

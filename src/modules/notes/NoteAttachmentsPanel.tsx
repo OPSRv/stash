@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 import { AudioPlayer } from '../../shared/ui/AudioPlayer';
+import { revealFile } from '../../shared/util/revealFile';
 import { Badge } from '../../shared/ui/Badge';
 import { Button } from '../../shared/ui/Button';
 import { FileChip, formatBytes } from '../../shared/ui/FileChip';
@@ -39,14 +40,6 @@ const kindOf = (a: NoteAttachment): 'image' | 'video' | 'audio' | 'file' => {
   if (m.startsWith('video/')) return 'video';
   if (m.startsWith('audio/')) return 'audio';
   return 'file';
-};
-
-const revealInFinder = async (path: string) => {
-  // Lean on the existing opener plugin so the native reveal call stays
-  // sandboxed behind a single permission allow-list.
-  await invoke('plugin:opener|reveal_item_in_dir', { path }).catch(() =>
-    invoke('plugin:opener|open_path', { path }),
-  );
 };
 
 /// Attachments rail for a single note. Supports drag-and-drop (files
@@ -346,7 +339,7 @@ const AttachmentActions = ({
     )}
     <IconButton
       title="Reveal in Finder"
-      onClick={() => void revealInFinder(item.file_path)}
+      onClick={() => void revealFile(item.file_path)}
     >
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H3z" />
@@ -456,7 +449,12 @@ const AudioAttachmentBody = ({
 
   return (
     <div className="w-full flex flex-col gap-2">
-      <AudioPlayer src={item.file_path} />
+      {/* Stream attachments over the loopback HTTP server. `asset://`
+          can't reach AVFoundation (which `<audio>` falls back to for
+          large/streaming media), so the local server is the only path
+          that works for note attachments — no IPC byte transfer, full
+          Range-request seeking. */}
+      <AudioPlayer src={item.file_path} loader="stream" />
       <TranscriptArea
         transcript={transcript}
         transcribing={status === 'running'}
