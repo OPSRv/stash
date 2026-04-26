@@ -47,7 +47,23 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # See release.yml comment — cache the sherpa-rs extraction dir so
+      # build.rs finds the prebuilt dylibs on warm runs. Cold runs go
+      # through the warm-up step below.
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/sherpa-rs
+          key: sherpa-rs-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            sherpa-rs-${{ runner.os }}-
+
       - run: npm ci
+
+      - name: Warm sherpa-rs cache (both arches for universal2 build)
+        working-directory: src-tauri
+        run: |
+          cargo build -p sherpa-rs --release --target aarch64-apple-darwin
+          cargo build -p sherpa-rs --release --target x86_64-apple-darwin
 
       - name: Derive version string
         id: ver

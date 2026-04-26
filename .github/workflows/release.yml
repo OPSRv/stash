@@ -39,7 +39,34 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # `sherpa-rs` downloads its prebuilt dylibs into `~/Library/Caches/sherpa-rs`
+      # on first build. Our build.rs stages them into `src-tauri/sherpa-libs/`
+      # so Tauri's bundler can pick them up — but build.rs runs before the
+      # sherpa-rs-sys build script populates the cache, so a cold runner
+      # produces an empty `sherpa-libs/` and the bundler errors with
+      # "Library not found". Caching the extraction dir lets the second run
+      # of build.rs (after cargo finishes the dependency build, kicked off
+      # by the warm-up below) find the files. The cache key includes
+      # Cargo.lock so a sherpa-rs version bump invalidates cleanly.
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/sherpa-rs
+          key: sherpa-rs-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            sherpa-rs-${{ runner.os }}-
+
       - run: npm ci
+
+      # Cold-cache warm-up: build sherpa-rs once so its build script downloads
+      # + extracts the prebuilt dylibs into ~/Library/Caches/sherpa-rs. The
+      # subsequent `tauri build` re-runs our own build.rs, which now finds
+      # the cache populated and stages the dylibs into sherpa-libs/. No-op
+      # cost (~10s) on warm cache.
+      - name: Warm sherpa-rs cache (both arches for universal2 build)
+        working-directory: src-tauri
+        run: |
+          cargo build -p sherpa-rs --release --target aarch64-apple-darwin
+          cargo build -p sherpa-rs --release --target x86_64-apple-darwin
 
       - name: Build universal macOS bundle
         env:
