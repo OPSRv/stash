@@ -261,17 +261,24 @@ export const NotesShell = () => {
 
   // Cross-module inserts (e.g. Telegram /note) fire `notes:changed` so the
   // sidebar refreshes without the user re-typing in the search box.
+  // Hold `reload` in a ref so the listener is registered exactly once on
+  // mount — re-subscribing on every `query` change can drop events that
+  // arrive between unsubscribe and re-subscribe.
+  const reloadRef = useRef(reload);
+  useEffect(() => {
+    reloadRef.current = reload;
+  }, [reload]);
   useEffect(() => {
     let cancel: (() => void) | undefined;
     listen('notes:changed', () => {
-      void reload();
+      void reloadRef.current();
     }).then((un) => {
       cancel = un;
     });
     return () => {
       cancel?.();
     };
-  }, [reload]);
+  }, []);
 
   const active = activeNote;
 

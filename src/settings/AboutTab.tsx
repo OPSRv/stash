@@ -152,7 +152,7 @@ export const AboutTab = () => {
                   </span>
                   {typeof m.tabShortcutDigit === 'number' && (
                     <span
-                      className="absolute top-0.5 right-1 text-[10px] font-mono tabular-nums"
+                      className="absolute top-0.5 right-1 text-meta font-mono tabular-nums"
                       style={{ color: tint, opacity: 0.7 }}
                     >
                       {m.tabShortcutDigit}

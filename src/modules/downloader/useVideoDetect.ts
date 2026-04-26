@@ -65,10 +65,12 @@ export const useVideoDetect = (): UseVideoDetectResult => {
   const cancelledRef = useRef<Set<string>>(new Set());
 
   // Tick elapsed seconds for every actively-detecting session. One interval
-  // handles all of them — no proliferating timers per card.
+  // handles all of them — no proliferating timers per card. We depend on the
+  // derived `hasInflight` boolean, not the full `sessions` array, so adding
+  // or completing a card doesn't tear down + re-create the interval mid-tick.
+  const hasInflight = sessions.some((s) => s.detecting);
   useEffect(() => {
-    const anyActive = sessions.some((s) => s.detecting);
-    if (!anyActive) return;
+    if (!hasInflight) return;
     const timer = window.setInterval(() => {
       const now = Date.now();
       setSessions((prev) =>
@@ -80,7 +82,7 @@ export const useVideoDetect = (): UseVideoDetectResult => {
       );
     }, 200);
     return () => window.clearInterval(timer);
-  }, [sessions]);
+  }, [hasInflight]);
 
   const dismiss = useCallback((id: string) => {
     cancelledRef.current.add(id);

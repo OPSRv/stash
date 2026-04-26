@@ -146,8 +146,12 @@ export const AudioPlayer = ({
 
   useEffect(() => {
     if (!shouldLoadBytes) return;
+    // `AbortController` over a bare cancellation flag so future callers
+    // that hand the signal down to `fetch` / `invoke` get free abort
+    // semantics — and the cleanup path is symmetric with the `stream`
+    // loader below.
+    const ctrl = new AbortController();
     let revoke: string | null = null;
-    let cancelled = false;
     setBlobUrl(null);
     setLoadError(null);
     setPlaying(false);
@@ -155,7 +159,7 @@ export const AudioPlayer = ({
     if (!durationHint) setDuration(0);
     loadBytes(src)
       .then((bytes) => {
-        if (cancelled) return;
+        if (ctrl.signal.aborted) return;
         if (!bytes || bytes.byteLength === 0) {
           setLoadError('Empty audio file');
           return;
@@ -166,18 +170,18 @@ export const AudioPlayer = ({
         setBlobUrl(u);
       })
       .catch((e) => {
-        if (cancelled) return;
+        if (ctrl.signal.aborted) return;
         setLoadError(e instanceof Error ? e.message : String(e));
       });
     return () => {
-      cancelled = true;
+      ctrl.abort();
       if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [src, shouldLoadBytes, durationHint]);
 
   useEffect(() => {
     if (!shouldStream) return;
-    let cancelled = false;
+    const ctrl = new AbortController();
     setStreamUrl(null);
     setLoadError(null);
     setPlaying(false);
@@ -192,13 +196,13 @@ export const AudioPlayer = ({
     import('../../modules/notes/api')
       .then(({ notesAudioStreamUrl }) => notesAudioStreamUrl(decoded))
       .then((u) => {
-        if (!cancelled) setStreamUrl(u);
+        if (!ctrl.signal.aborted) setStreamUrl(u);
       })
       .catch((e) => {
-        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
+        if (!ctrl.signal.aborted) setLoadError(e instanceof Error ? e.message : String(e));
       });
     return () => {
-      cancelled = true;
+      ctrl.abort();
     };
   }, [src, shouldStream, durationHint]);
 
