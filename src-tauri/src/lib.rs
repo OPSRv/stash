@@ -792,11 +792,32 @@ pub fn run() {
             // actual cell grid).
             app.manage(Arc::new(TerminalState::new()));
 
-            // AI — sessions/messages in dedicated SQLite, API keys in OS keychain.
+            // AI — sessions/messages in dedicated SQLite, API keys in OS keychain
+            // with the same probe-and-file-fallback the Telegram module uses
+            // (see below). Without it, ad-hoc-signed release DMGs (no Apple
+            // Developer ID) silently lose every `set_password` and the Telegram
+            // assistant ends up with `LlmError::Auth` after a "successful" Save
+            // in Settings → AI. The encrypted file at `<data>/ai/.secrets.bin`
+            // keeps the flow working until the bundle ships with proper
+            // codesigning.
             let ai_db = data_dir.join("ai.sqlite");
             let ai_repo = AiRepo::new(Connection::open(&ai_db)?)?;
             let ai_secrets: Arc<dyn SecretStore> =
-                Arc::new(KeyringStore::new(KEYRING_SERVICE));
+                if modules::telegram::file_secrets::keyring_roundtrip_ok(KEYRING_SERVICE) {
+                    tracing::info!("ai: OS keyring available, using Keychain");
+                    Arc::new(KeyringStore::new(KEYRING_SERVICE))
+                } else {
+                    let secrets_dir = data_dir.join("ai");
+                    std::fs::create_dir_all(&secrets_dir).ok();
+                    let secrets_path = secrets_dir.join(".secrets.bin");
+                    tracing::warn!(
+                        path = %secrets_path.display(),
+                        "ai: OS keyring unavailable (likely an unsigned build); falling back to encrypted file"
+                    );
+                    Arc::new(modules::telegram::file_secrets::FileSecretStore::new(
+                        secrets_path,
+                    )?)
+                };
             app.manage(AiState::new(ai_repo, ai_secrets));
 
             // Telegram — own SQLite + own Keychain service. Wrapped in Arc so
