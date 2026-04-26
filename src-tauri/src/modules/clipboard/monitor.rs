@@ -143,10 +143,7 @@ impl<R: ClipboardReader> Monitor<R> {
             }
             if let Some(dir) = &self.images_dir {
                 let path = Self::save_png(&image, dir, &hash).map_err(|e| {
-                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        e,
-                    )))
+                    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(e)))
                 })?;
                 let meta = format!(
                     r#"{{"path":{},"w":{},"h":{}}}"#,
@@ -228,7 +225,7 @@ impl<R: ClipboardReader> Monitor<R> {
             let buf = image::RgbaImage::from_raw(image.width, image.height, image.bytes.clone())
                 .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "bad rgba"))?;
             buf.save(&path)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
         }
         Ok(path)
     }

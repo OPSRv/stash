@@ -556,9 +556,12 @@ mod tests {
 
     #[test]
     fn parse_ping_extracts_rtt() {
+        // 3.14159 picked deliberately to dodge clippy's `approx_constant`
+        // — the value here is just an arbitrary RTT sample, nothing to
+        // do with π.
         let sample = "PING 1.1.1.1 (1.1.1.1): 56 data bytes\n\
-                      64 bytes from 1.1.1.1: icmp_seq=0 ttl=57 time=3.142 ms\n";
-        assert!((parse_ping_stdout(sample).unwrap() - 3.142).abs() < 0.01);
+                      64 bytes from 1.1.1.1: icmp_seq=0 ttl=57 time=3.7 ms\n";
+        assert!((parse_ping_stdout(sample).unwrap() - 3.7).abs() < 0.01);
         assert!(parse_ping_stdout("no match here").is_none());
     }
 }

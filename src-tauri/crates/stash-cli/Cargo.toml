@@ -3,6 +3,9 @@ name = "stash-cli"
 version = "0.1.1"
 edition = "2021"
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "stash"
 path = "src/main.rs"

@@ -442,6 +442,9 @@ pub fn build_runtime_assistant(
     if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>()
     {
         tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));
+        tools.register(super::tools::stash::ClipboardSearch::new(clip.inner().clone()));
+        tools.register(super::tools::stash::ClipboardPin::new(clip.inner().clone()));
+        tools.register(super::tools::stash::ClipboardClear::new(clip.inner().clone()));
     }
     if let Some(pomo) = app.try_state::<Arc<crate::modules::pomodoro::state::PomodoroState>>() {
         tools.register(super::tools::stash::PomodoroStatus::new(
