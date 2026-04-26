@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { aiDeleteApiKey, aiSetApiKey } from '../modules/ai/api';
 import { buildModel } from '../modules/ai/provider';
 import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
@@ -64,7 +65,12 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
   const currentKey = settings.aiApiKeys[settings.aiProvider] ?? '';
   const keyStored = currentKey.length > 0;
 
-  const saveKey = () => {
+  // Dual-write: keyring is the source of truth in release builds (the Rust
+  // assistant only reads from `com.stash.ai`). settings.json is kept in sync
+  // because the in-process JS chat (AiShell, useAiChat) and Test connection
+  // here use that copy directly via the AI SDK. If either path is skipped,
+  // Test passes while Telegram fails (or vice versa).
+  const saveKey = async () => {
     const trimmed = keyInput.trim();
     if (!trimmed) return;
     onChange('aiApiKeys', {
@@ -72,15 +78,33 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
       [settings.aiProvider]: trimmed,
     });
     setKeyInput('');
-    toast({ title: 'API key saved', variant: 'success' });
+    try {
+      await aiSetApiKey(settings.aiProvider, trimmed);
+      toast({ title: 'API key saved', variant: 'success' });
+    } catch (e) {
+      toast({
+        title: 'Saved to settings, but keyring write failed',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
   };
 
-  const clearKey = () => {
+  const clearKey = async () => {
     const next = { ...settings.aiApiKeys };
     delete next[settings.aiProvider];
     onChange('aiApiKeys', next);
     setKeyInput('');
-    toast({ title: 'API key cleared' });
+    try {
+      await aiDeleteApiKey(settings.aiProvider);
+      toast({ title: 'API key cleared' });
+    } catch (e) {
+      toast({
+        title: 'Cleared from settings, but keyring delete failed',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
   };
 
   const runTest = async () => {
