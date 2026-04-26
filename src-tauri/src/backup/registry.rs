@@ -24,6 +24,18 @@ pub fn providers() -> Vec<Box<dyn ModuleBackup>> {
         Box::new(modules::ai::backup::Provider),
         Box::new(modules::metronome::backup::Provider),
         Box::new(modules::whisper::backup::Provider),
+        Box::new(modules::telegram::backup::Provider),
+        // No backup providers below — by design:
+        // - `system`: process lists, dashboards, scan results are all
+        //   live snapshots of the host. Nothing to restore.
+        // - `terminal`: PTY sessions are ephemeral; the paste-blob the
+        //   `terminal_save_paste_blob` command writes lives in tmp and
+        //   is consumed within seconds.
+        // - `voice`: settings live in `telegram.sqlite` (kv table) so
+        //   they ride along with the telegram backup above.
+        // - `music` / `webchat`: pure WKWebView overlays; cookies and
+        //   localStorage stay inside the OS-managed WebView store, not
+        //   under the app's data dir.
     ]
 }
 
