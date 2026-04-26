@@ -45,7 +45,7 @@ async fn run_once(app: &AppHandle, seen: &Mutex<HashSet<String>>) -> Result<(), 
     let Some(state) = app.try_state::<std::sync::Arc<super::state::TelegramState>>() else {
         return Ok(());
     };
-    let settings = NotificationSettings::load(&**state);
+    let settings = NotificationSettings::load(&state);
     if !settings.calendar {
         return Ok(());
     }

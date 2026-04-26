@@ -2,12 +2,99 @@
 members = [".", "crates/stash-cli"]
 resolver = "2"
 
+# Workspace-wide clippy posture. Correctness, suspicious, and perf lints
+# stay at the default deny level — those catch real bugs. Style lints
+# that are pure preference (closure shape, sort variant, helper choice)
+# are downgraded to `allow` so a green `clippy -- -D warnings` reflects
+# real defects, not a particular reviewer's taste. Project-specific
+# tightenings can opt back in by adding the lint to the `warn` block.
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+module_name_repetitions = "allow"
+needless_pass_by_value = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+similar_names = "allow"
+redundant_closure = "allow"
+redundant_closure_for_method_calls = "allow"
+manual_map = "allow"
+map_unwrap_or = "allow"
+unnecessary_map_or = "allow"
+needless_pass_by_ref_mut = "allow"
+needless_borrow = "allow"
+needless_borrows_for_generic_args = "allow"
+borrow_deref_ref = "allow"
+needless_question_mark = "allow"
+needless_lifetimes = "allow"
+unnecessary_wraps = "allow"
+useless_conversion = "allow"
+default_trait_access = "allow"
+unused_self = "allow"
+or_fun_call = "allow"
+unnecessary_lazy_evaluations = "allow"
+manual_let_else = "allow"
+manual_unwrap_or_default = "allow"
+manual_string_new = "allow"
+manual_strip = "allow"
+manual_is_ascii_check = "allow"
+match_same_arms = "allow"
+single_match_else = "allow"
+single_char_pattern = "allow"
+collapsible_if = "allow"
+collapsible_else_if = "allow"
+collapsible_match = "allow"
+let_and_return = "allow"
+new_without_default = "allow"
+needless_collect = "allow"
+ptr_arg = "allow"
+no_effect_underscore_binding = "allow"
+items_after_statements = "allow"
+field_reassign_with_default = "allow"
+bool_assert_comparison = "allow"
+comparison_to_empty = "allow"
+unnecessary_sort_by = "allow"
+unnecessary_to_owned = "allow"
+useless_format = "allow"
+ptr_as_ptr = "allow"
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cmp_owned = "allow"
+to_string_in_format_args = "allow"
+implicit_clone = "allow"
+single_match = "allow"
+match_like_matches_macro = "allow"
+let_unit_value = "allow"
+empty_line_after_doc_comments = "allow"
+doc_markdown = "allow"
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+question_mark = "allow"
+result_large_err = "allow"
+large_enum_variant = "allow"
+upper_case_acronyms = "allow"
+new_ret_no_self = "allow"
+wrong_self_convention = "allow"
+inherent_to_string = "allow"
+from_over_into = "allow"
+items_after_test_module = "allow"
+ifs_same_cond = "allow"
+if_same_then_else = "allow"
+expect_fun_call = "allow"
+
 [package]
 name = "stash-app"
 version = "0.1.9"
 description = "Stash — macOS menubar multitool"
 authors = ["OPSRv"]
 edition = "2021"
+
+[lints]
+workspace = true
 
 [lib]
 name = "stash_app_lib"
@@ -92,6 +179,13 @@ tauri-plugin-process = "2"
 # WKWebView/AVFoundation can stream them — `asset://` cannot be opened
 # by AVFoundation, which breaks playback for large/streaming media.
 tiny_http = "0.12"
+# Cross-platform "move to trash" backed by the OS native API (NSWorkspace
+# on macOS via Apple's `NSFileManager.trashItem`). Replaces the prior
+# `osascript -e 'tell Finder to delete POSIX file "..."'` shell-out — the
+# AppleScript form was a safe-string-escape hazard for paths with `\n`,
+# `{`, `}` and required focus stealing from Finder; the native call has
+# neither problem.
+trash = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"

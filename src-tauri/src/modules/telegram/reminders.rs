@@ -175,10 +175,11 @@ fn parse_relative(s: &str, now: i64) -> Option<(i64, String)> {
         total_sec = total_sec.checked_add(n.checked_mul(mul)?)?;
         matched_any_unit = true;
         i += 1;
-        // Optional whitespace inside compound offset: "1h 30m".
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        // Optional whitespace inside compound offset: "1h 30m". A single
+        // step is enough — the outer parser tolerates trailing ws on the
+        // next iteration if there were several spaces.
+        if i < bytes.len() && bytes[i].is_ascii_whitespace() {
             i += 1;
-            break; // only consume one run of ws here
         }
     }
     if !matched_any_unit || total_sec <= 0 {

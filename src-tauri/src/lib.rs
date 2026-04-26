@@ -1097,8 +1097,21 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Clean up long-lived background services on app exit. The
+            // OS would reap them anyway, but doing it explicitly means a
+            // future hot-restart (or test harness) does not leak ports
+            // / file handles between runs.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(notes_state) = app_handle.try_state::<modules::notes::commands::NotesState>() {
+                    if let Some(server) = notes_state.media_server.get() {
+                        server.stop();
+                    }
+                }
+            }
+        });
 }
 
 /// Initialise the tracing subscriber with a rolling daily file in the app

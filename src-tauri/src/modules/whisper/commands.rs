@@ -49,7 +49,6 @@ pub fn resolve_active_model(app: &AppHandle) -> Result<PathBuf, String> {
         .active_model_id
         .clone()
         .ok_or_else(|| "no active whisper model — download one first".to_string())?;
-    drop(state);
     let spec = catalog::find(&active).ok_or_else(|| format!("unknown model: {active}"))?;
     let model = model_path(app, &active)?;
     if !is_downloaded(&model, spec.size_bytes) {
@@ -86,7 +85,6 @@ pub async fn transcribe_with_active_model(
         .active_model_id
         .clone()
         .ok_or_else(|| "no active whisper model — download one first".to_string())?;
-    drop(state);
     let spec = catalog::find(&active).ok_or_else(|| format!("unknown model: {active}"))?;
     let model = model_path(app, &active)?;
     if !is_downloaded(&model, spec.size_bytes) {

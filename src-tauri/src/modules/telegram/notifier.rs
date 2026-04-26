@@ -58,8 +58,7 @@ pub fn notify_if_paired(app: &AppHandle, category: Category, text: impl Into<Str
     };
 
     // Per-category toggle check — user may have silenced this kind.
-    // Double-deref: State<'_, Arc<T>> → Arc<T> → T.
-    if !super::settings::category_enabled(&**state, category) {
+    if !super::settings::category_enabled(&state, category) {
         tracing::debug!(?category, "telegram notifier: disabled in settings");
         return;
     }

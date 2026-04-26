@@ -355,8 +355,7 @@ mod tests {
         // Opening with JobRepo::new must survive even though the column is absent.
         let repo = JobRepo::new(conn).unwrap();
         // After migration we can write + read the new column.
-        let id = repo.conn.last_insert_rowid(); // just to borrow conn; col is 0 here
-        drop(id);
+        let _ = repo.conn.last_insert_rowid(); // just to borrow conn; col is 0 here
         // Real check: insert a row and verify transcription round-trips.
         repo.conn
             .execute(

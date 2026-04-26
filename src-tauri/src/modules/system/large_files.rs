@@ -1,7 +1,6 @@
 use super::cancel;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -130,12 +129,20 @@ fn is_safe_trash_target(path: &std::path::Path) -> bool {
     allowed_roots.iter().any(|root| canonical.starts_with(root))
 }
 
-/// Move a path to the macOS Trash via Finder AppleScript. Guards:
+/// Move a path to the macOS Trash via the native NSFileManager API
+/// (`trash` crate → `NSFileManager.trashItem`). Guards:
 /// - refuses empty, absolute system roots, and `/` itself;
 /// - requires the resolved path to live under `$HOME`, `/Applications`,
 ///   or a mounted volume — every legitimate Stash flow stays within
 ///   those;
 /// - rejects `$HOME` (the whole home dir) as a target.
+///
+/// Why the native call instead of the prior `osascript` form: the
+/// AppleScript literal escape only handled `\` and `"`. Paths with `\n`,
+/// `{`, or `}` could break the literal and either error out or — in a
+/// future refactor where someone adds another `format!` layer — open a
+/// real injection seam. NSFileManager takes a `URL` object; nothing is
+/// parsed as code, so there is nothing to escape.
 pub fn move_to_trash(path: &str) -> Result<(), String> {
     if path.is_empty() {
         return Err("refusing to trash empty path".into());
@@ -150,17 +157,7 @@ pub fn move_to_trash(path: &str) -> Result<(), String> {
     if !is_safe_trash_target(&pb) {
         return Err(format!("path is outside the safe trash whitelist: {path}"));
     }
-    // Escape embedded quotes so the AppleScript string literal stays valid.
-    let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("tell application \"Finder\" to delete POSIX file \"{escaped}\"");
-    let out = Command::new("osascript")
-        .args(["-e", &script])
-        .output()
-        .map_err(|e| format!("osascript: {e}"))?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
-    }
-    Ok(())
+    trash::delete(&pb).map_err(|e| format!("trash: {e}"))
 }
 
 #[cfg(test)]

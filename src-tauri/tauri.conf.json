@@ -47,7 +47,7 @@
       "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost ipc: http://ipc.localhost data: blob: https:; media-src 'self' asset: https://asset.localhost blob: data: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost https: wss: data: blob: http://127.0.0.1:*; frame-src 'self' https:;",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$HOME/Movies/Stash/**", "$HOME/Movies/Stash/.thumbs/**", "$VIDEO/**", "/private/tmp/**", "/tmp/**", "/var/folders/**"]
+        "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$HOME/Movies/Stash/**", "$HOME/Movies/Stash/.thumbs/**", "$VIDEO/**", "$TEMP/Stash/**"]
       }
     },
     "macOSPrivateApi": true

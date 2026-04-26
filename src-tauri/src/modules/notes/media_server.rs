@@ -14,20 +14,68 @@
 //!   * Path is validated against the same scope guards used by
 //!     `notes_read_audio_path` (audio dir + attachments root). A leaked
 //!     token still cannot read arbitrary files on disk.
+//!   * Symlink hop is rejected: if `canonicalize()` fails or the resolved
+//!     path leaves the allowed roots, the request is dropped.
 //!   * Token + port are exposed only to the frontend via a Tauri
 //!     command — never written to disk.
+//!
+//! Lifecycle:
+//!   * `start()` is idempotent — the caller (`NotesState::media_server`
+//!     OnceLock) only ever calls it once, but the inner accept loop is
+//!     polling-based (`recv_timeout` + shutdown flag) so a future
+//!     `stop()` shuts threads down cleanly.
+//!   * The number of in-flight request handlers is bounded; bursts above
+//!     `MAX_INFLIGHT` are answered with 503 instead of spawning unbounded
+//!     OS threads.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use tiny_http::{Header, Method, Response, Server, StatusCode};
+
+/// Cap concurrent connection handlers. The frontend only opens one or two
+/// streams at a time; anything past this cap is a runaway client (or a
+/// malicious caller riding a leaked token) and gets 503'd.
+const MAX_INFLIGHT: usize = 16;
+
+/// Period at which the accept loop re-checks the shutdown flag. Short
+/// enough that `stop()` returns within ~half a second, long enough that
+/// the idle CPU cost is invisible.
+const ACCEPT_POLL: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub struct MediaServer {
     pub port: u16,
     pub token: String,
+    /// Shared shutdown flag. Setting it makes the accept loop exit on
+    /// the next `recv_timeout` tick; existing in-flight handlers run
+    /// to completion before threads join.
+    shutdown: Arc<AtomicBool>,
+    /// Optional join handle for the accept loop. Wrapped in a `Mutex`
+    /// because `MediaServer` is `Clone` — the original retains the
+    /// handle, every cloned reader sees `None`.
+    handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+impl MediaServer {
+    /// Signal the accept loop to exit and join its thread. Idempotent;
+    /// safe to call multiple times. After return, no further requests
+    /// are accepted on the bound port.
+    pub fn stop(&self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Ok(mut guard) = self.handle.lock() {
+            if let Some(h) = guard.take() {
+                // Blocking on the accept thread is fine — it polls every
+                // ACCEPT_POLL ms and bails out as soon as the flag flips.
+                let _ = h.join();
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -55,12 +103,31 @@ pub fn start(audio: PathBuf, attachments: PathBuf, images: PathBuf) -> Result<Me
     let token_for_thread = token.clone();
     let roots = Arc::new(Roots { audio, attachments, images });
     let server = Arc::new(server);
-    std::thread::Builder::new()
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let inflight = Arc::new(AtomicUsize::new(0));
+
+    let server_for_thread = Arc::clone(&server);
+    let shutdown_for_thread = Arc::clone(&shutdown);
+    let inflight_for_thread = Arc::clone(&inflight);
+    let join = std::thread::Builder::new()
         .name("notes-media-server".into())
-        .spawn(move || accept_loop(server, token_for_thread, roots))
+        .spawn(move || {
+            accept_loop(
+                server_for_thread,
+                token_for_thread,
+                roots,
+                shutdown_for_thread,
+                inflight_for_thread,
+            )
+        })
         .map_err(|e| format!("spawn server thread failed: {e}"))?;
 
-    Ok(MediaServer { port, token })
+    Ok(MediaServer {
+        port,
+        token,
+        shutdown,
+        handle: Arc::new(Mutex::new(Some(join))),
+    })
 }
 
 fn mint_token() -> String {
@@ -71,16 +138,44 @@ fn mint_token() -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf)
 }
 
-fn accept_loop(server: Arc<Server>, token: String, roots: Arc<Roots>) {
-    for request in server.incoming_requests() {
-        let token = token.clone();
-        let roots = roots.clone();
-        // One thread per request keeps the implementation trivial and
-        // is fine at this scale: the frontend opens one or two streams
-        // at a time.
-        let _ = std::thread::Builder::new()
-            .name("notes-media-conn".into())
-            .spawn(move || handle(request, &token, &roots));
+fn accept_loop(
+    server: Arc<Server>,
+    token: String,
+    roots: Arc<Roots>,
+    shutdown: Arc<AtomicBool>,
+    inflight: Arc<AtomicUsize>,
+) {
+    while !shutdown.load(Ordering::SeqCst) {
+        match server.recv_timeout(ACCEPT_POLL) {
+            Ok(Some(request)) => {
+                // Bound concurrent handlers — a leaked token + malicious
+                // peer cannot trigger unbounded thread spawn.
+                if inflight.load(Ordering::SeqCst) >= MAX_INFLIGHT {
+                    let _ = request.respond(Response::empty(StatusCode(503)));
+                    continue;
+                }
+                let token = token.clone();
+                let roots = Arc::clone(&roots);
+                let inflight_cell = Arc::clone(&inflight);
+                let _ = std::thread::Builder::new()
+                    .name("notes-media-conn".into())
+                    .spawn(move || {
+                        inflight_cell.fetch_add(1, Ordering::SeqCst);
+                        handle(request, &token, &roots);
+                        inflight_cell.fetch_sub(1, Ordering::SeqCst);
+                    });
+            }
+            Ok(None) => {
+                // Timeout — loop and re-check shutdown. Cheap.
+            }
+            Err(_) => {
+                // tiny_http surfaces transient I/O errors on accept;
+                // bailing out of the whole server on a single bad
+                // socket would be over-eager. Backoff briefly and
+                // continue.
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
     }
 }
 
@@ -129,7 +224,18 @@ fn handle(request: tiny_http::Request, token: &str, roots: &Roots) {
     };
 
     let p = Path::new(&path);
-    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    // Hard path resolve: if `canonicalize` fails (broken symlink,
+    // permission denied, vanished file) we 404 instead of falling back
+    // to the unresolved path — that fallback would let a symlink that
+    // points outside the allowed roots slip past the `starts_with`
+    // guard below.
+    let canon = match p.canonicalize() {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = request.respond(Response::empty(StatusCode(404)));
+            return;
+        }
+    };
     let in_scope = match kind {
         RouteKind::Audio => {
             canon.starts_with(&roots.audio) || canon.starts_with(&roots.attachments)
@@ -144,12 +250,12 @@ fn handle(request: tiny_http::Request, token: &str, roots: &Roots) {
         let _ = request.respond(Response::empty(StatusCode(403)));
         return;
     }
-    if !p.is_file() {
+    if !canon.is_file() {
         let _ = request.respond(Response::empty(StatusCode(404)));
         return;
     }
 
-    let total = match std::fs::metadata(p) {
+    let total = match std::fs::metadata(&canon) {
         Ok(m) => m.len(),
         Err(_) => {
             let _ = request.respond(Response::empty(StatusCode(500)));
@@ -164,13 +270,29 @@ fn handle(request: tiny_http::Request, token: &str, roots: &Roots) {
         .map(|h| h.value.as_str().to_string());
     let head_only = request.method() == &Method::Head;
     let mime = match kind {
-        RouteKind::Audio => mime_for_audio(p),
-        RouteKind::Image => mime_for_image(p),
+        RouteKind::Audio => mime_for_audio(&canon),
+        RouteKind::Image => mime_for_image(&canon),
     };
 
-    let (start, end) = match parse_range(range_header.as_deref(), total) {
-        Some(range) => range,
-        None => (0, total.saturating_sub(1)),
+    let (start, end) = match (range_header.as_deref(), parse_range(range_header.as_deref(), total))
+    {
+        // Honour any well-formed range header.
+        (Some(_), Some(range)) => range,
+        // RFC 7233: a malformed/unsatisfiable Range header should answer
+        // 416 with a Content-Range describing the whole resource — not
+        // silently fall through to a full-body 200, which masks bugs in
+        // clients that send `bytes=abc-` and expect partial content.
+        (Some(_), None) => {
+            let cr = format!("bytes */{total}");
+            let mut response = Response::empty(StatusCode(416));
+            if let Ok(h) = Header::from_bytes("Content-Range", cr.as_bytes()) {
+                response.add_header(h);
+            }
+            let _ = request.respond(response);
+            return;
+        }
+        // No header: serve the whole file.
+        (None, _) => (0, total.saturating_sub(1)),
     };
     let len = end + 1 - start;
     let is_partial = range_header.is_some();
@@ -206,7 +328,7 @@ fn handle(request: tiny_http::Request, token: &str, roots: &Roots) {
 
     // Stream the requested byte range. Open a fresh handle so each
     // request seeks independently — `tiny_http` may pipeline.
-    let mut file = match std::fs::File::open(p) {
+    let mut file = match std::fs::File::open(&canon) {
         Ok(f) => f,
         Err(_) => {
             let _ = request.respond(Response::empty(StatusCode(500)));
@@ -353,6 +475,14 @@ mod tests {
     }
 
     #[test]
+    fn rejects_non_numeric_range() {
+        // `bytes=abc-` previously slipped past the parser and served the
+        // whole file. Now the handler turns that into a 416.
+        assert_eq!(parse_range(Some("bytes=abc-"), 1000), None);
+        assert_eq!(parse_range(Some("bytes=-xyz"), 1000), None);
+    }
+
+    #[test]
     fn missing_range_yields_none() {
         assert_eq!(parse_range(None, 1000), None);
     }
@@ -370,5 +500,25 @@ mod tests {
         assert_eq!(mime_for_audio(Path::new("a.MP3")), "audio/mpeg");
         assert_eq!(mime_for_audio(Path::new("a.opus")), "audio/ogg");
         assert_eq!(mime_for_audio(Path::new("a.weird")), "application/octet-stream");
+    }
+
+    #[test]
+    fn server_can_stop_cleanly() {
+        // Smoke test: start → stop should return promptly without
+        // panicking, even with no requests served.
+        let tmp = std::env::temp_dir();
+        let server = start(tmp.clone(), tmp.clone(), tmp).expect("start");
+        let port = server.port;
+        server.stop();
+        // After stop, the port should be free for re-bind. Allow a tiny
+        // window for the OS to release; failure here would mean the
+        // accept thread leaked.
+        for _ in 0..20 {
+            if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("port {port} still bound after stop()");
     }
 }

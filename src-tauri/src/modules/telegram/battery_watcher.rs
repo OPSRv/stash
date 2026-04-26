@@ -32,7 +32,7 @@ pub fn spawn(app: AppHandle) {
             // is missing (pristine install).
             let threshold = app
                 .try_state::<std::sync::Arc<super::state::TelegramState>>()
-                .map(|s| super::settings::NotificationSettings::load(&**s).battery_threshold_pct)
+                .map(|s| super::settings::NotificationSettings::load(&s).battery_threshold_pct)
                 .unwrap_or(20);
             if !charging && percent <= threshold {
                 notify_if_paired(

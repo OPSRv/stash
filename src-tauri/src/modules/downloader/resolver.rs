@@ -41,7 +41,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp);
         // CANDIDATES may or may not exist on this machine; we just check that
         // an arbitrary empty extra_dir doesn't produce a match.
-        let empty_dir_result = find_on_path(&[tmp.clone()]);
+        let empty_dir_result = find_on_path(std::slice::from_ref(&tmp));
         assert!(
             empty_dir_result.is_none() || empty_dir_result.unwrap().exists(),
             "find_on_path must return a real file path or None"
@@ -56,7 +56,7 @@ mod tests {
         let binary = tmp.join("yt-dlp");
         std::fs::write(&binary, b"#!/bin/sh\necho stub\n").unwrap();
         // Must be found via extra_dirs even if PATH/candidates don't have it.
-        let found = find_on_path(&[tmp.clone()]);
+        let found = find_on_path(std::slice::from_ref(&tmp));
         assert!(found.is_some());
         let _ = std::fs::remove_dir_all(&tmp);
     }

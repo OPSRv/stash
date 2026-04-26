@@ -766,6 +766,149 @@ impl Tool for InvokeCommand {
     }
 }
 
+/// Search clipboard history for entries matching `query`. Limited to 20
+/// hits so a runaway model can't ask for the whole history.
+pub struct ClipboardSearch {
+    state: Arc<ClipboardState>,
+}
+
+impl ClipboardSearch {
+    pub fn new(state: Arc<ClipboardState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for ClipboardSearch {
+    fn name(&self) -> &'static str {
+        "clipboard_search"
+    }
+    fn description(&self) -> &'static str {
+        "Search the user's clipboard history for entries containing `query`. \
+         Returns up to 20 most recent matches with their id + content snippet. \
+         Use to answer 'find that link I copied yesterday' kind of questions."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Substring or word to look up." }
+            },
+            "required": ["query"],
+            "additionalProperties": false,
+        })
+    }
+    async fn invoke(&self, _ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing required field: query".to_string())?
+            .trim();
+        if query.is_empty() {
+            return Err("query is empty".into());
+        }
+        let repo = self.state.repo.lock().map_err(|e| e.to_string())?;
+        let items = repo.search(query, 20).map_err(|e| e.to_string())?;
+        Ok(json!({
+            "matches": items.iter().map(|i| json!({
+                "id": i.id,
+                "kind": i.kind,
+                "pinned": i.pinned,
+                "content": truncate(&i.content, 200),
+            })).collect::<Vec<_>>(),
+        }))
+    }
+}
+
+/// Toggle the pin flag on a clipboard entry by id. Pinned entries
+/// survive the unpinned-cap trim.
+pub struct ClipboardPin {
+    state: Arc<ClipboardState>,
+}
+
+impl ClipboardPin {
+    pub fn new(state: Arc<ClipboardState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for ClipboardPin {
+    fn name(&self) -> &'static str {
+        "clipboard_pin"
+    }
+    fn description(&self) -> &'static str {
+        "Toggle the pin flag on the clipboard entry with the given numeric id. \
+         Pinned entries are kept even when the unpinned cap is hit. \
+         Use after `clipboard_search` once the user asks to keep something."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "integer", "description": "Numeric id from clipboard_search." }
+            },
+            "required": ["id"],
+            "additionalProperties": false,
+        })
+    }
+    async fn invoke(&self, _ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let id = args
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| "missing required field: id".to_string())?;
+        let mut repo = self.state.repo.lock().map_err(|e| e.to_string())?;
+        repo.toggle_pin(id).map_err(|e| e.to_string())?;
+        let item = repo.get(id).map_err(|e| e.to_string())?;
+        Ok(json!({
+            "id": id,
+            "pinned": item.map(|i| i.pinned).unwrap_or(false),
+        }))
+    }
+}
+
+/// Wipe the entire unpinned clipboard history. Pinned entries are
+/// preserved so a user-facing "save for later" flag never disappears
+/// behind a single tool call.
+pub struct ClipboardClear {
+    state: Arc<ClipboardState>,
+}
+
+impl ClipboardClear {
+    pub fn new(state: Arc<ClipboardState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for ClipboardClear {
+    fn name(&self) -> &'static str {
+        "clipboard_clear"
+    }
+    fn description(&self) -> &'static str {
+        "Delete every unpinned entry from the clipboard history. Pinned \
+         entries survive. Returns the number of rows removed. Confirm \
+         with the user before invoking — this is destructive."
+    }
+    fn schema(&self) -> Value {
+        json!({ "type": "object", "properties": {}, "additionalProperties": false })
+    }
+    async fn invoke(&self, _ctx: &ToolCtx, _args: Value) -> Result<Value, String> {
+        let mut repo = self.state.repo.lock().map_err(|e| e.to_string())?;
+        let removed = repo.clear_all().map_err(|e| e.to_string())?;
+        Ok(json!({ "removed": removed }))
+    }
+}
+
+fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max_chars).collect();
+    out.push('…');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1019,6 +1162,75 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("AppHandle"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clipboard_search_returns_matching_rows() {
+        let clip = fresh_clipboard();
+        {
+            let mut r = clip.repo.lock().unwrap();
+            r.insert_text("alpha bravo", 1).unwrap();
+            r.insert_text("charlie delta", 2).unwrap();
+            r.insert_text("echo bravo", 3).unwrap();
+        }
+        let out = ClipboardSearch::new(clip)
+            .invoke(&ctx(), json!({ "query": "bravo" }))
+            .await
+            .unwrap();
+        let arr = out["matches"].as_array().expect("matches");
+        assert_eq!(arr.len(), 2);
+        // Most-recent first (per repo ordering).
+        assert_eq!(arr[0]["content"], "echo bravo");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clipboard_search_rejects_empty_query() {
+        let clip = fresh_clipboard();
+        let err = ClipboardSearch::new(clip)
+            .invoke(&ctx(), json!({ "query": "   " }))
+            .await
+            .unwrap_err();
+        assert!(err.to_lowercase().contains("empty"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clipboard_pin_toggles_flag() {
+        let clip = fresh_clipboard();
+        let id = {
+            let mut r = clip.repo.lock().unwrap();
+            r.insert_text("pin me", 1).unwrap()
+        };
+        let out1 = ClipboardPin::new(Arc::clone(&clip))
+            .invoke(&ctx(), json!({ "id": id }))
+            .await
+            .unwrap();
+        assert_eq!(out1["pinned"], true);
+        let out2 = ClipboardPin::new(clip)
+            .invoke(&ctx(), json!({ "id": id }))
+            .await
+            .unwrap();
+        assert_eq!(out2["pinned"], false);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clipboard_clear_removes_unpinned_only() {
+        let clip = fresh_clipboard();
+        let pinned_id = {
+            let mut r = clip.repo.lock().unwrap();
+            let pin_id = r.insert_text("keep me", 1).unwrap();
+            r.toggle_pin(pin_id).unwrap();
+            r.insert_text("trash me", 2).unwrap();
+            r.insert_text("trash me too", 3).unwrap();
+            pin_id
+        };
+        let out = ClipboardClear::new(Arc::clone(&clip))
+            .invoke(&ctx(), json!({}))
+            .await
+            .unwrap();
+        assert_eq!(out["removed"], 2);
+        let surviving = clip.repo.lock().unwrap().list(10).unwrap();
+        assert_eq!(surviving.len(), 1);
+        assert_eq!(surviving[0].id, pinned_id);
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -251,7 +251,7 @@ mod tests {
         .unwrap();
         drop(conn);
         let bytes = vacuum_sqlite_to_vec(&src).unwrap();
-        assert!(bytes.len() > 0);
+        assert!(!bytes.is_empty());
 
         // Write to a new file, reopen, check row.
         let out = dir.path().join("out.sqlite");

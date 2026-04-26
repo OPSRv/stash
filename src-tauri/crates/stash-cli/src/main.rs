@@ -104,7 +104,7 @@ fn parse_argv(mut argv: Vec<String>) -> Parsed {
             "--version" | "-V" => show_version = true,
             // `--` ends flag parsing explicitly, like most CLIs.
             "--" => {
-                rest.extend(argv.drain(..));
+                rest.append(&mut argv);
                 break;
             }
             // First non-flag token is the command — everything after it,
@@ -112,7 +112,7 @@ fn parse_argv(mut argv: Vec<String>) -> Parsed {
             // to the command's own argv.
             _ => {
                 rest.push(tok);
-                rest.extend(argv.drain(..));
+                rest.append(&mut argv);
                 break;
             }
         }
