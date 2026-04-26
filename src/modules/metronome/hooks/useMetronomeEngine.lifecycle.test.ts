@@ -6,7 +6,7 @@ const cfg = {
   bpm: 120,
   subdivision: 1 as const,
   numerator: 4,
-  sound: 'classic',
+  sound: 'click' as const,
   click_volume: 1,
   accent_volume: 1,
   beat_accents: [true, false, false, false],
