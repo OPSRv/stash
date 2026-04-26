@@ -323,13 +323,11 @@ pub fn webchat_embed(
     let script = WEBVIEW_DISGUISE_TEMPLATE
         .replace("{SERVICE_ID}", &service)
         .replace("{INITIAL_ZOOM}", &zoom_literal);
-    let mut builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed))
+    let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed))
         .user_agent(&ua)
         .initialization_script(&script);
     #[cfg(debug_assertions)]
-    {
-        builder = builder.devtools(true);
-    }
+    let builder = builder.devtools(true);
 
     popup
         .add_child(

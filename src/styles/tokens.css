@@ -402,9 +402,9 @@
     );
     box-shadow: inset 0 0 0 0.5px rgba(var(--stash-accent-rgb), 0.35);
   }
-  /// Slightly deeper tint for list surfaces where the active row needs extra
-  /// contrast against a busier neighbour column (e.g. the Notes list sitting
-  /// beside the editor). Opt-in via the `row-active-strong` modifier.
+  /* Slightly deeper tint for list surfaces where the active row needs extra
+     contrast against a busier neighbour column (e.g. the Notes list sitting
+     beside the editor). Opt-in via the `row-active-strong` modifier. */
   .row-active-strong.row-active {
     background: linear-gradient(
       180deg,

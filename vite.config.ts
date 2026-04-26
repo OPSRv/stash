@@ -55,10 +55,35 @@ export default defineConfig(async () => ({
   // bundles separate so the voice popup doesn't drag the entire
   // module tree into its first paint.
   build: {
+    // 800kB so the chunk-size warning fires only on genuinely problematic
+    // bundles. The mermaid/wardley/cytoscape diagrams below are already
+    // their own chunks via `manualChunks`, and they're lazy-loaded inside
+    // the Markdown renderer, so they never block first paint.
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL('./index.html', import.meta.url)),
         voice: fileURLToPath(new URL('./voice.html', import.meta.url)),
+      },
+      output: {
+        // Force the heaviest viz libraries into named chunks so they don't
+        // get duplicated across every Markdown-using shell. Each one is
+        // 400-600kB and only loads when the user actually renders a
+        // matching code block in a note preview. Path-based matcher
+        // because mermaid pulls cytoscape + wardley as sub-deps that
+        // aren't in our top-level package.json.
+        manualChunks(id) {
+          if (id.includes('node_modules/mermaid/') || id.includes('node_modules/@mermaid-js/')) {
+            return 'mermaid';
+          }
+          if (id.includes('node_modules/cytoscape')) {
+            return 'cytoscape';
+          }
+          if (id.includes('wardley')) {
+            return 'wardley';
+          }
+          return undefined;
+        },
       },
     },
   },

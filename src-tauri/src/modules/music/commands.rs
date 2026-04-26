@@ -120,15 +120,13 @@ pub fn music_embed(
     let ua = user_agent
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| SAFARI_UA.to_string());
-    let mut builder = tauri::webview::WebviewBuilder::new(LABEL, WebviewUrl::External(url))
+    let builder = tauri::webview::WebviewBuilder::new(LABEL, WebviewUrl::External(url))
         .user_agent(&ua)
         .initialization_script(INIT_SCRIPT);
     // Enable right-click → Inspect Element in dev builds so the injected
     // now-playing poller (and any YT Music DOM drift) can be diagnosed.
     #[cfg(debug_assertions)]
-    {
-        builder = builder.devtools(true);
-    }
+    let builder = builder.devtools(true);
 
     popup
         .add_child(

@@ -356,7 +356,7 @@ mod tests {
         let repo = JobRepo::new(conn).unwrap();
         // After migration we can write + read the new column.
         let _ = repo.conn.last_insert_rowid(); // just to borrow conn; col is 0 here
-        // Real check: insert a row and verify transcription round-trips.
+                                               // Real check: insert a row and verify transcription round-trips.
         repo.conn
             .execute(
                 "INSERT INTO download_jobs (url, platform, created_at, status, progress)

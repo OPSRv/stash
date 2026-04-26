@@ -185,7 +185,9 @@ fn sha256_of_file(path: &Path) -> Result<String, String> {
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = file.read(&mut buf).map_err(|e| format!("read {path:?}: {e}"))?;
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| format!("read {path:?}: {e}"))?;
         if n == 0 {
             break;
         }

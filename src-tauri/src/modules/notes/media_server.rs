@@ -101,7 +101,11 @@ pub fn start(audio: PathBuf, attachments: PathBuf, images: PathBuf) -> Result<Me
 
     let token = mint_token();
     let token_for_thread = token.clone();
-    let roots = Arc::new(Roots { audio, attachments, images });
+    let roots = Arc::new(Roots {
+        audio,
+        attachments,
+        images,
+    });
     let server = Arc::new(server);
     let shutdown = Arc::new(AtomicBool::new(false));
     let inflight = Arc::new(AtomicUsize::new(0));
@@ -274,8 +278,10 @@ fn handle(request: tiny_http::Request, token: &str, roots: &Roots) {
         RouteKind::Image => mime_for_image(&canon),
     };
 
-    let (start, end) = match (range_header.as_deref(), parse_range(range_header.as_deref(), total))
-    {
+    let (start, end) = match (
+        range_header.as_deref(),
+        parse_range(range_header.as_deref(), total),
+    ) {
         // Honour any well-formed range header.
         (Some(_), Some(range)) => range,
         // RFC 7233: a malformed/unsatisfiable Range header should answer
@@ -383,7 +389,11 @@ enum RouteKind {
 }
 
 fn mime_for_image(p: &Path) -> &'static str {
-    match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()) {
+    match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+    {
         Some(ref e) if e == "png" => "image/png",
         Some(ref e) if e == "jpg" || e == "jpeg" => "image/jpeg",
         Some(ref e) if e == "gif" => "image/gif",
@@ -397,7 +407,11 @@ fn mime_for_image(p: &Path) -> &'static str {
 }
 
 fn mime_for_audio(p: &Path) -> &'static str {
-    match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()) {
+    match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+    {
         Some(ref e) if e == "mp4" || e == "m4a" || e == "aac" => "audio/mp4",
         Some(ref e) if e == "mp3" => "audio/mpeg",
         Some(ref e) if e == "wav" => "audio/wav",
@@ -499,7 +513,10 @@ mod tests {
         assert_eq!(mime_for_audio(Path::new("a.m4a")), "audio/mp4");
         assert_eq!(mime_for_audio(Path::new("a.MP3")), "audio/mpeg");
         assert_eq!(mime_for_audio(Path::new("a.opus")), "audio/ogg");
-        assert_eq!(mime_for_audio(Path::new("a.weird")), "application/octet-stream");
+        assert_eq!(
+            mime_for_audio(Path::new("a.weird")),
+            "application/octet-stream"
+        );
     }
 
     #[test]
