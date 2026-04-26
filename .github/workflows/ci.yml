@@ -8,7 +8,14 @@ on:
 jobs:
   frontend:
     name: Frontend (Vitest + TSC)
-    runs-on: macos-latest
+    # Pinned to macos-14 (matches release.yml + nightly.yml). The
+    # `macos-latest` image rolled to a newer arm64 SKU whose clang
+    # advertises target feature `i8mm`, which causes whisper-rs-sys's
+    # vendored ggml to fail compilation (4 always-inline errors on
+    # `vmmlaq_s32`). Until whisper.cpp adds the i8mm feature flag,
+    # pinning is the straightforward fix and keeps CI matched to the
+    # bundle build.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +28,14 @@ jobs:
 
   backend:
     name: Backend (cargo test)
-    runs-on: macos-latest
+    # Pinned to macos-14 (matches release.yml + nightly.yml). The
+    # `macos-latest` image rolled to a newer arm64 SKU whose clang
+    # advertises target feature `i8mm`, which causes whisper-rs-sys's
+    # vendored ggml to fail compilation (4 always-inline errors on
+    # `vmmlaq_s32`). Until whisper.cpp adds the i8mm feature flag,
+    # pinning is the straightforward fix and keeps CI matched to the
+    # bundle build.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -42,7 +56,14 @@ jobs:
 
   e2e:
     name: E2E (Playwright smoke)
-    runs-on: macos-latest
+    # Pinned to macos-14 (matches release.yml + nightly.yml). The
+    # `macos-latest` image rolled to a newer arm64 SKU whose clang
+    # advertises target feature `i8mm`, which causes whisper-rs-sys's
+    # vendored ggml to fail compilation (4 always-inline errors on
+    # `vmmlaq_s32`). Until whisper.cpp adds the i8mm feature flag,
+    # pinning is the straightforward fix and keeps CI matched to the
+    # bundle build.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
