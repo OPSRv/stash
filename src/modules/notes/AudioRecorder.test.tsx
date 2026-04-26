@@ -197,3 +197,26 @@ describe('AudioRecorder mic selection', () => {
     });
   });
 });
+
+describe('AudioRecorder unmount safety', () => {
+  it('stops the MediaRecorder when unmounted mid-recording', async () => {
+    installMediaMocks([
+      { deviceId: 'mac', label: 'MacBook Pro Microphone', kind: 'audioinput' },
+    ]);
+    const stopSpy = vi.spyOn(MockMediaRecorder.prototype, 'stop');
+
+    const { unmount } = render(
+      <AudioRecorder open onCancel={() => {}} onComplete={() => {}} />,
+    );
+
+    // Wait for recording to engage.
+    await waitFor(() => expect(screen.getByText(/recording/i)).toBeTruthy());
+
+    unmount();
+
+    // Cleanup must explicitly stop the recorder so the underlying audio
+    // graph is released — without this fix the MediaRecorder kept emitting
+    // dataavailable into a detached chunk array.
+    expect(stopSpy).toHaveBeenCalled();
+  });
+});
