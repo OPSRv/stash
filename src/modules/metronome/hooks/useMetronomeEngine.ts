@@ -200,6 +200,28 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
     };
   }, []);
 
+  // Resume the AudioContext when the popup tab becomes visible again.
+  // macOS suspends inactive WKWebView audio graphs aggressively — without
+  // this hop the metronome would visibly tick (worker keeps firing) but
+  // the speaker stays silent until the user toggles play/pause. Read
+  // `isPlaying` via a ref so the listener stays bound across renders and
+  // doesn't re-register when the user changes BPM mid-play.
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!isPlayingRef.current) return;
+      const ctx = ctxRef.current;
+      if (!ctx || ctx.state !== 'suspended') return;
+      ctx.resume().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+
   const onBeat: EngineHandle['onBeat'] = useCallback((cb) => {
     listenersRef.current.add(cb);
     return () => {

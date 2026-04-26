@@ -111,6 +111,25 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    // Stop the recorder before nulling the ref. Without this, an unmount
+    // mid-recording (popup hide / tab switch) leaves the MediaRecorder
+    // running until the underlying MediaStream's tracks are stopped on
+    // the next line — its internal `dataavailable` callback continues to
+    // push into a `chunksRef.current` array that nobody reads, and the
+    // partial blob is silently lost. Nulling the event handlers first
+    // ensures we don't fire `onComplete` with a stub clip from whatever
+    // bytes happened to land before the stop request flushes.
+    const rec = recorderRef.current;
+    if (rec && rec.state !== 'inactive') {
+      rec.ondataavailable = null;
+      rec.onstop = null;
+      try {
+        rec.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    chunksRef.current = [];
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
