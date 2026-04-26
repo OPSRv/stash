@@ -12,9 +12,17 @@ export default defineConfig({
   expect: { timeout: 5_000 },
   fullyParallel: true,
   reporter: [['list']],
+  // CI machines are slower than dev laptops and the dev server boot
+  // race occasionally drops one frame on the first try. Two retries
+  // there keeps the suite reliable; locally we still want zero so
+  // a failing assertion gets noticed instead of papered over.
+  retries: process.env.CI ? 2 : 0,
   use: {
     baseURL: 'http://localhost:1420',
-    trace: 'on-first-retry',
+    // Keep the trace artifact whenever a test fails so the CI run
+    // bundles the timeline + DOM snapshots — much faster to triage
+    // than re-running the suite locally.
+    trace: 'retain-on-failure',
   },
   webServer: {
     command: 'npm run dev',

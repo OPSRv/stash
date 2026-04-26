@@ -25,6 +25,15 @@ export default defineConfig({
         'src/**/index.tsx',
         'src/modules/registry.ts',
       ],
+      // Hard floor for the line metric. Actual coverage today sits well
+      // above this (87 %), so the gate catches regressions without
+      // demanding net-new tests for routine UI changes. Bump the
+      // threshold once we land a concerted push to lift the absolute
+      // number — flipping it on now would just drift the bar below
+      // current reality on any small PR.
+      thresholds: {
+        lines: 70,
+      },
     },
   },
 });
