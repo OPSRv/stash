@@ -47,6 +47,15 @@ jobs:
       - name: cargo fmt --check
         working-directory: src-tauri
         run: cargo fmt --check
+      # `tauri.conf.json::bundle.resources` references `target/release/stash`,
+      # which is the stash-cli binary. tauri-build's build script verifies the
+      # path exists at compile time, so we have to materialise the binary
+      # before clippy / test fire — otherwise both fail with `resource path
+      # 'target/release/stash' doesn't exist`. release.yml gets it for free
+      # because `npm run tauri build` chains through `npm run build:cli`.
+      - name: Build stash-cli (satisfies tauri bundle.resources check)
+        working-directory: src-tauri
+        run: cargo build -p stash-cli --release
       - name: cargo clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets --workspace -- -D warnings
