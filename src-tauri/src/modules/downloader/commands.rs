@@ -103,7 +103,7 @@ pub async fn dl_detect(
     .map_err(|e| e.to_string())??;
     let qualities = pick_quality_options(&info);
 
-    state.detect_cache.lock().unwrap().insert(
+    state.detect_cache.lock().unwrap().put(
         url.clone(),
         CachedDetection {
             info: info.clone(),

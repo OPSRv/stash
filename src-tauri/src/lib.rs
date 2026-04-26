@@ -152,8 +152,9 @@ use modules::music::commands::{
 };
 use modules::notes::{
     commands::{
-        notes_add_attachment, notes_create, notes_delete, notes_export_path, notes_get, notes_list,
-        notes_list_attachments, notes_read_audio_path, notes_read_file, notes_read_image_path,
+        notes_add_attachment, notes_audio_stream_url, notes_create, notes_delete,
+        notes_export_path, notes_get, notes_image_stream_url, notes_list, notes_list_attachments,
+        notes_read_audio_path, notes_read_file, notes_read_image_path,
         notes_remove_attachment, notes_save_audio_bytes, notes_save_audio_file,
         notes_save_image_bytes, notes_save_image_file, notes_search,
         notes_set_attachment_transcription, notes_set_audio_transcription, notes_set_pinned,
@@ -499,9 +500,11 @@ pub fn run() {
             notes_save_audio_bytes,
             notes_save_audio_file,
             notes_read_audio_path,
+            notes_audio_stream_url,
             notes_save_image_bytes,
             notes_save_image_file,
             notes_read_image_path,
+            notes_image_stream_url,
             notes_list_attachments,
             notes_add_attachment,
             notes_remove_attachment,
@@ -762,7 +765,10 @@ pub fn run() {
             let notes_repo = NotesRepo::new(Connection::open(&notes_db)?)?;
             let notes_repo = Arc::new(Mutex::new(notes_repo));
             let notes_repo_for_telegram = Arc::clone(&notes_repo);
-            app.manage(NotesState { repo: notes_repo });
+            app.manage(NotesState {
+                repo: notes_repo,
+                media_server: std::sync::OnceLock::new(),
+            });
 
             // Pomodoro — timer engine runs in a std::thread so it survives
             // popup hide / webview unload. Frontend is only a projection.

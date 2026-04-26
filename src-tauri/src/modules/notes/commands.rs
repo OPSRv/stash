@@ -1,6 +1,7 @@
+use crate::modules::notes::media_server::MediaServer;
 use crate::modules::notes::repo::{Note, NoteAttachment, NoteSummary, NotesRepo};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Manager, State};
 
 pub struct NotesState {
@@ -8,6 +9,11 @@ pub struct NotesState {
     /// clone a handle without duplicating the SQLite connection. Existing
     /// callers still `.lock()` through transparent `Arc` deref.
     pub repo: Arc<Mutex<NotesRepo>>,
+    /// Loopback HTTP server used to stream audio attachments to
+    /// WKWebView — see `media_server.rs` for why `asset://` is unsuitable.
+    /// Lazily booted on first audio playback so we don't hold a port
+    /// open for users who never open Notes.
+    pub media_server: OnceLock<MediaServer>,
 }
 
 fn now() -> i64 {
@@ -477,23 +483,141 @@ pub fn notes_read_image_path(app: tauri::AppHandle, path: String) -> Result<Vec<
     std::fs::read(p).map_err(|e| e.to_string())
 }
 
-/// Read raw bytes of an audio file stored under the managed audio dir. Used
-/// by the inline markdown audio player, which references files by absolute
-/// path rather than by note id. Path must live under the audio dir — a hard
-/// guard against a tampered note body coaxing the app into reading other
-/// locations on disk.
+/// Read raw bytes of an audio file managed by the Notes module. Used by
+/// the inline markdown audio player to populate a Blob URL when the
+/// recording is short enough that one IPC round-trip is fine.
+///
+/// Prefer `notes_audio_alias_path` for attachments — it sidesteps the
+/// IPC `Vec<u8>` JSON-array tax for large files (a 50 MB m4a serialises
+/// to ~hundreds of MB of JSON and freezes the main thread).
+///
+/// Two trusted roots: the inline markdown audio dir (voice recordings)
+/// and the per-note attachments tree. Hard scope guard against a
+/// tampered note body coaxing the app into reading anything else.
 #[tauri::command]
 pub fn notes_read_audio_path(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
-    let base = audio_dir(&app)?;
+    let audio_root = audio_dir(&app)?;
+    let attach_root = attachments_root(&app)?;
     let p = Path::new(&path);
     let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    if !canon.starts_with(&base) {
-        return Err("audio path is outside the managed audio directory".into());
+    if !canon.starts_with(&audio_root) && !canon.starts_with(&attach_root) {
+        return Err("audio path is outside the managed audio directories".into());
     }
     if !p.is_file() {
         return Err("audio file is missing on disk".into());
     }
     std::fs::read(p).map_err(|e| e.to_string())
+}
+
+/// Resolve a `http://127.0.0.1:<port>/audio?...` URL the frontend can
+/// hand to `<audio src>`. Boots the loopback media server on first call
+/// (idempotent, daemon thread). The token is per-process and never
+/// stored on disk; the path is validated against the same scope guards
+/// used by `notes_read_audio_path`. See `media_server.rs` for why
+/// `asset://` cannot be used for AVFoundation-backed playback.
+#[tauri::command]
+pub fn notes_audio_stream_url(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    path: String,
+) -> Result<String, String> {
+    let audio_root = audio_dir(&app)?;
+    let attach_root = attachments_root(&app)?;
+    let p = Path::new(&path);
+    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    if !canon.starts_with(&audio_root) && !canon.starts_with(&attach_root) {
+        return Err("audio path is outside the managed audio directories".into());
+    }
+    if !p.is_file() {
+        return Err("audio file is missing on disk".into());
+    }
+
+    let server = ensure_media_server(&app, &state)?;
+
+    let abs = canon
+        .to_str()
+        .ok_or_else(|| "audio path is not valid UTF-8".to_string())?;
+    let path_q = url_encode_component(abs);
+    let token_q = url_encode_component(&server.token);
+    Ok(format!(
+        "http://127.0.0.1:{}/audio?path={}&t={}",
+        server.port, path_q, token_q
+    ))
+}
+
+/// Resolve a `http://127.0.0.1:<port>/image?...` URL the frontend can hand
+/// to `<img src>`. Avoids the IPC `Vec<u8>` JSON-array tax that previously
+/// forced `notes_read_image_path` to materialise the whole file into the
+/// renderer just to wrap it in a Blob URL — at the 100 MB embed cap that
+/// translates to hundreds of MB of JSON parsing on every preview render.
+/// Same scope guards as `notes_read_image_path` (managed images dir +
+/// per-note attachments tree).
+#[tauri::command]
+pub fn notes_image_stream_url(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    path: String,
+) -> Result<String, String> {
+    let img_root = image_dir(&app)?;
+    let attach_root = attachments_root(&app)?;
+    let p = Path::new(&path);
+    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    if !canon.starts_with(&img_root) && !canon.starts_with(&attach_root) {
+        return Err("image path is outside the managed images directories".into());
+    }
+    if !p.is_file() {
+        return Err("image file is missing on disk".into());
+    }
+
+    let server = ensure_media_server(&app, &state)?;
+
+    let abs = canon
+        .to_str()
+        .ok_or_else(|| "image path is not valid UTF-8".to_string())?;
+    let path_q = url_encode_component(abs);
+    let token_q = url_encode_component(&server.token);
+    Ok(format!(
+        "http://127.0.0.1:{}/image?path={}&t={}",
+        server.port, path_q, token_q
+    ))
+}
+
+/// Boot-or-fetch the loopback media server. Idempotent: the first caller
+/// (audio or image) wins the `OnceLock` race; later callers reuse the
+/// already-published handle. All three managed roots (audio, attachments,
+/// images) are passed in so route dispatch in `media_server.rs` can scope
+/// each request to the right subset.
+fn ensure_media_server(
+    app: &tauri::AppHandle,
+    state: &State<'_, NotesState>,
+) -> Result<MediaServer, String> {
+    if let Some(s) = state.media_server.get() {
+        return Ok(s.clone());
+    }
+    let audio_root = audio_dir(app)?;
+    let attach_root = attachments_root(app)?;
+    let img_root = image_dir(app)?;
+    let started = crate::modules::notes::media_server::start(audio_root, attach_root, img_root)?;
+    let _ = state.media_server.set(started.clone());
+    Ok(state.media_server.get().cloned().unwrap_or(started))
+}
+
+/// `application/x-www-form-urlencoded`-compatible encoder. Strict
+/// percent-encoding for everything outside RFC 3986 unreserved + a few
+/// path-safe extras — keeps the URL safe even when the source path
+/// has Cyrillic, spaces, `?`, `&`, `=` and other reserved bytes.
+fn url_encode_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for byte in s.as_bytes() {
+        let b = *byte;
+        let ok = b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~');
+        if ok {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// Read a markdown file from disk. Rejects anything that is not a regular

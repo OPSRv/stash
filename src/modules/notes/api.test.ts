@@ -4,6 +4,7 @@ import {
   notesCreate,
   notesDelete,
   notesList,
+  notesImageStreamUrl,
   notesReadAudioByPath,
   notesSaveAudioBytes,
   notesSaveAudioFile,
@@ -72,6 +73,15 @@ describe('notes/api', () => {
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(Array.from(bytes)).toEqual([10, 20, 30]);
     expect(invoke).toHaveBeenCalledWith('notes_read_audio_path', { path: '/managed/rec.mp4' });
+  });
+
+  it('notesImageStreamUrl returns the resolved loopback url', async () => {
+    vi.mocked(invoke).mockResolvedValue(
+      'http://127.0.0.1:51234/image?path=%2Fmanaged%2Fa.png&t=tok' as never,
+    );
+    const url = await notesImageStreamUrl('/managed/a.png');
+    expect(url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/image\?/);
+    expect(invoke).toHaveBeenCalledWith('notes_image_stream_url', { path: '/managed/a.png' });
   });
 
   it('notesSetAudioTranscription forwards noteId and transcription text', async () => {

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { MarkdownPreview } from './MarkdownPreview';
 
@@ -36,12 +36,18 @@ describe('MarkdownPreview', () => {
     );
   });
 
-  it('applies syntax-highlight classes to fenced code blocks', () => {
+  it('applies syntax-highlight classes to fenced code blocks', async () => {
     const src = '```js\nconst x = 1;\n```';
     const { container } = render(<MarkdownPreview source={src} />);
-    const code = container.querySelector('pre code');
-    expect(code?.className).toMatch(/hljs/);
-    expect(code?.className).toMatch(/language-js/);
+    // The hljs grammar bundle is dynamically imported on first sighting of
+    // a fenced code block, so the first paint renders the raw `language-js`
+    // class and a subsequent re-render upgrades it with `hljs` once the
+    // chunk resolves.
+    await waitFor(() => {
+      const code = container.querySelector('pre code');
+      expect(code?.className).toMatch(/hljs/);
+      expect(code?.className).toMatch(/language-js/);
+    });
   });
 
   it('toggles checkboxes by line via callback', () => {

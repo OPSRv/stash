@@ -8,62 +8,32 @@ import {
   type ReactNode,
 } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
-import rehypeHighlight from 'rehype-highlight';
+
+type RehypePlugin = NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehypePlugins']>[number];
 import remarkGfm from 'remark-gfm';
-import bash from 'highlight.js/lib/languages/bash';
-import css from 'highlight.js/lib/languages/css';
-import diff from 'highlight.js/lib/languages/diff';
-import go from 'highlight.js/lib/languages/go';
-import java from 'highlight.js/lib/languages/java';
-import javascript from 'highlight.js/lib/languages/javascript';
-import json from 'highlight.js/lib/languages/json';
-import markdownLang from 'highlight.js/lib/languages/markdown';
-import plaintext from 'highlight.js/lib/languages/plaintext';
-import python from 'highlight.js/lib/languages/python';
-import rust from 'highlight.js/lib/languages/rust';
-import sql from 'highlight.js/lib/languages/sql';
-import typescript from 'highlight.js/lib/languages/typescript';
-import xml from 'highlight.js/lib/languages/xml';
-import yaml from 'highlight.js/lib/languages/yaml';
-import 'highlight.js/styles/github-dark.css';
 import { accent } from '../theme/accent';
 import { copyText } from '../util/clipboard';
 
-// rehype-highlight ships with all ~190 highlight.js languages by default,
-// dragging ~250 KB of grammar into every chunk that touches the markdown
-// renderer (Notes preview, AI chat). Almost no real note or chat fence
-// uses anything outside this set, so curating cuts the markdown chunk by
-// more than half with no user-visible impact.
-const HLJS_LANGUAGES = {
-  bash,
-  shell: bash,
-  sh: bash,
-  zsh: bash,
-  css,
-  diff,
-  go,
-  java,
-  javascript,
-  js: javascript,
-  jsx: javascript,
-  json,
-  markdown: markdownLang,
-  md: markdownLang,
-  plaintext,
-  text: plaintext,
-  python,
-  py: python,
-  rust,
-  rs: rust,
-  sql,
-  typescript,
-  ts: typescript,
-  tsx: typescript,
-  xml,
-  html: xml,
-  yaml,
-  yml: yaml,
+// rehype-highlight + the curated highlight.js grammars are ~250 KB of JS
+// that only matter when the rendered source contains a fenced code block.
+// Lazy-load the bundle on first sighting of ``` and cache the resolved
+// plugin entry so subsequent renders are synchronous. Plain prose (the
+// vast majority of AI chat tokens, note bodies and toasts) stays cheap.
+type RehypeEntry = typeof import('./Markdown.highlight')['rehypeHighlightEntry'];
+let highlightModulePromise: Promise<RehypeEntry> | null = null;
+let highlightEntry: RehypeEntry | null = null;
+const loadHighlightEntry = (): Promise<RehypeEntry> => {
+  if (!highlightModulePromise) {
+    highlightModulePromise = import('./Markdown.highlight').then((m) => {
+      highlightEntry = m.rehypeHighlightEntry;
+      return m.rehypeHighlightEntry;
+    });
+  }
+  return highlightModulePromise;
 };
+
+const FENCED_CODE_RE = /(^|\n)\s{0,3}(```|~~~)/;
+const hasFencedCode = (source: string): boolean => FENCED_CODE_RE.test(source);
 
 type MarkdownProps = {
   source: string;
@@ -233,6 +203,29 @@ const CodeBlock = ({
 /// Streaming-safe: re-renders on every token and partial code fences/bold
 /// tokens just render as partial.
 export const Markdown = ({ source, className, codeCopy, components }: MarkdownProps) => {
+  const needsHighlight = useMemo(() => hasFencedCode(source ?? ''), [source]);
+  // `highlightEntry` may already be resolved from a prior mount; reuse the
+  // cached value so the very first paint is highlighted instead of flashing
+  // unstyled tokens. When still loading, render plain code on the first
+  // paint and re-render once the dynamic import resolves.
+  const [hljsEntry, setHljsEntry] = useState<RehypeEntry | null>(highlightEntry);
+  useEffect(() => {
+    if (!needsHighlight || hljsEntry) return;
+    let cancelled = false;
+    loadHighlightEntry().then((entry) => {
+      if (!cancelled) setHljsEntry(entry);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [needsHighlight, hljsEntry]);
+
+  const rehypePlugins = useMemo<RehypePlugin[]>(() => {
+    const plugins: RehypePlugin[] = [rehypeMermaid as RehypePlugin];
+    if (needsHighlight && hljsEntry) plugins.push(hljsEntry as RehypePlugin);
+    return plugins;
+  }, [needsHighlight, hljsEntry]);
+
   const merged: Components = useMemo(() => {
     const base: Components = { a: baseAnchor };
     // ```mermaid fences are rewritten by `rehypeMermaid` into a
@@ -274,10 +267,7 @@ export const Markdown = ({ source, className, codeCopy, components }: MarkdownPr
     <div className={rootClass}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[
-          rehypeMermaid,
-          [rehypeHighlight, { languages: HLJS_LANGUAGES, ignoreMissing: true }],
-        ]}
+        rehypePlugins={rehypePlugins}
         components={merged}
       >
         {source}

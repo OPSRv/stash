@@ -79,6 +79,15 @@ export const notesSaveAudioFile = (path: string): Promise<string> =>
 export const notesReadAudioByPath = (path: string): Promise<Uint8Array> =>
   invoke<number[]>('notes_read_audio_path', { path }).then((arr) => new Uint8Array(arr));
 
+/** Resolve a `http://127.0.0.1:<port>/audio?…` URL for a managed audio file.
+ *  Used when WKWebView's `<audio>` would otherwise hand the source off to
+ *  AVFoundation, which can't open Tauri's `asset://` protocol. The URL is
+ *  served by an in-process loopback server (per-app token, scope-checked
+ *  paths) and supports HTTP Range, so seeking works for huge attachments
+ *  without any IPC byte transfer. */
+export const notesAudioStreamUrl = (path: string): Promise<string> =>
+  invoke<string>('notes_audio_stream_url', { path });
+
 /** Persist image bytes (e.g. a screenshot pasted from the clipboard) into
  *  the managed images dir. Returns the absolute path for embedding via
  *  markdown's `![alt](path)` syntax. */
@@ -91,9 +100,19 @@ export const notesSaveImageFile = (path: string): Promise<string> =>
   invoke('notes_save_image_file', { path });
 
 /** Read raw image bytes by absolute path. Only paths under the managed
- *  images dir are accepted. */
+ *  images dir are accepted. Prefer `notesImageStreamUrl` for the inline
+ *  embed — round-tripping bytes through IPC turns into hundreds of MB of
+ *  JSON for large captures. */
 export const notesReadImageByPath = (path: string): Promise<Uint8Array> =>
   invoke<number[]>('notes_read_image_path', { path }).then((arr) => new Uint8Array(arr));
+
+/** Resolve a `http://127.0.0.1:<port>/image?…` URL for a managed image
+ *  file. Served by the same loopback media server as audio (per-app
+ *  token, scope-checked paths). The browser fetches bytes directly over
+ *  HTTP — zero IPC payload — so even multi-MB screenshots embed without
+ *  blocking the main thread on JSON.parse. */
+export const notesImageStreamUrl = (path: string): Promise<string> =>
+  invoke<string>('notes_image_stream_url', { path });
 
 export type NoteAttachment = {
   id: number;

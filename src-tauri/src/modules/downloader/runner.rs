@@ -1,12 +1,19 @@
 use crate::modules::downloader::jobs::JobRepo;
 use crate::modules::downloader::progress;
+use lru::LruCache;
 use std::io::{BufRead, BufReader};
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use tracing::debug;
+
+/// Cap on cached yt-dlp probe results. A typical session probes a handful of
+/// URLs; 200 leaves room for power users (research/sweeps) without letting the
+/// map grow without bound when the app is left running for days.
+const DETECT_CACHE_CAP: usize = 200;
 
 #[derive(Clone)]
 pub struct JobSpawnArgs {
@@ -33,7 +40,7 @@ pub struct RunnerState {
     pub yt_dlp_path: Mutex<Option<PathBuf>>,
     pub downloads_dir: Mutex<PathBuf>,
     pub default_downloads_dir: PathBuf,
-    pub detect_cache: Mutex<std::collections::HashMap<String, CachedDetection>>,
+    pub detect_cache: Mutex<LruCache<String, CachedDetection>>,
     pub cookies_browser: Mutex<Option<String>>,
     pub job_specs: Mutex<std::collections::HashMap<i64, JobSpawnArgs>>,
     pub retry_counts: Mutex<std::collections::HashMap<i64, u32>>,
@@ -50,7 +57,9 @@ impl RunnerState {
             yt_dlp_path: Mutex::new(None),
             downloads_dir: Mutex::new(downloads_dir.clone()),
             default_downloads_dir: downloads_dir,
-            detect_cache: Mutex::new(std::collections::HashMap::new()),
+            detect_cache: Mutex::new(LruCache::new(
+                NonZeroUsize::new(DETECT_CACHE_CAP).expect("DETECT_CACHE_CAP is non-zero"),
+            )),
             cookies_browser: Mutex::new(None),
             job_specs: Mutex::new(std::collections::HashMap::new()),
             retry_counts: Mutex::new(std::collections::HashMap::new()),

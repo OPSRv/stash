@@ -1,32 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { notesReadImageByPath } from './api';
-
-/** Map a path's extension to a MIME type the browser needs to decode the
- *  blob. Most browsers sniff regardless, but an explicit type avoids an
- *  early `onerror` on edge cases like HEIC on non-Safari WebViews. */
-const mimeFor = (path: string): string => {
-  const ext = path.split(/[?#]/)[0].split('.').pop()?.toLowerCase() ?? '';
-  switch (ext) {
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'gif':
-      return 'image/gif';
-    case 'webp':
-      return 'image/webp';
-    case 'svg':
-      return 'image/svg+xml';
-    case 'bmp':
-      return 'image/bmp';
-    case 'heic':
-    case 'heif':
-      return 'image/heic';
-    default:
-      return 'application/octet-stream';
-  }
-};
+import { notesImageStreamUrl } from './api';
 
 type Props = {
   /** Raw src from the markdown `![alt](src)` reference. */
@@ -35,10 +8,13 @@ type Props = {
   alt?: string;
 };
 
-/** Inline image embed for markdown-referenced files. Same bytes-to-blob
- *  round-trip as the audio player — WebKit can't fetch `asset://` URLs
- *  that land in the editor via react-markdown's URL-normalising
- *  transformer, so we skip the asset protocol entirely. */
+/** Inline image embed for markdown-referenced files. Resolves the path to
+ *  a loopback `http://127.0.0.1:<port>/image?...` URL served by the notes
+ *  media server — the browser streams bytes directly, so the renderer
+ *  never has to materialise a multi-MB blob via IPC just to display the
+ *  picture. Tauri's `asset://` protocol is unreachable from
+ *  react-markdown-rendered `<img src>` (URL-normalising transformer
+ *  rewrites the scheme), so loopback HTTP is the only viable path. */
 export const MarkdownImageEmbed = ({ src, alt }: Props) => {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,30 +32,21 @@ export const MarkdownImageEmbed = ({ src, alt }: Props) => {
 
   useEffect(() => {
     let cancelled = false;
-    let revoke: string | null = null;
     setUrl(null);
     setError(null);
-    notesReadImageByPath(decodedSrc)
-      .then((bytes) => {
+    notesImageStreamUrl(decodedSrc)
+      .then((u) => {
         if (cancelled) return;
-        if (!bytes || bytes.byteLength === 0) {
-          setError('Empty image file');
-          return;
-        }
-        const blob = new Blob([new Uint8Array(bytes)], { type: mimeFor(src) });
-        const u = URL.createObjectURL(blob);
-        revoke = u;
         setUrl(u);
       })
       .catch((e) => {
         if (cancelled) return;
         // eslint-disable-next-line no-console
-        console.error('[MarkdownImageEmbed] read bytes failed', { src, decodedSrc, error: e });
+        console.error('[MarkdownImageEmbed] resolve stream url failed', { src, decodedSrc, error: e });
         setError(String(e));
       });
     return () => {
       cancelled = true;
-      if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [decodedSrc, src]);
 
