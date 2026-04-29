@@ -79,10 +79,17 @@ export const DetectSessionCard = ({ session, onDismiss, onCancel: _onCancel, onD
     return (
       <div className="mx-4 mt-3">
         <div className="flex items-start gap-2 text-meta px-3 py-2 rounded-md bg-red-500/[0.08] border border-red-500/[0.22] text-red-200/90">
-          <span className="flex-1 min-w-0 truncate" title={session.url}>
-            {session.url}
-          </span>
-          <span className="shrink-0">{error}</span>
+          <div className="flex-1 min-w-0">
+            <div className="truncate" title={session.url}>
+              {session.url}
+            </div>
+            {/* yt-dlp errors are often multi-line and far longer than the
+                card's width — wrap with `break-words` and cap height so the
+                row can't push the rest of the shell off-screen. */}
+            <div className="mt-1 break-words whitespace-pre-wrap max-h-24 overflow-y-auto nice-scroll t-tertiary">
+              {error}
+            </div>
+          </div>
           <IconButton
             onClick={onDismiss}
             title="Dismiss"

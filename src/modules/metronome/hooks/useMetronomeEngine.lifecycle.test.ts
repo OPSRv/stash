@@ -132,4 +132,29 @@ describe('useMetronomeEngine — visibilitychange resume', () => {
       removeSpy.mock.calls.some(([event]) => event === 'visibilitychange'),
     ).toBe(true);
   });
+
+  // Regression: a hardened CSP (`worker-src 'self'`) blocks `blob:` workers
+  // in the bundled .dmg and `new Worker(blobUrl)` throws synchronously.
+  // Without a fallback the metronome flips to "playing" but never schedules
+  // a single note → silent. The fallback path swaps in `setInterval` so the
+  // scheduler still runs.
+  it('falls back to setInterval scheduling when Worker construction fails', () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const { result, unmount } = renderHook(() => useMetronomeEngine(cfg));
+
+    act(() => {
+      result.current.start();
+    });
+
+    const calledForScheduler = setIntervalSpy.mock.calls.some(
+      ([, ms]) => typeof ms === 'number' && ms > 0 && ms < 100,
+    );
+    expect(calledForScheduler).toBe(true);
+
+    act(() => {
+      result.current.stop();
+    });
+    unmount();
+    setIntervalSpy.mockRestore();
+  });
 });

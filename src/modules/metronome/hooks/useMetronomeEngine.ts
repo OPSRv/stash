@@ -59,6 +59,12 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   const beatIdxRef = useRef<number>(0);
   const workerRef = useRef<Worker | null>(null);
   const workerUrlRef = useRef<string | null>(null);
+  /// Main-thread `setInterval` id — only used when the Web Worker can't be
+  /// constructed (e.g. CSP refuses `blob:` workers in a hardened build).
+  /// Workers stay throttle-proof when the popup is hidden, so they're still
+  /// the preferred path; this is a safety net so the metronome makes sound
+  /// even if `worker-src` is locked down again.
+  const fallbackTimerRef = useRef<number | null>(null);
   const cfgRef = useRef(cfg);
   const listenersRef = useRef<Set<(beatDot: number, accent: boolean) => void>>(new Set());
   const currentBeatRef = useRef<number>(0);
@@ -153,12 +159,19 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
     const w = ensureWorker();
     if (w) {
       w.postMessage({ type: 'start', ms: LOOKAHEAD_MS });
+    } else {
+      if (fallbackTimerRef.current !== null) window.clearInterval(fallbackTimerRef.current);
+      fallbackTimerRef.current = window.setInterval(scheduler, LOOKAHEAD_MS);
     }
-  }, [ensureWorker]);
+  }, [ensureWorker, scheduler]);
 
   const stop = useCallback(() => {
     if (workerRef.current) {
       workerRef.current.postMessage({ type: 'stop' });
+    }
+    if (fallbackTimerRef.current !== null) {
+      window.clearInterval(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
     }
     for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
     pendingBeatTimersRef.current.clear();
@@ -193,6 +206,10 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
       if (workerUrlRef.current) {
         URL.revokeObjectURL(workerUrlRef.current);
         workerUrlRef.current = null;
+      }
+      if (fallbackTimerRef.current !== null) {
+        window.clearInterval(fallbackTimerRef.current);
+        fallbackTimerRef.current = null;
       }
       for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
       pendingBeatTimersRef.current.clear();
