@@ -1,5 +1,7 @@
 use crate::modules::notes::media_server::MediaServer;
-use crate::modules::notes::repo::{Note, NoteAttachment, NoteSummary, NotesRepo};
+use crate::modules::notes::repo::{
+    FolderFilter, Note, NoteAttachment, NoteFolder, NoteSummary, NotesRepo,
+};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Manager, State};
@@ -52,23 +54,104 @@ fn sanitize_ext(ext: &str) -> Result<String, String> {
     Ok(lower)
 }
 
+/// Parse the `folder` parameter sent from the frontend.
+/// `None` / `"all"` → no filter, `"unfiled"` → notes without a folder,
+/// any numeric string → that folder id. Unknown strings fall back to `All`
+/// rather than erroring — keeps the IPC surface forgiving for older clients.
+fn parse_folder_filter(folder: Option<String>) -> FolderFilter {
+    match folder.as_deref() {
+        None | Some("") | Some("all") => FolderFilter::All,
+        Some("unfiled") => FolderFilter::Unfiled,
+        Some(s) => match s.parse::<i64>() {
+            Ok(id) => FolderFilter::Folder(id),
+            Err(_) => FolderFilter::All,
+        },
+    }
+}
+
 /// Side-list projection. Returns only title + a short body preview so we
 /// don't ship 100s of KB of markdown across IPC every time Notes opens.
 /// Full body is loaded on demand via `notes_get`.
 #[tauri::command]
-pub fn notes_list(state: State<'_, NotesState>) -> Result<Vec<NoteSummary>, String> {
-    to_string_err(state.repo.lock().unwrap().list_summaries())
+pub fn notes_list(
+    state: State<'_, NotesState>,
+    folder: Option<String>,
+) -> Result<Vec<NoteSummary>, String> {
+    let filter = parse_folder_filter(folder);
+    to_string_err(state.repo.lock().unwrap().list_summaries(filter))
 }
 
 #[tauri::command]
 pub fn notes_search(
     state: State<'_, NotesState>,
     query: String,
+    folder: Option<String>,
 ) -> Result<Vec<NoteSummary>, String> {
+    let filter = parse_folder_filter(folder);
     if query.trim().is_empty() {
-        return to_string_err(state.repo.lock().unwrap().list_summaries());
+        return to_string_err(state.repo.lock().unwrap().list_summaries(filter));
     }
-    to_string_err(state.repo.lock().unwrap().search_summaries(&query))
+    to_string_err(state.repo.lock().unwrap().search_summaries(&query, filter))
+}
+
+// -------------------- folders --------------------
+
+#[tauri::command]
+pub fn notes_folders_list(state: State<'_, NotesState>) -> Result<Vec<NoteFolder>, String> {
+    to_string_err(state.repo.lock().unwrap().list_folders())
+}
+
+#[tauri::command]
+pub fn notes_folder_create(state: State<'_, NotesState>, name: String) -> Result<i64, String> {
+    to_string_err(state.repo.lock().unwrap().create_folder(name.trim(), now()))
+}
+
+#[tauri::command]
+pub fn notes_folder_rename(
+    state: State<'_, NotesState>,
+    id: i64,
+    name: String,
+) -> Result<(), String> {
+    to_string_err(state.repo.lock().unwrap().rename_folder(id, name.trim()))
+}
+
+#[tauri::command]
+pub fn notes_folder_delete(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    id: i64,
+) -> Result<(), String> {
+    to_string_err(state.repo.lock().unwrap().delete_folder(id))?;
+    use tauri::Emitter;
+    let _ = app.emit("notes:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn notes_folders_reorder(
+    state: State<'_, NotesState>,
+    ids: Vec<i64>,
+) -> Result<(), String> {
+    to_string_err(state.repo.lock().unwrap().reorder_folders(&ids))
+}
+
+#[tauri::command]
+pub fn notes_set_folder(
+    app: tauri::AppHandle,
+    state: State<'_, NotesState>,
+    note_id: i64,
+    folder_id: Option<i64>,
+) -> Result<(), String> {
+    to_string_err(
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .set_note_folder(note_id, folder_id),
+    )?;
+    use tauri::Emitter;
+    let _ = app.emit("notes:changed", ());
+    Ok(())
 }
 
 /// Fetch a single full note (with body). Called when the user activates a

@@ -1,12 +1,20 @@
-//! Speaker-diarization pipeline. `sherpa-rs::Diarize` does the heavy
-//! lifting (pyannote VAD/segmentation → speaker embeddings → fast
-//! clustering); this module wraps it with the file-based interface
-//! the rest of Stash uses and merges the resulting speaker timeline
-//! into whisper segments to produce a labeled transcript.
+//! Speaker-diarization pipeline. Diarization itself runs in the
+//! `stash-diarize` sidecar binary (see `crates/stash-diarize/`); this
+//! module only orchestrates the spawn — feeding it the same 16 kHz mono
+//! PCM buffer that whisper transcribed, parsing the JSON it writes
+//! back, and merging the speaker timeline into whisper segments to
+//! produce a labeled transcript.
+//!
+//! Why out-of-process: keeping sherpa-onnx + onnxruntime out of the
+//! main bundle saves ~56 MB and lets the app launch even when the user
+//! hasn't opted into diarization. The sidecar plus its dylibs live
+//! under `$APPLOCALDATA/diarization/` and get there via
+//! `commands::diarization_download`.
 
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
-use sherpa_rs::diarize::{Diarize, DiarizeConfig, Segment as SherpaSegment};
+use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 
 use crate::modules::whisper::pipeline::WhisperSegment;
@@ -23,51 +31,107 @@ pub struct SpeakerSegment {
     pub speaker: i32,
 }
 
-/// Run pyannote + 3D-Speaker over a 16 kHz mono PCM buffer. Caller is
-/// responsible for resampling — the whisper pipeline already does this
-/// for us, so we share the same `Vec<f32>` between transcription and
-/// diarization without paying the decode cost twice.
+/// JSON payload the sidecar writes on stdout. `segments` and `error`
+/// are mutually exclusive — exactly one is `Some` per invocation.
+/// Untagged so the sidecar's `enum Output` (success / failure)
+/// round-trips through a single struct on this side.
+#[derive(Debug, Deserialize, Default)]
+struct SidecarOutput {
+    #[serde(default)]
+    segments: Option<Vec<SidecarSegment>>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SidecarSegment {
+    start: f32,
+    end: f32,
+    speaker: i32,
+}
+
+/// Run pyannote + 3D-Speaker over a 16 kHz mono PCM buffer by spawning
+/// the `stash-diarize` sidecar. Caller is responsible for resampling —
+/// the whisper pipeline already does this, so we hand the sidecar the
+/// same `Vec<f32>` whisper already worked over.
+///
+/// `sidecar_bin` should be the absolute path to the installed binary
+/// (`$APPLOCALDATA/diarization/bin/stash-diarize`); the dylibs are
+/// expected next to it under `../lib/` per the sidecar's
+/// `@loader_path/../lib` rpath.
 pub fn diarize_samples(
     samples_16k_mono: Vec<f32>,
+    sidecar_bin: &Path,
     segmentation_model: &Path,
     embedding_model: &Path,
 ) -> Result<Vec<SpeakerSegment>, String> {
-    // sherpa-onnx's clustering treats `num_clusters > 0` as "force
-    // exactly K speakers" and `<= 0` as "auto via threshold". sherpa-rs
-    // 0.6 maps `None` to `4` via its own `unwrap_or(4)`, which would
-    // silently pin every recording to four clusters; pass `-1`
-    // explicitly to opt into threshold-based clustering.
-    //
-    // The threshold is a *cosine-distance* upper bound for merging:
-    // higher = more lenient merge = fewer distinct speakers, lower =
-    // stricter = more speakers. Upstream default is 0.5; for the
-    // expressive Ukrainian / English voices Stash sees in practice
-    // that's a touch too low and over-splits a 2-person recording
-    // into 3-4 clusters. 0.6 holds the same conversation together
-    // without merging genuinely different voices.
-    let mut d = Diarize::new(
-        segmentation_model,
-        embedding_model,
-        DiarizeConfig {
-            num_clusters: Some(-1),
-            threshold: Some(0.6),
-            // Pyannote returns very short fragments around silence —
-            // requiring at least 0.3 s of speech and 0.5 s of silence
-            // before a turn break stops the diarizer from churning
-            // out two-frame "speakers" on consonants.
-            min_duration_on: Some(0.3),
-            min_duration_off: Some(0.5),
-            provider: None,
-            debug: false,
-        },
-    )
-    .map_err(|e| format!("diarize init: {e}"))?;
-    let segs = d
-        .compute(samples_16k_mono, None)
-        .map_err(|e| format!("diarize compute: {e}"))?;
+    use std::io::Write;
+
+    if !sidecar_bin.is_file() {
+        return Err(format!(
+            "diarization sidecar not installed: {}",
+            sidecar_bin.display()
+        ));
+    }
+
+    let mut child = std::process::Command::new(sidecar_bin)
+        .arg(segmentation_model)
+        .arg(embedding_model)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn diarize sidecar: {e}"))?;
+
+    // Stream the f32 buffer as raw little-endian bytes — same layout
+    // the sidecar's `read_pcm_stdin` expects. We write in one shot;
+    // a 30-minute voice note at 16 kHz is ~115 MB, which the kernel
+    // happily buffers/streams without blocking us long enough to
+    // matter.
+    {
+        let mut stdin = child.stdin.take().ok_or("child stdin missing")?;
+        let bytes: Vec<u8> = samples_16k_mono
+            .iter()
+            .flat_map(|s| s.to_le_bytes())
+            .collect();
+        stdin
+            .write_all(&bytes)
+            .map_err(|e| format!("write pcm to sidecar: {e}"))?;
+        // Drop closes the pipe → sidecar sees EOF and starts processing.
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("wait diarize sidecar: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "diarize sidecar exited {}: {}",
+            output.status, stderr
+        ));
+    }
+
+    parse_sidecar_output(&output.stdout)
+}
+
+/// Parse the sidecar's single-line JSON. Pulled out so unit tests can
+/// drive it without a real binary.
+pub(crate) fn parse_sidecar_output(stdout: &[u8]) -> Result<Vec<SpeakerSegment>, String> {
+    let trimmed = std::str::from_utf8(stdout)
+        .map_err(|e| format!("sidecar stdout not utf8: {e}"))?
+        .trim();
+    if trimmed.is_empty() {
+        return Err("diarize sidecar produced no output".into());
+    }
+    let parsed: SidecarOutput = serde_json::from_str(trimmed)
+        .map_err(|e| format!("parse sidecar json: {e}; raw: {trimmed}"))?;
+    if let Some(err) = parsed.error {
+        return Err(format!("diarize sidecar: {err}"));
+    }
+    let segs = parsed.segments.unwrap_or_default();
     Ok(segs
         .into_iter()
-        .map(|s: SherpaSegment| SpeakerSegment {
+        .map(|s| SpeakerSegment {
             start: s.start,
             end: s.end,
             speaker: s.speaker,
@@ -148,8 +212,8 @@ pub fn merge_segments(whisper: &[WhisperSegment], speakers: &[SpeakerSegment]) -
 /// Cross-module orchestrator: take an audio file, hand the same 16
 /// kHz mono buffer to whisper *and* the diarizer, then return the
 /// merged labeled transcript. Falls back to flat whisper text when
-/// `enabled` is false or the diarization models aren't on disk yet —
-/// callers don't need to special-case the disabled path.
+/// `enabled` is false or the diarization sidecar/models aren't on
+/// disk yet — callers don't need to special-case the disabled path.
 ///
 /// Run on `spawn_blocking` because both pipelines are CPU-bound and
 /// we don't want to pin the tokio scheduler.
@@ -173,7 +237,8 @@ pub async fn transcribe_with_optional_diarization(
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
-    let want_diarize = enabled && super::state::models_ready(&app_data);
+    let want_diarize = enabled && super::state::assets_ready(&app_data);
+    let sidecar_bin = super::state::sidecar_path(&app_data);
     let seg_path = super::state::segmentation_path(&app_data);
     let emb_path = super::state::embedding_path(&app_data);
 
@@ -184,10 +249,11 @@ pub async fn transcribe_with_optional_diarization(
         if !want_diarize {
             return Ok(flat_text(&segments));
         }
-        // Diarization runs on the same 16 kHz mono buffer — no second
-        // decode pass. On failure we degrade gracefully to plain text
-        // rather than abort the whole transcription.
-        let speakers = match diarize_samples(samples, &seg_path, &emb_path) {
+        // Diarization spawns the sidecar over the same 16 kHz mono
+        // buffer — no second decode pass. On any failure we degrade
+        // gracefully to plain text rather than abort the whole
+        // transcription.
+        let speakers = match diarize_samples(samples, &sidecar_bin, &seg_path, &emb_path) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "diarization failed, returning plain transcript");
@@ -315,5 +381,46 @@ mod tests {
     fn overlap_is_zero_when_disjoint() {
         assert_eq!(overlap(0.0, 1.0, 2.0, 3.0), 0.0);
         assert!((overlap(0.0, 2.0, 1.0, 3.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_sidecar_output_success() {
+        let raw = br#"{"segments":[{"start":0.0,"end":1.5,"speaker":0},{"start":1.5,"end":3.0,"speaker":1}]}"#;
+        let segs = parse_sidecar_output(raw).expect("parse ok");
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].speaker, 0);
+        assert!((segs[1].end - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_sidecar_output_error_field_propagates() {
+        let raw = br#"{"error":"diarize init: model not found"}"#;
+        let err = parse_sidecar_output(raw).unwrap_err();
+        assert!(err.contains("model not found"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_sidecar_output_empty_is_an_error() {
+        assert!(parse_sidecar_output(b"   \n").is_err());
+    }
+
+    #[test]
+    fn parse_sidecar_output_garbage_is_an_error() {
+        assert!(parse_sidecar_output(b"not json").is_err());
+    }
+
+    #[test]
+    fn diarize_samples_returns_clear_error_when_sidecar_missing() {
+        // The sidecar lives outside the bundle now; before the user
+        // opts into diarization the binary path simply doesn't exist
+        // and we have to say so up front instead of letting `Command`
+        // produce a less obvious "No such file or directory".
+        let missing = std::path::Path::new("/tmp/__stash_diarize_does_not_exist__");
+        let dummy = std::path::Path::new("/tmp/_no_model");
+        let err = diarize_samples(vec![0.0; 16], missing, dummy, dummy).unwrap_err();
+        assert!(
+            err.contains("not installed"),
+            "expected install hint, got: {err}"
+        );
     }
 }

@@ -1,9 +1,15 @@
 name: Release
 
-# Builds a universal macOS DMG on tag push (e.g. `git tag v0.1.0 && git push --tags`)
-# and attaches it to a GitHub Release. The landing page's "Download" button
-# points at /releases/latest, so every tag cut here becomes the canonical
-# download URL without any manual link updates.
+# Builds an arm64 macOS DMG on tag push (e.g. `git tag v0.1.0 && git push --tags`)
+# and attaches it to a GitHub Release together with the diarization sidecar
+# trio (sidecar binary + sherpa-onnx + ONNX Runtime dylibs). The main app no
+# longer bundles those — Settings downloads them from this release on opt-in.
+#
+# Apple Silicon only: Stash dropped Intel-Mac support, which lets the bundle
+# stay slim (no fat binaries) and removes a second `cargo build` per release.
+#
+# The landing page's "Download" button points at /releases/latest, so every
+# tag cut here becomes the canonical download URL without manual link updates.
 
 on:
   push:
@@ -19,8 +25,8 @@ permissions:
   contents: write
 
 jobs:
-  macos-universal:
-    name: macOS universal build
+  macos-arm64:
+    name: macOS arm64 build
     runs-on: macos-14
     timeout-minutes: 60
     steps:
@@ -33,21 +39,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      # `sherpa-rs` downloads its prebuilt dylibs into `~/Library/Caches/sherpa-rs`
-      # on first build. Our build.rs stages them into `src-tauri/sherpa-libs/`
-      # so Tauri's bundler can pick them up — but build.rs runs before the
-      # sherpa-rs-sys build script populates the cache, so a cold runner
-      # produces an empty `sherpa-libs/` and the bundler errors with
-      # "Library not found". Caching the extraction dir lets the second run
-      # of build.rs (after cargo finishes the dependency build, kicked off
-      # by the warm-up below) find the files. The cache key includes
-      # Cargo.lock so a sherpa-rs version bump invalidates cleanly.
+      # `sherpa-rs` (linked from the `stash-diarize` sidecar crate, *not*
+      # from the main app) downloads its prebuilt dylibs into
+      # `~/Library/Caches/sherpa-rs` on first build. Caching that dir keeps
+      # the runner from re-downloading ~60 MB on every CI run. The cache
+      # key includes Cargo.lock so a sherpa-rs version bump invalidates
+      # cleanly.
       - uses: actions/cache@v4
         with:
           path: ~/Library/Caches/sherpa-rs
@@ -57,41 +60,57 @@ jobs:
 
       - run: npm ci
 
-      # Cold-cache warm-up: build sherpa-rs once so its build script downloads
-      # + extracts the prebuilt dylibs into ~/Library/Caches/sherpa-rs. The
-      # subsequent `tauri build` re-runs our own build.rs, which now finds
-      # the cache populated and stages the dylibs into sherpa-libs/. No-op
-      # cost (~10s) on warm cache.
-      - name: Warm sherpa-rs cache (both arches for universal2 build)
-        working-directory: src-tauri
-        run: |
-          cargo build -p sherpa-rs --release --target aarch64-apple-darwin
-          cargo build -p sherpa-rs --release --target x86_64-apple-darwin
-
-      - name: Build universal macOS bundle
+      - name: Build main app bundle (arm64)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ''
-        run: npm run tauri build -- --target universal-apple-darwin
+        run: npm run tauri build -- --target aarch64-apple-darwin
+
+      # `stash-diarize` is a separate workspace member that links
+      # sherpa-rs and runs out-of-process. We ship the binary plus the
+      # two dylibs sherpa-rs's build script extracted into the cache —
+      # the user downloads them on demand from this same release.
+      - name: Build diarization sidecar
+        working-directory: src-tauri
+        run: cargo build -p stash-diarize --release --target aarch64-apple-darwin
 
       - name: Stage release artifacts
         id: stage
         run: |
           set -e
-          BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
+          BUNDLE=src-tauri/target/aarch64-apple-darwin/release/bundle
+          SIDECAR_DIR=src-tauri/target/aarch64-apple-darwin/release
           mkdir -p release-assets
-          # Grab the DMG (preferred) and fall back to the .app.tar.gz.
+          # Main app: prefer DMG, fall back to .app.tar.gz.
           if compgen -G "$BUNDLE/dmg/*.dmg" > /dev/null; then
             for f in "$BUNDLE"/dmg/*.dmg; do
-              cp "$f" "release-assets/Stash_universal.dmg"
+              cp "$f" "release-assets/Stash_arm64.dmg"
               break
             done
           fi
           if compgen -G "$BUNDLE/macos/*.app.tar.gz" > /dev/null; then
             for f in "$BUNDLE"/macos/*.app.tar.gz; do
-              cp "$f" "release-assets/Stash_universal.app.tar.gz"
+              cp "$f" "release-assets/Stash_arm64.app.tar.gz"
               break
             done
           fi
+          # Diarization sidecar binary. Strip to drop debug info — the
+          # downloader and the catalog `min_plausible_bytes` threshold
+          # both expect the slim ~1 MB binary.
+          cp "$SIDECAR_DIR/stash-diarize" release-assets/stash-diarize
+          strip release-assets/stash-diarize || true
+          # The dylibs sherpa-rs already extracted. Glob across the
+          # cache so a sherpa-rs version bump doesn't break the path.
+          # `lib/` is the canonical subdir inside each extracted archive.
+          SHERPA_CACHE="$HOME/Library/Caches/sherpa-rs"
+          SHERPA_LIB=$(find "$SHERPA_CACHE" -path "*/sherpa-onnx-*-shared/lib/libsherpa-onnx-c-api.dylib" | head -n 1)
+          ONNX_LIB=$(find "$SHERPA_CACHE" -path "*/sherpa-onnx-*-shared/lib/libonnxruntime.1.17.1.dylib" | head -n 1)
+          if [ -z "$SHERPA_LIB" ] || [ -z "$ONNX_LIB" ]; then
+            echo "missing sherpa dylibs in $SHERPA_CACHE" >&2
+            find "$SHERPA_CACHE" -type f | head -50 >&2
+            exit 1
+          fi
+          cp "$SHERPA_LIB" release-assets/libsherpa-onnx-c-api.dylib
+          cp "$ONNX_LIB" release-assets/libonnxruntime.1.17.1.dylib
           ls -la release-assets
 
       - name: Resolve tag
@@ -111,8 +130,14 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+          # Asset names match the catalog filenames in
+          # src-tauri/src/modules/diarization/catalog.rs — the in-app
+          # downloader fetches them by filename from this release.
           files: |
-            release-assets/Stash_universal.dmg
-            release-assets/Stash_universal.app.tar.gz
+            release-assets/Stash_arm64.dmg
+            release-assets/Stash_arm64.app.tar.gz
+            release-assets/stash-diarize
+            release-assets/libsherpa-onnx-c-api.dylib
+            release-assets/libonnxruntime.1.17.1.dylib
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -314,7 +314,7 @@ impl CommandHandler for NotesListCmd {
     }
     async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
         let summaries = match self.repo.lock() {
-            Ok(r) => match r.list_summaries() {
+            Ok(r) => match r.list_summaries(crate::modules::notes::repo::FolderFilter::All) {
                 Ok(v) => v,
                 Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
             },

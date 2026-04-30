@@ -22,14 +22,27 @@ describe('notes/api', () => {
     vi.mocked(invoke).mockResolvedValue(undefined as never);
   });
 
-  it('notesList is argument-less', async () => {
+  it('notesList omits the folder filter when default', async () => {
     await notesList();
-    expect(invoke).toHaveBeenCalledWith('notes_list');
+    expect(invoke).toHaveBeenCalledWith('notes_list', { folder: undefined });
   });
 
-  it('notesSearch forwards query', async () => {
+  it('notesList encodes a folder id as a string', async () => {
+    await notesList(7);
+    expect(invoke).toHaveBeenCalledWith('notes_list', { folder: '7' });
+  });
+
+  it('notesList encodes the unfiled filter', async () => {
+    await notesList('unfiled');
+    expect(invoke).toHaveBeenCalledWith('notes_list', { folder: 'unfiled' });
+  });
+
+  it('notesSearch forwards query and folder', async () => {
     await notesSearch('hello');
-    expect(invoke).toHaveBeenCalledWith('notes_search', { query: 'hello' });
+    expect(invoke).toHaveBeenCalledWith('notes_search', {
+      query: 'hello',
+      folder: undefined,
+    });
   });
 
   it('notesCreate forwards title/body', async () => {

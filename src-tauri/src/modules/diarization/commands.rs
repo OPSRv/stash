@@ -1,18 +1,24 @@
 //! Tauri commands: download / status / delete for the diarization
-//! model pair. Mirrors the whisper download UX so the frontend can
-//! reuse its progress-bar pattern (event name differs).
+//! asset bundle (two ONNX models + sidecar binary + two dylibs).
+//! Mirrors the whisper download UX so the frontend can reuse its
+//! progress-bar pattern.
+//!
+//! The user opts into diarization once; from there on the telegram
+//! voice path picks it up automatically (`assets_ready` flips to
+//! `true`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use super::catalog::{self, DiarModel, ALL, EMBEDDING, SEGMENTATION};
-use super::state::{embedding_path, models_dir, models_ready, segmentation_path, DiarizationState};
+use super::catalog::{self, AssetKind, DiarAsset, ALL};
+use super::state::{asset_path, assets_ready, root_dir, DiarizationState};
 
 #[derive(Debug, Clone, Serialize)]
 struct DownloadEvent<'a> {
-    /// `"segmentation"` or `"embedding"` — matches the catalog kind.
+    /// Catalog kind ("segmentation", "embedding", "sidecar",
+    /// "sherpalib", "onnxlib") — the frontend keys progress bars by it.
     id: &'a str,
     received: u64,
     total: u64,
@@ -20,7 +26,7 @@ struct DownloadEvent<'a> {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct DiarModelStatus {
+pub struct DiarAssetStatus {
     pub kind: &'static str,
     pub label: &'static str,
     pub size_bytes: u64,
@@ -31,7 +37,7 @@ pub struct DiarModelStatus {
 #[derive(Debug, Clone, Serialize)]
 pub struct DiarStatus {
     pub ready: bool,
-    pub models: Vec<DiarModelStatus>,
+    pub assets: Vec<DiarAssetStatus>,
 }
 
 #[tauri::command]
@@ -40,32 +46,29 @@ pub fn diarization_status(app: AppHandle) -> Result<DiarStatus, String> {
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
-    let models = ALL
+    let assets = ALL
         .iter()
-        .map(|m| {
-            let path = file_path_for(&data_dir, m);
-            // Mirrors `state::models_ready` — file present and ≥ 1 MB
-            // is the lenient threshold; sherpa load-time errors catch
-            // genuinely corrupt content.
+        .map(|a| {
+            let path = asset_path(&data_dir, a);
             let downloaded = std::fs::metadata(&path)
-                .map(|meta| meta.len() >= 1024 * 1024)
+                .map(|meta| meta.len() >= catalog::min_plausible_bytes(a.kind))
                 .unwrap_or(false);
-            DiarModelStatus {
-                kind: kind_str(m.kind),
-                label: m.label,
-                size_bytes: m.size_bytes,
+            DiarAssetStatus {
+                kind: kind_str(a.kind),
+                label: a.label,
+                size_bytes: a.size_bytes,
                 downloaded,
                 local_path: downloaded.then(|| path.display().to_string()),
             }
         })
         .collect::<Vec<_>>();
-    let ready = models_ready(&data_dir);
-    Ok(DiarStatus { ready, models })
+    let ready = assets_ready(&data_dir);
+    Ok(DiarStatus { ready, assets })
 }
 
-/// Download whichever models are missing. Idempotent — already-present
+/// Download whichever assets are missing. Idempotent — already-present
 /// files emit a `done` event and are skipped. Concurrent calls for the
-/// same model are rejected via the in-memory `in_flight` set.
+/// same asset are rejected via the in-memory `in_flight` set.
 #[tauri::command]
 pub async fn diarization_download(
     app: AppHandle,
@@ -75,23 +78,26 @@ pub async fn diarization_download(
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
-    std::fs::create_dir_all(models_dir(&data_dir)).map_err(|e| format!("mkdir: {e}"))?;
+    std::fs::create_dir_all(root_dir(&data_dir)).map_err(|e| format!("mkdir: {e}"))?;
 
-    for m in ALL {
-        // Skip when the file already looks usable. We don't compare
-        // against the catalog size — see `state::models_ready` for
-        // why exact-match was too strict.
-        let path = file_path_for(&data_dir, m);
+    for a in ALL {
+        let path = asset_path(&data_dir, a);
+        // Make sure the parent (`bin/`, `lib/`, or root) exists before
+        // we try to drop a file into it. `root_dir` was created above,
+        // but `bin/` and `lib/` aren't.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+        }
         if std::fs::metadata(&path)
-            .map(|meta| meta.len() >= 1024 * 1024)
+            .map(|meta| meta.len() >= catalog::min_plausible_bytes(a.kind))
             .unwrap_or(false)
         {
             let _ = app.emit(
                 "diarization:download",
                 DownloadEvent {
-                    id: kind_str(m.kind),
-                    received: m.size_bytes,
-                    total: m.size_bytes,
+                    id: kind_str(a.kind),
+                    received: a.size_bytes,
+                    total: a.size_bytes,
                     done: true,
                 },
             );
@@ -100,12 +106,18 @@ pub async fn diarization_download(
         // Concurrency guard.
         {
             let mut inflight = state.in_flight.lock().unwrap();
-            if !inflight.insert(kind_str(m.kind)) {
-                return Err(format!("{} download already in progress", kind_str(m.kind)));
+            if !inflight.insert(a.filename) {
+                return Err(format!("{} download already in progress", a.label));
             }
         }
-        let result = run_download(&app, m, &path).await;
-        state.in_flight.lock().unwrap().remove(kind_str(m.kind));
+        let result = run_download(&app, a, &path).await;
+        // Sidecar binary needs +x. Run the chmod inside the success
+        // branch so a failed/partial download doesn't leave a fake
+        // executable behind.
+        if result.is_ok() && a.kind == AssetKind::Sidecar {
+            ensure_executable(&path)?;
+        }
+        state.in_flight.lock().unwrap().remove(a.filename);
         result?;
     }
     Ok(())
@@ -117,7 +129,8 @@ pub fn diarization_delete(app: AppHandle) -> Result<(), String> {
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
-    for path in [segmentation_path(&data_dir), embedding_path(&data_dir)] {
+    for a in ALL {
+        let path = asset_path(&data_dir, a);
         if path.exists() {
             std::fs::remove_file(&path).map_err(|e| format!("rm {}: {e}", path.display()))?;
         }
@@ -125,26 +138,44 @@ pub fn diarization_delete(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn file_path_for(data_dir: &std::path::Path, m: &DiarModel) -> PathBuf {
-    models_dir(data_dir).join(m.filename)
+fn kind_str(k: AssetKind) -> &'static str {
+    match k {
+        AssetKind::Segmentation => "segmentation",
+        AssetKind::Embedding => "embedding",
+        AssetKind::Sidecar => "sidecar",
+        AssetKind::SherpaLib => "sherpalib",
+        AssetKind::OnnxLib => "onnxlib",
+    }
 }
 
-fn kind_str(k: catalog::ModelKind) -> &'static str {
-    match k {
-        catalog::ModelKind::Segmentation => "segmentation",
-        catalog::ModelKind::Embedding => "embedding",
-    }
+#[cfg(unix)]
+fn ensure_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {e}", path.display()))?;
+    let mut perms = meta.permissions();
+    perms.set_mode(perms.mode() | 0o755);
+    std::fs::set_permissions(path, perms)
+        .map_err(|e| format!("chmod {}: {e}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 async fn run_download(
     app: &AppHandle,
-    spec: &DiarModel,
+    spec: &DiarAsset,
     final_path: &PathBuf,
 ) -> Result<(), String> {
-    // Defensive — the catalog ships HTTPS URLs; reject anything else
-    // so a future bad edit can't redirect the downloader.
-    if !spec.url.starts_with("https://") {
-        return Err("model url must be https".into());
+    // Defensive — `resolve_url` should always return an HTTPS URL
+    // (models carry one literally, runtime URLs are formatted from a
+    // hard-coded https template). Reject anything else so a future
+    // bad edit can't redirect the downloader.
+    let url = catalog::resolve_url(spec);
+    if !url.starts_with("https://") {
+        return Err("asset url must be https".into());
     }
     let client = reqwest::Client::builder()
         .user_agent("stash-app/diarization-downloader")
@@ -152,7 +183,7 @@ async fn run_download(
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client
-        .get(spec.url)
+        .get(&url)
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -193,24 +224,24 @@ async fn run_download(
     drop(file);
 
     let len = std::fs::metadata(&tmp).map_err(|e| e.to_string())?.len();
-    // Only fail outright when the result is clearly broken (sub-1 MB
-    // chunks of garbage). Mismatches against the catalog `size_bytes`
-    // are common — HF / GitHub re-encode files without changing the
-    // URL — and they don't actually break sherpa, so we surface them
-    // as a `warn!` and keep going.
-    if len < 1024 * 1024 {
+    let min = catalog::min_plausible_bytes(spec.kind);
+    if len < min {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!(
-            "{}: download produced only {len} bytes — looks corrupt",
+            "{}: download produced only {len} bytes (< {min}) — looks corrupt",
             spec.label
         ));
     }
     if !catalog::size_is_plausible(spec.size_bytes, len) {
+        // Mismatches against the catalog `size_bytes` are common — HF /
+        // GitHub re-encode files without changing the URL — and they
+        // don't actually break loading, so we surface as a `warn!` and
+        // keep going.
         tracing::warn!(
             label = spec.label,
             got = len,
             expected = spec.size_bytes,
-            "downloaded model size differs from catalog — accepting anyway"
+            "downloaded asset size differs from catalog — accepting anyway"
         );
     }
     std::fs::rename(&tmp, final_path).map_err(|e| e.to_string())?;
@@ -223,7 +254,5 @@ async fn run_download(
             done: true,
         },
     );
-    // Suppress unused warning — referenced indirectly via constants.
-    let _ = (SEGMENTATION.size_bytes, EMBEDDING.size_bytes);
     Ok(())
 }

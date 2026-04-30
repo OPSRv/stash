@@ -53,6 +53,7 @@ import {
   notesCreate,
   notesDelete,
   notesExportPath,
+  notesFoldersList,
   notesGet,
   notesList,
   notesReadFile,
@@ -60,12 +61,18 @@ import {
   notesSaveAudioFile,
   notesSaveImageFile,
   notesSearch,
+  notesSetFolder,
   notesSetPinned,
   notesUpdate,
   notesWriteFile,
+  type FolderFilter,
   type Note,
+  type NoteFolder,
   type NoteSummary,
 } from './api';
+import { FoldersSidebar } from './FoldersSidebar';
+import { ContextMenu, type ContextMenuItem } from '../../shared/ui/ContextMenu';
+import { usePointerDrag, type DropTargetData, type DragInfo } from './notesDnd';
 
 const RailButton = ({
   onClick,
@@ -103,6 +110,20 @@ const formatDuration = (ms: number | null): string =>
 
 const AUTOSAVE_DEBOUNCE_MS = 400;
 const SIDEBAR_COLLAPSED_KEY = 'stash:notes:sidebar-collapsed';
+const FOLDER_FILTER_KEY = 'stash:notes:folder-filter';
+
+const readFolderFilter = (): FolderFilter => {
+  if (typeof window === 'undefined') return 'all';
+  try {
+    const raw = window.localStorage.getItem(FOLDER_FILTER_KEY);
+    if (!raw || raw === 'all') return 'all';
+    if (raw === 'unfiled') return 'unfiled';
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 'all';
+  } catch {
+    return 'all';
+  }
+};
 
 const VIEW_MODE_OPTIONS = [
   {
@@ -124,6 +145,106 @@ const VIEW_MODE_OPTIONS = [
     title: 'Editor + preview',
   },
 ];
+
+/** Single row inside the notes side-list. Extracted so each row can hold
+ *  its own pointer-DnD ref via `usePointerDrag` (hooks can't run inside
+ *  the `.map(renderNoteRow)` loop directly). */
+const NoteRow = ({
+  n,
+  active,
+  onOpen,
+  onDrop,
+  onContextMenu,
+  onTogglePin,
+}: {
+  n: NoteSummary;
+  active: boolean;
+  onOpen: () => void;
+  onDrop: (target: DropTargetData | null, source: DragInfo) => void;
+  onContextMenu: (x: number, y: number) => void;
+  onTogglePin: () => void;
+}) => {
+  const { ref, isDragging } = usePointerDrag(
+    { kind: 'note', id: n.id },
+    onDrop,
+  );
+  const preview = n.preview.split('\n').find((l) => l.trim()) || 'No content';
+  return (
+    <div
+      ref={ref}
+      key={n.id}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        // Pointer-DnD start steals the click when a real drag happened —
+        // we still want a plain click without movement to open the note.
+        if (isDragging) {
+          e.preventDefault();
+          return;
+        }
+        onOpen();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onContextMenu(e.clientX, e.clientY);
+      }}
+      className={`group w-full text-left px-3 py-2 cursor-pointer transition-colors ring-focus ${
+        active ? 'row-active row-active-strong' : 'hover:bg-white/[0.03]'
+      } ${isDragging ? 'opacity-40' : ''}`}
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
+          {n.title || <span className="t-tertiary">Untitled</span>}
+        </span>
+        <span className="shrink-0 relative inline-flex items-center justify-end w-7 h-4">
+          <span
+            className={`t-tertiary text-[10px] font-mono ${
+              n.pinned ? 'hidden' : 'group-hover:hidden group-focus-within:hidden'
+            }`}
+          >
+            {iso(n.updated_at)}
+          </span>
+          <Tooltip label={n.pinned ? 'Unpin note' : 'Pin note'}>
+            <span
+              role="button"
+              tabIndex={0}
+              data-no-drag
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePin();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onTogglePin();
+                }
+              }}
+              aria-label={n.pinned ? 'Unpin note' : 'Pin note'}
+              aria-pressed={n.pinned}
+              className={`ring-focus rounded p-0.5 t-tertiary hover:t-primary cursor-pointer ${
+                n.pinned
+                  ? 'inline-flex items-center'
+                  : 'hidden group-hover:inline-flex group-focus-within:inline-flex items-center'
+              }`}
+              style={n.pinned ? { color: 'var(--stash-accent)' } : undefined}
+            >
+              <PinIcon size={11} filled={n.pinned} />
+            </span>
+          </Tooltip>
+        </span>
+      </div>
+      <div className="t-tertiary text-meta truncate mt-0.5">{preview}</div>
+    </div>
+  );
+};
 
 export const NotesShell = () => {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
@@ -186,6 +307,15 @@ export const NotesShell = () => {
   /// itself still runs to completion in Rust, but the UI forgets about
   /// the result so the user isn't blocked.
   const transcribeSessionRef = useRef(0);
+  const [folderFilter, setFolderFilterState] = useState<FolderFilter>(readFolderFilter);
+  const setFolderFilter = useCallback((next: FolderFilter) => {
+    setFolderFilterState(next);
+    try {
+      window.localStorage.setItem(FOLDER_FILTER_KEY, String(next));
+    } catch {
+      // ignore
+    }
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try {
@@ -222,10 +352,33 @@ export const NotesShell = () => {
   );
 
   const reload = useCallback(async () => {
-    const data = query.trim() ? await notesSearch(query) : await notesList();
+    const data = query.trim()
+      ? await notesSearch(query, folderFilter)
+      : await notesList(folderFilter);
     setNotes(data);
     return data;
-  }, [query]);
+  }, [query, folderFilter]);
+
+  const assignNoteToFolder = useCallback(
+    async (noteId: number, folderId: number | null, folderLabel: string) => {
+      // Skip the no-op when the user drops a note onto its current folder —
+      // avoids a useless toast and a wasted IPC round-trip.
+      const current = notes.find((n) => n.id === noteId);
+      if (current && (current.folder_id ?? null) === folderId) return;
+      try {
+        await notesSetFolder(noteId, folderId);
+        await reload();
+        toast({
+          title: `Moved to ${folderLabel}`,
+          variant: 'success',
+          durationMs: 1500,
+        });
+      } catch (e) {
+        toast({ title: 'Move failed', description: String(e), variant: 'error' });
+      }
+    },
+    [notes, reload, toast]
+  );
 
   const togglePinned = useCallback(
     async (id: number, pinned: boolean) => {
@@ -242,6 +395,19 @@ export const NotesShell = () => {
     [reload, toast],
   );
 
+  // Folders are also fetched here (independently from FoldersSidebar) so the
+  // note row context menu can show a "Move to" submenu without prop drilling.
+  // Both fetches react to the shared `notes:changed` event below.
+  const [folders, setFolders] = useState<NoteFolder[]>([]);
+  useEffect(() => {
+    void notesFoldersList()
+      .then((list) => setFolders(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, []);
+  const [noteCtxMenu, setNoteCtxMenu] = useState<
+    { x: number; y: number; noteId: number } | null
+  >(null);
+
   const { pinned: pinnedNotes, recent: recentNotes } = useMemo(
     () => ({
       pinned: notes.filter((n) => n.pinned),
@@ -257,7 +423,7 @@ export const NotesShell = () => {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, folderFilter]);
 
   // Cross-module inserts (e.g. Telegram /note) fire `notes:changed` so the
   // sidebar refreshes without the user re-typing in the search box.
@@ -272,6 +438,9 @@ export const NotesShell = () => {
     let cancel: (() => void) | undefined;
     listen('notes:changed', () => {
       void reloadRef.current();
+      void notesFoldersList()
+        .then((list) => setFolders(Array.isArray(list) ? list : []))
+        .catch(() => {});
     }).then((un) => {
       cancel = un;
     });
@@ -425,6 +594,57 @@ export const NotesShell = () => {
     }
   }, [exportCurrentNotePath, toast]);
 
+  /** Same as `exportCurrentNotePath` but for any note id. Flushes the
+   *  pending debounced save only when the requested note is the one being
+   *  edited — other notes never have unsaved edits so a direct export is
+   *  safe and avoids a wasted `notesUpdate` round-trip. */
+  const exportNotePath = useCallback(
+    async (noteId: number): Promise<string | null> => {
+      if (noteId === activeId) return exportCurrentNotePath();
+      return notesExportPath(noteId);
+    },
+    [activeId, exportCurrentNotePath]
+  );
+
+  const revealNoteById = useCallback(
+    async (noteId: number) => {
+      try {
+        const path = await exportNotePath(noteId);
+        if (!path) return;
+        await revealFile(path);
+      } catch (e) {
+        toast({
+          title: 'Reveal failed',
+          description: e instanceof Error ? e.message : String(e),
+          variant: 'error',
+        });
+      }
+    },
+    [exportNotePath, toast]
+  );
+
+  const copyNotePathById = useCallback(
+    async (noteId: number) => {
+      try {
+        const path = await exportNotePath(noteId);
+        if (!path) return;
+        const ok = await copyText(path);
+        toast(
+          ok
+            ? { title: 'Path copied', description: path, variant: 'success', durationMs: 2200 }
+            : { title: 'Copy failed', variant: 'error' }
+        );
+      } catch (e) {
+        toast({
+          title: 'Export failed',
+          description: e instanceof Error ? e.message : String(e),
+          variant: 'error',
+        });
+      }
+    },
+    [exportNotePath, toast]
+  );
+
   const onToggleCheckbox = useCallback(
     (line: number) => {
       const next = toggleCheckboxAtLine(body, line);
@@ -438,6 +658,16 @@ export const NotesShell = () => {
 
   const newNote = async () => {
     const id = await notesCreate('', '');
+    // If a folder is currently selected, drop the new note into it so it
+    // shows up in the active filter immediately. `'unfiled'` and `'all'`
+    // already match a fresh note (folder_id IS NULL), so no extra call.
+    if (typeof folderFilter === 'number') {
+      try {
+        await notesSetFolder(id, folderFilter);
+      } catch (e) {
+        console.error('assign new note to folder failed', e);
+      }
+    }
     setActiveId(id);
     // Brand-new blank note — drop the user straight into the editor instead of
     // the empty preview pane. Existing notes open in preview (see row onClick).
@@ -795,76 +1025,29 @@ export const NotesShell = () => {
   const showEditor = viewMode !== 'preview';
   const showPreview = viewMode !== 'edit';
 
-  const renderNoteRow = (n: NoteSummary) => {
-    const preview = n.preview.split('\n').find((l) => l.trim()) || 'No content';
-    const open = () => {
-      setActiveId(n.id);
-      setViewMode('preview');
-    };
-    return (
-      <div
-        key={n.id}
-        role="button"
-        tabIndex={0}
-        onClick={open}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            open();
-          }
-        }}
-        className={`group w-full text-left px-3 py-2 cursor-pointer transition-colors ring-focus ${
-          n.id === activeId ? 'row-active row-active-strong' : 'hover:bg-white/[0.03]'
-        }`}
-      >
-        <div className="flex items-baseline gap-2">
-          <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
-            {n.title || <span className="t-tertiary">Untitled</span>}
-          </span>
-          {/* Trailing slot: timestamp by default, pin toggle on row hover/focus
-              and always when the note is pinned. Same width avoids layout
-              jumps when the trailing element swaps. */}
-          <span className="shrink-0 relative inline-flex items-center justify-end w-7 h-4">
-            <span
-              className={`t-tertiary text-[10px] font-mono ${
-                n.pinned ? 'hidden' : 'group-hover:hidden group-focus-within:hidden'
-              }`}
-            >
-              {iso(n.updated_at)}
-            </span>
-            <Tooltip label={n.pinned ? 'Unpin note' : 'Pin note'}>
-              <span
-                role="button"
-                tabIndex={0}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void togglePinned(n.id, !n.pinned);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    void togglePinned(n.id, !n.pinned);
-                  }
-                }}
-                aria-label={n.pinned ? 'Unpin note' : 'Pin note'}
-                aria-pressed={n.pinned}
-                className={`ring-focus rounded p-0.5 t-tertiary hover:t-primary cursor-pointer ${
-                  n.pinned
-                    ? 'inline-flex items-center'
-                    : 'hidden group-hover:inline-flex group-focus-within:inline-flex items-center'
-                }`}
-                style={n.pinned ? { color: 'var(--stash-accent)' } : undefined}
-              >
-                <PinIcon size={11} filled={n.pinned} />
-              </span>
-            </Tooltip>
-          </span>
-        </div>
-        <div className="t-tertiary text-meta truncate mt-0.5">{preview}</div>
-      </div>
-    );
-  };
+  const handleNoteDrop = useCallback(
+    async (target: DropTargetData | null, source: DragInfo) => {
+      if (source.kind !== 'note') return;
+      if (!target || target.kind !== 'note-into') return;
+      await assignNoteToFolder(source.id, target.folderId, target.label);
+    },
+    [assignNoteToFolder],
+  );
+
+  const renderNoteRow = (n: NoteSummary) => (
+    <NoteRow
+      key={n.id}
+      n={n}
+      active={n.id === activeId}
+      onOpen={() => {
+        setActiveId(n.id);
+        setViewMode('preview');
+      }}
+      onDrop={handleNoteDrop}
+      onContextMenu={(x, y) => setNoteCtxMenu({ x, y, noteId: n.id })}
+      onTogglePin={() => void togglePinned(n.id, !n.pinned)}
+    />
+  );
 
   return (
     <div className="h-full flex relative">
@@ -964,6 +1147,10 @@ export const NotesShell = () => {
               <PanelLeftIcon size={13} />
             </IconButton>
           }
+        />
+        <FoldersSidebar
+          selected={folderFilter}
+          onSelect={setFolderFilter}
         />
         <div className="px-2.5 pt-1 pb-1.5 flex items-stretch gap-1.5">
           <Button
@@ -1278,6 +1465,69 @@ export const NotesShell = () => {
         onConfirm={(suppress) => deleteConfirm.confirm(!!suppress)}
         onCancel={deleteConfirm.cancel}
       />
+      {(() => {
+        const target = noteCtxMenu
+          ? notes.find((n) => n.id === noteCtxMenu.noteId)
+          : null;
+        if (!noteCtxMenu || !target) return null;
+        const label = target.title.trim() || 'Untitled';
+        const moveItems: ContextMenuItem[] = [];
+        if (target.folder_id != null) {
+          moveItems.push({
+            kind: 'action',
+            label: 'Move to: Unfiled',
+            onSelect: () =>
+              void assignNoteToFolder(target.id, null, 'Unfiled'),
+          });
+        }
+        for (const f of folders) {
+          if (f.id === target.folder_id) continue;
+          moveItems.push({
+            kind: 'action',
+            label: `Move to: ${f.name || 'Untitled'}`,
+            onSelect: () =>
+              void assignNoteToFolder(target.id, f.id, f.name || 'Untitled'),
+          });
+        }
+        const items: ContextMenuItem[] = [
+          {
+            kind: 'action',
+            label: target.pinned ? 'Unpin' : 'Pin',
+            onSelect: () => void togglePinned(target.id, !target.pinned),
+          },
+          ...(moveItems.length > 0
+            ? [{ kind: 'separator' as const }, ...moveItems]
+            : []),
+          { kind: 'separator' },
+          {
+            kind: 'action',
+            label: 'Reveal in Finder',
+            onSelect: () => void revealNoteById(target.id),
+          },
+          {
+            kind: 'action',
+            label: 'Copy file path',
+            onSelect: () => void copyNotePathById(target.id),
+          },
+          { kind: 'separator' },
+          {
+            kind: 'action',
+            label: 'Delete',
+            tone: 'danger',
+            onSelect: () => deleteConfirm.request(target.id, performDelete),
+          },
+        ];
+        return (
+          <ContextMenu
+            open
+            x={noteCtxMenu.x}
+            y={noteCtxMenu.y}
+            items={items}
+            onClose={() => setNoteCtxMenu(null)}
+            label={`Actions for note ${label}`}
+          />
+        );
+      })()}
     </div>
   );
 };

@@ -289,9 +289,11 @@ type DiarizationRowProps = {
 };
 
 /// Speaker-diarization toggle. Flipping it on auto-downloads the
-/// pyannote + 3D-Speaker ONNX pair (~24 MB) on first use; the toggle
-/// itself only flips after the download succeeds so users don't end
-/// up with the flag enabled but the models missing.
+/// full asset bundle on first use — pyannote + 3D-Speaker ONNX
+/// models *and* the `stash-diarize` sidecar binary plus its dylibs
+/// (~80 MB total). The toggle itself only flips after the download
+/// succeeds so users don't end up with the flag enabled but the
+/// runtime missing.
 function DiarizationRow({ enabled, onChange, onError }: DiarizationRowProps) {
   const [status, setStatus] = useState<DiarStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -340,7 +342,7 @@ function DiarizationRow({ enabled, onChange, onError }: DiarizationRowProps) {
     onChange(next);
   };
 
-  const totalSize = status?.models.reduce((acc, m) => acc + m.size_bytes, 0) ?? 0;
+  const totalSize = status?.assets.reduce((acc, a) => acc + a.size_bytes, 0) ?? 0;
   const sizeMb = (totalSize / 1024 / 1024).toFixed(0);
   const pct =
     progress && progress.total > 0
@@ -364,7 +366,7 @@ function DiarizationRow({ enabled, onChange, onError }: DiarizationRowProps) {
         <div className="t-tertiary text-meta">
           {status?.ready
             ? 'Pyannote + 3D-Speaker, працює локально. Транскрипт буде розмічений «Спікер 1 / 2 / …».'
-            : `Перший раз завантажить близько ${sizeMb} MB моделей (pyannote + 3D-Speaker).`}
+            : `Перший раз завантажить близько ${sizeMb} MB (pyannote + 3D-Speaker + sherpa-onnx runtime).`}
           {downloading && pct !== null && (
             <span className="ml-2 t-secondary">downloading {pct}%</span>
           )}

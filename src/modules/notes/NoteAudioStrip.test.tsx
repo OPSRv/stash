@@ -18,6 +18,7 @@ const mkNote = (over: Partial<Note> = {}): Note => ({
   audio_duration_ms: 30000,
   pinned: false,
   audio_transcription: null,
+  folder_id: null,
   ...over,
 });
 

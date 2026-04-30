@@ -6,8 +6,16 @@ name: Nightly
 # refreshes `latest.json` next to the DMG — that's what Tauri's updater
 # polls to decide whether a newer build is available.
 #
-# Tag-cut releases live in `release.yml`; this workflow is the "canary"
-# lane for people tracking main between tags.
+# Apple Silicon only: we dropped Intel-Mac support to keep bundle size
+# down. Tag-cut releases live in `release.yml`; this workflow is the
+# "canary" lane for people tracking main between tags.
+#
+# Diarization sidecar artifacts (sherpa-rs binary + dylibs) are *not*
+# uploaded here. The in-app downloader resolves them against
+# `/releases/latest/download/`, which GitHub points at the newest
+# non-prerelease tag — i.e. the matching `release.yml` build. Keeping
+# them off the nightly tag means nightlies never serve a runtime
+# different from the stable they're paired with.
 
 on:
   push:
@@ -26,7 +34,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  macos-universal:
+  macos-arm64:
     runs-on: macos-14
     timeout-minutes: 60
     steps:
@@ -41,29 +49,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      # See release.yml comment — cache the sherpa-rs extraction dir so
-      # build.rs finds the prebuilt dylibs on warm runs. Cold runs go
-      # through the warm-up step below.
-      - uses: actions/cache@v4
-        with:
-          path: ~/Library/Caches/sherpa-rs
-          key: sherpa-rs-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            sherpa-rs-${{ runner.os }}-
-
       - run: npm ci
-
-      - name: Warm sherpa-rs cache (both arches for universal2 build)
-        working-directory: src-tauri
-        run: |
-          cargo build -p sherpa-rs --release --target aarch64-apple-darwin
-          cargo build -p sherpa-rs --release --target x86_64-apple-darwin
 
       - name: Derive version string
         id: ver
@@ -73,28 +65,28 @@ jobs:
           echo "version=${BASE}-nightly+${SHORT}" >> "$GITHUB_OUTPUT"
           echo "short=${SHORT}" >> "$GITHUB_OUTPUT"
 
-      - name: Build universal macOS bundle
+      - name: Build arm64 macOS bundle
         env:
           # Tauri's updater plugin signs artifacts when these are set.
           # Leave blank here — users who want signed auto-updates set
           # repo secrets TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run tauri build -- --target universal-apple-darwin
+        run: npm run tauri build -- --target aarch64-apple-darwin
 
       - name: Stage artifacts
         id: stage
         run: |
           set -e
-          BUNDLE=src-tauri/target/universal-apple-darwin/release/bundle
+          BUNDLE=src-tauri/target/aarch64-apple-darwin/release/bundle
           mkdir -p release-assets
           for f in "$BUNDLE"/dmg/*.dmg; do
-            cp "$f" "release-assets/Stash_universal.dmg"
+            cp "$f" "release-assets/Stash_arm64.dmg"
             break
           done
           if compgen -G "$BUNDLE/macos/*.app.tar.gz" > /dev/null; then
             for f in "$BUNDLE"/macos/*.app.tar.gz; do
-              cp "$f" "release-assets/Stash_universal.app.tar.gz"
+              cp "$f" "release-assets/Stash_arm64.app.tar.gz"
               break
             done
           fi
@@ -102,7 +94,7 @@ jobs:
           # configured. Silently skipped when no private key is set.
           if compgen -G "$BUNDLE/macos/*.app.tar.gz.sig" > /dev/null; then
             for f in "$BUNDLE"/macos/*.app.tar.gz.sig; do
-              cp "$f" "release-assets/Stash_universal.app.tar.gz.sig"
+              cp "$f" "release-assets/Stash_arm64.app.tar.gz.sig"
               break
             done
           fi
@@ -114,8 +106,8 @@ jobs:
           VERSION="${{ steps.ver.outputs.version }}"
           PUBDATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
           DL_BASE="https://github.com/${{ github.repository }}/releases/download/nightly"
-          if [ -f release-assets/Stash_universal.app.tar.gz.sig ]; then
-            SIG=$(cat release-assets/Stash_universal.app.tar.gz.sig)
+          if [ -f release-assets/Stash_arm64.app.tar.gz.sig ]; then
+            SIG=$(cat release-assets/Stash_arm64.app.tar.gz.sig)
           else
             SIG=""
           fi
@@ -125,13 +117,9 @@ jobs:
             "pub_date": "${PUBDATE}",
             "notes": "Rolling nightly build from main (${{ steps.ver.outputs.short }}).",
             "platforms": {
-              "darwin-x86_64": {
-                "signature": "${SIG}",
-                "url": "${DL_BASE}/Stash_universal.app.tar.gz"
-              },
               "darwin-aarch64": {
                 "signature": "${SIG}",
-                "url": "${DL_BASE}/Stash_universal.app.tar.gz"
+                "url": "${DL_BASE}/Stash_arm64.app.tar.gz"
               }
             }
           }
@@ -150,9 +138,9 @@ jobs:
           prerelease: true
           make_latest: false
           files: |
-            release-assets/Stash_universal.dmg
-            release-assets/Stash_universal.app.tar.gz
-            release-assets/Stash_universal.app.tar.gz.sig
+            release-assets/Stash_arm64.dmg
+            release-assets/Stash_arm64.app.tar.gz
+            release-assets/Stash_arm64.app.tar.gz.sig
             release-assets/latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

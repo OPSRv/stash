@@ -5456,7 +5456,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stash-app"
-version = "0.1.15"
+version = "0.1.16"
 dependencies = [
  "aes",
  "arboard",
@@ -5490,7 +5490,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "sherpa-rs",
  "symphonia",
  "tauri",
  "tauri-build",
@@ -5530,6 +5529,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "stash-diarize"
+version = "0.1.0"
+dependencies = [
+ "dirs-next",
+ "serde",
+ "serde_json",
+ "sherpa-rs",
 ]
 
 [[package]]

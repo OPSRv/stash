@@ -82,7 +82,7 @@ pub fn global_search(
 
     // Notes — native LIKE search over title + body.
     if let Ok(repo) = notes.repo.lock() {
-        if let Ok(list) = repo.search(q) {
+        if let Ok(list) = repo.search(q, crate::modules::notes::repo::FolderFilter::All) {
             for n in list.into_iter().take(PER_BUCKET) {
                 let title = if n.title.is_empty() {
                     first_line(&n.body, 60)

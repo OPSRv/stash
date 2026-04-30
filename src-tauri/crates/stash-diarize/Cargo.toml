@@ -1,0 +1,28 @@
+[package]
+name = "stash-diarize"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "stash-diarize"
+path = "src/main.rs"
+
+[build-dependencies]
+# Used by build.rs to locate the active sherpa-rs cache for a dev-only
+# rpath (so `cargo run -p stash-diarize` works without staging the
+# dylibs into `$APPLOCALDATA`).
+dirs-next = "2"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Same crate the main app used to depend on, with the same feature set
+# (offline diarization only — no TTS, no online recognition). Keeping
+# `download-binaries` so the build script fetches prebuilt sherpa-onnx
+# C/C++ libs and links us against them; the resulting binary depends on
+# `@rpath/libsherpa-onnx-c-api.dylib`, which build.rs resolves to the
+# bundle's `lib/` dir at runtime.
+sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries"] }

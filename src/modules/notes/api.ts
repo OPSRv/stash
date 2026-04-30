@@ -14,6 +14,8 @@ export type Note = {
   pinned: boolean;
   /** Whisper transcript of the primary audio recording, if transcription has been run. */
   audio_transcription: string | null;
+  /** Folder this note belongs to. `null` means unfiled. */
+  folder_id: number | null;
 };
 
 /** Lightweight projection returned by the list / search endpoints — carries a
@@ -27,13 +29,50 @@ export type NoteSummary = {
   created_at: number;
   updated_at: number;
   pinned: boolean;
+  folder_id: number | null;
 };
 
-export const notesList = (): Promise<NoteSummary[]> => invoke('notes_list');
+/** A user-created note folder. Folders are flat (no nesting); their visual
+ *  order is `sort_order` ASC, controllable via drag-reorder. */
+export type NoteFolder = {
+  id: number;
+  name: string;
+  sort_order: number;
+  created_at: number;
+};
+
+/** Filter passed to `notesList` / `notesSearch`. `'all'` is no filter,
+ *  `'unfiled'` matches notes without a folder, a numeric id targets that
+ *  folder. Encoded as a string so the IPC stays JSON-friendly. */
+export type FolderFilter = 'all' | 'unfiled' | number;
+
+const encodeFolderFilter = (f: FolderFilter | undefined): string | undefined => {
+  if (f === undefined || f === 'all') return undefined;
+  return typeof f === 'number' ? String(f) : f;
+};
+
+export const notesList = (folder?: FolderFilter): Promise<NoteSummary[]> =>
+  invoke('notes_list', { folder: encodeFolderFilter(folder) });
 export const notesSetPinned = (id: number, pinned: boolean): Promise<void> =>
   invoke('notes_set_pinned', { id, pinned });
-export const notesSearch = (query: string): Promise<NoteSummary[]> =>
-  invoke('notes_search', { query });
+export const notesSearch = (query: string, folder?: FolderFilter): Promise<NoteSummary[]> =>
+  invoke('notes_search', { query, folder: encodeFolderFilter(folder) });
+
+export const notesFoldersList = (): Promise<NoteFolder[]> =>
+  invoke('notes_folders_list');
+export const notesFolderCreate = (name: string): Promise<number> =>
+  invoke('notes_folder_create', { name });
+export const notesFolderRename = (id: number, name: string): Promise<void> =>
+  invoke('notes_folder_rename', { id, name });
+export const notesFolderDelete = (id: number): Promise<void> =>
+  invoke('notes_folder_delete', { id });
+export const notesFoldersReorder = (ids: number[]): Promise<void> =>
+  invoke('notes_folders_reorder', { ids });
+/** Move (or unfile) a note. Pass `null` to remove its folder assignment. */
+export const notesSetFolder = (
+  noteId: number,
+  folderId: number | null
+): Promise<void> => invoke('notes_set_folder', { noteId, folderId });
 export const notesGet = (id: number): Promise<Note | null> =>
   invoke('notes_get', { id });
 export const notesCreate = (title: string, body: string): Promise<number> =>

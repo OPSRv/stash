@@ -47,9 +47,13 @@ export type AiSettings = {
   diarization_enabled: boolean;
 };
 
-/// Status of the on-disk diarization model pair.
-export type DiarModelStatus = {
-  kind: 'segmentation' | 'embedding';
+/// Status of one downloadable diarization asset. Five total: two
+/// ONNX models, the `stash-diarize` sidecar binary, and two dylibs
+/// (sherpa-onnx + ONNX Runtime). The sidecar trio used to ship inside
+/// the bundle; pulling them out shaves ~56 MB off the .app and gates
+/// diarization behind an explicit opt-in install.
+export type DiarAssetStatus = {
+  kind: 'segmentation' | 'embedding' | 'sidecar' | 'sherpalib' | 'onnxlib';
   label: string;
   size_bytes: number;
   downloaded: boolean;
@@ -58,7 +62,7 @@ export type DiarModelStatus = {
 
 export type DiarStatus = {
   ready: boolean;
-  models: DiarModelStatus[];
+  assets: DiarAssetStatus[];
 };
 
 /// User-tunable inbox storage caps. Both fields are megabytes; the

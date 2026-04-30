@@ -1,15 +1,22 @@
-//! Persistent diarization state. Two pieces:
+//! Persistent diarization state and on-disk paths.
 //!
-//! - `enabled` flag (kv-backed, lives next to the AI settings) — when
-//!   `false` the telegram voice path skips diarization entirely.
-//! - In-memory `in_flight` set guarding concurrent downloads of the
-//!   same model file.
+//! The UI guards diarization behind an opt-in install — when nothing
+//! is downloaded yet, the telegram voice path skips diarization
+//! entirely and just returns the flat whisper transcript. The
+//! `assets_ready` check below is the canonical "is diarization
+//! usable?" question; everywhere else (settings UI, pipeline
+//! orchestrator) goes through it.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::catalog::{self, AssetSubdir, DiarAsset, ALL, EMBEDDING, SEGMENTATION, SIDECAR};
+
 pub struct DiarizationState {
+    /// Filenames currently being downloaded — guards against two
+    /// concurrent `diarization_download` invocations racing on the
+    /// same destination.
     pub in_flight: Mutex<HashSet<&'static str>>,
 }
 
@@ -27,37 +34,46 @@ impl Default for DiarizationState {
     }
 }
 
-/// Folder under the app data dir where diarization ONNX files live.
-/// Created on demand by the downloader; missing dir means "no models
-/// installed yet".
-pub fn models_dir(app_data: &std::path::Path) -> PathBuf {
+/// Root folder for everything diarization-related under the app data
+/// dir. Created on demand by the downloader; missing dir means
+/// "nothing installed yet".
+pub fn root_dir(app_data: &Path) -> PathBuf {
     app_data.join("diarization")
 }
 
-pub fn segmentation_path(app_data: &std::path::Path) -> PathBuf {
-    models_dir(app_data).join(super::catalog::SEGMENTATION.filename)
+pub fn asset_path(app_data: &Path, asset: &DiarAsset) -> PathBuf {
+    let mut p = root_dir(app_data);
+    match asset.subdir {
+        AssetSubdir::Root => {}
+        AssetSubdir::Bin => p.push("bin"),
+        AssetSubdir::Lib => p.push("lib"),
+    }
+    p.push(asset.filename);
+    p
 }
 
-pub fn embedding_path(app_data: &std::path::Path) -> PathBuf {
-    models_dir(app_data).join(super::catalog::EMBEDDING.filename)
+pub fn segmentation_path(app_data: &Path) -> PathBuf {
+    asset_path(app_data, &SEGMENTATION)
 }
 
-/// True when both ONNX files are on disk and at least look like real
-/// model blobs (≥ 1 MB each). We deliberately don't verify the exact
-/// size against the catalog: HuggingFace and GitHub releases sometimes
-/// re-encode files without bumping the URL, and a strict ±5 % check
-/// then turns a working download into a permanent "not ready" state.
-/// Sherpa itself reads the file at load time and fails loudly on a
-/// truly corrupt one, which is the right place for a hard check.
-pub fn models_ready(app_data: &std::path::Path) -> bool {
-    const MIN_MODEL_BYTES: u64 = 1024 * 1024;
-    let s = segmentation_path(app_data);
-    let e = embedding_path(app_data);
-    let s_ok = std::fs::metadata(&s)
-        .map(|m| m.len() >= MIN_MODEL_BYTES)
-        .unwrap_or(false);
-    let e_ok = std::fs::metadata(&e)
-        .map(|m| m.len() >= MIN_MODEL_BYTES)
-        .unwrap_or(false);
-    s_ok && e_ok
+pub fn embedding_path(app_data: &Path) -> PathBuf {
+    asset_path(app_data, &EMBEDDING)
+}
+
+pub fn sidecar_path(app_data: &Path) -> PathBuf {
+    asset_path(app_data, &SIDECAR)
+}
+
+/// True when every asset (both ONNX models *and* the sidecar trio) is
+/// on disk and large enough to plausibly be a real file rather than
+/// an error page. Sherpa itself reads the model files at load time
+/// and fails loudly on a truly corrupt one, which is the right place
+/// for a hard check; here we just guard against partial installs.
+pub fn assets_ready(app_data: &Path) -> bool {
+    ALL.iter().all(|a| {
+        let path = asset_path(app_data, a);
+        std::fs::metadata(&path)
+            .map(|m| m.len() >= catalog::min_plausible_bytes(a.kind))
+            .unwrap_or(false)
+    })
 }

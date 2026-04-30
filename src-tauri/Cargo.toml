@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/stash-cli"]
+members = [".", "crates/stash-cli", "crates/stash-diarize"]
 resolver = "2"
 
 # Workspace-wide clippy posture. Correctness, suspicious, and perf lints
@@ -88,7 +88,7 @@ expect_fun_call = "allow"
 
 [package]
 name = "stash-app"
-version = "0.1.15"
+version = "0.1.16"
 description = "Stash — macOS menubar multitool"
 authors = ["OPSRv"]
 edition = "2021"
@@ -157,12 +157,13 @@ opus = "0.3"
 audiopus_sys = { version = "0.2", features = ["static"] }
 rubato = "0.15"
 whisper-rs = { version = "0.14", features = ["raw-api"] }
-# Speaker diarization. `sherpa-rs` wraps k2-fsa/sherpa-onnx; the
-# `download-binaries` feature pulls pre-built libsherpa-onnx static
-# libs during cargo build so we don't have to ship a CMake toolchain
-# in CI. `tts` is excluded — we only need the offline diarization
-# pipeline (pyannote segmentation + speaker embedding).
-sherpa-rs = { version = "0.6", default-features = false, features = ["download-binaries"] }
+# Speaker diarization no longer links here — it lives in the
+# `stash-diarize` sidecar binary (see `crates/stash-diarize/`).
+# Removing sherpa-rs from the main app drops ~56 MB of shared
+# libraries (libonnxruntime + libsherpa-onnx) from the bundle: the
+# sidecar plus those dylibs are downloaded into
+# `$APPLOCALDATA/diarization/` only when the user opts into
+# diarization from Settings.
 lru = "0.12"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
