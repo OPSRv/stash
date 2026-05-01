@@ -49,11 +49,15 @@ fn uv_url() -> &'static str {
 /// Spec passed to `uv python install` and `uv venv --python`. Same
 /// rationale as `uv_url`: explicitly pin the Apple Silicon triple
 /// when the host is arm64, even if the parent process is x86_64.
+/// uv's python-build-standalone naming is
+/// `cpython-<ver>-macos-<arch>-none` — note `macos`, not
+/// `apple-darwin`, and `aarch64`, not `arm64`. Confirmed via
+/// `uv python list --only-downloads`.
 fn python_spec() -> &'static str {
     if host_is_arm64() {
-        "cpython-3.11-aarch64-apple-darwin"
+        "cpython-3.11-macos-aarch64-none"
     } else {
-        "cpython-3.11-x86_64-apple-darwin"
+        "cpython-3.11-macos-x86_64-none"
     }
 }
 
