@@ -58,19 +58,31 @@ fn python_spec() -> &'static str {
 }
 
 fn host_is_arm64() -> bool {
-    // `uname -m` is the only place macOS reliably reports physical
-    // CPU family even when the calling process is running through
-    // Rosetta. Cached on first call so we don't fork a child every
-    // time `ensure_uv` runs.
+    // `sysctl hw.optional.arm64` returns "1" on Apple Silicon
+    // hardware even when the calling process is running translated
+    // through Rosetta. `uname -m` *lies* in that situation — it
+    // reports the process arch ("x86_64"), which is exactly what
+    // the previous version of this function got wrong.
+    //
+    // Cached on first call so we don't fork a child every time
+    // `ensure_uv` / `ensure_python` / `ensure_venv` runs.
     static CELL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *CELL.get_or_init(|| {
-        std::process::Command::new("uname")
-            .arg("-m")
+        let out = std::process::Command::new("sysctl")
+            .args(["-n", "hw.optional.arm64"])
             .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim() == "arm64")
-            .unwrap_or(cfg!(target_arch = "aarch64"))
+            .ok();
+        if let Some(o) = out {
+            if let Ok(s) = String::from_utf8(o.stdout) {
+                if s.trim() == "1" {
+                    return true;
+                }
+            }
+        }
+        // Fall back to compile-time arch — only reached on a real
+        // Intel Mac (where sysctl prints empty / errors out) or
+        // when the sysctl call itself fails.
+        cfg!(target_arch = "aarch64")
     })
 }
 
