@@ -39,7 +39,7 @@ const languageArrow = (from: string, to: string): ReactNode => {
 /// reference-stable across reloads that don't touch the entry.
 export const TranslationRow = memo(
   ({ row, onCopy, onDelete, onSpeak, onReuse }: TranslationRowProps) => (
-    <div className="translator-row group relative mx-3 my-1 rounded-lg p-2.5 transition-colors hover:bg-white/[0.04]">
+    <div className="translator-row group relative mx-3 my-1 rounded-lg p-2.5 transition-colors hover:[background:var(--bg-hover)]">
       <div className="flex items-center gap-2 mb-1">
         <span className="translator-pill px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider t-primary uppercase">
           {languageArrow(row.from_lang, row.to_lang)}

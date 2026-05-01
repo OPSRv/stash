@@ -5,16 +5,19 @@ interface ToastCardProps {
   onDismiss: () => void;
 }
 
-const variantClasses: Record<ToastVariant, string> = {
-  default: 'bg-white/10 border-white/[0.05] t-primary',
-  success: 'border-emerald-400/30 t-primary',
-  error: 'border-red-400/40 t-primary',
+// Refresh-2026-04: keep variant tints (success / error) but rebase the
+// chrome on `--bg-elev` + hairline-strong + 7 px radius. Default
+// variant drops the white-10 fill that fought with the new flat surfaces.
+const variantBorder: Record<ToastVariant, string> = {
+  default: 'var(--hairline-strong)',
+  success: 'var(--color-success-border)',
+  error: 'var(--color-danger-border)',
 };
 
-const variantBackground = (variant: ToastVariant): string | undefined => {
+const variantBackground = (variant: ToastVariant): string => {
   if (variant === 'success') return 'var(--color-success-bg)';
   if (variant === 'error') return 'var(--color-danger-bg)';
-  return undefined;
+  return 'var(--bg-elev)';
 };
 
 export const ToastCard = ({ toast, onDismiss }: ToastCardProps) => {
@@ -22,8 +25,13 @@ export const ToastCard = ({ toast, onDismiss }: ToastCardProps) => {
   return (
     <div
       role={variant === 'error' ? 'alert' : 'status'}
-      className={`pointer-events-auto pane rounded-md px-3 py-2 text-[13px] shadow-lg border stash-fade-in ${variantClasses[variant]} flex items-start gap-2`}
-      style={{ background: variantBackground(variant) }}
+      className="pointer-events-auto t-primary px-3 py-2 text-[13px] stash-fade-in flex items-start gap-2"
+      style={{
+        background: variantBackground(variant),
+        border: `0.5px solid ${variantBorder[variant]}`,
+        borderRadius: 'var(--r-lg)',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+      }}
     >
       <div className="flex-1 min-w-0">
         <div className="font-medium truncate">{toast.title}</div>

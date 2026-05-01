@@ -72,7 +72,7 @@ const PreviewCard = ({ href }: { href: string }) => {
     <button
       type="button"
       onClick={() => void openExternal(href)}
-      className="my-2 w-full text-left rounded-lg overflow-hidden border hair flex gap-3 p-2 transition-colors hover:bg-white/[0.04] ring-focus"
+      className="my-2 w-full text-left rounded-[var(--r-lg)] overflow-hidden border hair flex gap-3 p-2 transition-colors hover:[background:var(--bg-hover)] ring-focus"
       title={href}
     >
       {showImage ? (

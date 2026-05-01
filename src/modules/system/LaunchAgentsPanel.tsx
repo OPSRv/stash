@@ -67,7 +67,7 @@ export const LaunchAgentsPanel = () => {
     return (
       <ListItemRow
         key={a.path}
-        className="hover:bg-white/[0.03]"
+        className="hover:[background:var(--bg-hover)]"
         leading={
           <span
             aria-hidden

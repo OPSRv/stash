@@ -34,10 +34,14 @@ type ContextMenuProps = {
   label: string;
 };
 
+// Refresh-2026-04: tightened menu to bundle metrics.
+//   - panel padding 4 px (was 6)
+//   - item height 24 px (was 28)
+//   - separator height 5 px (was 9 — 4 px margin + 0.5 px line + 4 px margin)
 const MENU_WIDTH = 220;
-const ITEM_HEIGHT = 28;
-const SEPARATOR_HEIGHT = 9;
-const PADDING = 6;
+const ITEM_HEIGHT = 24;
+const SEPARATOR_HEIGHT = 8.5;
+const PADDING = 4;
 
 const clampPosition = (x: number, y: number, itemCount: number, separatorCount: number) => {
   const height =
@@ -130,8 +134,18 @@ export const ContextMenu = ({ open, x, y, items, onClose, label }: ContextMenuPr
       role="menu"
       aria-label={label}
       tabIndex={-1}
-      className="stash-context-menu fixed z-40 pane rounded-lg py-1.5 shadow-lg outline-none"
-      style={{ left, top, width: MENU_WIDTH }}
+      // Refresh-2026-04: surface = the shared `.floating-panel` (elevated
+      // flat + hairline-strong + drop shadow). The context menu narrows
+      // the radius to `--r-md` for a tighter feel; --r-lg from the panel
+      // utility would read as a popover card.
+      className="floating-panel ctxmenu-panel fixed z-40 outline-none"
+      style={{
+        left,
+        top,
+        width: MENU_WIDTH,
+        padding: PADDING,
+        borderRadius: 'var(--r-lg)',
+      }}
     >
       {items.map((it, i) => {
         if (it.kind === 'separator') {
@@ -139,29 +153,37 @@ export const ContextMenu = ({ open, x, y, items, onClose, label }: ContextMenuPr
             <div
               key={`sep-${i}`}
               role="separator"
-              className="my-1 mx-2 h-px bg-white/8"
+              className="my-1 mx-0.5 h-px"
+              style={{ background: 'var(--hairline)' }}
             />
           );
         }
         const active = i === activeIdx;
+        const isDanger = it.tone === 'danger';
+        // Refresh-2026-04: hover/active state is a full accent (or danger)
+        // flood. This is the loudest single change in the redesign — match
+        // macOS native menus exactly.
         const base =
-          'w-full flex items-center gap-2 px-3 h-7 text-[12.5px] leading-none text-left rounded-sm select-none';
-        const tone =
-          it.tone === 'danger'
-            ? active
-              ? 'bg-rose-500/18 text-rose-200'
-              : 'text-rose-300/90 hover:bg-rose-500/12'
-            : active
-              ? 'bg-white/10 t-primary'
-              : 't-primary hover:bg-white/6';
+          'ctxmenu-item w-full flex items-center gap-2 px-2 h-6 text-[12.5px] leading-none text-left rounded-[4px] select-none transition-colors';
         const disabled = it.disabled ? 'opacity-40 cursor-not-allowed' : '';
+        const itemStyle = active
+          ? {
+              background: isDanger
+                ? 'rgb(var(--color-danger-rgb))'
+                : 'rgb(var(--stash-accent-rgb))',
+              color: '#ffffff',
+            }
+          : {
+              color: isDanger ? 'var(--color-danger-fg)' : 'var(--fg)',
+            };
         return (
           <button
             key={i}
             type="button"
             role="menuitem"
             disabled={it.disabled}
-            className={`${base} ${tone} ${disabled}`}
+            className={`${base} ${disabled}`}
+            style={itemStyle}
             onMouseEnter={() => !it.disabled && setActiveIdx(i)}
             onClick={() => {
               if (it.disabled) return;
@@ -172,7 +194,10 @@ export const ContextMenu = ({ open, x, y, items, onClose, label }: ContextMenuPr
             {it.icon && <span className="shrink-0 flex items-center">{it.icon}</span>}
             <span className="flex-1 truncate">{it.label}</span>
             {it.shortcut && (
-              <span className="t-tertiary text-[10.5px] font-mono tabular-nums">
+              <span
+                className="text-[10.5px] font-mono tabular-nums"
+                style={{ color: active ? 'rgba(255,255,255,0.8)' : 'var(--fg-faint)' }}
+              >
                 {it.shortcut}
               </span>
             )}

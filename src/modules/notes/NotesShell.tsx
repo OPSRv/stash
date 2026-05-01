@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { SearchInput } from '../../shared/ui/SearchInput';
 import { Button } from '../../shared/ui/Button';
+import { SearchInput } from '../../shared/ui/SearchInput';
 import { IconButton } from '../../shared/ui/IconButton';
+import { Separator } from '../../shared/ui/Separator';
 import { Tooltip } from '../../shared/ui/Tooltip';
 import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import {
@@ -23,7 +24,6 @@ import {
   UploadIcon,
 } from '../../shared/ui/icons';
 import { SectionLabel } from '../../shared/ui/SectionLabel';
-import { accent } from '../../shared/theme/accent';
 import { useToast } from '../../shared/ui/Toast';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
@@ -111,6 +111,24 @@ const formatDuration = (ms: number | null): string =>
 const AUTOSAVE_DEBOUNCE_MS = 400;
 const SIDEBAR_COLLAPSED_KEY = 'stash:notes:sidebar-collapsed';
 const FOLDER_FILTER_KEY = 'stash:notes:folder-filter';
+const ZOOM_KEY = 'stash:notes:zoom';
+/** Discrete zoom steps for ⌘+ / ⌘-. macOS-feel: ~10 % per step, capped so
+ *  the editor never collapses (< 0.85) or pushes the toolbar offscreen
+ *  (> 1.6). `1` is the canonical baseline. */
+const ZOOM_STEPS = [0.85, 0.95, 1, 1.1, 1.25, 1.4, 1.6] as const;
+const ZOOM_DEFAULT = 1;
+const readZoom = (): number => {
+  if (typeof window === 'undefined') return ZOOM_DEFAULT;
+  try {
+    const raw = window.localStorage.getItem(ZOOM_KEY);
+    const n = raw ? Number(raw) : NaN;
+    return Number.isFinite(n) && ZOOM_STEPS.includes(n as (typeof ZOOM_STEPS)[number])
+      ? n
+      : ZOOM_DEFAULT;
+  } catch {
+    return ZOOM_DEFAULT;
+  }
+};
 
 const readFolderFilter = (): FolderFilter => {
   if (typeof window === 'undefined') return 'all';
@@ -195,19 +213,25 @@ const NoteRow = ({
         e.stopPropagation();
         onContextMenu(e.clientX, e.clientY);
       }}
-      className={`group w-full text-left px-3 py-2 cursor-pointer transition-colors ring-focus ${
-        active ? 'row-active row-active-strong' : 'hover:bg-white/[0.03]'
-      } ${isDragging ? 'opacity-40' : ''}`}
+      // Refresh-2026-04: chrome / state lives in the shared `.list-row`
+      // primitive (data-attrs drive hover, active, dragging visuals). The
+      // `--note` modifier swaps the active background tint for accent-fog
+      // and shifts the accent left-bar to `top:8 / bottom:8` for the
+      // taller row.
+      data-active={active}
+      data-dragging={isDragging}
+      className="list-row list-row--note group mx-1.5 my-px px-2 py-[7px] ring-focus"
     >
-      <div className="flex items-baseline gap-2">
-        <span className="t-primary text-body font-medium truncate flex-1 min-w-0">
-          {n.title || <span className="t-tertiary">Untitled</span>}
+      <div className="flex items-center gap-2">
+        <span className={`text-body truncate flex-1 min-w-0 leading-tight ${active ? 't-primary font-semibold' : 't-primary font-medium'}`}>
+          {n.title || <span className="t-tertiary italic">Untitled</span>}
         </span>
         <span className="shrink-0 relative inline-flex items-center justify-end w-7 h-4">
           <span
-            className={`t-tertiary text-[10px] font-mono ${
+            className={`t-tertiary tabular-nums ${
               n.pinned ? 'hidden' : 'group-hover:hidden group-focus-within:hidden'
             }`}
+            style={{ font: 'var(--t-time)' }}
           >
             {iso(n.updated_at)}
           </span>
@@ -230,11 +254,8 @@ const NoteRow = ({
               aria-label={n.pinned ? 'Unpin note' : 'Pin note'}
               aria-pressed={n.pinned}
               className={`ring-focus rounded p-0.5 t-tertiary hover:t-primary cursor-pointer ${
-                n.pinned
-                  ? 'inline-flex items-center'
-                  : 'hidden group-hover:inline-flex group-focus-within:inline-flex items-center'
+                n.pinned ? 'accent-fg inline-flex items-center' : 'hidden group-hover:inline-flex group-focus-within:inline-flex items-center'
               }`}
-              style={n.pinned ? { color: 'var(--stash-accent)' } : undefined}
             >
               <PinIcon size={11} filled={n.pinned} />
             </span>
@@ -324,6 +345,15 @@ export const NotesShell = () => {
       return false;
     }
   });
+  const [notesZoom, setNotesZoomState] = useState<number>(readZoom);
+  const setNotesZoom = useCallback((next: number) => {
+    setNotesZoomState(next);
+    try {
+      window.localStorage.setItem(ZOOM_KEY, String(next));
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const { toast } = useToast();
 
   const setSidebarCollapsed = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
@@ -367,6 +397,7 @@ export const NotesShell = () => {
       if (current && (current.folder_id ?? null) === folderId) return;
       try {
         await notesSetFolder(noteId, folderId);
+        setFolderFilter(folderId == null ? 'unfiled' : folderId);
         await reload();
         toast({
           title: `Moved to ${folderLabel}`,
@@ -377,7 +408,7 @@ export const NotesShell = () => {
         toast({ title: 'Move failed', description: String(e), variant: 'error' });
       }
     },
-    [notes, reload, toast]
+    [notes, reload, setFolderFilter, toast]
   );
 
   const togglePinned = useCallback(
@@ -399,11 +430,36 @@ export const NotesShell = () => {
   // note row context menu can show a "Move to" submenu without prop drilling.
   // Both fetches react to the shared `notes:changed` event below.
   const [folders, setFolders] = useState<NoteFolder[]>([]);
+  /// Per-folder note counts driving the badges in the folders sidebar.
+  /// Computed from a `notesList('all')` fetch (separate from the main
+  /// filtered list so counts stay correct even when the user filters
+  /// the side-list to a single folder). Refreshed on mount + every
+  /// `notes:changed` event. Cheap — at 500 notes the response is ~150 KB.
+  const [folderCounts, setFolderCounts] = useState<{
+    total: number;
+    unfiled: number;
+    byFolder: Record<number, number>;
+  }>({ total: 0, unfiled: 0, byFolder: {} });
+  const refreshFolderCounts = useCallback(async () => {
+    try {
+      const all = await notesList('all');
+      const byFolder: Record<number, number> = {};
+      let unfiled = 0;
+      for (const n of all) {
+        if (n.folder_id == null) unfiled += 1;
+        else byFolder[n.folder_id] = (byFolder[n.folder_id] ?? 0) + 1;
+      }
+      setFolderCounts({ total: all.length, unfiled, byFolder });
+    } catch {
+      // Counts are decoration — fail silently; the sidebar still works.
+    }
+  }, []);
   useEffect(() => {
     void notesFoldersList()
       .then((list) => setFolders(Array.isArray(list) ? list : []))
       .catch(() => {});
-  }, []);
+    void refreshFolderCounts();
+  }, [refreshFolderCounts]);
   const [noteCtxMenu, setNoteCtxMenu] = useState<
     { x: number; y: number; noteId: number } | null
   >(null);
@@ -441,13 +497,14 @@ export const NotesShell = () => {
       void notesFoldersList()
         .then((list) => setFolders(Array.isArray(list) ? list : []))
         .catch(() => {});
+      void refreshFolderCounts();
     }).then((un) => {
       cancel = un;
     });
     return () => {
       cancel?.();
     };
-  }, []);
+  }, [refreshFolderCounts]);
 
   const active = activeNote;
 
@@ -674,6 +731,95 @@ export const NotesShell = () => {
     setViewMode('edit');
     await reload();
   };
+
+  // ⌘D inside the Notes tab forks the active note. Skipped while typing in
+  // the title input or markdown editor so the user can still type "d" with
+  // a stuck Cmd modifier; routed through `e.target` instead of focus
+  // because the editor textarea may briefly lose focus during AI streams.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.shiftKey || e.altKey || e.ctrlKey) return;
+      if (e.key !== 'd' && e.key !== 'D') return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (activeId == null) return;
+      e.preventDefault();
+      void duplicateNote(activeId);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
+  /** ⌘+ / ⌘- / ⌘0 — zoom the editor + preview typography. Active in the
+   *  Notes tab regardless of focus target (textarea included), so the
+   *  shortcut keeps working while typing. `=` matches the unshifted form
+   *  of the `+` key on most layouts so users don't need to hold Shift. */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.altKey) return;
+      const key = e.key;
+      const isPlus = key === '+' || key === '=';
+      const isMinus = key === '-' || key === '_';
+      const isZero = key === '0';
+      if (!isPlus && !isMinus && !isZero) return;
+      e.preventDefault();
+      if (isZero) {
+        setNotesZoom(ZOOM_DEFAULT);
+        return;
+      }
+      const idx = ZOOM_STEPS.indexOf(notesZoom as (typeof ZOOM_STEPS)[number]);
+      // If somehow stuck off-grid (e.g. older value), snap to nearest known step.
+      const baseIdx = idx >= 0 ? idx : ZOOM_STEPS.indexOf(ZOOM_DEFAULT);
+      const nextIdx = isPlus
+        ? Math.min(ZOOM_STEPS.length - 1, baseIdx + 1)
+        : Math.max(0, baseIdx - 1);
+      const next = ZOOM_STEPS[nextIdx];
+      if (next !== notesZoom) setNotesZoom(next);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [notesZoom, setNotesZoom]);
+
+  /** Fork a note into a new one. Copies title (with a "copy" suffix) and
+   *  body verbatim, then mirrors the source folder so the duplicate sits
+   *  next to its origin in the side-list. The new note becomes active so
+   *  the user can start editing immediately. Audio attachments aren't
+   *  carried over — voice recordings are tied to the original note's
+   *  recording id; cloning them would create dangling references. */
+  const duplicateNote = useCallback(
+    async (sourceId: number) => {
+      try {
+        const src = await notesGet(sourceId);
+        if (!src) return;
+        // Suffix the title once. If the title already ends with " copy"
+        // we still append — `" copy 2"` semantics aren't worth the parsing
+        // complexity, and the user can rename freely.
+        const nextTitle = src.title.trim() ? `${src.title} copy` : 'Untitled copy';
+        const newId = await notesCreate(nextTitle, src.body);
+        if (src.folder_id != null) {
+          await notesSetFolder(newId, src.folder_id);
+        }
+        setActiveId(newId);
+        setViewMode('edit');
+        await reload();
+        toast({
+          title: 'Note duplicated',
+          description: nextTitle,
+          variant: 'success',
+          durationMs: 1800,
+        });
+      } catch (e) {
+        toast({
+          title: 'Duplicate failed',
+          description: e instanceof Error ? e.message : String(e),
+          variant: 'error',
+        });
+      }
+    },
+    [reload, toast],
+  );
 
   const openRecorderForNew = useCallback(() => {
     recorderIntentRef.current = 'new';
@@ -1053,60 +1199,66 @@ export const NotesShell = () => {
     <div className="h-full flex relative">
       {isDragOver && (
         <div
-          className="absolute inset-0 z-40 pointer-events-none flex items-center justify-center"
+          className="absolute inset-0 z-40 pointer-events-none flex flex-col items-center justify-center gap-2.5"
           role="presentation"
           data-testid="notes-audio-drop-overlay"
           style={{
-            // Accent-tinted fog so the drop zone reads as "ready to accept"
-            // without obscuring the underlying list layout beneath it.
-            background: accent(0.12),
+            // Refresh-2026-04: full-pane accent-fog fill, 1.5 px dashed
+            // accent border. Centre stack: 64 px accent ring with halo +
+            // 16 px H3 + 12 px description. Replaces the prior glass-card
+            // floating in the middle.
+            background: 'var(--accent-fog)',
             backdropFilter: 'blur(2px)',
-            border: `2px dashed ${accent(0.6)}`,
-            borderRadius: 10,
-            margin: 6,
+            WebkitBackdropFilter: 'blur(2px)',
+            border: `1.5px dashed rgb(var(--stash-accent-rgb))`,
           }}
         >
           <div
-            className="flex items-center gap-3 px-5 py-3 rounded-lg"
+            className="flex items-center justify-center"
             style={{
-              background: 'var(--color-surface)',
-              boxShadow: '0 12px 40px -12px rgba(0,0,0,0.5)',
-              border: `1px solid ${accent(0.4)}`,
+              width: 64,
+              height: 64,
+              borderRadius: '50%',
+              background: 'rgb(var(--stash-accent-rgb))',
+              color: 'var(--accent-fg)',
+              boxShadow:
+                '0 0 0 8px var(--accent-soft), 0 0 0 16px var(--accent-fog)',
             }}
           >
-            <MicIcon size={18} />
-            <div className="flex flex-col">
-              <span className="t-primary text-body font-medium">
-                {(() => {
-                  const total = audioCount + imageCount;
-                  const parts: string[] = [];
-                  if (audioCount > 0)
-                    parts.push(
-                      audioCount === 1 ? 'audio file' : `${audioCount} audio files`
-                    );
-                  if (imageCount > 0)
-                    parts.push(imageCount === 1 ? 'image' : `${imageCount} images`);
-                  if (total === 0) return 'Drop media to import';
-                  return `Drop ${parts.join(' + ')} to import`;
-                })()}
-              </span>
-              <span className="t-tertiary text-meta">
-                {audioCount > 0
-                  ? 'Audio is auto-transcribed after the drop'
-                  : 'Files embed into the active note'}
-              </span>
-            </div>
+            <MicIcon size={22} />
+          </div>
+          <div className="t-primary" style={{ font: 'var(--t-h2)' }}>
+            {(() => {
+              const total = audioCount + imageCount;
+              const parts: string[] = [];
+              if (audioCount > 0)
+                parts.push(audioCount === 1 ? 'audio file' : `${audioCount} audio files`);
+              if (imageCount > 0)
+                parts.push(imageCount === 1 ? 'image' : `${imageCount} images`);
+              if (total === 0) return 'Drop media to import';
+              return `Drop ${parts.join(' + ')} to import`;
+            })()}
+          </div>
+          <div className="t-secondary text-meta">
+            {audioCount > 0
+              ? 'Audio is auto-transcribed after the drop'
+              : 'Files embed into the active note'}
           </div>
         </div>
       )}
       <aside
-        className="relative shrink-0 border-r hair overflow-hidden transition-[width] duration-200 ease-out"
-        style={{ width: sidebarCollapsed ? 40 : 220 }}
+        className="relative shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
+        style={{
+          width: sidebarCollapsed ? 'var(--rail-w)' : 'var(--sidebar-w)',
+          background: 'var(--bg-sidebar)',
+          borderRight: '0.5px solid var(--hairline)',
+        }}
       >
         <div
-          className={`absolute inset-y-0 left-0 w-10 flex flex-col items-center py-2 gap-1 transition-opacity duration-150 ${
+          className={`absolute inset-y-0 left-0 flex flex-col items-center py-2 gap-1 transition-opacity duration-150 ${
             sidebarCollapsed ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
+          style={{ width: 'var(--rail-w)' }}
           aria-hidden={!sidebarCollapsed}
         >
           <RailButton onClick={() => setSidebarCollapsed(false)} title="Expand notes list">
@@ -1127,64 +1279,78 @@ export const NotesShell = () => {
           </RailButton>
         </div>
         <div
-          className={`absolute inset-y-0 left-0 w-[220px] flex flex-col transition-opacity duration-150 ${
+          className={`absolute inset-y-0 left-0 flex flex-col overflow-x-hidden transition-opacity duration-150 ${
             sidebarCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'
           }`}
+          style={{ width: 'var(--sidebar-w)' }}
           aria-hidden={sidebarCollapsed}
         >
-        <SearchInput
-          value={query}
-          onChange={setQuery}
-          placeholder="Search notes"
-          inputRef={searchRef}
-          compact
-          trailing={
-            <IconButton
-              onClick={() => setSidebarCollapsed(true)}
-              title="Collapse notes list"
-              stopPropagation={false}
-            >
-              <PanelLeftIcon size={13} />
-            </IconButton>
-          }
-        />
-        <FoldersSidebar
-          selected={folderFilter}
-          onSelect={setFolderFilter}
-        />
-        <div className="px-2.5 pt-1 pb-1.5 flex items-stretch gap-1.5">
+        <div className="px-2 pt-2 pb-1 flex items-center gap-1.5">
+          <div className="flex-1 min-w-0">
+            <SearchInput
+              value={query}
+              onChange={setQuery}
+              placeholder="Search notes"
+              inputRef={searchRef}
+              compact
+              variant="surface"
+            />
+          </div>
+          <IconButton
+            onClick={() => setSidebarCollapsed(true)}
+            title="Collapse notes list"
+          >
+            <PanelLeftIcon size={13} />
+          </IconButton>
+        </div>
+        <div className="px-2 pt-0.5 pb-2 grid gap-1.5" style={{ gridTemplateColumns: '1fr 28px' }}>
           <Button
-            size="sm"
-            variant="soft"
+            variant="solid"
             tone="accent"
+            size="md"
             onClick={newNote}
             title="New note (⌘N)"
-            className="flex-1 justify-center"
+            aria-label="New note"
+            fullWidth
             leadingIcon={<PencilIcon size={12} />}
           >
             New note
           </Button>
           <Button
-            size="sm"
-            variant="soft"
-            tone="accent"
+            variant="ghost"
+            tone="neutral"
+            size="md"
             shape="square"
             onClick={openRecorderForNew}
             title="New voice note"
             aria-label="New voice note"
+            className="!h-7 !w-7 [background:var(--bg-elev)] [border:0.5px_solid_var(--hairline-strong)]"
           >
             <MicIcon size={13} />
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto nice-scroll">
+        <div
+          className="shrink-0 overflow-y-auto overflow-x-hidden nice-scroll"
+          style={{
+            maxHeight: '30%',
+            borderBottom: '0.5px solid var(--hairline)',
+          }}
+        >
+          <FoldersSidebar
+            selected={folderFilter}
+            onSelect={setFolderFilter}
+            counts={folderCounts}
+          />
+        </div>
+        <div className="flex-1 overflow-y-auto overflow-x-hidden nice-scroll pt-1">
           {pinnedNotes.length > 0 && (
-            <div className="px-3 pt-3 pb-1">
+            <div className="px-3 py-1">
               <SectionLabel>Pinned</SectionLabel>
             </div>
           )}
           {pinnedNotes.map((n) => renderNoteRow(n))}
           {pinnedNotes.length > 0 && recentNotes.length > 0 && (
-            <div className="px-3 pt-3 pb-1">
+            <div className="px-3 py-1">
               <SectionLabel>Recent</SectionLabel>
             </div>
           )}
@@ -1193,18 +1359,22 @@ export const NotesShell = () => {
             <EmptyState
               variant="compact"
               title={query ? 'No matches' : 'No notes yet'}
-              description={query ? 'Try a different search.' : 'Create your first note below.'}
+              description={query ? 'Try a different search.' : 'Create your first note above.'}
             />
           )}
         </div>
-        <div className="px-3 py-2 border-t hair">
+        <div
+          className="flex items-center gap-1.5 px-2 py-1.5"
+          style={{ borderTop: '0.5px solid var(--hairline)' }}
+        >
           <Button
-            size="sm"
             variant="ghost"
+            size="sm"
+            fullWidth
             onClick={onImport}
             title="Open a markdown or text file as a new note"
-            fullWidth
-            leadingIcon={<UploadIcon size={12} />}
+            leadingIcon={<UploadIcon size={11} />}
+            className="!h-6 !text-meta t-tertiary hover:t-primary"
           >
             Import .md
           </Button>
@@ -1215,13 +1385,26 @@ export const NotesShell = () => {
       <main className="flex-1 flex flex-col min-w-0">
         {isEditing ? (
           <>
-            <div className="px-5 pt-4 pb-3 border-b hair">
-              <div className="flex items-center gap-3">
+            <div
+              className="flex flex-col gap-1"
+              style={{
+                padding: '12px 14px 6px',
+                borderBottom: '0.5px solid var(--hairline)',
+              }}
+            >
+              <div className="flex items-center gap-2">
                 <input
                   value={title}
                   onChange={(e) => onTitleChange(e.currentTarget.value)}
                   placeholder="Untitled"
-                  className="flex-1 bg-transparent outline-none t-primary text-heading font-medium min-w-0"
+                  className="flex-1 bg-transparent outline-none t-primary min-w-0"
+                  style={{
+                    // `--t-display` composes weight 600 / 18 px / 1.25 /
+                    // SF Pro Display in one declaration. Letter-spacing
+                    // tightens further per the spec's note-title treatment.
+                    font: 'var(--t-display)',
+                    letterSpacing: '-0.01em',
+                  }}
                 />
                 <SaveStatusPill status={saveStatus} onCancel={cancelTranscribe} />
                 <SegmentedControl
@@ -1231,8 +1414,11 @@ export const NotesShell = () => {
                   onChange={setViewMode}
                   ariaLabel="View mode"
                 />
-                <div className="w-px h-5 bg-white/[0.08]" aria-hidden />
-                <div className="flex items-center gap-1 shrink-0">
+                <Separator orientation="vertical" tone="strong" className="mx-[3px]" />
+                {/* Refresh-2026-04: 8 inline header actions clustered into
+                 * three groups separated by 0.5 × 16 hairline-strong rules:
+                 * [pin · mic · send · ai] | [reveal · copy] | [export · delete]. */}
+                <div className="flex items-center shrink-0" style={{ gap: 1 }}>
                   {active && (
                     <IconButton
                       onClick={() => void togglePinned(active.id, !active.pinned)}
@@ -1302,12 +1488,14 @@ export const NotesShell = () => {
                   <IconButton
                     onClick={() => setAiBarOpen((v) => !v)}
                     title={aiBarOpen ? 'Hide AI bar' : 'Rewrite this note with AI'}
+                    active={aiBarOpen}
                     stopPropagation={false}
                   >
                     <MagicWandIcon size={13} />
                   </IconButton>
                   {activeId !== null && (
                     <>
+                      <Separator orientation="vertical" tone="strong" className="mx-[3px]" />
                       <IconButton
                         onClick={() => void revealNoteFile()}
                         title="Reveal note file in Finder"
@@ -1324,6 +1512,7 @@ export const NotesShell = () => {
                       </IconButton>
                     </>
                   )}
+                  <Separator orientation="vertical" tone="strong" className="mx-[3px]" />
                   <IconButton
                     onClick={onExport}
                     title={exportDisabled ? 'Nothing to export' : 'Export as .md'}
@@ -1343,14 +1532,33 @@ export const NotesShell = () => {
                   )}
                 </div>
               </div>
-              <div className="mt-2 flex items-center gap-3 t-tertiary text-meta tabular-nums">
-                {active && <span>Updated {iso(active.updated_at)} ago</span>}
+              {/* Refresh-2026-04 meta row: 11 / 1.5, dot-separated facts.
+                * Order matches the bundle: timestamp · word count · folder. */}
+              <div
+                className="flex items-center flex-wrap gap-2 t-tertiary text-meta"
+                style={{ lineHeight: 1.5 }}
+              >
+                {active && <span className="tabular-nums">Updated {iso(active.updated_at)} ago</span>}
                 {body.trim() && (
                   <>
-                    {active && <span aria-hidden>·</span>}
-                    <span>{countWords(body)} words</span>
+                    {active && <span className="t-ghost" aria-hidden>·</span>}
+                    <span className="tabular-nums">{countWords(body)} words</span>
                   </>
                 )}
+                {(() => {
+                  if (!active) return null;
+                  const folderName =
+                    active.folder_id == null
+                      ? 'No folder'
+                      : folders.find((f) => f.id === active.folder_id)?.name;
+                  if (!folderName) return null;
+                  return (
+                    <>
+                      <span className="t-ghost" aria-hidden>·</span>
+                      <span>{folderName}</span>
+                    </>
+                  );
+                })()}
               </div>
             </div>
             {active && (
@@ -1381,7 +1589,10 @@ export const NotesShell = () => {
                 }}
               />
             )}
-            <div className="flex-1 flex min-h-0">
+            <div
+              className="flex-1 flex min-h-0 relative"
+              style={{ ['--notes-zoom' as string]: String(notesZoom) }}
+            >
               {showEditor && (
                 <div
                   className={`flex flex-col min-h-0 ${showPreview ? 'w-1/2 border-r hair' : 'flex-1'}`}
@@ -1412,7 +1623,8 @@ export const NotesShell = () => {
               )}
               {showPreview && (
                 <div
-                  className={`${showEditor ? 'w-1/2' : 'flex-1'} overflow-y-auto nice-scroll px-5 py-4`}
+                  className={`${showEditor ? 'w-1/2' : 'flex-1'} overflow-y-auto nice-scroll`}
+                  style={{ padding: '14px 18px 60px' }}
                 >
                   <MarkdownPreview source={body} onToggleCheckbox={onToggleCheckbox} />
                 </div>
@@ -1435,14 +1647,28 @@ export const NotesShell = () => {
           </>
         ) : (
           <EmptyState
-            title="Your scratchpad"
-            description="Markdown notes with live preview. Press ⌘⇧N anywhere to quick-open."
+            glyph
+            icon={<PencilIcon size={24} />}
+            title="No note selected"
+            description="Pick something from the sidebar, or start fresh. Stash autosaves as you type."
+            kbdHint={{ label: 'New note', kbd: '⌘⇧N' }}
             action={
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="soft" tone="accent" onClick={newNote}>
-                  + New note
+                <Button
+                  size="md"
+                  variant="solid"
+                  tone="accent"
+                  onClick={newNote}
+                  leadingIcon={<PencilIcon size={12} />}
+                >
+                  New note
                 </Button>
-                <Button size="sm" variant="ghost" onClick={onImport}>
+                <Button
+                  size="md"
+                  variant="ghost"
+                  onClick={onImport}
+                  leadingIcon={<UploadIcon size={12} />}
+                >
                   Import .md
                 </Button>
               </div>
@@ -1494,6 +1720,12 @@ export const NotesShell = () => {
             kind: 'action',
             label: target.pinned ? 'Unpin' : 'Pin',
             onSelect: () => void togglePinned(target.id, !target.pinned),
+          },
+          {
+            kind: 'action',
+            label: 'Duplicate',
+            shortcut: '⌘D',
+            onSelect: () => void duplicateNote(target.id),
           },
           ...(moveItems.length > 0
             ? [{ kind: 'separator' as const }, ...moveItems]

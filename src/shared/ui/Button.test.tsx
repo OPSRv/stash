@@ -43,16 +43,20 @@ describe('Button', () => {
     expect(screen.getByRole('button').className).toContain('btn-danger');
   });
 
-  it('applies ghost+neutral → btn-ghost token', () => {
+  it('applies ghost+neutral → transparent default with hover lift', () => {
+    // Refresh-2026-04: ghost lost its 0.06 default tint; it's now fully
+    // transparent until hover. Assert the canonical hover utility instead
+    // of the retired `.btn-ghost` token.
     render(<Button>G</Button>);
-    expect(screen.getByRole('button').className).toContain('btn-ghost');
+    expect(screen.getByRole('button').className).toMatch(/hover:\[background:var\(--bg-hover\)\]/);
   });
 
   it('applies size class', () => {
     const { rerender } = render(<Button size="xs">x</Button>);
     expect(screen.getByRole('button').className).toContain('h-5');
     rerender(<Button size="lg">x</Button>);
-    expect(screen.getByRole('button').className).toContain('h-9');
+    // Refresh-2026-04: lg shrinks 36 → 32 px.
+    expect(screen.getByRole('button').className).toContain('h-8');
   });
 
   it('applies shape pill', () => {

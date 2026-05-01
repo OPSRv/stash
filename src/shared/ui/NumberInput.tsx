@@ -162,7 +162,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
 
     return (
       <div
-        className={`input-field ring-focus-within rounded-md flex items-center ${wrapperSize[size]} ${dangerCls} ${disCls} ${className}`.trim()}
+        className={`input-field ring-focus-within rounded-[var(--r-lg)] flex items-center ${wrapperSize[size]} ${dangerCls} ${disCls} ${className}`.trim()}
       >
         <input
           ref={ref}
@@ -188,14 +188,14 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           <span className="t-tertiary pr-1.5 shrink-0 select-none">{suffix}</span>
         )}
         {!hideStepper && (
-          <div className="flex flex-col border-l border-white/[0.04] shrink-0 h-full">
+          <div className="flex flex-col border-l [border-color:var(--hairline)] shrink-0 h-full">
             <button
               type="button"
               tabIndex={-1}
               aria-label="Increment"
               disabled={disabled || atMax}
               onClick={() => nudge(1)}
-              className={`${stepperBtnSize[size]} inline-flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] disabled:opacity-30 disabled:hover:bg-transparent`}
+              className={`${stepperBtnSize[size]} inline-flex items-center justify-center t-secondary hover:t-primary hover:[background:var(--bg-row-active)] disabled:opacity-30 disabled:hover:bg-transparent`}
               style={{ height: '50%', lineHeight: 1 }}
             >
               <span aria-hidden>▲</span>
@@ -206,7 +206,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
               aria-label="Decrement"
               disabled={disabled || atMin}
               onClick={() => nudge(-1)}
-              className={`${stepperBtnSize[size]} inline-flex items-center justify-center t-secondary hover:t-primary hover:bg-white/[0.06] disabled:opacity-30 disabled:hover:bg-transparent border-t border-white/[0.04]`}
+              className={`${stepperBtnSize[size]} inline-flex items-center justify-center t-secondary hover:t-primary hover:[background:var(--bg-row-active)] disabled:opacity-30 disabled:hover:bg-transparent border-t [border-color:var(--hairline)]`}
               style={{ height: '50%', lineHeight: 1 }}
             >
               <span aria-hidden>▼</span>

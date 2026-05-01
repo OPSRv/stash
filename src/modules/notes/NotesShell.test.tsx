@@ -111,3 +111,144 @@ describe('NotesShell view-mode defaults', () => {
     );
   });
 });
+
+describe('NotesShell move-to-folder', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it('switches the folder filter to the destination folder after a move', async () => {
+    const user = userEvent.setup();
+    const folder = { id: 10, name: 'Work', sort_order: 0, created_at: 0 };
+    const note = { ...existing, folder_id: null as number | null };
+    mockInvoke.mockImplementation(async (cmd, args) => {
+      if (cmd === 'notes_list' || cmd === 'notes_search') return [note];
+      if (cmd === 'notes_get') return fullExisting;
+      if (cmd === 'notes_folders_list') return [folder];
+      if (cmd === 'notes_set_folder') {
+        const a = args as { noteId: number; folderId: number | null };
+        note.folder_id = a.folderId;
+        return undefined;
+      }
+      return undefined;
+    });
+
+    render(<NotesShell />);
+    const row = await screen.findByText('Existing note');
+
+    // Sanity: "Work" folder starts unselected.
+    const workRow = await screen.findByRole('button', { name: /Work/ });
+    expect(workRow).toHaveAttribute('aria-pressed', 'false');
+
+    // Open the row context menu and pick "Move to: Work".
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+    );
+    const moveItem = await screen.findByText('Move to: Work');
+    await user.click(moveItem);
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Work/ })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+  });
+});
+
+describe('NotesShell duplicate', () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it('duplicates a note from the row context menu, copying title/body and mirroring the source folder', async () => {
+    const user = userEvent.setup();
+    const folder = { id: 7, name: 'Drafts', sort_order: 0, created_at: 0 };
+    const sourceWithFolder = { ...fullExisting, folder_id: 7 as number | null };
+
+    const setFolderCalls: Array<{ noteId: number; folderId: number | null }> = [];
+    const createCalls: Array<{ title: string; body: string }> = [];
+    let nextCreatedId = 99;
+
+    mockInvoke.mockImplementation(async (cmd, args) => {
+      if (cmd === 'notes_list' || cmd === 'notes_search')
+        return [{ ...existing, folder_id: 7 }];
+      if (cmd === 'notes_get') return sourceWithFolder;
+      if (cmd === 'notes_folders_list') return [folder];
+      if (cmd === 'notes_create') {
+        const a = args as { title: string; body: string };
+        createCalls.push({ title: a.title, body: a.body });
+        return nextCreatedId;
+      }
+      if (cmd === 'notes_set_folder') {
+        setFolderCalls.push(args as { noteId: number; folderId: number | null });
+        return undefined;
+      }
+      return undefined;
+    });
+
+    render(<NotesShell />);
+    const row = await screen.findByText('Existing note');
+
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+    );
+    const dupItem = await screen.findByText('Duplicate');
+    await user.click(dupItem);
+
+    // The new note carries the source title with a " copy" suffix and the
+    // original body verbatim.
+    await waitFor(() => {
+      expect(createCalls).toEqual([
+        { title: 'Existing note copy', body: 'Hello world\nwith some body' },
+      ]);
+    });
+
+    // And it lands in the same folder as its source.
+    await waitFor(() => {
+      expect(setFolderCalls).toEqual([{ noteId: 99, folderId: 7 }]);
+    });
+  });
+
+  it('falls back to "Untitled copy" when the source has no title', async () => {
+    const user = userEvent.setup();
+    const blank = {
+      ...existing,
+      title: '',
+      preview: '',
+      folder_id: null as number | null,
+    };
+    const blankFull = {
+      ...fullExisting,
+      title: '',
+      body: '',
+      folder_id: null as number | null,
+    };
+    const createCalls: Array<{ title: string; body: string }> = [];
+
+    mockInvoke.mockImplementation(async (cmd, args) => {
+      if (cmd === 'notes_list' || cmd === 'notes_search') return [blank];
+      if (cmd === 'notes_get') return blankFull;
+      if (cmd === 'notes_create') {
+        const a = args as { title: string; body: string };
+        createCalls.push({ title: a.title, body: a.body });
+        return 100;
+      }
+      return undefined;
+    });
+
+    render(<NotesShell />);
+    // Empty-title rows render as italic "Untitled" — find by that.
+    const row = await screen.findByText('Untitled');
+
+    row.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+    );
+    const dupItem = await screen.findByText('Duplicate');
+    await user.click(dupItem);
+
+    await waitFor(() => {
+      expect(createCalls).toEqual([{ title: 'Untitled copy', body: '' }]);
+    });
+  });
+});

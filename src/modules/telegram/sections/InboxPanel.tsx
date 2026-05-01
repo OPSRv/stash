@@ -305,7 +305,7 @@ export function InboxPanel() {
       aria-label="Telegram inbox"
     >
       {hasItems && (
-        <div className="border-b border-white/5 flex items-center gap-2">
+        <div className="border-b [border-color:var(--hairline)] flex items-center gap-2">
           {selCount === 0 ? (
             <div className="flex-1">
               <SearchInput
@@ -382,7 +382,7 @@ export function InboxPanel() {
                   <span className="text-meta font-semibold uppercase tracking-wider text-white/35">
                     {group.label}
                   </span>
-                  <span className="h-px flex-1 bg-white/5" />
+                  <span className="h-px flex-1 [background:var(--bg-hover)]" />
                 </div>
                 <ul
                   className="flex flex-col"
@@ -494,7 +494,7 @@ const VirtualInboxList = ({
                   <span className="text-meta font-semibold uppercase tracking-wider text-white/35">
                     {entry.label}
                   </span>
-                  <span className="h-px flex-1 bg-white/5" />
+                  <span className="h-px flex-1 [background:var(--bg-hover)]" />
                 </div>
               ) : (
                 <InboxRow
@@ -563,7 +563,7 @@ const InboxRow = ({
     className={`mx-3 my-1 px-3 py-2.5 rounded-lg border hair transition-colors flex flex-col gap-2 group cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-[rgb(var(--stash-accent-rgb))] ${
       selected
         ? 'bg-[rgba(var(--stash-accent-rgb),0.18)] border-[rgb(var(--stash-accent-rgb))]/40'
-        : 'bg-white/[0.03] [.light_&]:bg-black/[0.02] hover:bg-white/[0.06] [.light_&]:hover:bg-black/[0.04]'
+        : '[background:var(--bg-hover)] [.light_&]:bg-black/[0.02] hover:[background:var(--bg-row-active)] [.light_&]:hover:bg-black/[0.04]'
     }`}
   >
     <div className="flex items-center gap-2 text-meta text-white/40">

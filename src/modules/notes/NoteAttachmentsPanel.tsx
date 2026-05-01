@@ -10,6 +10,7 @@ import { Badge } from '../../shared/ui/Badge';
 import { Button } from '../../shared/ui/Button';
 import { FileChip, formatBytes } from '../../shared/ui/FileChip';
 import { IconButton } from '../../shared/ui/IconButton';
+import { Separator } from '../../shared/ui/Separator';
 import { ImageThumbnail } from '../../shared/ui/ImageThumbnail';
 import { InlineVideo } from '../../shared/ui/InlineVideo';
 import { TranscriptArea } from '../../shared/ui/TranscriptArea';
@@ -208,20 +209,19 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
   if (items.length === 0 && !busy) {
     return (
       <div
-        className={`px-5 pt-3 pb-4 transition-colors ${
-          dropActive ? 'bg-[rgba(var(--stash-accent-rgb),0.08)]' : ''
-        }`}
+        className="px-5 pt-3 pb-4 transition-colors"
+        style={dropActive ? { background: 'var(--accent-fog)' } : undefined}
       >
         <div className="flex items-center gap-2.5 text-meta t-tertiary">
           <Button size="xs" variant="ghost" onClick={addFromPicker}>
             + Attach file
           </Button>
-          <span className="t-tertiary/80">
+          <span className="t-tertiary">
             {dropActive ? 'Release to attach' : 'or drop a file onto this window'}
           </span>
         </div>
         {error && (
-          <p role="alert" className="mt-2 text-meta text-rose-300/90">
+          <p role="alert" className="mt-2 text-meta" style={{ color: 'var(--color-danger-fg)' }}>
             {error}
           </p>
         )}
@@ -231,21 +231,23 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
 
   return (
     <div
-      className={`px-5 pt-3 pb-4 flex flex-col gap-2 transition-colors ${
-        dropActive ? 'bg-[rgba(var(--stash-accent-rgb),0.08)]' : ''
-      }`}
+      className="px-5 pt-3 pb-4 flex flex-col gap-2 transition-colors"
+      style={dropActive ? { background: 'var(--accent-fog)' } : undefined}
     >
       <div className="flex items-center gap-2">
-        <span className="text-meta font-semibold uppercase tracking-wider text-white/40">
+        <span
+          className="text-meta font-semibold uppercase tracking-wider t-tertiary"
+          style={{ letterSpacing: '0.06em' }}
+        >
           Attachments · {items.length}
         </span>
-        <span className="h-px flex-1 bg-white/5" />
+        <Separator className="flex-1" />
         <Button size="xs" variant="ghost" onClick={addFromPicker} disabled={busy}>
           + Attach file
         </Button>
       </div>
       {error && (
-        <p role="alert" className="text-meta text-rose-300/90">
+        <p role="alert" className="text-meta" style={{ color: 'var(--color-danger-fg)' }}>
           {error}
         </p>
       )}
@@ -269,10 +271,13 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
             return (
               <li
                 key={a.id}
-                className="group w-full rounded-lg border border-white/8 bg-white/3 px-3 py-2.5 flex flex-col gap-2"
+                className="group w-full px-3 py-2.5 flex flex-col gap-2 attach-card"
               >
                 <div className="flex items-center gap-2">
-                  <Badge color="#4A8BEA" bg="#4A8BEA1a" className="uppercase tracking-wider">
+                  {/* Refresh-2026-04: drop the bespoke #4A8BEA hex, route
+                    * through the design-system `accent` tone. The Badge
+                    * primitive already maps tones to vars internally. */}
+                  <Badge tone="accent" className="uppercase tracking-wider">
                     Audio
                   </Badge>
                   <span
@@ -298,7 +303,7 @@ export const NoteAttachmentsPanel = ({ noteId, onEmbedMarkdown }: Props) => {
           return (
             <li
               key={a.id}
-              className="group relative rounded-lg border border-white/8 bg-white/3 overflow-hidden flex items-center"
+              className="group relative overflow-hidden flex items-center attach-card"
             >
               <AttachmentBody
                 item={a}

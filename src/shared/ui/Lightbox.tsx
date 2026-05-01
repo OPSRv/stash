@@ -120,7 +120,7 @@ export const Lightbox = ({ src, alt, onClose, path }: LightboxProps) => {
         type="button"
         onClick={onClose}
         aria-label="Close preview"
-        className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white/90 flex items-center justify-center transition-colors"
+        className="absolute top-4 right-4 w-8 h-8 rounded-full [background:var(--color-surface-raised)] hover:bg-white/20 text-white/90 flex items-center justify-center transition-colors"
       >
         <svg
           width="16"

@@ -159,7 +159,7 @@ export const UninstallerPanel = () => {
                     type="button"
                     onClick={() => setSelected(a)}
                     className={`w-full text-left px-4 py-1.5 flex items-center gap-2 ${
-                      active ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'
+                      active ? '[background:var(--bg-row-active)]' : 'hover:[background:var(--bg-hover)]'
                     }`}
                   >
                     <div className="min-w-0 flex-1">

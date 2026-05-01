@@ -17,6 +17,19 @@ type IconButtonProps = {
   'data-testid'?: string;
 };
 
+/** Refresh-2026-04 chrome:
+ *  - 28 × 28 (was 24) — denser hit-target without bumping into icon-only `Button`.
+ *  - Radius `--r-lg` (7 px) instead of Tailwind `rounded-md` (12 px).
+ *  - Default state: fully transparent. Hover lifts to `var(--bg-hover)` and
+ *    foreground bumps from `--fg-mute` to `--fg`.
+ *  - `active` (toggle-on): `var(--accent-fog)` background + accent foreground.
+ *  - `tone="danger"`: only colours on hover (red foreground); no red background.
+ *
+ *  Inline styles are used for the bg / colour swaps because the new tokens
+ *  live as CSS variables — Tailwind arbitrary classes for `var(...)` would
+ *  read worse. Hover/focus visuals stay in classNames so :hover / :focus
+ *  pseudo-classes work without extra JS state.
+ */
 export const IconButton = ({
   onClick,
   children,
@@ -28,8 +41,11 @@ export const IconButton = ({
   tooltipSide = 'bottom',
   'data-testid': dataTestId,
 }: IconButtonProps) => {
-  const toneClass = tone === 'danger' ? 't-primary hover:text-red-400' : 't-primary hover:t-primary';
-  const activeClass = active ? 'bg-white/[0.12]' : 'bg-white/[0.04] hover:bg-white/[0.08]';
+  const stateClass = active
+    ? 'icon-btn-active'
+    : tone === 'danger'
+      ? 'icon-btn-default icon-btn-danger'
+      : 'icon-btn-default';
   return (
     <Tooltip label={title} side={tooltipSide}>
       <button
@@ -42,7 +58,7 @@ export const IconButton = ({
           onClick(e);
         }}
         data-testid={dataTestId}
-        className={`ring-focus w-6 h-6 rounded-md flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/[0.04] ${activeClass} ${toneClass}`}
+        className={`icon-btn ring-focus ${stateClass}`}
       >
         {children}
       </button>

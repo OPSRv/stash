@@ -152,7 +152,7 @@ export const MusicShell = () => {
           onClick={reload}
           aria-label="Reload"
           title="Reload"
-          className="w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] t-secondary hover:t-primary transition-colors"
+          className="w-6 h-6 rounded-md flex items-center justify-center [background:var(--bg-hover)] hover:[background:var(--bg-row-active)] t-secondary hover:t-primary transition-colors"
         >
           <RefreshIcon />
         </button>
@@ -161,7 +161,7 @@ export const MusicShell = () => {
           onClick={hardClose}
           aria-label="Sign out & reset"
           title="Sign out & reset"
-          className="w-6 h-6 rounded-md flex items-center justify-center bg-white/[0.04] hover:bg-white/[0.08] t-secondary hover:text-red-400 transition-colors"
+          className="w-6 h-6 rounded-md flex items-center justify-center [background:var(--bg-hover)] hover:[background:var(--bg-row-active)] t-secondary hover:text-red-400 transition-colors"
         >
           <TrashIcon />
         </button>

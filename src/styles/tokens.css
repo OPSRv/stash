@@ -6,6 +6,15 @@
 
 @theme {
   --font-sys: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  /* Spec name from the design bundle. Same stack as `--font-sys` — kept as
+   * an alias so spec-aligned snippets like `font: var(--t-body)` (which
+   * resolves to `… var(--font-ui)`) drop in without a substitution step. */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
+  /* Display fallback chain — used by note titles, empty-state heads, and
+   * other tighter-tracked headings. SF Pro Display only exists as a
+   * separate face on Apple platforms; everywhere else the chain falls
+   * through to the same system stack as `--font-sys`, which is fine. */
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro', 'Helvetica Neue', system-ui, sans-serif;
   --font-mono: 'SF Mono', ui-monospace, Menlo, monospace;
 
   --color-accent: #2f7ae5;
@@ -30,20 +39,65 @@
   --radius-md: 12px;
   --radius-lg: 16px;
 
-  /* Spacing scale (4px base). */
+  /* Stash design-system radii (canonical spec values).
+   *   --r-xs    3   tiny chips, micro-pills inside ctxmenu
+   *   --r-sm    5   note rows, list items
+   *   --r-md    6   search input, mode-switch
+   *   --r-lg    7   buttons, ctxmenu, audio chips, inputs
+   *   --r-xl   10   AI bar, attachments, floating panels
+   *   --r-2xl  12   modals
+   *   --r-window 11 the popup window itself (matches macOS) */
+  --r-xs: 3px;
+  --r-sm: 5px;
+  --r-md: 6px;
+  --r-lg: 7px;
+  --r-xl: 10px;
+  --r-2xl: 12px;
+  --r-window: 11px;
+
+  /* Geometry — fixed popup chrome dimensions plus sidebar widths. */
+  --popup-w: 920px;
+  --popup-h: 520px;
+  --tabbar-h: 36px;
+  --sidebar-w: 232px;
+  --rail-w: 44px;
+
+  /* Spacing — 4 px base, dense (this is a popup, not a webpage).
+   * `--space-*` legacy scale stays for the parts of the app still on it;
+   * `--sp-*` is the canonical spec name and the one new code reaches for. */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
+  --sp-1: 2px;
+  --sp-2: 4px;
+  --sp-3: 6px;
+  --sp-4: 8px;
+  --sp-5: 10px;
+  --sp-6: 12px;
+  --sp-7: 14px;
+  --sp-8: 16px;
+  --sp-10: 20px;
 
-  /* Motion tokens. prefers-reduced-motion still wins (see media query below). */
+  /* Motion tokens. `prefers-reduced-motion` still wins (see media query
+   * below). Two parallel scales coexist:
+   *   --duration-* / --easing-* — generic primitive transitions
+   *   --t-fast/-base/-slow / --ease-quiet — spec-aligned, used by the
+   *     refreshed surfaces (modal pop-in, save-dot pulse, hover lifts).
+   * The `--t-*` motion vars share a prefix with the type-shorthand vars
+   * (`--t-display`, `--t-body`, …) but live in different CSS properties
+   * (transition vs font), so context disambiguates. */
   --duration-fast: 120ms;
   --duration-base: 180ms;
   --duration-slow: 260ms;
   --easing-standard: cubic-bezier(0.2, 0, 0.2, 1);
   --easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --t-fast: 80ms ease;
+  --t-base: 140ms ease;
+  --t-slow: 200ms ease;
+  --ease-quiet: cubic-bezier(0.2, 1, 0.3, 1);
 
   /* z-index scale. Higher wins; leave gaps for future layers. */
   --z-dropdown: 100;
@@ -52,10 +106,36 @@
   --z-modal: 1000;
   --z-toast: 1100;
 
-  /* Shadow scale. */
+  /* Generic shadow scale (legacy, used by some module-local surfaces). */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.18);
   --shadow-md: 0 6px 14px -4px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 18px 38px -10px rgba(0, 0, 0, 0.5);
+
+  /* Stash design-system shadow recipes — named by surface so consumers
+   * stop hand-rolling the same `0 12px 32px rgba(0,0,0,0.4) ...` stacks.
+   * Light-theme overrides live in the `:root.light` block below. */
+  --sh-popup:    0 0 0 0.5px rgba(255, 255, 255, 0.04) inset,
+                 0 24px 64px rgba(0, 0, 0, 0.5),
+                 0 4px 12px rgba(0, 0, 0, 0.3);
+  --sh-modal:    0 24px 60px rgba(0, 0, 0, 0.4);
+  --sh-floating: 0 12px 32px rgba(0, 0, 0, 0.4),
+                 0 0 0 0.5px rgba(255, 255, 255, 0.04) inset;
+  --sh-tooltip:  0 4px 12px rgba(0, 0, 0, 0.3);
+  --sh-focus:    0 0 0 3px var(--accent-soft);
+
+  /* Type ramp — composed `font` shorthands per the spec. Apply via
+   *   `font: var(--t-display);`
+   * to get weight + size + line-height + family in one declaration. */
+  --t-display: 600 18px/1.25 var(--font-display);
+  --t-h1:      700 22px/1.3  var(--font-display);
+  --t-h2:      600 16px/1.35 var(--font-display);
+  --t-h3:      600 13px/1.3  var(--font-display);
+  --t-body:    400 13px/1.6  var(--font-sys);
+  --t-ui:      400 12px/1.4  var(--font-sys);
+  --t-ui-sm:   400 11px/1.4  var(--font-sys);
+  --t-mono:    400 12.5px/1.5 var(--font-mono);
+  --t-label:   600 10px/1 var(--font-sys);
+  --t-time:    400 10.5px/1 var(--font-mono);
 }
 
 @layer base {
@@ -83,6 +163,15 @@
     --color-warning-fg: #fbbf24;
     --color-warning-border: rgba(var(--color-warning-rgb), 0.32);
 
+    /* Spec aliases (refresh-2026-04). Short flat names from the design
+     * bundle so spec-aligned components can use `var(--danger)` etc. The
+     * `--color-*-fg` cluster above stays for existing callers; these
+     * aliases just point at the same swatch. `--warn` follows the spec's
+     * abbreviated naming (vs. our older `--color-warning-*`). */
+    --danger: var(--color-danger-fg);
+    --success: var(--color-success-fg);
+    --warn: var(--color-warning-fg);
+
     /* Focus ring — used by every interactive primitive. */
     --ring-focus:
       0 0 0 2px rgba(var(--stash-accent-rgb), 0.55),
@@ -105,6 +194,40 @@
        but quiet; hover raises contrast. Track is intentionally transparent. */
     --scrollbar-thumb: rgba(255, 255, 255, 0.22);
     --scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
+
+    /* ─── Refresh-2026-04 tokens (additive; legacy vars above keep working). ─
+     *
+     * Surfaces — flat (non-translucent) variants for the new chrome. The
+     * existing translucent `.pane` lives on; these vars feed primitives
+     * that the bundle wants opaque (sidebar background, popup window,
+     * elevated cards, hover/active row tints). */
+    --bg-window: #1a1a1c;
+    --bg-sidebar: #18181a;
+    --bg-pane: #1d1d1f;
+    --bg-elev: #232326;
+    --bg-hover: rgba(255, 255, 255, 0.04);
+    --bg-row-active: rgba(255, 255, 255, 0.06);
+
+    /* Foreground 4-step ramp. Replaces ad-hoc `rgba(255,255,255,0.NN)` text
+     * tints across the codebase so light theme can flip everything once. */
+    --fg: #e8e8ea;
+    --fg-mute: rgba(232, 232, 234, 0.62);
+    --fg-faint: rgba(232, 232, 234, 0.42);
+    --fg-ghost: rgba(232, 232, 234, 0.28);
+
+    /* Hairlines — two strengths. `--hairline` is the default; primitives
+     * sitting on elevated surfaces (modal, recorder, AI bar, segmented
+     * track) reach for `--hairline-strong`. */
+    --hairline: rgba(255, 255, 255, 0.07);
+    --hairline-strong: rgba(255, 255, 255, 0.12);
+
+    /* Accent companions. Today every translucent accent fill is computed
+     * inline via `accent(α)`; collecting the canonical levels into vars
+     * lets the new primitives stay legible in both themes without each
+     * call site picking its own opacity. */
+    --accent-soft: rgba(var(--stash-accent-rgb), 0.18);
+    --accent-fog: rgba(var(--stash-accent-rgb), 0.08);
+    --accent-fg: #ffffff;
   }
   html.light {
     --color-danger-bg: rgba(var(--color-danger-rgb), 0.1);
@@ -134,6 +257,38 @@
 
     --scrollbar-thumb: rgba(20, 22, 28, 0.28);
     --scrollbar-thumb-hover: rgba(20, 22, 28, 0.45);
+
+    /* Refresh-2026-04 light overrides. */
+    --bg-window: #f6f6f4;
+    --bg-sidebar: #ededeb;
+    --bg-pane: #ffffff;
+    --bg-elev: #ffffff;
+    --bg-hover: rgba(0, 0, 0, 0.035);
+    --bg-row-active: rgba(0, 0, 0, 0.05);
+
+    --fg: #1d1d1f;
+    --fg-mute: rgba(29, 29, 31, 0.62);
+    --fg-faint: rgba(29, 29, 31, 0.42);
+    --fg-ghost: rgba(29, 29, 31, 0.26);
+
+    --hairline: rgba(0, 0, 0, 0.08);
+    --hairline-strong: rgba(0, 0, 0, 0.14);
+
+    --accent-soft: rgba(var(--stash-accent-rgb), 0.14);
+    --accent-fog: rgba(var(--stash-accent-rgb), 0.06);
+    /* `--accent-fg` stays #fff: text on accent fills should remain white
+     * in both themes (matches macOS native blue-button behaviour). */
+
+    /* Light shadow recipes — softer alphas because dark drop-shadows are
+     * invisible on light surfaces; the spec's design previews keep modals
+     * legible by lowering alpha + flipping the inset highlight to white. */
+    --sh-popup:    0 0 0 0.5px rgba(255, 255, 255, 0.6) inset,
+                   0 24px 64px rgba(0, 0, 0, 0.18),
+                   0 4px 12px rgba(0, 0, 0, 0.08);
+    --sh-modal:    0 24px 60px rgba(0, 0, 0, 0.18);
+    --sh-floating: 0 12px 32px rgba(0, 0, 0, 0.12),
+                   0 0 0 0.5px rgba(0, 0, 0, 0.05) inset;
+    --sh-tooltip:  0 4px 12px rgba(0, 0, 0, 0.12);
   }
   html,
   body,
@@ -200,6 +355,105 @@
   }
   .light .modal-surface {
     background: rgb(246, 247, 249);
+  }
+
+  /* Shared elevated-overlay chrome. Used by floating UI that lifts off
+   * the editor pane (AI bar, context menu, attachments card). The
+   * recorder modal uses `.modal-panel` instead — same surface but with
+   * the heavier 12 px radius and 18 px padding. The shadow recipe lives
+   * in `--sh-floating` so light-theme picks up the right alpha + inset. */
+  .floating-panel {
+    background: var(--bg-elev);
+    border: 0.5px solid var(--hairline-strong);
+    border-radius: var(--r-xl);
+    box-shadow: var(--sh-floating);
+  }
+
+  /* Attachment / file card surface — used by NoteAttachmentsPanel and any
+   * future "small fileset card". Matches the bundle's `.audio-block-inner`
+   * chrome but parameterised on tokens. */
+  .attach-card {
+    background: var(--bg-hover);
+    border: 0.5px solid var(--hairline);
+    border-radius: var(--r-lg);
+  }
+
+  /* `.accent-fg` — the canonical "use the user's accent for foreground"
+   * utility. Replaces dozens of inline `color: rgb(var(--stash-accent-rgb))`
+   * styles across modules. */
+  .accent-fg {
+    color: rgb(var(--stash-accent-rgb));
+  }
+
+  /* List rows (NoteRow, FolderRow, eventually any sidebar row). State is
+   * data-attribute driven so the React component stays declarative — it
+   * just toggles `data-active` / `data-drop-target` and the CSS picks
+   * the matching tint. */
+  .list-row {
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+    border-radius: var(--r-sm);
+    transition: background var(--duration-fast) var(--easing-standard);
+  }
+  .list-row:hover:not([data-active='true']):not([data-drop-target='true']) {
+    background: var(--bg-hover);
+  }
+  .list-row[data-active='true'] {
+    background: var(--bg-row-active);
+  }
+  /* Notes (`.list-row--note`) lean on the accent-fog tint instead of the
+   * neutral row-active surface, since they sit alongside an active editor
+   * and need a stronger anchor. */
+  .list-row--note[data-active='true'] {
+    background: var(--accent-fog);
+  }
+  /* The 2 px accent left bar, drawn via ::before so the bar can reach
+   * outside the row's own padding without disturbing flex layout. */
+  .list-row[data-active='true']::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: rgb(var(--stash-accent-rgb));
+  }
+  .list-row--note[data-active='true']::before {
+    top: 8px;
+    bottom: 8px;
+  }
+  /* Drop-target highlight — used while a note is being dragged onto a
+   * folder row. Fully overrides the active state. */
+  .list-row[data-drop-target='true'] {
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 1px rgb(var(--stash-accent-rgb)) inset;
+  }
+  .list-row[data-dragging='true'] {
+    opacity: 0.4;
+  }
+
+  /* Shared modal panel + backdrop. Both Modal and ConfirmDialog (and the
+   * recorder modal) opt into these so the elevation chrome lives in one
+   * place. Panel = elevated flat surface + 0.5 px hairline-strong + the
+   * `--sh-modal` drop shadow. Backdrop darkens to 0.4 in dark theme,
+   * lightens to 0.4 white in light, with an 8 px blur and 80 % saturation
+   * to mimic macOS native modal scrims. */
+  .modal-panel {
+    background: var(--bg-elev);
+    border: 0.5px solid var(--hairline-strong);
+    border-radius: var(--r-2xl);
+    padding: 18px;
+    box-shadow: var(--sh-modal);
+  }
+  .modal-backdrop {
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px) saturate(80%);
+    -webkit-backdrop-filter: blur(8px) saturate(80%);
+  }
+  .light .modal-backdrop {
+    background: rgba(255, 255, 255, 0.4);
   }
 
   .canvas-grid {
@@ -270,24 +524,109 @@
     border-color: rgba(0, 0, 0, 0.07);
   }
 
+  /* SaveIndicator (refresh-2026-04). A 6 × 6 dot + label that fades
+   * through the persistence states. The dot's colour is data-state driven
+   * so the React component just sets `data-state="saving"` and the CSS
+   * picks the matching tint + animation. */
+  .save-ind .save-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--fg-ghost);
+    transition:
+      background var(--duration-base) var(--easing-standard),
+      transform var(--duration-base) var(--easing-standard);
+    display: inline-block;
+  }
+  .save-ind[data-state='idle'] .save-dot,
+  .save-ind[data-state='saved'] .save-dot {
+    background: var(--color-success-fg);
+  }
+  .save-ind[data-state='saving'] .save-dot,
+  .save-ind[data-state='transcribing'] .save-dot,
+  .save-ind[data-state='polishing'] .save-dot {
+    background: var(--color-warning-fg);
+    animation: save-dot-pulse 1.4s ease-in-out infinite;
+  }
+  .save-ind[data-state='error'] .save-dot {
+    background: var(--color-danger-fg);
+  }
+  @keyframes save-dot-pulse {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.5;
+      transform: scale(0.7);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .save-ind .save-dot {
+      animation: none !important;
+    }
+  }
+
+  /* IconButton (refresh-2026-04). Style is split across three classes so
+   * `:hover` / `:disabled` pseudo-states can live in CSS, while the React
+   * component picks the right state class per render. */
+  .icon-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--r-lg);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 0;
+    cursor: default;
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      color var(--duration-fast) var(--easing-standard);
+  }
+  .icon-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .icon-btn-default {
+    color: var(--fg-mute);
+  }
+  .icon-btn-default:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+  .icon-btn-danger:hover:not(:disabled) {
+    color: var(--color-danger-fg);
+  }
+  .icon-btn-active {
+    color: rgb(var(--stash-accent-rgb));
+    background: var(--accent-fog);
+  }
+  .icon-btn-active:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
+
+  /* Foreground utility classes are now thin wrappers around the `--fg-*`
+   * scale (refresh-2026-04). Values remained equivalent at the pixel
+   * level — primary still ~0.92, faint ~0.42 — so nothing visual moves;
+   * the win is that light-theme flips happen once in :root vars instead
+   * of once per class. New: `t-ghost` for almost-invisible decorations
+   * (line-numbers gutter, unfilled checkbox border, etc.). */
   .t-primary {
-    color: rgba(255, 255, 255, 0.92);
+    color: var(--fg);
   }
   .t-secondary {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--fg-mute);
   }
   .t-tertiary {
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--fg-faint);
   }
-  .light .t-primary {
-    color: rgba(20, 22, 28, 0.92);
+  .t-ghost {
+    color: var(--fg-ghost);
   }
-  .light .t-secondary {
-    color: rgba(20, 22, 28, 0.62);
-  }
-  .light .t-tertiary {
-    color: rgba(20, 22, 28, 0.42);
-  }
+  /* Light-theme wins by overriding the `--fg*` vars in :root above, so
+   * the .light overrides for `.t-*` are gone — the var swap handles it. */
 
   .kbd {
     display: inline-flex;
@@ -318,70 +657,54 @@
       inset 0 -1px 0 rgba(0, 0, 0, 0.04);
   }
 
-  .tip {
-    position: relative;
-  }
-  .tip > .tip-label {
-    position: absolute;
-    left: 50%;
-    padding: 3px 6px;
-    background: rgba(20, 22, 28, 0.96);
-    color: rgba(255, 255, 255, 0.92);
-    font-size: 11px;
-    line-height: 1.2;
-    border-radius: 6px;
+  /* Tooltip bubble — portaled to <body>; the React component owns
+   * positioning, the rules here own visuals only.
+   * Refresh-2026-04: tightened to 4/7 px padding, 5 px radius, opaque
+   * dark-grey background instead of dark-blue tint. */
+  .tip-label {
+    padding: 4px 7px;
+    background: #2a2a2c;
+    color: #f5f5f7;
+    font: var(--t-ui-sm);
+    line-height: 1;
+    border-radius: var(--r-sm);
     white-space: nowrap;
     pointer-events: none;
-    opacity: 0;
-    z-index: 50;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-    transition: opacity 120ms ease 200ms, transform 120ms ease 200ms;
+    border: 0.5px solid var(--hairline-strong);
+    box-shadow: var(--sh-tooltip);
   }
-  .tip-top > .tip-label {
-    bottom: 100%;
-    transform: translate(-50%, 0);
-  }
-  .tip-bottom > .tip-label {
-    top: 100%;
-    transform: translate(-50%, 0);
-  }
-  .tip-right > .tip-label {
-    left: 100%;
-    top: 50%;
-    transform: translate(0, -50%);
-  }
-  .tip-left > .tip-label {
-    left: auto;
-    right: 100%;
-    top: 50%;
-    transform: translate(0, -50%);
-  }
-  .tip:hover > .tip-label,
-  .tip:focus-within > .tip-label {
-    opacity: 1;
-  }
-  .tip-top:hover > .tip-label,
-  .tip-top:focus-within > .tip-label {
-    transform: translate(-50%, -6px);
-  }
-  .tip-bottom:hover > .tip-label,
-  .tip-bottom:focus-within > .tip-label {
-    transform: translate(-50%, 6px);
-  }
-  .tip-right:hover > .tip-label,
-  .tip-right:focus-within > .tip-label {
-    transform: translate(6px, -50%);
-  }
-  .tip-left:hover > .tip-label,
-  .tip-left:focus-within > .tip-label {
-    transform: translate(-6px, -50%);
-  }
-  .light .tip > .tip-label {
+  .light .tip-label {
     background: rgba(250, 250, 252, 0.98);
     color: rgba(20, 22, 28, 0.9);
-    border: 1px solid rgba(0, 0, 0, 0.08);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  }
+
+  /* Spec utility classes — `.stash-section-label` formalises the 10 px /
+   * 600 / 0.06 em uppercase tick used everywhere as a quiet header.
+   * `.stash-tnum` opts a span of digits into tabular numerals (timers,
+   * counts, durations).
+   *
+   * `.stash-popup` is the canonical popup-window chrome (920 × 520, the
+   * ramped border + popup shadow). Currently `PopupShell` rolls its own;
+   * the class is provided so storybook foundations and any future
+   * standalone preview can render the popup outline declaratively. */
+  .stash-section-label {
+    font: var(--t-label);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+  .stash-tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  .stash-popup {
+    width: var(--popup-w);
+    height: var(--popup-h);
+    background: var(--bg-window);
+    border: 0.5px solid var(--hairline-strong);
+    border-radius: var(--r-window);
+    box-shadow: var(--sh-popup);
+    overflow: hidden;
+    color: var(--fg);
   }
 
   .row-base {
@@ -420,31 +743,30 @@
     background: rgba(0, 0, 0, 0.015);
   }
 
+  /* SegmentedControl (refresh-2026-04). Track is the same hover-tint used
+   * elsewhere; active option lifts onto the elevated flat surface with a
+   * 0.5 px hairline-strong stroke. No translucent white-on-white in light
+   * theme — the active option is straight #fff there, matching the bundle. */
   .seg {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    border-radius: 7px;
+    background: var(--bg-hover);
+    border: 0;
+    /* Spec: mode-switch track is `--r-md` (6 px). Inner button uses
+     * Tailwind `rounded-md` (~6 px) for an aligned-edge look at small
+     * sizes, matching the design bundle's edit/split/preview switcher. */
+    border-radius: var(--r-md);
     padding: 2px;
   }
-  .light .seg {
-    background: rgba(0, 0, 0, 0.05);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-  }
   .seg button {
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--fg-faint);
+    transition: color var(--duration-fast) var(--easing-standard);
   }
-  .light .seg button {
-    color: rgba(20, 22, 28, 0.68);
+  .seg button:hover:not(:disabled):not(.on) {
+    color: var(--fg);
   }
   .seg .on {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.95);
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25), inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
-  }
-  .light .seg .on {
-    background: #ffffff;
-    color: rgba(20, 22, 28, 0.95);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), inset 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+    background: var(--bg-elev);
+    color: var(--fg);
+    box-shadow: 0 0 0 0.5px var(--hairline-strong);
   }
 
   .select-popup {
@@ -462,21 +784,29 @@
       0 0 0 0.5px rgba(0, 0, 0, 0.06);
   }
 
+  /* Refresh-2026-04: input field surface routed through `--bg-hover`
+   * (same translucent tint hover-rows use), border 0.5 px hairline-strong.
+   * Focus picks up the canonical accent halo from the global ring-focus
+   * utility, plus an accent border via :focus-within in this file. */
   .input-field {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.03);
-    color: rgba(255, 255, 255, 0.92);
+    background: var(--bg-hover);
+    border: 0.5px solid var(--hairline-strong);
+    color: var(--fg);
+    transition:
+      background-color var(--duration-fast) var(--easing-standard),
+      border-color var(--duration-fast) var(--easing-standard);
   }
   .light .input-field {
     background: #ffffff;
-    border: 1px solid rgba(0, 0, 0, 0.09);
-    color: rgba(20, 22, 28, 0.92);
+    border: 0.5px solid var(--hairline-strong);
+  }
+  .input-field:focus,
+  .input-field:focus-within {
+    background: var(--bg-elev);
+    border-color: rgb(var(--stash-accent-rgb));
   }
   .input-field::placeholder {
-    color: rgba(255, 255, 255, 0.35);
-  }
-  .light .input-field::placeholder {
-    color: rgba(20, 22, 28, 0.38);
+    color: var(--fg-faint);
   }
 
   .section-label {
@@ -490,25 +820,17 @@
     color: rgba(20, 22, 28, 0.45);
   }
 
-  .btn-ghost {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.02);
-  }
-  .btn-ghost:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  .light .btn-ghost {
-    background: rgba(0, 0, 0, 0.06);
-    border: 1px solid rgba(0, 0, 0, 0.05);
-  }
-  .light .btn-ghost:hover:not(:disabled) {
-    background: rgba(0, 0, 0, 0.09);
-  }
+  /* Refresh-2026-04: drop the dark border, rely on the inset top-highlight
+   * + accent fill alone. `box-shadow` stacks the inset highlight with a
+   * faint inner darken so the button reads as a discrete chip rather than
+   * a flat colour swatch. */
   .btn-primary {
     background: var(--stash-accent);
-    color: #fff;
-    border: 1px solid rgba(0, 0, 0, 0.18);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1) inset;
+    color: var(--accent-fg);
+    border: 0;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.1) inset,
+      0 1px 0 rgba(255, 255, 255, 0.1) inset;
   }
   .btn-primary:hover:not(:disabled) {
     filter: brightness(1.08);
@@ -873,12 +1195,15 @@
 }
 
 /* Scrollbars — thin, theme-tinted, unlayered so they beat any lingering UA
-   or layered rule. `html` prefix gives them non-zero specificity. */
+   or layered rule. `html` prefix gives them non-zero specificity.
+   `-webkit-appearance: none` disables macOS overlay-scrollbar default sizing
+   so our width/height take effect even when "Show scroll bars: Always" is on. */
 html ::-webkit-scrollbar,
 html::-webkit-scrollbar {
-  width: 6px !important;
-  height: 6px !important;
+  width: 3px !important;
+  height: 3px !important;
   background: transparent !important;
+  -webkit-appearance: none !important;
 }
 html ::-webkit-scrollbar-track,
 html::-webkit-scrollbar-track {
@@ -891,6 +1216,7 @@ html::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb) !important;
   border: 0 !important;
   border-radius: 99px !important;
+  min-height: 24px !important;
 }
 html ::-webkit-scrollbar-thumb:hover,
 html::-webkit-scrollbar-thumb:hover {
@@ -900,7 +1226,13 @@ html ::-webkit-scrollbar-corner,
 html::-webkit-scrollbar-corner {
   background: transparent !important;
 }
-html {
+html ::-webkit-scrollbar-button,
+html::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+html, body, * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
@@ -991,17 +1323,57 @@ code,
 }
 
 /* Shared markdown rendering styles. Applied to `.md-body` so both Notes and
- * AI Chat get the same typography (spacing, lists, code blocks) without the
- * default browser reset collapsing paragraphs into each other. `.notes-md`
- * stays as an alias for backwards compatibility with older references. */
-.md-body, .notes-md { line-height: 1.55; }
-.md-body h1, .notes-md h1 { font-size: 20px; font-weight: 600; margin: 12px 0 8px; }
-.md-body h2, .notes-md h2 { font-size: 16px; font-weight: 600; margin: 12px 0 6px; }
-.md-body h3, .notes-md h3 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; }
-.md-body h4, .md-body h5, .md-body h6,
-.notes-md h4, .notes-md h5, .notes-md h6 { font-size: 13px; font-weight: 600; margin: 6px 0 2px; }
-.md-body p, .notes-md p { margin: 6px 0; }
-.md-body ul, .md-body ol, .notes-md ul, .notes-md ol { margin: 4px 0; padding-left: 1.5em; }
+ * AI Chat get the same typography. `.notes-md` overrides on top — the
+ * Notes preview gets the bundle's display typography (14 / 1.6 SF Pro
+ * Display, max 62 ch, tighter heading scale) while AI Chat keeps the
+ * tighter `.md-body` defaults that fit its narrower message bubbles. */
+/* `--notes-zoom` is set on the editor body wrapper (see NotesShell). The
+ * default `1` keeps existing previews unchanged; ⌘+ / ⌘- / ⌘0 inside the
+ * Notes tab nudge it through 0.85…1.6. We scale font-size only — `max-width`
+ * is in `ch` units so reading column grows proportionally on its own. */
+.notes-md {
+  font: var(--t-body);
+  font-size: calc(13px * var(--notes-zoom, 1));
+  max-width: 76ch;
+  color: var(--fg);
+}
+.notes-md h1 { font: var(--t-h1); font-size: calc(22px * var(--notes-zoom, 1)); letter-spacing: -0.01em; margin: 0 0 12px; }
+.notes-md h2 { font: var(--t-h2); font-size: calc(16px * var(--notes-zoom, 1)); margin: 18px 0 8px; }
+.notes-md h3 { font: var(--t-h3); font-size: calc(13px * var(--notes-zoom, 1)); margin: 12px 0 6px; }
+.notes-md p { margin: 0 0 10px; }
+.notes-md blockquote {
+  margin: 10px 0;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--hairline-strong);
+  color: var(--fg-mute);
+  font-style: italic;
+}
+.notes-md hr { margin: 14px 0; border: 0; border-top: 0.5px solid var(--hairline); }
+.notes-md code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+}
+.notes-md pre {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: var(--r-lg);
+  background: var(--bg-hover);
+  border: 0.5px solid var(--hairline);
+  overflow-x: auto;
+  font-size: 12.5px;
+}
+.md-body { line-height: 1.55; }
+.md-body h1 { font-size: 20px; font-weight: 600; margin: 12px 0 8px; }
+.md-body h2 { font-size: 16px; font-weight: 600; margin: 12px 0 6px; }
+.md-body h3 { font-size: 14px; font-weight: 600; margin: 8px 0 4px; }
+.md-body h4, .md-body h5, .md-body h6 { font-size: 13px; font-weight: 600; margin: 6px 0 2px; }
+.md-body p { margin: 6px 0; }
+.md-body ul, .md-body ol,
+.notes-md ul, .notes-md ol { margin: 4px 0; padding-left: 1.5em; }
 .md-body ul, .notes-md ul { list-style-type: disc; }
 /* Explicit list-style-type (not shorthand) + counter-reset ensures decimal markers
    render correctly in WebKit even when Tailwind v4 preflight resets list-style. */
@@ -1012,22 +1384,22 @@ code,
 .notes-md li.task-list-item { list-style: none; margin-left: -1.25em; display: flex; align-items: flex-start; gap: 8px; }
 .md-body li.task-list-item input[type="checkbox"],
 .notes-md li.task-list-item input[type="checkbox"] { margin-top: 4px; }
-.md-body blockquote, .notes-md blockquote {
+.md-body blockquote {
   margin: 8px 0;
   padding: 2px 12px;
   border-left: 2px solid rgba(var(--stash-accent-rgb), 0.5);
   color: rgba(255, 255, 255, 0.72);
   font-style: italic;
 }
-.md-body hr, .notes-md hr { margin: 12px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.05); }
-.md-body code, .notes-md code {
+.md-body hr { margin: 12px 0; border: 0; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.md-body code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.9em;
   padding: 1px 4px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.08);
 }
-.md-body pre, .notes-md pre {
+.md-body pre {
   margin: 8px 0;
   padding: 10px 12px;
   border-radius: 6px;
@@ -1037,8 +1409,8 @@ code,
   font-size: 12px;
   line-height: 1.5;
 }
-.md-body pre code, .notes-md pre code { background: transparent; padding: 0; }
-.notes-md pre code { padding: 0; background: transparent; font-size: inherit; }
+.md-body pre code,
+.notes-md pre code { background: transparent; padding: 0; font-size: inherit; }
 .notes-md table { border-collapse: collapse; margin: 8px 0; width: 100%; font-size: 13px; }
 .notes-md th, .notes-md td {
   border: 1px solid rgba(255, 255, 255, 0.06);

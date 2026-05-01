@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { accent } from '../../shared/theme/accent';
 import { Button } from '../../shared/ui/Button';
 import { Modal } from '../../shared/ui/Modal';
 import { Select } from '../../shared/ui/Select';
@@ -346,14 +345,18 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
       onClose={onCancel}
       ariaLabel="Record a voice note"
       dismissOnBackdropClick={false}
-      panelClassName="modal-surface rounded-xl p-6 w-[380px] flex flex-col items-center gap-4"
+      // Refresh-2026-04: use the design-system `.modal-panel` chrome
+      // (elevated flat surface, hairline-strong border, 12 px radius,
+      // 18 px padding, the floating-overlay shadow stack). Bespoke surface
+      // utilities (`.modal-surface`) retired here.
+      panelClassName="modal-panel w-[360px] flex flex-col items-center gap-3.5"
     >
         {state === 'recording' && (
           <>
             <div className="flex items-center gap-2 t-secondary text-meta uppercase tracking-wider">
               <span
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{ background: '#ef4444' }}
+                className="w-[7px] h-[7px] rounded-full animate-pulse"
+                style={{ background: 'var(--color-danger-fg)' }}
                 aria-hidden
               />
               Recording
@@ -365,8 +368,8 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
               {formatClock(elapsedMs)}
             </div>
             <div
-              className="flex items-end gap-[2px] h-12 w-full overflow-hidden rounded-md px-1"
-              style={{ background: 'rgba(255,255,255,0.04)' }}
+              className="flex items-end gap-[2px] h-[60px] w-full overflow-hidden px-1"
+              style={{ background: 'var(--bg-hover)', borderRadius: 'var(--r-lg)' }}
               aria-hidden
               data-testid="recorder-meter"
             >
@@ -377,7 +380,7 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
                     flex: 1,
                     minWidth: 2,
                     height: `${Math.max(6, lvl * 100)}%`,
-                    background: accent(0.7),
+                    background: 'rgb(var(--stash-accent-rgb))',
                     borderRadius: 1,
                     transition: 'height 40ms linear',
                   }}
@@ -399,18 +402,21 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
                 />
               </div>
             )}
+            {/* Refresh-2026-04: switch primary action from soft+accent →
+              * solid+accent (matches the doc's "drop soft+accent" rule —
+              * a CTA inside a modal should be unmistakably primary). */}
             <div className="flex items-center gap-2 w-full justify-center mt-1">
               <Button variant="ghost" onClick={onCancel}>
                 Cancel
               </Button>
               <Button
-                variant="soft"
+                variant="solid"
                 tone="accent"
                 onClick={finish}
                 className="gap-2"
                 data-testid="recorder-stop"
+                leadingIcon={<StopCircleIcon size={12} />}
               >
-                <StopCircleIcon size={14} />
                 Stop & save
               </Button>
             </div>
@@ -429,7 +435,7 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
               Allow microphone access for Stash in macOS&nbsp;System&nbsp;Settings → Privacy &amp; Security
               → Microphone, then try again.
             </p>
-            <Button variant="soft" tone="accent" onClick={onCancel}>
+            <Button variant="ghost" onClick={onCancel}>
               Close
             </Button>
           </>
@@ -440,7 +446,7 @@ export const AudioRecorder = ({ open, onCancel, onComplete }: Props) => {
             <p className="t-secondary text-meta text-center leading-relaxed">
               {errorMsg ?? 'Unknown recording error.'}
             </p>
-            <Button variant="soft" tone="accent" onClick={onCancel}>
+            <Button variant="ghost" onClick={onCancel}>
               Close
             </Button>
           </>

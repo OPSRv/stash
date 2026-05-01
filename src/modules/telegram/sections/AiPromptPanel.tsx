@@ -250,7 +250,7 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
         }
       />
 
-      <div className="mt-4 pt-3 border-t border-white/8 flex items-center justify-between gap-3">
+      <div className="mt-4 pt-3 border-t [border-color:var(--hairline-strong)] flex items-center justify-between gap-3">
         <div>
           <div className="t-primary text-body font-medium">Clear inbox</div>
           <div className="t-tertiary text-meta">

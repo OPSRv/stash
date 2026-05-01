@@ -336,7 +336,7 @@ export const AudioPlayer = ({
         onClick={(e) =>
           seekFromPointer(e.clientX, e.currentTarget.getBoundingClientRect())
         }
-        className="flex-1 h-1.5 rounded-full bg-white/8 overflow-hidden cursor-pointer"
+        className="flex-1 h-1.5 rounded-full [background:var(--bg-row-active)] overflow-hidden cursor-pointer"
       >
         <div
           className="h-full rounded-full transition-[width]"

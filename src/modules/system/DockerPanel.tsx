@@ -144,7 +144,7 @@ export const DockerPanel = () => {
                   <div className="t-tertiary text-meta tabular-nums">
                     {it.total} · active {it.active}
                   </div>
-                  <div className="mt-2 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                  <div className="mt-2 h-1.5 rounded-full [background:var(--bg-hover)] overflow-hidden">
                     <div
                       className="h-full"
                       style={{

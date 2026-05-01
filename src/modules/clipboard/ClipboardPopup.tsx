@@ -1041,7 +1041,7 @@ export const ClipboardPopup = () => {
       });
       const useCollage = files.length > 1 && imageFiles.length >= 2 && imageFiles.length <= 4;
       const icon = useCollage ? (
-        <div className="w-7 h-7 rounded-md overflow-hidden grid grid-cols-2 grid-rows-2 gap-[1px] bg-white/10">
+        <div className="w-7 h-7 rounded-md overflow-hidden grid grid-cols-2 grid-rows-2 gap-[1px] [background:var(--color-surface-raised)]">
           {imageFiles.slice(0, 4).map((f) => (
             <img
               key={f.path}
@@ -1104,8 +1104,8 @@ export const ClipboardPopup = () => {
               <>
                 {extraCount > 0 && (
                   <span
-                    className="text-[10px] font-mono font-medium tabular-nums px-1.5 py-px rounded"
-                    style={{ background: tint.bg, color: tint.fg }}
+                    className="font-medium tabular-nums px-1.5 py-px rounded"
+                    style={{ background: tint.bg, color: tint.fg, font: 'var(--t-time)' }}
                     title={`${files.length} files copied together`}
                   >
                     +{extraCount}
@@ -1175,7 +1175,7 @@ export const ClipboardPopup = () => {
       />
     ) : hexSwatchColor ? (
       <span
-        className="w-7 h-7 rounded-md block border border-white/12"
+        className="w-7 h-7 rounded-md block border [border-color:var(--hairline-strong)]"
         style={{ background: hexSwatchColor }}
         aria-hidden
       />

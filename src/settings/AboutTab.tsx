@@ -139,7 +139,7 @@ export const AboutTab = () => {
                       ? `${m.title} · ⌘⌥${m.tabShortcutDigit}`
                       : m.title
                   }
-                  className="group relative flex flex-col items-center gap-1 rounded-md py-2 px-1 hair border transition-colors hover:bg-white/5 [.light_&]:hover:bg-black/5 focus-visible:outline-none"
+                  className="group relative flex flex-col items-center gap-1 rounded-md py-2 px-1 hair border transition-colors hover:[background:var(--bg-hover)] [.light_&]:hover:bg-black/5 focus-visible:outline-none"
                 >
                   <span
                     className="inline-flex h-5 w-5 items-center justify-center"

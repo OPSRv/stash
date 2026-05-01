@@ -48,7 +48,7 @@ export const ActiveDownloadRow = ({
             {job.title ?? job.url}
           </span>
         </div>
-        <div className="h-1 rounded-full overflow-hidden bg-white/[0.08]">
+        <div className="h-1 rounded-full overflow-hidden [background:var(--bg-row-active)]">
           <div
             className={`h-full rounded-full ${
               job.status === 'active' ? 'prog-fill' : 'bg-white/[0.35]'

@@ -21,24 +21,27 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
   children?: ReactNode;
 };
 
+// Refresh-2026-04 size scale: every step is 4 px shorter than before so
+// chrome reads quieter. Was 20 / 28 / 32 / 36 → now 20 / 24 / 28 / 32. The
+// content padding is trimmed in lockstep so the inner labels still breathe.
 const sizeClass: Record<ButtonSize, string> = {
   xs: 'h-5 text-[11px] px-1.5 py-0.5 gap-1',
-  sm: 'h-7 text-xs px-2 py-1 gap-1',
-  md: 'h-8 text-[13px] px-2.5 py-1.5 gap-1.5',
-  lg: 'h-9 text-sm px-3.5 py-2 gap-1.5',
+  sm: 'h-6 text-xs px-2 py-0.5 gap-1',
+  md: 'h-7 text-[12px] px-2.5 py-1 gap-1.5',
+  lg: 'h-8 text-[13px] px-3 py-1.5 gap-1.5',
 };
 
 const shapeClass: Record<ButtonShape, string> = {
-  default: 'rounded-md',
-  square: 'rounded-md aspect-square justify-center !px-0',
+  default: 'rounded-[var(--r-lg)]',
+  square: 'rounded-[var(--r-lg)] aspect-square justify-center !px-0',
   pill: 'rounded-full',
 };
 
 // variant × tone class composition. Uses tokens from tokens.css where possible
-// (.btn-ghost, .btn-primary, .btn-danger), inline styles for new combos.
+// (.btn-primary, .btn-danger), inline styles for new combos.
 const toneSolid: Record<ButtonTone, string> = {
   neutral:
-    'bg-white/10 hover:bg-white/15 text-[rgba(255,255,255,0.92)] border border-white/5',
+    '[background:var(--color-surface-raised)] hover:[background:var(--color-surface-muted)] text-[rgba(255,255,255,0.92)] border [border-color:var(--hairline)]',
   accent: 'btn-primary',
   success:
     'text-white border border-black/20 [background:rgb(var(--color-success-rgb))] hover:brightness-110',
@@ -50,9 +53,9 @@ const toneSolid: Record<ButtonTone, string> = {
 
 const toneSoft: Record<ButtonTone, string> = {
   neutral:
-    'bg-white/[0.10] hover:bg-white/[0.14] text-[rgba(255,255,255,0.92)] border border-white/5',
+    '[background:var(--color-surface-raised)] hover:bg-white/[0.14] text-[rgba(255,255,255,0.92)] border [border-color:var(--hairline)]',
   accent:
-    'text-[#4A8BEA] border [background:rgba(var(--stash-accent-rgb),0.16)] [border-color:rgba(var(--stash-accent-rgb),0.28)] hover:[background:rgba(var(--stash-accent-rgb),0.24)]',
+    '[color:rgb(var(--stash-accent-rgb))] border-0 [background:var(--accent-soft)] hover:[background:rgba(var(--stash-accent-rgb),0.26)]',
   success:
     'text-[color:var(--color-success-fg)] border border-[rgba(var(--color-success-rgb),0.28)] [background:rgba(var(--color-success-rgb),0.16)] hover:[background:rgba(var(--color-success-rgb),0.24)]',
   warning:
@@ -60,17 +63,19 @@ const toneSoft: Record<ButtonTone, string> = {
   danger: 'btn-danger',
 };
 
+// `ghost` defaults to fully transparent; only hover lifts to `--bg-hover`.
+// Was a 0.06 white tint by default — felt loud next to the bundle's hairlines.
 const toneGhost: Record<ButtonTone, string> = {
-  neutral: 'btn-ghost t-primary',
-  accent: 'text-[#4A8BEA] hover:bg-white/5',
-  success: 'text-[color:var(--color-success-fg)] hover:bg-white/5',
-  warning: 'text-[color:var(--color-warning-fg)] hover:bg-white/5',
-  danger: 'text-[color:var(--color-danger-fg)] hover:bg-white/5',
+  neutral: 't-primary hover:[background:var(--bg-hover)]',
+  accent: '[color:rgb(var(--stash-accent-rgb))] hover:[background:var(--bg-hover)]',
+  success: 'text-[color:var(--color-success-fg)] hover:[background:var(--bg-hover)]',
+  warning: 'text-[color:var(--color-warning-fg)] hover:[background:var(--bg-hover)]',
+  danger: 'text-[color:var(--color-danger-fg)] hover:[background:var(--bg-hover)]',
 };
 
 const toneOutline: Record<ButtonTone, string> = {
   neutral:
-    'border border-white/[0.06] hover:bg-white/5 text-[rgba(255,255,255,0.92)]',
+    'border [border-color:var(--hairline-strong)] hover:[background:var(--bg-hover)] text-[rgba(255,255,255,0.92)]',
   accent:
     'text-[#4A8BEA] border [border-color:rgba(var(--stash-accent-rgb),0.45)] hover:[background:rgba(var(--stash-accent-rgb),0.10)]',
   success:
@@ -115,7 +120,10 @@ export const Button = ({
 }: ButtonProps) => {
   const isDisabled = disabled || loading;
   const classes = [
-    'inline-flex items-center whitespace-nowrap transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed ring-focus',
+    // `active:translate-y-[0.5px]` swaps the previous `row-base:active`
+    // scale-down for the bundle's quieter "press" — a single pixel nudge,
+    // matching macOS native button feedback.
+    'inline-flex items-center whitespace-nowrap transition-colors duration-150 active:translate-y-[0.5px] disabled:opacity-40 disabled:cursor-not-allowed ring-focus',
     sizeClass[size],
     shapeClass[shape],
     variantTone(variant, tone),

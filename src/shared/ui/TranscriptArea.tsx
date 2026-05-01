@@ -113,7 +113,7 @@ export const TranscriptArea = ({
               `nice-scroll` skin keeps the bar from looking macOS-12
               chunky. */}
           <p
-            className="w-full max-h-[260px] overflow-y-auto nice-scroll text-body text-white/90 whitespace-pre-wrap bg-white/3 rounded-md px-3 py-2 border border-white/5"
+            className="w-full max-h-[260px] overflow-y-auto nice-scroll text-body text-white/90 whitespace-pre-wrap [background:var(--bg-hover)] rounded-md px-3 py-2 border [border-color:var(--hairline)]"
             onDoubleClick={() => onEdit && setEditing(true)}
             title={onEdit ? 'Double-click to edit' : undefined}
           >

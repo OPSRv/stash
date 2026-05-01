@@ -36,8 +36,8 @@ export const TranslationBanner = ({
       style={bannerStyle}
     >
       <span
-        className="px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wider t-primary shrink-0 uppercase"
-        style={pillStyle}
+        className="px-1.5 py-0.5 rounded tracking-wider t-primary shrink-0 uppercase"
+        style={{ ...pillStyle, font: 'var(--t-label)' }}
       >
         → {to}
       </span>

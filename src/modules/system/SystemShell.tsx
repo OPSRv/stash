@@ -237,8 +237,8 @@ const NavTile = ({
     aria-current={active ? 'page' : undefined}
     className={`group relative w-full text-left rounded-xl px-2 py-1.5 flex items-center gap-2 transition-all duration-150 ring-focus ${
       active
-        ? 'bg-white/[0.08] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
-        : 'hover:bg-white/[0.04]'
+        ? '[background:var(--bg-row-active)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]'
+        : 'hover:[background:var(--bg-hover)]'
     }`}
   >
     <span

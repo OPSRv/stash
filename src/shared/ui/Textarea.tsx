@@ -20,7 +20,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     const dis = disabled ? 'opacity-40 cursor-not-allowed' : '';
     const base = bare
       ? 'bg-transparent outline-none'
-      : 'input-field ring-focus rounded-md text-body px-3 py-2 resize-y';
+      : 'input-field ring-focus rounded-[var(--r-lg)] text-body px-3 py-2 resize-y';
     return (
       <textarea
         ref={ref}

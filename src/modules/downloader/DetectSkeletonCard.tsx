@@ -28,16 +28,16 @@ export const DetectSkeletonCard = ({ elapsedSec, onDismiss }: Props) => (
     className="mx-4 mt-3 flex items-center gap-3 stash-fade-in"
   >
     <div
-      className="w-27.5 h-15.5 rounded-md shrink-0 bg-white/[0.05]"
+      className="w-27.5 h-15.5 rounded-md shrink-0 [background:var(--bg-hover)]"
       aria-hidden
     />
     <div className="flex-1 min-w-0">
       <div
-        className="h-3 rounded mb-2 bg-white/[0.08] w-2/5"
+        className="h-3 rounded mb-2 [background:var(--bg-row-active)] w-2/5"
         aria-hidden
       />
       <div
-        className="h-3 rounded bg-white/[0.06] w-3/4"
+        className="h-3 rounded [background:var(--bg-row-active)] w-3/4"
         aria-hidden
       />
       <div className="t-tertiary text-meta mt-2 flex items-center gap-1.5">

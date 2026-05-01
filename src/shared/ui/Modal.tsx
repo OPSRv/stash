@@ -23,7 +23,10 @@ export const Modal = ({
   onClose,
   ariaLabel,
   children,
-  panelClassName = 'pane rounded-xl p-4',
+  // Refresh-2026-04: default panel chrome is the shared `.modal-panel`
+  // (opaque elevated surface, hairline-strong border, 12 px radius, the
+  // floating-overlay shadow). Callers can still override.
+  panelClassName = 'modal-panel',
   initialFocus = 'first',
   dismissOnBackdropClick = true,
   dismissOnEscape = true,
@@ -48,11 +51,8 @@ export const Modal = ({
   return (
     <div
       data-modal-backdrop
-      className="stash-fade-in absolute inset-0 flex items-center justify-center p-6"
+      className="stash-fade-in modal-backdrop absolute inset-0 flex items-center justify-center p-6"
       style={{
-        background: 'rgba(0,0,0,0.55)',
-        backdropFilter: 'blur(8px)',
-        WebkitBackdropFilter: 'blur(8px)',
         zIndex: 'var(--z-modal)' as unknown as number,
       }}
       onClick={dismissOnBackdropClick ? onClose : undefined}

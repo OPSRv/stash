@@ -47,7 +47,7 @@ export const ImageThumbnail = ({
         <div
           role="img"
           aria-label={`${label} (failed to load)`}
-          className={`w-[220px] h-[160px] flex flex-col items-center justify-center gap-2 rounded-lg border border-white/6 bg-white/3 text-white/40 ${className ?? ''}`}
+          className={`w-[220px] h-[160px] flex flex-col items-center justify-center gap-2 rounded-lg border [border-color:var(--hairline)] [background:var(--bg-hover)] text-white/40 ${className ?? ''}`}
         >
           <BrokenImageIcon size={32} />
           <span className="text-[12px] leading-none">image unavailable</span>
@@ -57,7 +57,7 @@ export const ImageThumbnail = ({
           type="button"
           onClick={() => setOpen(true)}
           aria-label={`Open ${label}`}
-          className={`w-fit rounded-lg overflow-hidden border border-white/6 hover:border-white/15 transition-colors ${className ?? ''}`}
+          className={`w-fit rounded-lg overflow-hidden border [border-color:var(--hairline)] hover:[border-color:var(--hairline-strong)] transition-colors ${className ?? ''}`}
         >
           <img
             src={url}

@@ -100,7 +100,7 @@ const CompletedDownloadTileImpl = ({
 
   return (
     <div
-      className={`group relative rounded-lg overflow-hidden bg-white/[0.03] border border-white/[0.05] ${failed ? 'cursor-default' : 'cursor-pointer'}`}
+      className={`group relative rounded-lg overflow-hidden [background:var(--bg-hover)] border [border-color:var(--hairline)] ${failed ? 'cursor-default' : 'cursor-pointer'}`}
       onClick={onTileClick}
     >
       <div

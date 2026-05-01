@@ -92,8 +92,10 @@ const preview: Preview = {
       storySort: {
         order: [
           'Intro',
+          'Foundations',
+          ['Tokens'],
           'Primitives',
-          ['Button', 'IconButton', 'Toggle', 'SegmentedControl', 'TabButton'],
+          ['Button', 'IconButton', 'Toggle', 'SegmentedControl', 'TabButton', 'Separator'],
           'Inputs',
           'Feedback',
           'Surfaces',

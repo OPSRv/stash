@@ -180,7 +180,7 @@ const XcodeTab = ({ onPending }: { onPending: (p: Pending) => void }) => {
               <span className="flex items-center gap-1.5">
                 <span className="truncate">{s.name}</span>
                 {!s.available && (
-                  <span className="text-[10px] px-1 py-px rounded bg-white/5 t-tertiary font-normal">
+                  <span className="text-[10px] px-1 py-px rounded [background:var(--bg-hover)] t-tertiary font-normal">
                     unavailable
                   </span>
                 )}

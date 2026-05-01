@@ -42,7 +42,7 @@ export const InlineVideo = ({
         src={url}
         controls
         preload="metadata"
-        className={`rounded-lg border border-white/6 bg-black ${className ?? 'max-w-[320px] max-h-[200px]'}`}
+        className={`rounded-lg border [border-color:var(--hairline)] bg-black ${className ?? 'max-w-[320px] max-h-[200px]'}`}
       >
         <track kind="captions" />
       </video>

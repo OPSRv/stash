@@ -10,7 +10,54 @@ import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { ContextMenu, type ContextMenuItem } from '../../shared/ui/ContextMenu';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
 import { PencilIcon, TrashIcon } from '../../shared/ui/icons';
-import { accent } from '../../shared/theme/accent';
+
+const FolderIcon = ({ size = 13 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.2c.55 0 1.07.22 1.45.62l1.16 1.21c.38.4.9.62 1.45.62H18.5A2.5 2.5 0 0 1 21 9.95V17.5A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5v-10Z" />
+  </svg>
+);
+
+const InboxIcon = ({ size = 13 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="M4 13.5 6.2 6.2A2 2 0 0 1 8.13 5h7.74a2 2 0 0 1 1.93 1.45L20 13.5M4 13.5h4l1.5 2.5h5L16 13.5h4M4 13.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4.5" />
+  </svg>
+);
+
+const NotesStackIcon = ({ size = 13 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="M7 4h9a2 2 0 0 1 2 2v12M5 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" />
+  </svg>
+);
 import {
   notesFolderCreate,
   notesFolderDelete,
@@ -28,10 +75,21 @@ import {
   type DropTargetData,
 } from './notesDnd';
 
+/** Note counts per folder zone. Lives in NotesShell because the side-list
+ *  is filtered (so the local notes array can't be summed) — counts come
+ *  from a parallel `notesList('all')` fetch. Optional so callers without
+ *  count data still render. */
+export type FolderCounts = {
+  total: number;
+  unfiled: number;
+  byFolder: Record<number, number>;
+};
+
 type Props = {
   /** Currently active filter — drives the highlighted row. */
   selected: FolderFilter;
   onSelect: (filter: FolderFilter) => void;
+  counts?: FolderCounts;
 };
 
 type DropZone = 'all' | 'unfiled' | { folder: number };
@@ -63,6 +121,7 @@ const FolderRow = ({
   setEditName,
   commitRename,
   editKey,
+  count,
 }: {
   label: string;
   zone: DropZone;
@@ -80,6 +139,9 @@ const FolderRow = ({
   setEditName: (s: string) => void;
   commitRename: (id: number) => void;
   editKey: (id: number) => (e: KeyboardEvent<HTMLInputElement>) => void;
+  /** Note count badge displayed at the right edge of the row. `undefined`
+   *  hides the badge entirely (e.g. parent has no count data yet). */
+  count?: number;
 }) => {
   const rowRef = useRef<HTMLDivElement | null>(null);
   const isOver = useIsDropTarget(rowRef);
@@ -106,12 +168,18 @@ const FolderRow = ({
 
   const handleClick = () => onSelect(filter);
 
+  const Icon = !folder
+    ? zone === 'all'
+      ? NotesStackIcon
+      : InboxIcon
+    : FolderIcon;
+
   return (
     <div className="relative">
       {isInsertBefore && (
         <div
-          className="absolute -top-px left-2 right-2 h-0.5 z-10 rounded"
-          style={{ background: accent(0.8) }}
+          className="absolute -top-px left-3 right-3 h-0.5 z-10 rounded-full"
+          style={{ background: 'rgb(var(--stash-accent-rgb))' }}
           aria-hidden
         />
       )}
@@ -137,15 +205,21 @@ const FolderRow = ({
               }
             : undefined
         }
-        className={`group flex items-center gap-1.5 px-3 py-1.5 text-meta cursor-pointer ring-focus transition-colors ${
-          active ? 'row-active row-active-strong' : 'hover:bg-white/[0.03]'
-        } ${isDragging ? 'opacity-40' : ''}`}
-        style={
-          showNoteDropHighlight
-            ? { outline: `2px solid ${accent(0.85)}`, background: accent(0.12) }
-            : undefined
-        }
+        // Refresh-2026-04: chrome lives entirely in `.list-row` — visuals
+        // are driven by data-attrs (active, drop-target, dragging) so the
+        // React component stays declarative and the design-system owns
+        // the hover/active state machine.
+        data-active={active}
+        data-drop-target={showNoteDropHighlight}
+        data-dragging={isDragging}
+        className="list-row group flex items-center gap-[7px] pl-2 pr-1.5 text-[12px] mx-1.5 ring-focus"
+        style={{ height: 26 }}
       >
+        <span
+          className={active ? 'accent-fg shrink-0' : 't-tertiary group-hover:t-secondary shrink-0'}
+        >
+          <Icon size={13} />
+        </span>
         {folder && editingId === folder.id ? (
           <input
             autoFocus
@@ -159,15 +233,25 @@ const FolderRow = ({
           />
         ) : (
           <>
-            <span
-              className="t-primary flex-1 min-w-0 truncate"
-              style={folder ? undefined : { fontStyle: 'italic', opacity: 0.85 }}
-            >
+            <span className={`flex-1 min-w-0 truncate ${active ? 't-primary font-medium' : 't-secondary'}`}>
               {label}
             </span>
+            {/* Note count — 11 px monospace ghost text, sits flush with the
+              * right edge until row hover surfaces the rename / delete
+              * actions, at which point the count fades out so it doesn't
+              * crowd the controls. */}
+            {count != null && (
+              <span
+                className="t-ghost shrink-0 tabular-nums opacity-100 group-hover:opacity-0 transition-opacity"
+                style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}
+                data-testid={`folder-count-${zone === 'all' ? 'all' : zone === 'unfiled' ? 'unfiled' : folder?.id ?? 'unknown'}`}
+              >
+                {count}
+              </span>
+            )}
             {folder && onRenameClick && onDeleteClick && (
               <span
-                className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-0.5"
+                className="absolute right-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center gap-0.5"
                 data-no-drag
               >
                 <IconButton
@@ -198,7 +282,7 @@ const FolderRow = ({
   );
 };
 
-export const FoldersSidebar = ({ selected, onSelect }: Props) => {
+export const FoldersSidebar = ({ selected, onSelect, counts }: Props) => {
   const [folders, setFolders] = useState<NoteFolder[]>([]);
   const [creating, setCreating] = useState(false);
   const [draftName, setDraftName] = useState('');
@@ -368,9 +452,9 @@ export const FoldersSidebar = ({ selected, onSelect }: Props) => {
   };
 
   return (
-    <div className="flex flex-col" data-testid="notes-folders">
-      <div className="px-3 pt-2 pb-1 flex items-center justify-between">
-        <span className="t-tertiary text-meta uppercase tracking-wide">Folders</span>
+    <div className="flex flex-col pb-1" data-testid="notes-folders">
+      <div className="px-3 py-1 flex items-center justify-between">
+        <span className="stash-section-label">Folders</span>
         <IconButton
           title="New folder"
           onClick={() => {
@@ -378,7 +462,9 @@ export const FoldersSidebar = ({ selected, onSelect }: Props) => {
             setDraftName('');
           }}
         >
-          <span className="text-meta leading-none">+</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+            <path d="M12 5v14M5 12h14" />
+          </svg>
         </IconButton>
       </div>
       <FolderRow
@@ -394,6 +480,7 @@ export const FoldersSidebar = ({ selected, onSelect }: Props) => {
         setEditName={setEditName}
         commitRename={commitRename}
         editKey={editKey}
+        count={counts?.total}
       />
       <FolderRow
         label="Unfiled"
@@ -408,6 +495,7 @@ export const FoldersSidebar = ({ selected, onSelect }: Props) => {
         setEditName={setEditName}
         commitRename={commitRename}
         editKey={editKey}
+        count={counts?.unfiled}
       />
       {folders.map((f) => (
         <FolderRow
@@ -430,18 +518,22 @@ export const FoldersSidebar = ({ selected, onSelect }: Props) => {
           setEditName={setEditName}
           commitRename={commitRename}
           editKey={editKey}
+          count={counts?.byFolder[f.id]}
         />
       ))}
       {/* Tail "drop after last" affordance — only visible while reordering. */}
       {isReorderingFolder && insertBeforeId === 'tail' && (
         <div
-          className="h-0.5 mx-2 rounded"
-          style={{ background: accent(0.8) }}
+          className="h-0.5 mx-3 rounded-full"
+          style={{ background: 'rgb(var(--stash-accent-rgb))' }}
           aria-hidden
         />
       )}
       {creating && (
-        <div className="px-3 py-1.5">
+        <div className="mx-2 my-0.5 flex items-center gap-2 px-2.5 py-1.5 rounded-[var(--r-sm)]" style={{ background: 'var(--accent-fog)' }}>
+          <span className="shrink-0 accent-fg">
+            <FolderIcon size={13} />
+          </span>
           <input
             ref={draftInputRef}
             value={draftName}
@@ -449,7 +541,7 @@ export const FoldersSidebar = ({ selected, onSelect }: Props) => {
             onBlur={() => void commitCreate()}
             onKeyDown={draftKey}
             placeholder="Folder name"
-            className="w-full bg-transparent outline-none t-primary text-meta border-b hair pb-0.5"
+            className="flex-1 min-w-0 bg-transparent outline-none t-primary text-meta"
             aria-label="New folder name"
           />
         </div>

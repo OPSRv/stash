@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Button } from './Button';
 import { Checkbox } from './Checkbox';
 import { useFocusTrap } from './useFocusTrap';
@@ -54,10 +55,10 @@ export const ConfirmDialog = ({
   }, [open, onConfirm, onCancel, suppress, suppressibleLabel]);
 
   if (!open) return null;
-  return (
+  if (typeof document === 'undefined') return null;
+  return createPortal(
     <div
-      className="absolute inset-0 z-[70] flex items-center justify-center p-6"
-      style={{ background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(8px)' }}
+      className="modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6"
       onClick={onCancel}
       role="presentation"
     >
@@ -66,7 +67,7 @@ export const ConfirmDialog = ({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="pane rounded-xl p-4 max-w-[420px] w-full"
+        className="modal-panel max-w-[420px] w-full"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="t-primary text-title font-semibold mb-1">{title}</div>
@@ -91,13 +92,14 @@ export const ConfirmDialog = ({
           </Button>
           <Button
             onClick={() => onConfirm(suppressibleLabel ? suppress : undefined)}
-            variant={tone === 'danger' ? 'soft' : 'solid'}
+            variant="solid"
             tone={tone === 'danger' ? 'danger' : 'accent'}
           >
             {confirmLabel}
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

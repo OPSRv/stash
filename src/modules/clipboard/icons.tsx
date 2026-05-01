@@ -55,8 +55,8 @@ export const FileIcon = () => (
 export const typeTint: Record<ContentType, { bg: string; fg: string }> = {
   link: { bg: 'rgba(47,122,229,0.10)', fg: '#4A8BEA' },
   code: { bg: 'rgba(180,120,255,0.10)', fg: '#B48BFF' },
-  image: { bg: 'rgba(255,255,255,0.06)', fg: 'rgba(255,255,255,0.85)' },
-  text: { bg: 'rgba(255,255,255,0.06)', fg: 'rgba(255,255,255,0.85)' },
+  image: { bg: 'var(--bg-row-active)', fg: 'var(--fg)' },
+  text: { bg: 'var(--bg-row-active)', fg: 'var(--fg)' },
   // Warm amber tint — visually distinct from image/text so multi-file
   // Finder copies pop out of a busy list without stealing focus from
   // the accent-coloured link rows.
@@ -141,7 +141,7 @@ export const subtypeVisual: Record<
     // Tint is overridden inline with the actual colour value so the
     // user sees the shade right away.
     icon: HashIcon,
-    tint: { bg: 'rgba(255,255,255,0.06)', fg: 'rgba(255,255,255,0.85)' },
+    tint: { bg: 'var(--bg-row-active)', fg: 'var(--fg)' },
   },
   uuid: {
     icon: HashIcon,

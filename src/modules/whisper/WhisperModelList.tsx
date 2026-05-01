@@ -146,7 +146,7 @@ export const WhisperModelList = ({ active = true }: Props) => {
             )}
             <div
               className={`px-4 py-3 border-t hair first:border-t-0 flex items-center gap-3 ${
-                row.active ? 'bg-white/[0.04]' : ''
+                row.active ? '[background:var(--bg-hover)]' : ''
               }`}
               data-testid={`model-row-${row.id}`}
             >

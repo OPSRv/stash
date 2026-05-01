@@ -89,7 +89,7 @@ export const SessionSidebar = ({
               <li key={s.id}>
                 <div
                   className={`group flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-md mx-1 ${
-                    isActive ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                    isActive ? '[background:var(--bg-row-active)]' : 'hover:[background:var(--bg-hover)]'
                   }`}
                   onClick={() => !isRenaming && onSelect(s.id)}
                 >

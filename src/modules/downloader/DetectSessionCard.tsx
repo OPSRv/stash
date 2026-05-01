@@ -112,7 +112,7 @@ export const DetectSessionCard = ({ session, onDismiss, onCancel: _onCancel, onD
   return (
     <>
       {detecting && elapsedSec > DETECT_SLOW_HINT_THRESHOLD_SEC && (
-        <div className="mx-4 mt-2 mb-0 t-tertiary text-meta rounded-md px-3 py-1.5 bg-white/[0.04]">
+        <div className="mx-4 mt-2 mb-0 t-tertiary text-meta rounded-md px-3 py-1.5 [background:var(--bg-hover)]">
           YouTube and a few other sites can take 20–40 seconds on the first
           fetch; subsequent detects of the same URL are instant.
         </div>

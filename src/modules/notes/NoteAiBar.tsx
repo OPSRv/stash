@@ -196,13 +196,15 @@ export const NoteAiBar = ({
 
   return (
     <div
-      className="border-t hair flex flex-col gap-1.5 px-3 py-2 shrink-0 relative"
+      className="floating-panel absolute flex flex-col gap-1.5 px-3 py-2 z-20"
       style={{
-        // Frosted glass to match Terminal's ComposeBox — the bar reads as
-        // chrome over the editor instead of a flat slab.
-        background: 'rgba(16, 18, 22, 0.6)',
-        backdropFilter: 'blur(18px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
+        // Refresh-2026-04: Cursor-style bar pinned 14 px above the bottom
+        // edge of the pane. Chrome (surface, border, shadow, radius) lives
+        // in the shared `.floating-panel` design-system utility so the AI
+        // bar, context menu, and any future popover stay in sync.
+        left: 14,
+        right: 14,
+        bottom: 14,
       }}
       data-testid="note-ai-bar"
     >

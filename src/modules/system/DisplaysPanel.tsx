@@ -150,12 +150,12 @@ const DisplayCard = ({
           <div className="flex items-center gap-1.5 flex-wrap">
             <div className="t-primary text-body font-semibold truncate">{d.name}</div>
             {d.is_main && (
-              <span className="text-[10px] px-1 py-px rounded bg-white/10 t-secondary">
+              <span className="text-[10px] px-1 py-px rounded [background:var(--color-surface-raised)] t-secondary">
                 main
               </span>
             )}
             {d.is_builtin && (
-              <span className="text-[10px] px-1 py-px rounded bg-white/10 t-secondary">
+              <span className="text-[10px] px-1 py-px rounded [background:var(--color-surface-raised)] t-secondary">
                 built-in
               </span>
             )}

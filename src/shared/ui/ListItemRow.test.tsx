@@ -40,6 +40,8 @@ describe('ListItemRow', () => {
       </ul>,
     );
     const li = container.querySelector('li');
-    expect(li?.className).toContain('bg-white/[0.05]');
+    // Refresh-2026-04: selected style routes through `--bg-hover` token,
+    // not the bespoke `bg-white/[0.05]` Tailwind utility.
+    expect(li?.className).toMatch(/\[background:var\(--bg-hover\)\]/);
   });
 });

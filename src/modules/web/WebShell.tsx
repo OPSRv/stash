@@ -547,7 +547,7 @@ export const WebShell = () => {
           setContextMenu({ id: s.id, x: e.clientX, y: e.clientY });
         }}
         className={`group relative flex items-center rounded-md transition-all ${
-          active ? 'bg-white/[0.10]' : 'hover:bg-white/[0.04]'
+          active ? '[background:var(--color-surface-raised)]' : 'hover:[background:var(--bg-hover)]'
         } ${beingDragged ? 'opacity-50' : ''} ${stale && !active ? 'opacity-60' : ''}`}
       >
         {isRenaming && !collapsed ? (
@@ -670,7 +670,7 @@ export const WebShell = () => {
         aria-label="Web services"
         className={`relative flex flex-col shrink-0 py-2 gap-0.5 border-r hair transition-[width,background] ${
           collapsed ? 'px-1' : 'px-1.5'
-        } ${dragOver ? 'bg-white/[0.04]' : ''}`}
+        } ${dragOver ? '[background:var(--bg-hover)]' : ''}`}
         style={{ width: sidebarWidth, background: 'var(--color-bg)' }}
         onDragOver={(e) => {
           const types = Array.from(e.dataTransfer.types);
@@ -698,8 +698,8 @@ export const WebShell = () => {
             collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
           } ${
             storedActive === ''
-              ? 't-primary bg-white/[0.08]'
-              : 't-secondary hover:t-primary hover:bg-white/[0.04]'
+              ? 't-primary [background:var(--bg-row-active)]'
+              : 't-secondary hover:t-primary hover:[background:var(--bg-hover)]'
           }`}
           aria-label="Home"
         >
@@ -768,7 +768,7 @@ export const WebShell = () => {
         <button
           type="button"
           onClick={() => openAddDialog('')}
-          className={`flex items-center rounded-md text-meta t-secondary hover:t-primary hover:bg-white/[0.04] transition-colors ${
+          className={`flex items-center rounded-md text-meta t-secondary hover:t-primary hover:[background:var(--bg-hover)] transition-colors ${
             collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
           }`}
           aria-label="Add web tab"
@@ -792,7 +792,7 @@ export const WebShell = () => {
         <button
           type="button"
           onClick={toggleCollapsed}
-          className={`flex items-center rounded-md text-meta t-tertiary hover:t-primary hover:bg-white/[0.04] transition-colors ${
+          className={`flex items-center rounded-md text-meta t-tertiary hover:t-primary hover:[background:var(--bg-hover)] transition-colors ${
             collapsed ? 'justify-center py-2' : 'gap-2 px-2 py-1.5'
           }`}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -911,7 +911,7 @@ export const WebShell = () => {
                       e.preventDefault();
                       handleReorder(from, s.id, side).catch(() => {});
                     }}
-                    className={`group relative flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:bg-white/[0.04] transition-colors text-center ${
+                    className={`group relative flex flex-col items-center gap-2 p-4 rounded-xl border hair hover:[background:var(--bg-hover)] transition-colors text-center ${
                       beingDragged ? 'opacity-50' : ''
                     }`}
                     style={{ background: 'var(--color-surface)' }}
@@ -1046,8 +1046,8 @@ const ContextMenuItem = ({
     onClick={onClick}
     className={`w-full text-left px-3 py-1.5 text-meta transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
       danger
-        ? 't-secondary hover:text-red-400 hover:bg-white/[0.04]'
-        : 't-secondary hover:t-primary hover:bg-white/[0.04]'
+        ? 't-secondary hover:text-red-400 hover:[background:var(--bg-hover)]'
+        : 't-secondary hover:t-primary hover:[background:var(--bg-hover)]'
     }`}
   >
     {children}

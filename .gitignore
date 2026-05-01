@@ -32,3 +32,7 @@ storybook-static/
 
 # Vitest coverage reports
 coverage/
+
+# Internal docs / scratch prototypes (not shipped)
+/docs/
+/stashnote/

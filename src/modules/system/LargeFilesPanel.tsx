@@ -197,7 +197,7 @@ export const LargeFilesPanel = () => {
             {result.files.map((f) => (
               <ListItemRow
                 key={f.path}
-                className="hover:bg-white/[0.03]"
+                className="hover:[background:var(--bg-hover)]"
                 leading={
                   <div
                     aria-hidden

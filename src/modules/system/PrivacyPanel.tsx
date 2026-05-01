@@ -73,7 +73,7 @@ export const PrivacyPanel = () => {
               return (
                 <ListItemRow
                   key={i.path}
-                  className="hover:bg-white/[0.03]"
+                  className="hover:[background:var(--bg-hover)]"
                   title={
                     <span className="flex items-center gap-2">
                       <span className="truncate">{i.label}</span>

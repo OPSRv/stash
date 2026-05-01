@@ -32,7 +32,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     if (leadingIcon != null || trailing != null) {
       return (
         <div
-          className={`input-field ring-focus-within rounded-md flex items-center ${wrapperSize[size]} ${danger} ${dis} ${className}`}
+          className={`input-field ring-focus-within rounded-[var(--r-lg)] flex items-center ${wrapperSize[size]} ${danger} ${dis} ${className}`}
         >
           {leadingIcon != null && <span className="t-tertiary inline-flex shrink-0">{leadingIcon}</span>}
           <input
@@ -50,7 +50,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       <input
         ref={ref}
         disabled={disabled}
-        className={`input-field ring-focus rounded-md ${bareSize[size]} ${danger} ${dis} ${className}`}
+        className={`input-field ring-focus rounded-[var(--r-lg)] ${bareSize[size]} ${danger} ${dis} ${className}`}
         {...rest}
       />
     );

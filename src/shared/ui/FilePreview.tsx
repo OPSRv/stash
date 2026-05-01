@@ -177,7 +177,7 @@ export const FilePreview = ({
         <embed
           src={normaliseFileSrc(src)}
           type="application/pdf"
-          className="w-full h-[420px] rounded-lg border border-white/6 bg-black/40"
+          className="w-full h-[420px] rounded-lg border [border-color:var(--hairline)] bg-black/40"
           aria-label={displayName}
         />
         {caption && (
@@ -257,7 +257,7 @@ export const FilePreview = ({
       // plain text
       return (
         <div className={wrapClass} data-file-kind="text">
-          <pre className="whitespace-pre-wrap break-words text-[12px] leading-[18px] font-mono text-white/85 rounded-lg border border-white/6 bg-black/30 p-3 max-h-[360px] overflow-auto">
+          <pre className="whitespace-pre-wrap break-words text-[12px] leading-[18px] font-mono text-white/85 rounded-lg border [border-color:var(--hairline)] bg-black/30 p-3 max-h-[360px] overflow-auto">
             {textState.text}
           </pre>
           {caption && (

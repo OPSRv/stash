@@ -44,7 +44,7 @@ export const SegmentedControl = <T extends string>({
             disabled={opt.disabled}
             data-seg-title={opt.title}
             onClick={() => onChange(opt.value)}
-            className={`rounded-md inline-flex items-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed ${padding[size]} ${active ? 'on' : ''}`}
+            className={`rounded-[4px] inline-flex items-center gap-1.5 disabled:opacity-35 disabled:cursor-not-allowed ${padding[size]} ${active ? 'on' : ''}`}
           >
             {opt.icon}
             {opt.label}

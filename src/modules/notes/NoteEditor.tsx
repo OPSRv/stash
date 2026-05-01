@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState, type ClipboardEvent, type KeyboardEvent, type RefObject } from 'react';
 import { IconButton } from '../../shared/ui/IconButton';
+import { Separator } from '../../shared/ui/Separator';
 import { Spinner } from '../../shared/ui/Spinner';
 import { Textarea } from '../../shared/ui/Textarea';
 import {
@@ -408,7 +409,10 @@ export const NoteEditor = ({
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="px-5 py-2 flex items-center gap-2 border-b hair">
+      <div
+        className="px-5 py-2 flex items-center gap-2"
+        style={{ borderBottom: '0.5px solid var(--hairline)' }}
+      >
         <div
           className="flex flex-wrap items-center gap-y-1 gap-x-0.5 min-w-0"
           role="toolbar"
@@ -423,7 +427,7 @@ export const NoteEditor = ({
           <IconButton onClick={() => run(linePrefix('### '))} title="Heading 3" stopPropagation={false}>
             <Heading3Icon />
           </IconButton>
-          <div className="w-px h-4 bg-white/10 mx-1" />
+          <Separator orientation="vertical" tone="strong" size={14} className="mx-1" />
           <IconButton onClick={() => run(wrap('**', '**', 'bold'))} title="Bold (⌘B)" stopPropagation={false}>
             <BoldIcon />
           </IconButton>
@@ -442,7 +446,7 @@ export const NoteEditor = ({
           <IconButton onClick={insertLink} title="Link (⌘K)" stopPropagation={false}>
             <LinkIcon size={12} />
           </IconButton>
-          <div className="w-px h-4 bg-white/10 mx-1" />
+          <Separator orientation="vertical" tone="strong" size={14} className="mx-1" />
           <IconButton onClick={() => run(linePrefix('- '))} title="Bulleted list (⌘L)" stopPropagation={false}>
             <BulletListIcon />
           </IconButton>
@@ -455,14 +459,14 @@ export const NoteEditor = ({
           <IconButton onClick={() => run(linePrefix('> '))} title="Quote" stopPropagation={false}>
             <QuoteIcon />
           </IconButton>
-          <div className="w-px h-4 bg-white/10 mx-1" />
+          <Separator orientation="vertical" tone="strong" size={14} className="mx-1" />
           <IconButton onClick={() => run(insertBlock('---'))} title="Horizontal rule" stopPropagation={false}>
             <HorizontalRuleIcon />
           </IconButton>
           <IconButton onClick={() => run(insertBlock(TABLE_TEMPLATE.trimEnd()))} title="Table" stopPropagation={false}>
             <TableIcon />
           </IconButton>
-          <div className="w-px h-4 bg-white/10 mx-1" />
+          <Separator orientation="vertical" tone="strong" size={14} className="mx-1" />
           <IconButton
             onClick={translate}
             title={`Translate to ${translateTarget.toUpperCase()} — selection if any, else whole note`}
@@ -481,7 +485,15 @@ export const NoteEditor = ({
         onKeyDown={onKeyDown}
         onPaste={onPaste}
         placeholder={placeholder}
-        className="flex-1 resize-none px-5 py-5 t-primary text-body font-mono leading-relaxed min-h-0"
+        // Refresh-2026-04: pane padding 14 / 18 / 60 — last value leaves
+        // room for the floating AI bar without clipping the cursor row.
+        className="flex-1 resize-none t-primary min-h-0"
+        style={{
+          padding: '14px 18px 60px',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 'calc(12.5px * var(--notes-zoom, 1))',
+          lineHeight: 1.5,
+        }}
         spellCheck={false}
       />
     </div>

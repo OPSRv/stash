@@ -8,12 +8,13 @@ export type SaveStatus =
   | 'transcribing'
   | 'polishing';
 
-const statusLabel: Record<Exclude<SaveStatus, 'idle'>, string> = {
+const statusLabel: Record<SaveStatus, string> = {
+  idle: 'Saved',
   saving: 'Saving…',
   saved: 'Saved',
   error: 'Save failed',
   transcribing: 'Transcribing…',
-  polishing: 'Polishing…',
+  polishing: 'Polishing with AI…',
 };
 
 type Props = {
@@ -24,20 +25,33 @@ type Props = {
   onCancel?: () => void;
 };
 
+/** Refresh-2026-04 SaveIndicator: a 6 × 6 dot + 11 px label that fades
+ *  through states. Replaces the prior pill chrome (chip-with-fill).
+ *
+ *  - idle / saved → success-green dot
+ *  - saving / transcribing / polishing → amber dot with `dot-pulse` keyframes
+ *  - error → danger-red dot
+ *
+ *  The component name (and re-exported type) stays `SaveStatusPill` so
+ *  every caller keeps working without an import sweep — the on-screen
+ *  treatment is what changed, not the API surface. */
 export const SaveStatusPill = ({ status, onCancel }: Props) => {
-  if (status === 'idle') return null;
-  const tone = status === 'error' ? 'stash-badge--danger' : 'stash-badge--neutral';
-  const cancellable = onCancel && (status === 'transcribing' || status === 'polishing');
+  // We render even at `idle` now — the green "Saved" indicator is the
+  // bundle's resting state. Caller passes `idle` when nothing has happened
+  // yet, and we collapse that into the same Saved label for visual calm.
+  const cancellable = !!onCancel && (status === 'transcribing' || status === 'polishing');
   return (
     <span
-      className={`stash-badge ${tone} ${cancellable ? 'inline-flex items-center gap-1.5' : ''}`}
+      className="save-ind inline-flex items-center gap-1.5 px-1 h-5"
+      data-state={status}
       aria-live="polite"
       data-testid="notes-save-status"
     >
-      {statusLabel[status]}
+      <span className="save-dot" aria-hidden />
+      <span className="text-meta t-tertiary leading-none">{statusLabel[status]}</span>
       {cancellable && (
         <IconButton
-          onClick={onCancel}
+          onClick={onCancel!}
           title="Cancel transcription"
           data-testid="notes-save-status-cancel"
           tooltipSide="bottom"

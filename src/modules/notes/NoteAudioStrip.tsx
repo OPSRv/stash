@@ -87,7 +87,17 @@ const NoteAudioStripInner = ({
   });
 
   return (
-    <div className="px-5 pt-2 pb-3 border-b hair flex flex-col gap-2">
+    <div
+      className="flex flex-col gap-2"
+      style={{
+        // Refresh-2026-04: elevated audio strip, hairline below the title
+        // header above and below the strip. 8 / 14 padding matches the
+        // bundle.
+        padding: '8px 14px',
+        background: 'var(--bg-elev)',
+        borderBottom: '0.5px solid var(--hairline)',
+      }}
+    >
       <div className="flex items-center gap-3">
         <AudioPlayer src={note.audio_path} loader="bytes" display="waveform" />
         {note.audio_duration_ms != null && (

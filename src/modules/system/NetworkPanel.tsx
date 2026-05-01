@@ -131,7 +131,7 @@ export const NetworkPanel = () => {
                     <div
                       key={`${r.pid}-${r.local}-${r.remote}-${vrow.index}`}
                       role="row"
-                      className="grid items-center border-t hair hover:bg-white/[0.03] text-meta absolute inset-x-0"
+                      className="grid items-center border-t hair hover:[background:var(--bg-hover)] text-meta absolute inset-x-0"
                       style={{
                         gridTemplateColumns: '1fr 70px 60px 1fr 1fr 110px 80px',
                         transform: `translateY(${vrow.start}px)`,
