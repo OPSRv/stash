@@ -135,13 +135,14 @@ async fn run_install_inner(
         targets.extend(OPTIONAL_FT.iter().copied());
     }
 
+    let total = targets.len().max(1);
     installer::emit_phase(
         app,
         installer::InstallPhase::Models,
         "Завантажую моделі…",
-        None,
+        Some(0.0),
     );
-    for a in targets {
+    for (idx, a) in targets.iter().enumerate() {
         let path = asset_path(data_dir, a);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
@@ -159,6 +160,12 @@ async fn run_install_inner(
                     done: true,
                 },
             );
+            installer::emit_phase(
+                app,
+                installer::InstallPhase::Models,
+                &format!("{} вже на диску", a.label),
+                Some((idx + 1) as f32 / total as f32),
+            );
             continue;
         }
         {
@@ -167,7 +174,7 @@ async fn run_install_inner(
                 return Err(format!("{} download already in progress", a.label));
             }
         }
-        let result = run_download(app, a, &path).await;
+        let result = run_download(app, a, &path, idx, total).await;
         state.in_flight.lock().unwrap().remove(a.filename);
         result?;
     }
@@ -366,14 +373,21 @@ async fn run_download(
     app: &AppHandle,
     spec: &SeparatorAsset,
     final_path: &Path,
+    asset_idx: usize,
+    asset_total: usize,
 ) -> Result<(), String> {
     let url = catalog::resolve_url(spec);
     if !url.starts_with("https://") {
         return Err("asset url must be https".into());
     }
+    // Connect timeout guards against the CDN never even completing
+    // a TLS handshake; the per-chunk read timeout below catches a
+    // mid-stream hang (the original symptom — Settings was stuck at
+    // "Завантажую моделі" for minutes with no traffic and no error).
     let client = reqwest::Client::builder()
         .user_agent("stash-app/separator-downloader")
         .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client
@@ -390,9 +404,31 @@ async fn run_download(
     let mut stream = resp.bytes_stream();
     let mut received: u64 = 0;
     let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    let phase_base = asset_idx as f32 / asset_total as f32;
+    let phase_span = 1.0 / asset_total as f32;
     use futures_util::StreamExt;
     use std::io::Write;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        // 60-second per-chunk read timeout. A working CDN streams a
+        // chunk well under a second; a stalled connection produces
+        // none for minutes. Killing the request after a minute lets
+        // the user retry instead of staring at a frozen progress bar.
+        let chunk = match tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            stream.next(),
+        )
+        .await
+        {
+            Ok(Some(c)) => c,
+            Ok(None) => break,
+            Err(_) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(format!(
+                    "{}: завантаження зависло (60 с без даних)",
+                    spec.label
+                ));
+            }
+        };
         let bytes = chunk.map_err(|e| {
             let _ = std::fs::remove_file(&tmp);
             e.to_string()
@@ -402,8 +438,13 @@ async fn run_download(
             e.to_string()
         })?;
         received += bytes.len() as u64;
-        if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
+        if last_emit.elapsed() >= std::time::Duration::from_millis(150) {
             last_emit = std::time::Instant::now();
+            let in_asset = if total > 0 {
+                (received as f32 / total as f32).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
             let _ = app.emit(
                 "separator:download",
                 DownloadEvent {
@@ -412,6 +453,19 @@ async fn run_download(
                     total,
                     done: false,
                 },
+            );
+            // Mirror the same byte progress into the install phase
+            // card so the user sees the model phase actually moving.
+            installer::emit_phase(
+                app,
+                installer::InstallPhase::Models,
+                &format!(
+                    "{} ({} / {})",
+                    spec.label,
+                    asset_idx + 1,
+                    asset_total
+                ),
+                Some(phase_base + phase_span * in_asset),
             );
         }
     }
