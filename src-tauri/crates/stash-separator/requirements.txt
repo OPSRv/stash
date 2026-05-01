@@ -1,15 +1,26 @@
 # stash-separator runtime deps. uv resolves these inside the venv at
-# `Settings → Separator → Завантажити` and the resulting interpreter
-# is what the in-app job spawns.
+# `Settings → Separator → Install` and the resulting interpreter is
+# what the in-app job spawns.
 #
-# `demucs.api` only exists from demucs 4.0.0 onwards — earlier
-# versions don't expose the `Separator` class the sidecar imports.
-# Pinning exactly to 4.0.1 (the latest 4.x as of writing) takes
-# resolver ambiguity off the table; bumping has to be paired with
-# a smoke test against a real song.
+# Notes on the pins:
+# - `demucs==4.0.1`: the API surface main.py uses
+#   (`demucs.pretrained` + `demucs.apply` + `demucs.audio`) is stable
+#   from 4.0.1 onwards. The newer `demucs.api.Separator` wrapper is
+#   only on git head and isn't in PyPI 4.0.1, so we don't depend on
+#   it. Pinning explicitly takes resolver ambiguity off the table.
+# - `librosa`: drives BPM detection via `librosa.beat.beat_track`
+#   on the separated drums stem. We previously tried BeatNet, but
+#   it imports `madmom` at module load and madmom's PyPI release is
+#   stuck at 0.16.1 (2018) which doesn't build on Python ≥3.10. The
+#   only way to get a working madmom is git+URL, which is outside
+#   the trust boundary of an opt-in installer running on user
+#   machines. librosa's accuracy is ~80-90 % on cleaned drums, which
+#   is good enough for the workflow.
+# - `numpy<2`: librosa 0.10 still pins numpy<2; demucs has no upper
+#   bound but is fine on 1.x.
 
 demucs==4.0.1
-BeatNet>=1.1.0
+librosa>=0.10,<0.12
 torch>=2.2,<3
 torchaudio>=2.2,<3
 numpy>=1.24,<2

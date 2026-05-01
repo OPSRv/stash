@@ -3,9 +3,9 @@
 #
 # Reads a path to a music file (any ffmpeg-decodable format) and runs:
 #   1) Demucs source separation (htdemucs_6s by default — gives a guitar stem)
-#   2) BeatNet tempo + beat tracking on the drum stem (more reliable than
-#      a full mix with vocals/melody/sfx fighting for the beat network's
-#      attention)
+#   2) librosa.beat.beat_track for tempo + beat tracking on the drum
+#      stem (cleaner percussion signal than the full mix where
+#      vocals/melody/sfx blur the onset envelope)
 #
 # Writes a single JSON line to stdout:
 #   {"stems_dir": "...", "stems": {...}, "bpm": 128.4, "beats": [...],
@@ -94,73 +94,99 @@ def resolve_device(arg: str) -> str:
     return "cpu"
 
 
-# Demucs `Separator` invokes this on every internal segment. We map its
-# 0..audio_length progress to our 0.10..0.85 band so the UI bar moves
-# smoothly across the dominant phase of the run (separation itself —
-# decode is fast, file write is fast, only inference is multi-second).
-def _demucs_progress_cb(data: dict[str, Any]) -> None:
-    state = data.get("state", "")
-    if state != "iter":
-        return
-    seg = float(data.get("segment_offset", 0))
-    audio = float(data.get("audio_length", 1))
-    fraction = 0.10 + 0.75 * min(1.0, max(0.0, seg / max(audio, 1.0)))
-    emit_progress(fraction, "separating")
-
-
 def run_separate(args: argparse.Namespace, device: str) -> dict[str, str]:
-    # Imported lazily so `--mode bpm` doesn't pay the demucs import cost
-    # (~2s on cold start).
-    from demucs.api import Separator, save_audio
+    # Lazy-imported so `--mode bpm` doesn't pay the demucs/torch import
+    # cost (~30 s on cold start). We use the low-level
+    # `demucs.pretrained` + `demucs.apply` + `demucs.audio` API rather
+    # than the convenience `demucs.api.Separator` wrapper — that one
+    # was added after the 4.0.1 PyPI release and isn't in the wheels
+    # uv resolves for us. The low-level surface has been stable since
+    # demucs 4.0.0.
+    from demucs.pretrained import get_model
+    from demucs.apply import apply_model
+    from demucs.audio import AudioFile, save_audio
+    import torch
 
     emit_progress(0.05, "loading demucs")
-    sep = Separator(model=args.model, device=device, callback=_demucs_progress_cb)
+    model = get_model(args.model)
+    samplerate = int(getattr(model, "samplerate", 44100))
+    audio_channels = int(getattr(model, "audio_channels", 2))
+    sources: list[str] = list(getattr(model, "sources", []))
+    if not sources:
+        # Bag-of-models bundles (`htdemucs_ft`) put `sources` on the
+        # contained models instead of the bundle itself.
+        inner = getattr(model, "models", None)
+        if inner:
+            sources = list(getattr(inner[0], "sources", []))
+
     emit_progress(0.10, "decoding audio")
-    _origin, separated = sep.separate_audio_file(Path(args.input))
+    wav = AudioFile(args.input).read(
+        streams=0,
+        samplerate=samplerate,
+        channels=audio_channels,
+    )
+    # Per-track standardisation — `apply_model` works in normalised
+    # space and rescales on the way out. Matches what
+    # `demucs.separate.main` does.
+    ref = wav.mean(0)
+    wav_norm = (wav - ref.mean()) / ref.std()
+
+    emit_progress(0.15, "separating")
+    with torch.no_grad():
+        out = apply_model(
+            model,
+            wav_norm[None],
+            device=device,
+            shifts=1,
+            split=True,
+            overlap=0.25,
+            progress=False,
+            num_workers=0,
+        )[0]
+    out = out * ref.std() + ref.mean()
+
     emit_progress(0.85, "writing stems")
-    out = Path(args.out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
     keep: set[str] | None = (
         {s.strip() for s in args.stems.split(",") if s.strip()}
         if args.stems
         else None
     )
     paths: dict[str, str] = {}
-    for stem_name, tensor in separated.items():
+    for source_tensor, stem_name in zip(out, sources):
         if keep is not None and stem_name not in keep:
             continue
-        target = out / f"{stem_name}.wav"
-        save_audio(tensor, target, samplerate=sep.samplerate)
+        target = out_dir / f"{stem_name}.wav"
+        save_audio(source_tensor.cpu(), target, samplerate=samplerate)
         paths[stem_name] = str(target)
     emit_progress(0.92, "stems written")
     return paths
 
 
 def run_bpm(stems_paths: dict[str, str] | None, input_path: str) -> dict[str, Any]:
-    # Prefer the drums stem when separation already ran — beat tracking is
-    # noticeably more confident on a clean percussion signal than on a
-    # full mix where vocals/melody/sfx blur the onset envelope.
-    emit_progress(0.92, "loading beatnet")
-    from BeatNet.BeatNet import BeatNet
+    # Prefer the drums stem when separation already ran — beat
+    # tracking is noticeably more confident on a clean percussion
+    # signal than on a full mix.
+    emit_progress(0.92, "loading librosa")
+    import librosa
     import numpy as np
 
     target = stems_paths.get("drums") if stems_paths else None
     if target is None:
         target = input_path
 
-    estimator = BeatNet(
-        1, mode="offline", inference_model="DBN", plot=[], thread=False
-    )
-    emit_progress(0.95, "detecting tempo")
-    output = estimator.process(target)
-    if output is None or len(output) < 2:
+    emit_progress(0.94, "decoding for bpm")
+    y, sr = librosa.load(target, sr=None, mono=True)
+    emit_progress(0.96, "detecting tempo")
+    # `beat_track` returns either a scalar or a (1,) array depending
+    # on the librosa version; coerce both to a plain float.
+    tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, units="frames")
+    tempo_val = float(np.asarray(tempo).reshape(-1)[0])
+    if not np.isfinite(tempo_val) or tempo_val <= 0:
         return {"bpm": None, "beats": []}
-    beats = [float(t) for t, _ in output]
-    intervals = np.diff(beats)
-    if len(intervals) == 0:
-        return {"bpm": None, "beats": beats}
-    bpm = float(60.0 / np.median(intervals))
-    return {"bpm": round(bpm, 2), "beats": beats}
+    beats = librosa.frames_to_time(beat_frames, sr=sr).astype(float).tolist()
+    return {"bpm": round(tempo_val, 2), "beats": beats}
 
 
 def audio_duration_sec(path: str) -> float | None:

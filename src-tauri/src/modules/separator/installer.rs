@@ -142,12 +142,14 @@ pub fn verify_runtime(app: &AppHandle, app_data: &Path) -> Result<String, String
         app,
         &python,
         "import demucs; \
-         from demucs.api import Separator; \
-         from BeatNet.BeatNet import BeatNet; \
+         from demucs.pretrained import get_model; \
+         from demucs.apply import apply_model; \
+         from demucs.audio import AudioFile, save_audio; \
+         import librosa, librosa.beat; \
          import soundfile; \
          print(demucs.__version__)",
         InstallPhase::Packages,
-        "Перевіряю venv",
+        "Verifying venv",
         std::time::Duration::from_secs(300),
     )?;
     if !output.status.success() {
@@ -341,9 +343,15 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     let probe_output = run_python_probe_with_watchdog(
         app,
         &python,
+        // `demucs.api` only exists on demucs head, not the 4.0.1 PyPI
+        // wheel. Probe the symbols main.py actually imports — the
+        // low-level pretrained/apply/audio surface plus librosa and
+        // soundfile.
         "import demucs; \
-         from demucs.api import Separator; \
-         from BeatNet.BeatNet import BeatNet; \
+         from demucs.pretrained import get_model; \
+         from demucs.apply import apply_model; \
+         from demucs.audio import AudioFile, save_audio; \
+         import librosa, librosa.beat; \
          import soundfile; \
          print(demucs.__version__)",
         InstallPhase::Packages,
