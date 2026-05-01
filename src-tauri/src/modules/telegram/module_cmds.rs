@@ -2638,3 +2638,191 @@ mod voice_action_tests {
         assert!(actions.contains(&"voice:improve:42"));
     }
 }
+
+// ────────────────────────────────────────────────────────────────────
+// /stems and /bpm — Demucs + BeatNet over the Telegram surface.
+// ────────────────────────────────────────────────────────────────────
+//
+// Both commands accept a local file path as the first argument. URLs are
+// not supported here on purpose: downloading a YouTube video from inside
+// Telegram is the `downloader` module's job, and forcing the two paths
+// to fight over yt-dlp / cookies / progress events would tangle the
+// surfaces. The intended flow is "save with /dl, then /stems".
+
+use crate::modules::separator;
+
+pub struct SeparateStemsCmd;
+
+#[async_trait]
+impl CommandHandler for SeparateStemsCmd {
+    fn name(&self) -> &'static str {
+        "stems"
+    }
+    fn description(&self) -> &'static str {
+        "Розкласти аудіо на 6 стемів (vocals/drums/bass/guitar/piano/other) + BPM. Demucs+BeatNet локально."
+    }
+    fn usage(&self) -> &'static str {
+        "/stems <file_path> [stems_csv]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        run_separator_cmd(ctx, args, separator::SeparatorRunArgs {
+            input_path: String::new(),
+            model: None,
+            mode: Some("analyze".into()),
+            stems: None,
+            output_dir: None,
+        })
+        .await
+    }
+}
+
+pub struct DetectBpmCmd;
+
+#[async_trait]
+impl CommandHandler for DetectBpmCmd {
+    fn name(&self) -> &'static str {
+        "bpm"
+    }
+    fn description(&self) -> &'static str {
+        "Визначити BPM аудіофайла без розкладки на стеми. BeatNet, локально."
+    }
+    fn usage(&self) -> &'static str {
+        "/bpm <file_path>"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        run_separator_cmd(ctx, args, separator::SeparatorRunArgs {
+            input_path: String::new(),
+            model: None,
+            mode: Some("bpm".into()),
+            stems: None,
+            output_dir: None,
+        })
+        .await
+    }
+}
+
+async fn run_separator_cmd(
+    ctx: Ctx,
+    args: &str,
+    mut spec: separator::SeparatorRunArgs,
+) -> Reply {
+    let parts = args.trim().splitn(2, char::is_whitespace).collect::<Vec<_>>();
+    let path = match parts.first() {
+        Some(p) if !p.trim().is_empty() => p.trim().trim_matches('"').to_string(),
+        _ => return Reply::text("⚠️ /stems <file_path> [stems_csv]"),
+    };
+    if !std::path::Path::new(&path).is_file() {
+        return Reply::text(format!("⚠️ файл не знайдено: {path}"));
+    }
+    let stems = parts
+        .get(1)
+        .map(|s| {
+            s.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty());
+
+    spec.input_path = path.clone();
+    if stems.is_some() {
+        spec.stems = stems;
+    }
+
+    let app = ctx.app.clone();
+    let state = app.state::<Arc<separator::SeparatorState>>();
+    let state_arc = Arc::clone(&state);
+    let job_id = match separator::enqueue_job(&app, &state_arc, spec) {
+        Ok(id) => id,
+        Err(e) => return Reply::text(format!("⚠️ {e}")),
+    };
+
+    // Wait for the job to settle. The sidecar is single-job, so we poll
+    // the in-memory state every 500ms; this matches the cadence of the
+    // UI's progress events without overloading the lock. Hard cap of
+    // 30 minutes per job — stems separation on CPU averages 2-5×
+    // realtime, and a 30-minute cap covers any realistic input.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30 * 60);
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if std::time::Instant::now() > deadline {
+            return Reply::text("⚠️ separator: тайм-аут (30 хв)");
+        }
+        let snapshot = state_arc
+            .jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|j| j.id == job_id)
+            .cloned();
+        let Some(job) = snapshot else {
+            return Reply::text("⚠️ separator: job lost");
+        };
+        match job.status {
+            separator::JobStatus::Completed => return reply_for_completed_job(&job),
+            separator::JobStatus::Failed => {
+                let err = job.error.unwrap_or_else(|| "невідомо".into());
+                let head = err.lines().next().unwrap_or(&err).to_string();
+                return Reply::text(format!("⚠️ separator: {head}"));
+            }
+            separator::JobStatus::Cancelled => {
+                return Reply::text("⚠️ separator: скасовано");
+            }
+            _ => continue,
+        }
+    }
+}
+
+fn reply_for_completed_job(job: &separator::SeparatorJob) -> Reply {
+    let result = job.result.as_ref();
+    let bpm_line = result
+        .and_then(|r| r.bpm)
+        .map(|b| format!("BPM: {b:.1}"))
+        .unwrap_or_default();
+    let stems_map = result.and_then(|r| r.stems.as_ref());
+
+    let mut text = String::new();
+    if let Some(stems) = stems_map {
+        text.push_str(&format!("🎚 Стеми готові ({})\n", stems.len()));
+    } else {
+        text.push_str("🎚 Готово\n");
+    }
+    if !bpm_line.is_empty() {
+        text.push_str(&bpm_line);
+        text.push('\n');
+    }
+    if let Some(stems) = stems_map {
+        for name in [
+            "vocals", "drums", "bass", "guitar", "piano", "other",
+        ] {
+            if let Some(p) = stems.get(name) {
+                text.push_str(&format!("• {name}: {p}\n"));
+            }
+        }
+    }
+
+    let documents = stems_map
+        .map(|m| {
+            let order = ["vocals", "drums", "bass", "guitar", "piano", "other"];
+            let mut paths: Vec<std::path::PathBuf> = order
+                .iter()
+                .filter_map(|k| m.get(*k))
+                .map(std::path::PathBuf::from)
+                .collect();
+            // Anything the model emits that isn't in our preferred order
+            // (future stems, custom subsets) still gets attached.
+            for (k, v) in m {
+                if !order.contains(&k.as_str()) {
+                    paths.push(std::path::PathBuf::from(v));
+                }
+            }
+            paths
+        })
+        .unwrap_or_default();
+
+    Reply {
+        text: text.trim_end().to_string(),
+        documents,
+        keyboard: None,
+    }
+}

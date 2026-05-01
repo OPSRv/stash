@@ -9,6 +9,7 @@ pub mod notes;
 pub mod ocr;
 pub mod pomodoro;
 pub mod search;
+pub mod separator;
 pub mod system;
 pub mod telegram;
 pub mod terminal;

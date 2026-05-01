@@ -909,6 +909,190 @@ fn truncate(s: &str, max_chars: usize) -> String {
     out
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Separator (Demucs + BeatNet) tools.
+// ────────────────────────────────────────────────────────────────────
+//
+// Stems separation runs for several minutes per song (CPU 2-5×
+// realtime), which exceeds the registry's 5-second per-tool timeout.
+// We don't wait inline: the tool enqueues a job and returns its id +
+// initial status straight away, and the model is expected to follow
+// up with `get_separator_job` to surface the result. This mirrors how
+// `dl_*` tools could behave for long downloads (they don't yet, but
+// it's the same shape).
+
+use crate::modules::separator;
+use tauri::Manager;
+
+pub struct SeparateStems;
+
+#[async_trait]
+impl Tool for SeparateStems {
+    fn name(&self) -> &'static str {
+        "separate_stems"
+    }
+    fn description(&self) -> &'static str {
+        "Розкласти аудіофайл на 6 стемів (vocals/drums/bass/guitar/piano/other) і визначити BPM. \
+         Demucs + BeatNet локально. Повертає `job_id` миттєво — отримайте кінцевий результат \
+         через `get_separator_job(job_id)` після завершення (~2-5× довжини треку на CPU)."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "input_path": {
+                    "type": "string",
+                    "description": "Абсолютний шлях до аудіофайлу (mp3, m4a, flac, ogg, wav, aac, aiff, opus)."
+                },
+                "model": {
+                    "type": "string",
+                    "enum": ["htdemucs_6s", "htdemucs_ft", "htdemucs"],
+                    "description": "Demucs модель. За замовчуванням `htdemucs_6s` (з guitar/piano стемами)."
+                },
+                "stems": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Підмножина стемів (vocals/drums/bass/guitar/piano/other). Без поля — всі."
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Куди зберегти стеми. Без поля — `~/Music/Stash Stems/<source-name>/`."
+                }
+            },
+            "required": ["input_path"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let app = ctx
+            .app
+            .as_ref()
+            .ok_or_else(|| "AppHandle not available in this context".to_string())?;
+        let spec = parse_run_args(&args, "analyze")?;
+        let state = app.state::<Arc<separator::SeparatorState>>();
+        let job_id = separator::enqueue_job(app, &state, spec)?;
+        Ok(json!({
+            "job_id": job_id,
+            "status": "queued",
+            "hint": "poll get_separator_job(job_id) until status is completed/failed/cancelled"
+        }))
+    }
+}
+
+pub struct DetectBpm;
+
+#[async_trait]
+impl Tool for DetectBpm {
+    fn name(&self) -> &'static str {
+        "detect_bpm"
+    }
+    fn description(&self) -> &'static str {
+        "Визначити BPM аудіофайлу без розкладки на стеми. BeatNet локально. Швидше ніж \
+         повний separate_stems, але дещо менш надійно на брудних міксах. Повертає job_id — \
+         отримайте число через `get_separator_job(job_id)`."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "input_path": {
+                    "type": "string",
+                    "description": "Абсолютний шлях до аудіофайлу."
+                }
+            },
+            "required": ["input_path"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let app = ctx
+            .app
+            .as_ref()
+            .ok_or_else(|| "AppHandle not available in this context".to_string())?;
+        let spec = parse_run_args(&args, "bpm")?;
+        let state = app.state::<Arc<separator::SeparatorState>>();
+        let job_id = separator::enqueue_job(app, &state, spec)?;
+        Ok(json!({ "job_id": job_id, "status": "queued" }))
+    }
+}
+
+pub struct GetSeparatorJob;
+
+#[async_trait]
+impl Tool for GetSeparatorJob {
+    fn name(&self) -> &'static str {
+        "get_separator_job"
+    }
+    fn description(&self) -> &'static str {
+        "Поточний стан separator-job: status (queued/running/completed/failed/cancelled), \
+         progress 0..1, phase, BPM та шляхи до стемів коли completed."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "job_id": { "type": "string" }
+            },
+            "required": ["job_id"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let app = ctx
+            .app
+            .as_ref()
+            .ok_or_else(|| "AppHandle not available in this context".to_string())?;
+        let job_id = args
+            .get("job_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing job_id".to_string())?
+            .to_string();
+        let state = app.state::<Arc<separator::SeparatorState>>();
+        let snapshot = state
+            .jobs
+            .lock()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .find(|j| j.id == job_id)
+            .cloned();
+        match snapshot {
+            Some(j) => serde_json::to_value(j).map_err(|e| e.to_string()),
+            None => Ok(json!({ "error": "job not found", "job_id": job_id })),
+        }
+    }
+}
+
+fn parse_run_args(
+    args: &Value,
+    default_mode: &str,
+) -> Result<separator::SeparatorRunArgs, String> {
+    let input_path = args
+        .get("input_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing input_path".to_string())?
+        .to_string();
+    let model = args
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let stems = args.get("stems").and_then(|v| v.as_array()).map(|a| {
+        a.iter()
+            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+            .collect::<Vec<_>>()
+    });
+    let output_dir = args
+        .get("output_dir")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    Ok(separator::SeparatorRunArgs {
+        input_path,
+        model,
+        mode: Some(default_mode.into()),
+        stems,
+        output_dir,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

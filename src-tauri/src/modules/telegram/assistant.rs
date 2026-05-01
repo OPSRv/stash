@@ -439,6 +439,9 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::stash::ListNotes);
     tools.register(super::tools::stash::NavigateTab);
     tools.register(super::tools::stash::InvokeCommand);
+    tools.register(super::tools::stash::SeparateStems);
+    tools.register(super::tools::stash::DetectBpm);
+    tools.register(super::tools::stash::GetSeparatorJob);
     if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>()
     {
         tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));

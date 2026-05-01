@@ -133,6 +133,10 @@ use modules::clipboard::{
 use modules::diarization::{
     diarization_delete, diarization_download, diarization_status, DiarizationState,
 };
+use modules::separator::{
+    separator_cancel, separator_clear_completed, separator_delete, separator_download,
+    separator_list_jobs, separator_run, separator_status, SeparatorState,
+};
 use modules::downloader::{
     commands::{
         dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_detect_quick, dl_extract_subtitles,
@@ -651,6 +655,13 @@ pub fn run() {
             diarization_status,
             diarization_download,
             diarization_delete,
+            separator_status,
+            separator_download,
+            separator_delete,
+            separator_run,
+            separator_cancel,
+            separator_list_jobs,
+            separator_clear_completed,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,
             modules::ipc::install::stash_cli_uninstall,
@@ -794,6 +805,10 @@ pub fn run() {
             let whisper_cfg = data_dir.join("whisper").join("state.json");
             app.manage(WhisperStateHandle::new(whisper_cfg));
             app.manage(DiarizationState::new());
+            // Separator (Demucs + BeatNet sidecar). Wrapped in Arc so the
+            // worker thread (`commands::run_worker`) can hold a reference
+            // without juggling lifetimes through the Tauri state plumbing.
+            app.manage(Arc::new(SeparatorState::new()));
 
             // Terminal — PTY session lazily opened by the first `pty_open`
             // call from the frontend (once the xterm fit addon knows the
@@ -936,6 +951,8 @@ pub fn run() {
             telegram_state.register_command(
                 modules::telegram::module_cmds::AiCmd::new(Arc::clone(&telegram_state)),
             );
+            telegram_state.register_command(modules::telegram::module_cmds::SeparateStemsCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::DetectBpmCmd);
 
             // Outbound watchers — battery + calendar + reminders ticker.
             modules::telegram::battery_watcher::spawn(app.handle().clone());
