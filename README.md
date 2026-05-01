@@ -52,7 +52,7 @@ Stash — свідомий **«Франкенштейн»**. Не тому, що
 | ✈️ | **Telegram** | Власний бот, спарений зі Stash. Inbox для тексту/фото/відео/voice, локальний Whisper-транскриб, OG-preview і YouTube-embed у лінках, slash-команди й AI-tools — один асистент, три транспорти (Telegram, CLI `stash ai "…"`, voice popup). |
 | ⬇️ | **Downloader** | yt-dlp під капотом: відео й аудіо з YouTube та інших джерел, прев'ю, черга, нотифікація по завершенню. Автодетект посилання з буфера й Telegram. |
 | 🎵 | **Music** | Локальний аудіо-плеєр для фонової музики без перемикання на Spotify. |
-| 🎚 | **Stems** | Розкладка треку на 6 інструментальних стемів (vocals/drums/bass/**guitar**/piano/other) через Demucs + локальне визначення BPM через BeatNet. Drag-and-drop або hand-off з Downloader. Demucs/BeatNet не у бандлі — ставляться разово через Settings. |
+| 🎚 | **Stems** | Розкладка треку на 6 інструментальних стемів (vocals/drums/bass/**guitar**/piano/other) через Demucs + локальне визначення BPM через BeatNet. Drag-and-drop або hand-off з Downloader. Python-runtime ставиться через `uv` (ні наших тарболів, ні per-release host-у) — `Settings → Separator → Завантажити` тягне uv → Python 3.11 → venv → demucs+BeatNet+torch локально. |
 | 🥁 | **Metronome** | Метроном з регульованим темпом, розміром такту, режимом тренажера й backing track. |
 | 🍅 | **Pomodoro** | Таймер з кастомними пресетами, історією сесій, нотифікаціями у Stash + Telegram. |
 | 💻 | **Terminal** | Вбудований термінал (`portable-pty`) для швидких команд. Кнопка «Claude Code» — запуск агентної сесії в два кліки. |

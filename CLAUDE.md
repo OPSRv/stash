@@ -34,12 +34,21 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
 
 ### Out-of-process sidecars (Demucs, sherpa-onnx, anything heavy)
 
-Keep ML / heavyweight runtimes **outside** the macOS bundle. The pattern is:
+Keep ML / heavyweight runtimes **outside** the macOS bundle. Two flavours, depending on whether the runtime needs Python:
 
-1. A separate workspace member under `src-tauri/crates/stash-<name>/` (Rust binary) **or** a Python tree under the same path (PyInstaller-frozen) — for libraries that don't have a usable Rust API.
-2. The main app downloads it lazily into `$APPLOCALDATA/<name>/` on first opt-in via Settings, behind a per-asset catalog (see `modules/diarization/catalog.rs` and `modules/separator/catalog.rs`).
-3. `release.yml` builds the sidecar once per tag and uploads it as a release asset. The catalog's `resolve_url` for runtime artifacts targets `https://github.com/<owner>/<repo>/releases/latest/download/<filename>` so a clean install always pulls a sidecar built against the matching app release.
-4. The pipeline spawns the sidecar via `std::process::Command`, streams progress over stderr lines like `progress\t<f>\t<phase>`, and parses a single-line JSON result on stdout. Failures still exit 0 with `{"error":"…"}` — the parent never has to interpret an exit code.
+**Native (Rust / C / dylib)** — `crates/stash-diarize/` is the canonical example.
+
+1. Separate workspace member under `src-tauri/crates/stash-<name>/`.
+2. Main app downloads it lazily into `$APPLOCALDATA/<name>/` on first opt-in via Settings, behind a per-asset catalog.
+3. `release.yml` builds the sidecar once per tag and uploads it as a release asset. The catalog's `resolve_url` for runtime artefacts targets `https://github.com/<owner>/<repo>/releases/latest/download/<filename>` so a clean install always pulls a sidecar built against the matching app release.
+
+**Python (uv-managed venv)** — `crates/stash-separator/` is the canonical example. Don't use PyInstaller — it forces a per-release tarball-host nobody wants to maintain.
+
+1. Source tree under `src-tauri/crates/stash-<name>/` containing `src/main.py` + `requirements.txt`. Both are baked into the main app via `include_str!`, staged on disk during install.
+2. `installer.rs` orchestrates the runtime: download `uv` (single static binary from Astral) → `uv python install 3.11` → `uv venv` → `uv pip install -r requirements.txt`. Each step emits a phase tick on `<module>:install` so Settings renders a staged progress card.
+3. Pipeline spawns `<venv>/bin/python <staged-main.py>` instead of a frozen exe. Nothing per-release to host.
+
+**Both flavours** spawn the sidecar via `std::process::Command`, stream progress over stderr lines like `progress\t<f>\t<phase>`, and parse a single-line JSON result on stdout. Failures still exit 0 with `{"error":"…"}` — the parent never has to interpret an exit code.
 
 ## Agent surface (Telegram + CLI + voice popup)
 

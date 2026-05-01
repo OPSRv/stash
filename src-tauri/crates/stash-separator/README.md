@@ -1,72 +1,32 @@
 # stash-separator
 
-Out-of-process Python sidecar for the Stash app. Runs Meta's [Demucs](https://github.com/facebookresearch/demucs) for music source separation and [BeatNet](https://github.com/mjhydri/BeatNet) for tempo detection.
+Source for the audio analysis pipeline of Stash's `separator` module — Meta's [Demucs](https://github.com/facebookresearch/demucs) for music source separation and [BeatNet](https://github.com/mjhydri/BeatNet) for tempo detection.
 
-This package is **not part of the macOS `.app` bundle**. It is built once per release on `macos-14` (Apple Silicon) by `.github/workflows/release.yml`, code-signed, notarized, packaged as a tarball, and uploaded as a release asset. The Stash app downloads it lazily on user opt-in into `$APPLOCALDATA/separator/`.
+The two files here — `src/main.py` and `requirements.txt` — are the **source of truth** the running app uses. They are baked into the main `stash-app` binary at compile time via Rust `include_str!`, then staged on disk under `$APPLOCALDATA/separator/` the first time the user opts in. There is **no separate tarball** to host: the runtime is provisioned at install time by `installer.rs` using [uv](https://github.com/astral-sh/uv) (download `uv` → `uv python install 3.11` → `uv venv` → `uv pip install -r requirements.txt`).
 
-The same out-of-process layout that `crates/stash-diarize/` uses for diarization, but with a Python toolchain instead of Rust because Demucs and BeatNet are Python-only.
-
-## Hosting the tarball somewhere other than the stash GitHub release
-
-The default download URL is `https://github.com/OPSRv/stash/releases/latest/download/stash-separator-macos-arm64.tar.gz`, which couples the sidecar's lifetime to your app release tags — every new tag re-publishes it. If you'd rather host the tarball on a stable mirror (HuggingFace dataset, Cloudflare R2, S3, plain object storage), set `STASH_SEPARATOR_URL` at app build time and the catalog picks it up via `option_env!`:
-
-```sh
-# Example: HuggingFace dataset, public, free, ~50 GB cap.
-STASH_SEPARATOR_URL='https://huggingface.co/<user>/stash-separator/resolve/main' \
-  npm run tauri build
-```
-
-The catalog appends `/<filename>` to whatever you provide, so the resolved URL becomes `<base>/stash-separator-macos-arm64.tar.gz`. HTTPS only — the in-app downloader refuses other schemes as a defensive guard.
-
-You still have to upload the tarball to your chosen host yourself; the build step that produces `dist/stash-separator/` is unchanged.
+This is intentional. PyInstaller bundles couple the sidecar to a release tag and force the project to host a 280 MB tarball for every version; the uv route ships zero per-release artefacts and the tarball-host question goes away.
 
 ## Layout
 
-- `src/main.py` — CLI entry (`--mode analyze | separate | bpm`)
-- `requirements.txt` — Python pins (demucs, BeatNet, torch, soundfile)
-- `stash-separator.spec` — PyInstaller `--onedir` spec
-- `build.sh` — local build helper
+- `src/main.py` — CLI entry (`--mode analyze | separate | bpm`). Read by the Rust app via `include_str!`.
+- `requirements.txt` — Python pins (demucs, BeatNet, torch, soundfile, numpy<2). Same — staged via `include_str!`.
 
-## Local build
+## Running locally without Stash
 
-```sh
-./build.sh
-```
-
-Produces `dist/stash-separator/` with the binary + bundled libs. Copy that directory to `~/Library/Application Support/com.stash.popup/separator/bin/` to test the running Stash app against your local build.
-
-## CLI
+For quick iteration on `main.py` outside the app:
 
 ```sh
-stash-separator --mode analyze \
-                --input song.mp3 \
-                --out-dir ./stems \
-                --model htdemucs_6s \
-                --device auto
+cd src-tauri/crates/stash-separator
+uv venv .venv --python 3.11
+uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/python src/main.py --mode analyze \
+    --input ~/Music/song.mp3 \
+    --out-dir /tmp/stems \
+    --model htdemucs_6s \
+    --device auto
 ```
 
-Writes a single JSON line to stdout on completion:
-
-```json
-{
-  "stems_dir": "./stems",
-  "stems": {
-    "vocals":  "./stems/vocals.wav",
-    "drums":   "./stems/drums.wav",
-    "bass":    "./stems/bass.wav",
-    "guitar":  "./stems/guitar.wav",
-    "piano":   "./stems/piano.wav",
-    "other":   "./stems/other.wav"
-  },
-  "bpm": 128.4,
-  "beats": [0.21, 0.68, 1.15, 1.62, ...],
-  "duration_sec": 240.5,
-  "model": "htdemucs_6s",
-  "device": "mps"
-}
-```
-
-Progress is written to stderr as `progress\t<0..1>\t<phase>` lines. On failure the binary still exits 0 with `{"error":"..."}` — the parent never has to interpret an exit code (same contract as `stash-diarize`).
+The script writes a single JSON line to stdout and `progress\t<0..1>\t<phase>` lines to stderr. On failure it still exits 0 with `{"error":"..."}` — the in-app parser never has to interpret an exit code.
 
 ## Output filenames
 
@@ -79,7 +39,7 @@ Use `--stems vocals,drums` to keep only a subset.
 
 ## BPM
 
-`--mode analyze` runs BeatNet on the **drums** stem after separation finishes. Beat tracking is noticeably more confident on a clean percussion signal than on a full mix.
+`--mode analyze` runs BeatNet on the **drums** stem after separation finishes — beat tracking is noticeably more confident on a clean percussion signal than on a full mix.
 
 `--mode bpm` runs BeatNet directly on the input file (no separation). Faster, slightly less reliable on busy mixes.
 
