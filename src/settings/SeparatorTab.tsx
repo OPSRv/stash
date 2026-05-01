@@ -272,6 +272,14 @@ export const SeparatorTab = () => {
               const active = installPhase?.phase === p;
               const showProgress =
                 active && typeof installPhase?.progress === 'number';
+              // Active phase shows the live `message` from the
+              // backend (carries the watchdog's "Перевіряю venv
+              // (Ns)…" tick + per-asset names during model fetch).
+              // Idle / completed steps fall back to the static label
+              // so the timeline still reads top-to-bottom.
+              const text = active
+                ? (installPhase?.message ?? PHASE_LABEL[p])
+                : PHASE_LABEL[p];
               return (
                 <li
                   key={p}
@@ -284,7 +292,7 @@ export const SeparatorTab = () => {
                   <span className="t-tertiary font-mono w-4">
                     {done ? '✓' : active ? '·' : '·'}
                   </span>
-                  <span className="flex-1 t-primary">{PHASE_LABEL[p]}</span>
+                  <span className="flex-1 t-primary">{text}</span>
                   {showProgress && (
                     <ProgressBar
                       value={installPhase!.progress!}

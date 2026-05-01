@@ -363,7 +363,7 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     let demucs_version = String::from_utf8_lossy(&probe_output.stdout)
         .trim()
         .to_string();
-    tracing::info!(target: "separator", demucs_version, "venv import probe ok");
+    tracing::info!(demucs_version, "venv import probe ok");
     emit(
         app,
         InstallPhase::Packages,
@@ -418,6 +418,10 @@ fn run_python_probe_with_watchdog(
                     &format!("{label} ({} с)…", elapsed.as_secs()),
                     None,
                 );
+                // Mirror to the dev console — without this the
+                // 30-60 s torch import looks identical to a hang
+                // in `tauri dev` output.
+                tracing::info!(elapsed_s = elapsed.as_secs(), "{label} still running");
                 std::thread::sleep(std::time::Duration::from_secs(3));
             }
             Err(e) => return Err(format!("try_wait probe: {e}")),
