@@ -27,21 +27,56 @@ use super::state::{
 };
 
 /// `uv` is small (~25 MB tarball, ~50 MB extracted), single static
-/// binary. Apple Silicon only — Stash dropped Intel support, mirrors
-/// the rest of the project. Astral pins their release naming to
-/// `uv-aarch64-apple-darwin.tar.gz` so this URL is stable across uv
-/// versions.
-#[cfg(target_arch = "aarch64")]
-const UV_URL: &str =
-    "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz";
-#[cfg(not(target_arch = "aarch64"))]
-const UV_URL: &str =
-    "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz";
+/// binary. Astral pins their release naming to
+/// `uv-<triple>-apple-darwin.tar.gz`, so picking the right tarball
+/// just means picking the right triple. Crucially that's a *runtime*
+/// decision, not compile-time: if stash-app was compiled for x86_64
+/// (rustup default on a freshly-imaged Mac is often Intel-targeted
+/// even on Apple Silicon), `cfg!(target_arch = "aarch64")` would lie
+/// and pull an x86_64 uv onto an arm64 host — uv would then install
+/// an x86_64 Python, and PyPI wheels with only arm64 builds (numba,
+/// llvmlite, scikit-learn) would force a from-source compile that
+/// requires LLVM and breaks. Detecting via `uname -m` keeps the
+/// install matched to the *machine*, not the binary.
+fn uv_url() -> &'static str {
+    if host_is_arm64() {
+        "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-apple-darwin.tar.gz"
+    } else {
+        "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-apple-darwin.tar.gz"
+    }
+}
 
-/// Python version we pin the venv to. 3.11 is the Demucs-GUI target
-/// of choice and the most-tested combination with current `torch` and
-/// `BeatNet` wheels on macOS arm64.
-const PYTHON_VERSION: &str = "3.11";
+/// Spec passed to `uv python install` and `uv venv --python`. Same
+/// rationale as `uv_url`: explicitly pin the Apple Silicon triple
+/// when the host is arm64, even if the parent process is x86_64.
+fn python_spec() -> &'static str {
+    if host_is_arm64() {
+        "cpython-3.11-aarch64-apple-darwin"
+    } else {
+        "cpython-3.11-x86_64-apple-darwin"
+    }
+}
+
+fn host_is_arm64() -> bool {
+    // `uname -m` is the only place macOS reliably reports physical
+    // CPU family even when the calling process is running through
+    // Rosetta. Cached on first call so we don't fork a child every
+    // time `ensure_uv` runs.
+    static CELL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CELL.get_or_init(|| {
+        std::process::Command::new("uname")
+            .arg("-m")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim() == "arm64")
+            .unwrap_or(cfg!(target_arch = "aarch64"))
+    })
+}
+
+// Python version is encoded inside `python_spec()` rather than a
+// standalone constant — the full triple (cpython-3.11-<arch>-apple-
+// darwin) is what `uv python install` and `uv venv --python` want.
 
 /// `crates/stash-separator/src/main.py` — the CLI entry the venv runs.
 /// `include_str!` baked at compile time so we don't need to ship a
@@ -211,7 +246,9 @@ async fn ensure_uv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
 
     let tmp = bin_dir.join("uv.tar.gz.part");
     let _ = std::fs::remove_file(&tmp);
-    download_with_progress(app, UV_URL, &tmp, InstallPhase::Uv).await?;
+    let url = uv_url();
+    tracing::info!(url, host_arm64 = host_is_arm64(), "uv download start");
+    download_with_progress(app, url, &tmp, InstallPhase::Uv).await?;
 
     emit(app, InstallPhase::Uv, "Unpacking…", Some(0.95));
     // `tar` is part of macOS, no extra crate needed. The Astral
@@ -256,29 +293,34 @@ async fn ensure_uv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
 }
 
 fn ensure_python(app: &AppHandle, app_data: &Path) -> Result<(), String> {
+    let spec = python_spec();
     emit(
         app,
         InstallPhase::Python,
-        &format!("Checking Python {PYTHON_VERSION}…"),
+        &format!("Checking Python {spec}…"),
         None,
     );
     let uv = uv_path(app_data);
-    // `uv python install <version>` is idempotent — exits 0 if the
-    // requested version is already managed. Cheap to call every install
-    // pass; saves us a separate "is python installed" probe.
+    // `uv python install <spec>` is idempotent — exits 0 if the
+    // requested version is already managed. Cheap to call every
+    // install pass; saves us a separate "is python installed"
+    // probe. We pass the full triple instead of just "3.11" so an
+    // x86_64 stash binary running on Apple Silicon doesn't end up
+    // with x86_64 Python (which would force from-source builds for
+    // every wheel that only ships arm64 binaries on PyPI).
     let status = Command::new(&uv)
-        .args(["python", "install", PYTHON_VERSION])
+        .args(["python", "install", spec])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .status()
         .map_err(|e| format!("spawn uv python install: {e}"))?;
     if !status.success() {
-        return Err(format!("uv python install {PYTHON_VERSION} exited {status}"));
+        return Err(format!("uv python install {spec} exited {status}"));
     }
     emit(
         app,
         InstallPhase::Python,
-        &format!("Python {PYTHON_VERSION} ready"),
+        &format!("Python {spec} ready"),
         None,
     );
     Ok(())
@@ -296,7 +338,7 @@ fn ensure_venv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     let status = Command::new(&uv)
         .arg("venv")
         .arg("--python")
-        .arg(PYTHON_VERSION)
+        .arg(python_spec())
         .arg(&venv)
         .status()
         .map_err(|e| format!("spawn uv venv: {e}"))?;
