@@ -57,58 +57,55 @@ describe('SeparatorTab', () => {
     mockedInvoke.mockReset();
   });
 
-  it('shows the "не встановлено" copy with a primary Download button', async () => {
+  it('shows the "not installed" copy with a primary Install button', async () => {
     mockBackend(notInstalled);
     render(<SeparatorTab />);
-    expect(await screen.findByText(/не встановлено/i)).toBeInTheDocument();
-    const buttons = await screen.findAllByRole('button', { name: /^Завантажити$/ });
-    // Two buttons: the primary one for the base pack, the secondary for
-    // the optional FT pack. Both labelled "Завантажити" — first is the
-    // primary action and must be enabled.
+    expect(await screen.findByText(/not installed/i)).toBeInTheDocument();
+    const buttons = await screen.findAllByRole('button', { name: /^Install$/ });
+    // Two buttons: the primary one for the base pack, the secondary
+    // for the optional FT pack. Both labelled "Install" — the first
+    // is the primary action and must be enabled.
     expect(buttons.length).toBe(2);
     expect(buttons[0]).toBeEnabled();
   });
 
-  it('clicking the primary Download invokes separator_download with withFt=false', async () => {
+  it('clicking the primary Install invokes separator_download with withFt=false', async () => {
     mockBackend(notInstalled);
     render(<SeparatorTab />);
-    const buttons = await screen.findAllByRole('button', { name: /^Завантажити$/ });
+    const buttons = await screen.findAllByRole('button', { name: /^Install$/ });
     await userEvent.click(buttons[0]);
     expect(mockedInvoke).toHaveBeenCalledWith('separator_download', {
       withFt: false,
     });
   });
 
-  it('disables the FT download button until the base pack is ready', async () => {
+  it('disables the FT install button until the base pack is ready', async () => {
     mockBackend(notInstalled);
     render(<SeparatorTab />);
-    const buttons = await screen.findAllByRole('button', { name: /^Завантажити$/ });
+    const buttons = await screen.findAllByRole('button', { name: /^Install$/ });
     expect(buttons[1]).toBeDisabled();
   });
 
-  it('shows "Видалити все" + Прибрати and no Download when fully installed', async () => {
+  it('shows Wipe + Remove and no Install when fully installed', async () => {
     mockBackend(fullyInstalled);
     render(<SeparatorTab />);
-    expect(await screen.findByRole('button', { name: 'Видалити все' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Прибрати' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Wipe' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /^Завантажити$/ }),
+      screen.queryByRole('button', { name: /^Install$/ }),
     ).not.toBeInTheDocument();
   });
 
-  it('exposes "Видалити все" alongside Download when something is partially staged', async () => {
-    // Symptom seen in the field: install_flag was stamped against a
-    // pre-fix venv, runtime_ready=true but the actual import probe
-    // would fail. The user needs a way to wipe and start over without
-    // having `status.ready` flip to true first.
+  it('exposes Wipe alongside Install when something is partially staged', async () => {
+    // Field symptom: install_flag was stamped against a pre-fix venv,
+    // runtime_ready=true but the actual import probe would fail. The
+    // user needs a way to wipe and start over without having
+    // `status.ready` flip to true first.
     mockBackend({ ...notInstalled, runtime_ready: true });
     render(<SeparatorTab />);
-    // There are two "Завантажити" buttons (core install + optional FT
-    // pack); we just need to confirm both are present alongside the
-    // wipe button.
-    const downloads = await screen.findAllByRole('button', { name: /^Завантажити$/ });
-    expect(downloads.length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByRole('button', { name: 'Видалити все' })).toBeInTheDocument();
+    const installs = await screen.findAllByRole('button', { name: /^Install$/ });
+    expect(installs.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('button', { name: 'Wipe' })).toBeEnabled();
   });
 
   it('renders one row per catalog asset', async () => {

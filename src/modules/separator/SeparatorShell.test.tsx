@@ -41,8 +41,8 @@ describe('SeparatorShell', () => {
   it('shows the install gate when assets are not installed', async () => {
     mockBackend({ status: notInstalled });
     render(<SeparatorShell />);
-    expect(await screen.findByText(/ще не встановлено/i)).toBeInTheDocument();
-    expect(screen.getByText(/Налаштування/i)).toBeInTheDocument();
+    expect(await screen.findByText(/not installed/i)).toBeInTheDocument();
+    expect(screen.getByText(/Settings/i)).toBeInTheDocument();
   });
 
   it('renders the drop-zone when the install is ready and there are no jobs', async () => {
@@ -90,7 +90,7 @@ describe('SeparatorShell', () => {
     expect(screen.getByText(/Song.mp3/)).toBeInTheDocument();
     // Phase label is translated to ukrainian; the percentage lives in
     // a separate node next to it.
-    expect(screen.getByText(/Розділяю стеми/)).toBeInTheDocument();
+    expect(screen.getByText(/Separating stems/)).toBeInTheDocument();
     expect(screen.getByText(/40%/)).toBeInTheDocument();
     expect(screen.getByTestId('done-sep-2')).toBeInTheDocument();
     expect(screen.getByText(/BPM 128\.4/)).toBeInTheDocument();

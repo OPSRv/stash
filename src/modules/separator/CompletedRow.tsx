@@ -23,13 +23,13 @@ export function CompletedRow({ job, onRemove }: CompletedRowProps) {
     try {
       await navigator.clipboard.writeText(path);
       toast({
-        title: 'Шлях скопійовано',
+        title: 'Path copied',
         description: filename(path),
         variant: 'success',
       });
     } catch (e) {
       toast({
-        title: 'Не вдалося скопіювати',
+        title: 'Could not copy',
         description: String(e),
         variant: 'error',
       });
@@ -57,10 +57,10 @@ export function CompletedRow({ job, onRemove }: CompletedRowProps) {
             )}
             {failed && (
               <span className="text-red-300/80" data-testid="job-error">
-                Помилка
+                Failed
               </span>
             )}
-            {cancelled && <span>Скасовано</span>}
+            {cancelled && <span>Cancelled</span>}
           </div>
         </div>
         {job.result?.stems_dir && (
@@ -69,7 +69,7 @@ export function CompletedRow({ job, onRemove }: CompletedRowProps) {
             variant="soft"
             onClick={() => revealFile(job.result!.stems_dir!)}
           >
-            Відкрити папку
+            Open folder
           </Button>
         )}
         <Button
@@ -77,8 +77,8 @@ export function CompletedRow({ job, onRemove }: CompletedRowProps) {
           variant="ghost"
           tone="danger"
           shape="square"
-          aria-label="Прибрати з історії"
-          title="Прибрати з історії"
+          aria-label="Remove from history"
+          title="Remove from history"
           onClick={() => onRemove(job.id)}
         >
           ×
@@ -105,10 +105,10 @@ export function CompletedRow({ job, onRemove }: CompletedRowProps) {
                 {filename(path)}
               </div>
               <div className="absolute right-1 top-1 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                <IconButton title="Показати у Finder" onClick={() => revealFile(path)}>
+                <IconButton title="Show in Finder" onClick={() => revealFile(path)}>
                   <ExternalIcon size={12} />
                 </IconButton>
-                <IconButton title="Скопіювати шлях" onClick={() => copyPath(path)}>
+                <IconButton title="Copy path" onClick={() => copyPath(path)}>
                   <CopyIcon size={12} />
                 </IconButton>
               </div>

@@ -43,9 +43,9 @@ export function SeparatorShell() {
   }, [refreshStatus]);
 
   // Cross-module handoff from `downloader`. The emitter side is wired
-  // in Task #9 (CompletedDownloadRow), so this listener is the standing
-  // contract: any module that fires `stash:navigate` with detail
-  // `{ tabId: 'separator', file }` will pre-fill our run.
+  // in CompletedDownloadRow; we listen here so the pre-fill works as
+  // soon as both are landed. Detail shape:
+  // `{ tabId: 'separator', file: '<absolute path>' }`.
   useEffect(() => {
     const onNav = (ev: Event) => {
       const detail = (ev as CustomEvent<{ tabId?: string; file?: string }>).detail;
@@ -114,14 +114,14 @@ export function SeparatorShell() {
   if (shell.kind === 'loading') {
     return (
       <div className="flex h-full items-center justify-center text-meta opacity-60">
-        Завантаження…
+        Loading…
       </div>
     );
   }
   if (shell.kind === 'error') {
     return (
       <div role="alert" className="p-6 text-body opacity-80">
-        Помилка: {shell.message}
+        Error: {shell.message}
       </div>
     );
   }
@@ -129,11 +129,12 @@ export function SeparatorShell() {
     return (
       <div className="flex flex-col gap-3 p-6">
         <p className="text-body opacity-80">
-          Розділення на стеми + визначення BPM ще не встановлено.
+          Stem separation + BPM detection is not installed yet.
         </p>
         <p className="text-meta opacity-60">
-          Перейдіть у Налаштування → Separator і завантажте Demucs+BeatNet
-          (~360&nbsp;МБ для 6-stem). 4-stem fine-tuned моделі — ще +320&nbsp;МБ опційно.
+          Open Settings → Separator and download Demucs+BeatNet
+          (~360&nbsp;MB for 6-stem). The 4-stem fine-tuned models cost an extra
+          +320&nbsp;MB optionally.
         </p>
       </div>
     );
@@ -162,13 +163,13 @@ export function SeparatorShell() {
       {done.length > 0 && (
         <div className="flex flex-col gap-2" data-testid="separator-completed-jobs">
           <div className="flex items-center justify-between">
-            <span className="text-meta opacity-60">Готово</span>
+            <span className="text-meta opacity-60">Done</span>
             <button
               type="button"
               onClick={clearAllCompleted}
               className="text-meta opacity-60 hover:opacity-100"
             >
-              Очистити
+              Clear
             </button>
           </div>
           <ul className="flex flex-col gap-2">

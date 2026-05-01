@@ -2659,7 +2659,7 @@ impl CommandHandler for SeparateStemsCmd {
         "stems"
     }
     fn description(&self) -> &'static str {
-        "Розкласти аудіо на 6 стемів (vocals/drums/bass/guitar/piano/other) + BPM. Demucs+BeatNet локально."
+        "Split audio into 6 stems (vocals/drums/bass/guitar/piano/other) + detect BPM. Demucs+BeatNet, local."
     }
     fn usage(&self) -> &'static str {
         "/stems <file_path> [stems_csv]"
@@ -2684,7 +2684,7 @@ impl CommandHandler for DetectBpmCmd {
         "bpm"
     }
     fn description(&self) -> &'static str {
-        "Визначити BPM аудіофайла без розкладки на стеми. BeatNet, локально."
+        "Detect BPM of an audio file without stem separation. BeatNet, local."
     }
     fn usage(&self) -> &'static str {
         "/bpm <file_path>"
@@ -2712,7 +2712,7 @@ async fn run_separator_cmd(
         _ => return Reply::text("⚠️ /stems <file_path> [stems_csv]"),
     };
     if !std::path::Path::new(&path).is_file() {
-        return Reply::text(format!("⚠️ файл не знайдено: {path}"));
+        return Reply::text(format!("⚠️ file not found: {path}"));
     }
     let stems = parts
         .get(1)
@@ -2746,7 +2746,7 @@ async fn run_separator_cmd(
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         if std::time::Instant::now() > deadline {
-            return Reply::text("⚠️ separator: тайм-аут (30 хв)");
+            return Reply::text("⚠️ separator: timeout (30 min)");
         }
         let snapshot = state_arc
             .jobs
@@ -2761,12 +2761,12 @@ async fn run_separator_cmd(
         match job.status {
             separator::JobStatus::Completed => return reply_for_completed_job(&job),
             separator::JobStatus::Failed => {
-                let err = job.error.unwrap_or_else(|| "невідомо".into());
+                let err = job.error.unwrap_or_else(|| "unknown".into());
                 let head = err.lines().next().unwrap_or(&err).to_string();
                 return Reply::text(format!("⚠️ separator: {head}"));
             }
             separator::JobStatus::Cancelled => {
-                return Reply::text("⚠️ separator: скасовано");
+                return Reply::text("⚠️ separator: cancelled");
             }
             _ => continue,
         }
@@ -2783,9 +2783,9 @@ fn reply_for_completed_job(job: &separator::SeparatorJob) -> Reply {
 
     let mut text = String::new();
     if let Some(stems) = stems_map {
-        text.push_str(&format!("🎚 Стеми готові ({})\n", stems.len()));
+        text.push_str(&format!("🎚 Stems ready ({})\n", stems.len()));
     } else {
-        text.push_str("🎚 Готово\n");
+        text.push_str("🎚 Done\n");
     }
     if !bpm_line.is_empty() {
         text.push_str(&bpm_line);

@@ -111,7 +111,7 @@ pub async fn separator_download(
     {
         let mut flag = state.install_in_flight.lock().unwrap();
         if *flag {
-            return Err("Встановлення вже триває".into());
+            return Err("Install already in progress".into());
         }
         *flag = true;
     }
@@ -134,7 +134,7 @@ async fn run_install_inner(
     installer::emit_phase(
         app,
         installer::InstallPhase::Uv,
-        "Перевіряю стан…",
+        "Checking install state…",
         Some(0.0),
     );
 
@@ -145,13 +145,13 @@ async fn run_install_inner(
         // pre-fix install can still leave the venv unable to import
         // demucs.api. Re-run the cheap probe; on failure, wipe the
         // runtime and reinstall fresh so the user doesn't have to
-        // open Settings → Видалити themselves.
+        // hit Wipe themselves.
         if let Err(e) = installer::verify_runtime(app, data_dir) {
-            tracing::warn!(target: "separator", error = %e, "stale runtime — reinstalling");
+            tracing::warn!(error = %e, "stale runtime — reinstalling");
             installer::emit_phase(
                 app,
                 installer::InstallPhase::Uv,
-                "Зіпсований venv — перевстановлюю…",
+                "Broken venv — reinstalling…",
                 None,
             );
             installer::purge_runtime(data_dir)?;
@@ -168,7 +168,7 @@ async fn run_install_inner(
     installer::emit_phase(
         app,
         installer::InstallPhase::Models,
-        "Завантажую моделі…",
+        "Downloading models…",
         Some(0.0),
     );
     for (idx, a) in targets.iter().enumerate() {
@@ -192,7 +192,7 @@ async fn run_install_inner(
             installer::emit_phase(
                 app,
                 installer::InstallPhase::Models,
-                &format!("{} вже на диску", a.label),
+                &format!("{} already on disk", a.label),
                 Some((idx + 1) as f32 / total as f32),
             );
             continue;
@@ -210,7 +210,7 @@ async fn run_install_inner(
     installer::emit_phase(
         app,
         installer::InstallPhase::Done,
-        "Готово",
+        "Done",
         Some(1.0),
     );
     Ok(())
@@ -453,7 +453,7 @@ async fn run_download(
             Err(_) => {
                 let _ = std::fs::remove_file(&tmp);
                 return Err(format!(
-                    "{}: завантаження зависло (60 с без даних)",
+                    "{}: download stalled (60 s without data)",
                     spec.label
                 ));
             }

@@ -42,7 +42,7 @@ describe('DropZone', () => {
     const onPick = vi.fn();
     mockedOpen.mockResolvedValue('/Music/picked.flac');
     render(<DropZone onPick={onPick} />);
-    await userEvent.click(screen.getByRole('button', { name: /виберіть файл/i }));
+    await userEvent.click(screen.getByRole('button', { name: /pick a file/i }));
     expect(mockedOpen).toHaveBeenCalled();
     // After the dialog resolves we should hand the path off.
     await Promise.resolve();

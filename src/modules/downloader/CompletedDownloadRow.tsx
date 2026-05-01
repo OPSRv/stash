@@ -162,8 +162,8 @@ const CompletedDownloadRowImpl = ({
           size="sm"
           variant="soft"
           onClick={sendToStems}
-          title="Розділити на стеми (Demucs) і визначити BPM"
-          aria-label="Розділити на стеми"
+          title="Split into stems (Demucs) and detect BPM"
+          aria-label="Split into stems"
         >
           Stems
         </Button>

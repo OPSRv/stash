@@ -197,10 +197,10 @@ fn write_if_changed(path: &Path, bytes: &[u8]) -> Result<(), String> {
 async fn ensure_uv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     let target = uv_path(app_data);
     if target.is_file() {
-        emit(app, InstallPhase::Uv, "uv вже встановлено", Some(1.0));
+        emit(app, InstallPhase::Uv, "uv already installed", Some(1.0));
         return Ok(());
     }
-    emit(app, InstallPhase::Uv, "Завантажую uv…", Some(0.0));
+    emit(app, InstallPhase::Uv, "Downloading uv…", Some(0.0));
     let bin_dir = target
         .parent()
         .ok_or_else(|| "uv target has no parent dir".to_string())?
@@ -211,7 +211,7 @@ async fn ensure_uv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     let _ = std::fs::remove_file(&tmp);
     download_with_progress(app, UV_URL, &tmp, InstallPhase::Uv).await?;
 
-    emit(app, InstallPhase::Uv, "Розпаковую…", Some(0.95));
+    emit(app, InstallPhase::Uv, "Unpacking…", Some(0.95));
     // `tar` is part of macOS, no extra crate needed. The Astral
     // tarball lays the `uv` binary inside `uv-<triple>/`, so we
     // extract into a scratch dir and then move just the binary out.
@@ -249,7 +249,7 @@ async fn ensure_uv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
         .arg(&target)
         .status();
 
-    emit(app, InstallPhase::Uv, "uv готово", Some(1.0));
+    emit(app, InstallPhase::Uv, "uv ready", Some(1.0));
     Ok(())
 }
 
@@ -257,7 +257,7 @@ fn ensure_python(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     emit(
         app,
         InstallPhase::Python,
-        &format!("Перевіряю Python {PYTHON_VERSION}…"),
+        &format!("Checking Python {PYTHON_VERSION}…"),
         None,
     );
     let uv = uv_path(app_data);
@@ -276,7 +276,7 @@ fn ensure_python(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     emit(
         app,
         InstallPhase::Python,
-        &format!("Python {PYTHON_VERSION} готовий"),
+        &format!("Python {PYTHON_VERSION} ready"),
         None,
     );
     Ok(())
@@ -286,10 +286,10 @@ fn ensure_venv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     let venv = venv_dir(app_data);
     let python = python_path(app_data);
     if python.is_file() {
-        emit(app, InstallPhase::Venv, "venv вже існує", None);
+        emit(app, InstallPhase::Venv, "venv already exists", None);
         return Ok(());
     }
-    emit(app, InstallPhase::Venv, "Створюю Python venv…", None);
+    emit(app, InstallPhase::Venv, "Creating Python venv…", None);
     let uv = uv_path(app_data);
     let status = Command::new(&uv)
         .arg("venv")
@@ -301,7 +301,7 @@ fn ensure_venv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     if !status.success() {
         return Err(format!("uv venv exited {status}"));
     }
-    emit(app, InstallPhase::Venv, "venv готове", None);
+    emit(app, InstallPhase::Venv, "venv ready", None);
     Ok(())
 }
 
@@ -309,7 +309,7 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     emit(
         app,
         InstallPhase::Packages,
-        "Встановлюю demucs + BeatNet + torch (~1.5 GB, кілька хвилин)…",
+        "Installing demucs + BeatNet + torch (~1.5 GB, a few minutes)…",
         None,
     );
     let uv = uv_path(app_data);
@@ -335,7 +335,7 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     emit(
         app,
         InstallPhase::Packages,
-        "Перевіряю venv (torch cold-start триває ~30–60 с)…",
+        "Verifying venv (torch cold-start takes ~30–60 s)…",
         None,
     );
     let probe_output = run_python_probe_with_watchdog(
@@ -347,7 +347,7 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
          import soundfile; \
          print(demucs.__version__)",
         InstallPhase::Packages,
-        "Перевіряю venv",
+        "Verifying venv",
         std::time::Duration::from_secs(300),
     )?;
     if !probe_output.status.success() {
@@ -355,7 +355,7 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
         return Err(format!(
             "Python venv collected wheels but cannot import demucs.api / \
              BeatNet / soundfile. The venv is in an inconsistent state — \
-             use «Settings → Separator → Видалити все» and try again. \
+             use Settings → Separator → Wipe and try again. \
              Detail:\n{}",
             stderr.trim()
         ));
@@ -367,7 +367,7 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     emit(
         app,
         InstallPhase::Packages,
-        &format!("demucs {demucs_version} готовий"),
+        &format!("demucs {demucs_version} ready"),
         Some(1.0),
     );
     Ok(())
@@ -415,7 +415,7 @@ fn run_python_probe_with_watchdog(
                 emit(
                     app,
                     phase,
-                    &format!("{label} ({} с)…", elapsed.as_secs()),
+                    &format!("{label} ({} s)…", elapsed.as_secs()),
                     None,
                 );
                 // Mirror to the dev console — without this the

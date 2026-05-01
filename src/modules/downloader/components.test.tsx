@@ -283,7 +283,7 @@ describe('CompletedDownloadRow', () => {
         onRetry={() => {}}
       />
     );
-    const stems = screen.getByRole('button', { name: 'Розділити на стеми' });
+    const stems = screen.getByRole('button', { name: 'Split into stems' });
     await user.click(stems);
     const ev = dispatchSpy.mock.calls.find(
       (c) => (c[0] as Event).type === 'stash:navigate',
@@ -303,7 +303,7 @@ describe('CompletedDownloadRow', () => {
       />
     );
     expect(
-      screen.queryByRole('button', { name: 'Розділити на стеми' }),
+      screen.queryByRole('button', { name: 'Split into stems' }),
     ).not.toBeInTheDocument();
   });
 });

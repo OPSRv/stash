@@ -55,7 +55,7 @@ export function DropZone({ onPick, pendingFile }: DropZoneProps) {
       const path = (f as unknown as { path?: string }).path ?? f.name;
       if (!isSupportedAudio(path)) {
         const ext = path.split('.').pop() ?? '';
-        setError(`Непідтримуваний формат: .${ext}`);
+        setError(`Unsupported format: .${ext}`);
         return;
       }
       onPick(path);
@@ -74,12 +74,12 @@ export function DropZone({ onPick, pendingFile }: DropZoneProps) {
         over ? 'border-white/40 bg-white/5' : 'border-white/15'
       }`}
     >
-      <p className="text-body opacity-80">Перетягніть аудіофайл сюди</p>
+      <p className="text-body opacity-80">Drop an audio file here</p>
       <p className="text-meta opacity-60">
         mp3, m4a, flac, ogg, wav, aac, aiff, opus
       </p>
       <Button onClick={pickFile} variant="soft">
-        Або виберіть файл…
+        Or pick a file…
       </Button>
       {error && (
         <p role="alert" className="text-meta text-red-300/80">

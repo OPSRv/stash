@@ -932,9 +932,9 @@ impl Tool for SeparateStems {
         "separate_stems"
     }
     fn description(&self) -> &'static str {
-        "Розкласти аудіофайл на 6 стемів (vocals/drums/bass/guitar/piano/other) і визначити BPM. \
-         Demucs + BeatNet локально. Повертає `job_id` миттєво — отримайте кінцевий результат \
-         через `get_separator_job(job_id)` після завершення (~2-5× довжини треку на CPU)."
+        "Split an audio file into 6 stems (vocals/drums/bass/guitar/piano/other) and detect BPM. \
+         Demucs + BeatNet, local. Returns `job_id` immediately — fetch the final result via \
+         `get_separator_job(job_id)` once it finishes (~2-5× track length on CPU)."
     }
     fn schema(&self) -> Value {
         json!({
@@ -942,21 +942,21 @@ impl Tool for SeparateStems {
             "properties": {
                 "input_path": {
                     "type": "string",
-                    "description": "Абсолютний шлях до аудіофайлу (mp3, m4a, flac, ogg, wav, aac, aiff, opus)."
+                    "description": "Absolute path to an audio file (mp3, m4a, flac, ogg, wav, aac, aiff, opus)."
                 },
                 "model": {
                     "type": "string",
                     "enum": ["htdemucs_6s", "htdemucs_ft", "htdemucs"],
-                    "description": "Demucs модель. За замовчуванням `htdemucs_6s` (з guitar/piano стемами)."
+                    "description": "Demucs model. Defaults to `htdemucs_6s` (yields guitar/piano stems)."
                 },
                 "stems": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Підмножина стемів (vocals/drums/bass/guitar/piano/other). Без поля — всі."
+                    "description": "Subset of stems (vocals/drums/bass/guitar/piano/other). Omit for all."
                 },
                 "output_dir": {
                     "type": "string",
-                    "description": "Куди зберегти стеми. Без поля — `~/Music/Stash Stems/<source-name>/`."
+                    "description": "Where to save stems. Omit for `~/Music/Stash Stems/<source-name>/`."
                 }
             },
             "required": ["input_path"],
@@ -987,9 +987,9 @@ impl Tool for DetectBpm {
         "detect_bpm"
     }
     fn description(&self) -> &'static str {
-        "Визначити BPM аудіофайлу без розкладки на стеми. BeatNet локально. Швидше ніж \
-         повний separate_stems, але дещо менш надійно на брудних міксах. Повертає job_id — \
-         отримайте число через `get_separator_job(job_id)`."
+        "Detect BPM of an audio file without stem separation. BeatNet, local. Faster than \
+         the full separate_stems but slightly less reliable on busy mixes. Returns a job_id — \
+         fetch the number via `get_separator_job(job_id)`."
     }
     fn schema(&self) -> Value {
         json!({
@@ -997,7 +997,7 @@ impl Tool for DetectBpm {
             "properties": {
                 "input_path": {
                     "type": "string",
-                    "description": "Абсолютний шлях до аудіофайлу."
+                    "description": "Absolute path to an audio file."
                 }
             },
             "required": ["input_path"],
@@ -1024,8 +1024,8 @@ impl Tool for GetSeparatorJob {
         "get_separator_job"
     }
     fn description(&self) -> &'static str {
-        "Поточний стан separator-job: status (queued/running/completed/failed/cancelled), \
-         progress 0..1, phase, BPM та шляхи до стемів коли completed."
+        "Current state of a separator job: status (queued/running/completed/failed/cancelled), \
+         progress 0..1, phase, BPM, and stem paths once completed."
     }
     fn schema(&self) -> Value {
         json!({

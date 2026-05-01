@@ -148,12 +148,13 @@ export const isSupportedAudio = (path: string): boolean => {
 /** Display labels for the six htdemucs_6s stems. The 4-stem htdemucs /
  *  htdemucs_ft models drop the `guitar` and `piano` entries — UI code
  *  that maps a stem name should fall through to the raw key when the
- *  model emits something we don't have a translation for. */
+ *  model emits something we don't recognise. Capitalised so a row in
+ *  the stems grid reads as a proper title rather than a raw token. */
 export const STEM_LABELS: Record<string, string> = {
-  vocals: 'Вокал',
-  drums: 'Барабани',
-  bass: 'Бас',
-  guitar: 'Гітара',
-  piano: 'Фортепіано',
-  other: 'Інше',
+  vocals: 'Vocals',
+  drums: 'Drums',
+  bass: 'Bass',
+  guitar: 'Guitar',
+  piano: 'Piano',
+  other: 'Other',
 };

@@ -8,15 +8,15 @@ type JobRowProps = {
 };
 
 const PHASE_LABELS: Record<string, string> = {
-  starting: 'Початок',
-  queued: 'У черзі',
-  'loading demucs': 'Завантажую Demucs',
-  'decoding audio': 'Декодую аудіо',
-  separating: 'Розділяю стеми',
-  'stems written': 'Стеми збережено',
-  'loading beatnet': 'Завантажую BeatNet',
-  'detecting tempo': 'Визначаю BPM',
-  done: 'Готово',
+  starting: 'Starting',
+  queued: 'Queued',
+  'loading demucs': 'Loading Demucs',
+  'decoding audio': 'Decoding audio',
+  separating: 'Separating stems',
+  'stems written': 'Stems written',
+  'loading beatnet': 'Loading BeatNet',
+  'detecting tempo': 'Detecting BPM',
+  done: 'Done',
 };
 
 export function JobRow({ job, onCancel }: JobRowProps) {
@@ -38,8 +38,8 @@ export function JobRow({ job, onCancel }: JobRowProps) {
           variant="ghost"
           tone="danger"
           shape="square"
-          aria-label="Скасувати"
-          title="Скасувати"
+          aria-label="Cancel"
+          title="Cancel"
           onClick={() => onCancel(job.id)}
         >
           ×

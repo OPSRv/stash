@@ -33,12 +33,12 @@ const PHASE_ORDER: SeparatorInstallPhase[] = [
 ];
 
 const PHASE_LABEL: Record<SeparatorInstallPhase, string> = {
-  uv: 'Завантажую uv',
-  python: 'Готую Python 3.11',
-  venv: 'Створюю venv',
-  packages: 'Ставлю demucs + BeatNet + torch',
-  models: 'Завантажую моделі',
-  done: 'Готово',
+  uv: 'Downloading uv',
+  python: 'Setting up Python 3.11',
+  venv: 'Creating venv',
+  packages: 'Installing demucs + BeatNet + torch',
+  models: 'Downloading models',
+  done: 'Done',
 };
 
 /** Settings → Separator: install / uninstall the uv-managed Python
@@ -96,7 +96,7 @@ export const SeparatorTab = () => {
     setInstallPhase(null);
     try {
       await runDownload(false);
-      setInstallPhase({ phase: 'done', message: 'Готово' });
+      setInstallPhase({ phase: 'done', message: 'Done' });
     } catch (e) {
       setError(String(e));
     } finally {
@@ -163,16 +163,16 @@ export const SeparatorTab = () => {
   if (!status) {
     return (
       <SettingsTab>
-        <p className="text-meta opacity-60">Завантаження…</p>
+        <p className="text-meta opacity-60">Loading…</p>
       </SettingsTab>
     );
   }
 
   // "Anything on disk" — true when the user has at least started an
-  // install, even if it broke partway. We always offer "Видалити все"
-  // in that state, so a user who hit a half-built venv (the symptom
-  // we landed the demucs.api probe fix for) doesn't have to dig into
-  // ~/Library to reset.
+  // install, even if it broke partway. The wipe button stays visible
+  // either way (always-reachable nuclear option), but disables itself
+  // when there's literally nothing to remove so the affordance reads
+  // honestly.
   const hasArtifacts =
     status.runtime_ready ||
     status.assets.some((a) => a.downloaded);
@@ -181,13 +181,13 @@ export const SeparatorTab = () => {
     <SettingsTab>
       <SettingsSection label="STEM SEPARATION + BPM">
         <SettingRow
-          title="Стан"
+          title="Status"
           description={
             status.ready
-              ? 'Demucs + BeatNet встановлено. Розкладка треку доступна на табі Stems.'
+              ? 'Demucs + BeatNet installed. Stem separation is available on the Stems tab.'
               : status.runtime_ready
-                ? 'Python готовий, лишилось докачати моделі (~80 МБ).'
-                : 'Не встановлено. uv підтягне Python 3.11 + demucs + BeatNet локально (~1.5 ГБ за 5–10 хв) та htdemucs_6s модель (~80 МБ).'
+                ? 'Python runtime is ready, only the models (~80 MB) left to fetch.'
+                : 'Not installed. uv will pull Python 3.11 + demucs + BeatNet locally (~1.5 GB, 5–10 min) plus the htdemucs_6s model (~80 MB).'
           }
           control={
             <div className="flex gap-2">
@@ -198,31 +198,31 @@ export const SeparatorTab = () => {
                   onClick={downloadCore}
                   disabled={busy}
                 >
-                  {busy ? 'Встановлюю…' : 'Завантажити'}
+                  {busy ? 'Installing…' : 'Install'}
                 </Button>
               )}
-              {hasArtifacts && (
-                <Button
-                  size="sm"
-                  variant="soft"
-                  tone="danger"
-                  onClick={() => setConfirmDeleteAll(true)}
-                  disabled={busy}
-                  title={
-                    status.ready
-                      ? 'Видалити Python venv + всі моделі'
-                      : 'Стерти все і почати з нуля'
-                  }
-                >
-                  Видалити все
-                </Button>
-              )}
+              <Button
+                size="sm"
+                variant="soft"
+                tone="danger"
+                onClick={() => setConfirmDeleteAll(true)}
+                disabled={busy || !hasArtifacts}
+                title={
+                  !hasArtifacts
+                    ? 'Nothing to delete yet'
+                    : status.ready
+                      ? 'Delete the Python venv + every model'
+                      : 'Wipe everything and start fresh'
+                }
+              >
+                Wipe
+              </Button>
             </div>
           }
         />
         <SettingRow
           title="High-quality 4-stem"
-          description="htdemucs_ft — чотири моделі, кожна спеціалізована на одному стемі. +320 МБ. Без guitar / piano стемів — для них залишається 6-стемна модель."
+          description="htdemucs_ft — four models, each specialised on one stem. +320 MB. No guitar / piano stems — for those keep the 6-stem model."
           control={
             status.ft_ready ? (
               <Button
@@ -232,7 +232,7 @@ export const SeparatorTab = () => {
                 onClick={() => setConfirmDeleteFt(true)}
                 disabled={busy}
               >
-                Прибрати
+                Remove
               </Button>
             ) : (
               <Button
@@ -242,23 +242,23 @@ export const SeparatorTab = () => {
                 disabled={busy || !status.ready}
                 title={
                   !status.ready
-                    ? 'Спочатку встановіть базовий пакет'
+                    ? 'Install the base pack first'
                     : undefined
                 }
               >
-                Завантажити
+                Install
               </Button>
             )
           }
         />
         <SettingRow
-          title="Папка для стемів"
+          title="Output folder"
           description={status.default_output_dir}
           control={null}
         />
       </SettingsSection>
       {(busy || installPhase) && (
-        <SettingsSection label="ВСТАНОВЛЕННЯ" divided={false}>
+        <SettingsSection label="INSTALL" divided={false}>
           <ol
             className="flex flex-col gap-1.5 text-meta"
             data-testid="separator-install-phases"
@@ -273,10 +273,10 @@ export const SeparatorTab = () => {
               const showProgress =
                 active && typeof installPhase?.progress === 'number';
               // Active phase shows the live `message` from the
-              // backend (carries the watchdog's "Перевіряю venv
-              // (Ns)…" tick + per-asset names during model fetch).
-              // Idle / completed steps fall back to the static label
-              // so the timeline still reads top-to-bottom.
+              // backend (carries the watchdog's "Verifying venv (Ns)…"
+              // tick + per-asset names during model fetch). Idle /
+              // completed steps fall back to the static label so the
+              // timeline still reads top-to-bottom.
               const text = active
                 ? (installPhase?.message ?? PHASE_LABEL[p])
                 : PHASE_LABEL[p];
@@ -342,7 +342,7 @@ export const SeparatorTab = () => {
                   </span>
                 )}
                 {a.optional && !done && (
-                  <span className="opacity-40">опційно</span>
+                  <span className="opacity-40">optional</span>
                 )}
               </li>
             );
@@ -356,18 +356,18 @@ export const SeparatorTab = () => {
       )}
       <ConfirmDialog
         open={confirmDeleteAll}
-        title="Видалити все?"
-        description="uv, Python venv, demucs / BeatNet та всі моделі (~2 ГБ) будуть видалені. При наступному встановленні все скачається наново."
-        confirmLabel="Видалити"
+        title="Wipe everything?"
+        description="uv, the Python venv, demucs / BeatNet, and every model (~2 GB) will be deleted. The next install will pull them again from scratch."
+        confirmLabel="Wipe"
         tone="danger"
         onConfirm={deleteAll}
         onCancel={() => setConfirmDeleteAll(false)}
       />
       <ConfirmDialog
         open={confirmDeleteFt}
-        title="Прибрати htdemucs_ft?"
-        description="Будуть видалені 4 файли вагою ~320 МБ. 6-стемна модель та Python-runtime залишаться на місці."
-        confirmLabel="Прибрати"
+        title="Remove htdemucs_ft?"
+        description="4 files (~320 MB) will be deleted. The 6-stem model and the Python runtime stay in place."
+        confirmLabel="Remove"
         tone="danger"
         onConfirm={deleteFt}
         onCancel={() => setConfirmDeleteFt(false)}
