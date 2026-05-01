@@ -126,8 +126,37 @@ async fn run_install_inner(
     state: &Arc<SeparatorState>,
     with_ft: bool,
 ) -> Result<(), String> {
+    // Surface a `phase` tick the moment install starts so the UI's
+    // staged card pops into view immediately. Without this, an install
+    // that short-circuits (everything already on disk) would emit
+    // nothing visible — the user clicks "Завантажити" and sees
+    // nothing happening, then a flash of "Готово".
+    installer::emit_phase(
+        app,
+        installer::InstallPhase::Uv,
+        "Перевіряю стан…",
+        Some(0.0),
+    );
+
     if !runtime_ready(data_dir) {
         installer::run_runtime_install(app, data_dir).await?;
+    } else {
+        // Runtime says "installed" — but a stale install_flag from a
+        // pre-fix install can still leave the venv unable to import
+        // demucs.api. Re-run the cheap probe; on failure, wipe the
+        // runtime and reinstall fresh so the user doesn't have to
+        // open Settings → Видалити themselves.
+        if let Err(e) = installer::verify_runtime(data_dir) {
+            tracing::warn!(target: "separator", error = %e, "stale runtime — reinstalling");
+            installer::emit_phase(
+                app,
+                installer::InstallPhase::Uv,
+                "Зіпсований venv — перевстановлюю…",
+                None,
+            );
+            installer::purge_runtime(data_dir)?;
+            installer::run_runtime_install(app, data_dir).await?;
+        }
     }
 
     let mut targets: Vec<&SeparatorAsset> = REQUIRED.iter().copied().collect();

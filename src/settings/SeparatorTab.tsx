@@ -168,6 +168,15 @@ export const SeparatorTab = () => {
     );
   }
 
+  // "Anything on disk" — true when the user has at least started an
+  // install, even if it broke partway. We always offer "Видалити все"
+  // in that state, so a user who hit a half-built venv (the symptom
+  // we landed the demucs.api probe fix for) doesn't have to dig into
+  // ~/Library to reset.
+  const hasArtifacts =
+    status.runtime_ready ||
+    status.assets.some((a) => a.downloaded);
+
   return (
     <SettingsTab>
       <SettingsSection label="STEM SEPARATION + BPM">
@@ -181,26 +190,34 @@ export const SeparatorTab = () => {
                 : 'Не встановлено. uv підтягне Python 3.11 + demucs + BeatNet локально (~1.5 ГБ за 5–10 хв) та htdemucs_6s модель (~80 МБ).'
           }
           control={
-            status.ready ? (
-              <Button
-                size="sm"
-                variant="soft"
-                tone="danger"
-                onClick={() => setConfirmDeleteAll(true)}
-                disabled={busy}
-              >
-                Видалити
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="solid"
-                onClick={downloadCore}
-                disabled={busy}
-              >
-                {busy ? 'Встановлюю…' : 'Завантажити'}
-              </Button>
-            )
+            <div className="flex gap-2">
+              {!status.ready && (
+                <Button
+                  size="sm"
+                  variant="solid"
+                  onClick={downloadCore}
+                  disabled={busy}
+                >
+                  {busy ? 'Встановлюю…' : 'Завантажити'}
+                </Button>
+              )}
+              {hasArtifacts && (
+                <Button
+                  size="sm"
+                  variant="soft"
+                  tone="danger"
+                  onClick={() => setConfirmDeleteAll(true)}
+                  disabled={busy}
+                  title={
+                    status.ready
+                      ? 'Видалити Python venv + всі моделі'
+                      : 'Стерти все і почати з нуля'
+                  }
+                >
+                  Видалити все
+                </Button>
+              )}
+            </div>
           }
         />
         <SettingRow

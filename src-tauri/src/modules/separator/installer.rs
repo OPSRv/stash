@@ -123,15 +123,40 @@ pub async fn run_runtime_install(app: &AppHandle, app_data: &Path) -> Result<(),
     Ok(())
 }
 
+/// Cheap runtime sanity check: imports the exact symbols `main.py`
+/// uses and returns the venv's demucs version. Catches a stale
+/// install where the flag was stamped against a pre-fix venv (e.g.
+/// demucs 3.x without `demucs.api`). Caller handles the recovery —
+/// usually `purge_runtime` followed by a fresh `run_runtime_install`.
+pub fn verify_runtime(app_data: &Path) -> Result<String, String> {
+    let python = python_path(app_data);
+    if !python.is_file() {
+        return Err(format!("python missing at {}", python.display()));
+    }
+    let probe = Command::new(&python)
+        .args([
+            "-c",
+            "import demucs; \
+             from demucs.api import Separator; \
+             from BeatNet.BeatNet import BeatNet; \
+             import soundfile; \
+             print(demucs.__version__)",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("spawn probe: {e}"))?;
+    if !probe.status.success() {
+        let stderr = String::from_utf8_lossy(&probe.stderr);
+        return Err(stderr.lines().next().unwrap_or("probe failed").to_string());
+    }
+    Ok(String::from_utf8_lossy(&probe.stdout).trim().to_string())
+}
+
 /// Wipe the entire runtime tree (uv, venv, staged payload, install
 /// flag). Models are kept — they're separately tracked and the user
 /// shouldn't have to re-download 320 MB of weights just because they
-/// reset Python. Currently exposed but not yet wired to a Settings
-/// action — kept here so a future "Reinstall Python only" button has
-/// the surgical hook ready, and so `commands.rs` can keep using
-/// `remove_dir_all` for the full-uninstall path without losing the
-/// fine-grained option.
-#[allow(dead_code)]
+/// reset Python.
 pub fn purge_runtime(app_data: &Path) -> Result<(), String> {
     // Drop the flag first so a concurrent ready-check sees `false`
     // even if the rmdir below races with it.

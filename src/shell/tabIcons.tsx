@@ -34,6 +34,7 @@ export const TAB_ICON_COLORS: Record<string, string> = {
   web: '#818cf8',
   telegram: '#3ba9ee',
   music: '#fb7185',
+  separator: '#22d3ee',
   metronome: '#fb923c',
   pomodoro: '#ef4444',
   terminal: '#84cc16',
@@ -122,6 +123,27 @@ export const TAB_ICONS: Record<string, ReactNode> = {
       <rect className="music-eq-bar music-eq-bar-1" x="0" y="0" width="4" height="12" rx="1" />
       <rect className="music-eq-bar music-eq-bar-2" x="7" y="0" width="4" height="12" rx="1" />
       <rect className="music-eq-bar music-eq-bar-3" x="14" y="0" width="4" height="12" rx="1" />
+    </svg>
+  ),
+  separator: (
+    /* Three stacked horizontal "stem" lines of decreasing length —
+       reads as a multitrack mixer / source-separated waveform stack.
+       Sized to match the rest of the tab-bar glyphs (13×13). */
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M3 6h18" />
+      <path d="M3 12h13" />
+      <path d="M3 18h16" />
+      <circle cx="20" cy="12" r="1.4" fill="currentColor" stroke="none" />
     </svg>
   ),
   metronome: (

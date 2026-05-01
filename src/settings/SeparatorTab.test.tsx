@@ -86,14 +86,29 @@ describe('SeparatorTab', () => {
     expect(buttons[1]).toBeDisabled();
   });
 
-  it('shows Delete + Прибрати and no Download when fully installed', async () => {
+  it('shows "Видалити все" + Прибрати and no Download when fully installed', async () => {
     mockBackend(fullyInstalled);
     render(<SeparatorTab />);
-    expect(await screen.findByRole('button', { name: 'Видалити' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Видалити все' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Прибрати' })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /^Завантажити$/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it('exposes "Видалити все" alongside Download when something is partially staged', async () => {
+    // Symptom seen in the field: install_flag was stamped against a
+    // pre-fix venv, runtime_ready=true but the actual import probe
+    // would fail. The user needs a way to wipe and start over without
+    // having `status.ready` flip to true first.
+    mockBackend({ ...notInstalled, runtime_ready: true });
+    render(<SeparatorTab />);
+    // There are two "Завантажити" buttons (core install + optional FT
+    // pack); we just need to confirm both are present alongside the
+    // wipe button.
+    const downloads = await screen.findAllByRole('button', { name: /^Завантажити$/ });
+    expect(downloads.length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole('button', { name: 'Видалити все' })).toBeInTheDocument();
   });
 
   it('renders one row per catalog asset', async () => {
