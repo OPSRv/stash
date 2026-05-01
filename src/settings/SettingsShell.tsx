@@ -18,6 +18,7 @@ import { DataTab } from './DataTab';
 import { DownloadsTab } from './DownloadsTab';
 import { GeneralTab } from './GeneralTab';
 import { NotesTab } from './NotesTab';
+import { SeparatorTab } from './SeparatorTab';
 import { TelegramTab } from './TelegramTab';
 import { TerminalTab } from './TerminalTab';
 import { consumeSettingsSection } from './pendingSettingsSection';
@@ -35,6 +36,7 @@ type Tab =
   | 'ai'
   | 'web'
   | 'telegram'
+  | 'separator'
   | 'data'
   | 'about';
 
@@ -139,6 +141,19 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
+      </svg>
+    ),
+  },
+  {
+    id: 'separator',
+    label: 'Separator',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M4 12h2m4 0h2m4 0h2" />
+        <path d="M3 6 3 18" />
+        <path d="M9 9 9 15" />
+        <path d="M15 4 15 20" />
+        <path d="M21 7 21 17" />
       </svg>
     ),
   },
@@ -339,6 +354,7 @@ export const SettingsShell = () => {
         {tab === 'ai' && <AiTab settings={settings} onChange={update} />}
         {tab === 'web' && <WebTab settings={settings} onChange={update} />}
         {tab === 'telegram' && <TelegramTab />}
+        {tab === 'separator' && <SeparatorTab />}
         {tab === 'data' && <DataTab />}
         {tab === 'about' && <AboutTab />}
       </main>
