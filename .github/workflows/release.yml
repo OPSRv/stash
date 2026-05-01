@@ -25,8 +25,71 @@ permissions:
   contents: write
 
 jobs:
+  # PyInstaller bundle for the stem-separation + BPM sidecar
+  # (Demucs + BeatNet, Python). Produced once per release tag, uploaded
+  # both as a workflow artifact (so the main job can attach it to the
+  # release) and never bundled inside the .app — it's ~280 MB and only
+  # users who opt into Stems separation pay that cost.
+  build-stash-separator:
+    name: stash-separator (Demucs + BeatNet) PyInstaller bundle
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip wheels
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/pip
+          key: pip-stash-separator-${{ runner.os }}-${{ hashFiles('src-tauri/crates/stash-separator/requirements.txt') }}
+          restore-keys: |
+            pip-stash-separator-${{ runner.os }}-
+
+      - name: Install runtime + PyInstaller
+        working-directory: src-tauri/crates/stash-separator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install 'pyinstaller>=6.6,<7'
+
+      - name: PyInstaller --onedir
+        working-directory: src-tauri/crates/stash-separator
+        run: |
+          rm -rf build dist
+          pyinstaller --noconfirm --clean stash-separator.spec
+          ls -la dist/stash-separator | head -20
+
+      # PyInstaller writes the bundle to dist/stash-separator/. We tar.gz
+      # the *parent* of the bundle dir (so the archive contains the
+      # `stash-separator/` directory at its root) — that way the
+      # in-app extractor lands the binary at
+      # `$APPLOCALDATA/separator/bin/stash-separator/stash-separator`
+      # without any path massaging.
+      - name: Pack tarball
+        working-directory: src-tauri/crates/stash-separator
+        run: |
+          set -e
+          # Strip extended attrs so the artifact stays small and the
+          # `xattr -dr com.apple.quarantine` step the in-app extractor
+          # runs starts from a clean slate.
+          xattr -cr dist/stash-separator || true
+          tar -C dist -czf stash-separator-macos-arm64.tar.gz stash-separator
+          ls -la stash-separator-macos-arm64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stash-separator-macos-arm64
+          path: src-tauri/crates/stash-separator/stash-separator-macos-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   macos-arm64:
     name: macOS arm64 build
+    needs: build-stash-separator
     runs-on: macos-14
     timeout-minutes: 60
     steps:
@@ -73,6 +136,12 @@ jobs:
         working-directory: src-tauri
         run: cargo build -p stash-diarize --release --target aarch64-apple-darwin
 
+      - name: Pull stash-separator artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: stash-separator-macos-arm64
+          path: stash-separator-artifact
+
       - name: Stage release artifacts
         id: stage
         run: |
@@ -111,6 +180,15 @@ jobs:
           fi
           cp "$SHERPA_LIB" release-assets/libsherpa-onnx-c-api.dylib
           cp "$ONNX_LIB" release-assets/libonnxruntime.1.17.1.dylib
+          # stash-separator (Demucs + BeatNet PyInstaller bundle) was
+          # built by the upstream `build-stash-separator` job and pulled
+          # in via download-artifact above. The catalog filename in
+          # `src-tauri/src/modules/separator/catalog.rs::SIDECAR.filename`
+          # must match exactly.
+          if [ -f "stash-separator-artifact/stash-separator-macos-arm64.tar.gz" ]; then
+            cp "stash-separator-artifact/stash-separator-macos-arm64.tar.gz" \
+               "release-assets/stash-separator-macos-arm64.tar.gz"
+          fi
           ls -la release-assets
 
       - name: Resolve tag
@@ -139,5 +217,6 @@ jobs:
             release-assets/stash-diarize
             release-assets/libsherpa-onnx-c-api.dylib
             release-assets/libonnxruntime.1.17.1.dylib
+            release-assets/stash-separator-macos-arm64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
