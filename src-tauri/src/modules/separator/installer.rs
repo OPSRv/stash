@@ -398,13 +398,15 @@ fn run_python_probe_with_watchdog(
     label: &str,
     timeout: std::time::Duration,
 ) -> Result<std::process::Output, String> {
-    use std::io::Read;
+    tracing::info!(label, python = %python.display(), "probe spawn");
     let mut child = Command::new(python)
         .args(["-c", code])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("spawn probe: {e}"))?;
+    let pid = child.id();
+    tracing::info!(pid, label, "probe child up");
     let stdout = child
         .stdout
         .take()
@@ -413,25 +415,56 @@ fn run_python_probe_with_watchdog(
         .stderr
         .take()
         .ok_or_else(|| "probe child stderr missing".to_string())?;
+    // Stream stdout and stderr line-by-line into the tracing log so a
+    // hung import shows the warning text torch printed before getting
+    // stuck. Without this `tauri dev` falls silent the moment the
+    // probe takes more than a tick to import demucs / torch.
     let stdout_thread = std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
         let mut buf = Vec::new();
-        let mut r = stdout;
-        let _ = r.read_to_end(&mut buf);
+        let mut tee = Vec::new();
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            tracing::info!(target: "stash_app_lib::modules::separator", "[probe stdout] {line}");
+            tee.extend_from_slice(line.as_bytes());
+            tee.push(b'\n');
+        }
+        buf.append(&mut tee);
         buf
     });
     let stderr_thread = std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
         let mut buf = Vec::new();
-        let mut r = stderr;
-        let _ = r.read_to_end(&mut buf);
+        let mut tee = Vec::new();
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            tracing::info!(target: "stash_app_lib::modules::separator", "[probe stderr] {line}");
+            tee.extend_from_slice(line.as_bytes());
+            tee.push(b'\n');
+        }
+        buf.append(&mut tee);
         buf
     });
     let started = std::time::Instant::now();
     let status = loop {
         match child.try_wait() {
-            Ok(Some(s)) => break s,
+            Ok(Some(s)) => {
+                tracing::info!(
+                    pid,
+                    elapsed_s = started.elapsed().as_secs(),
+                    code = ?s.code(),
+                    "probe exited"
+                );
+                break s;
+            }
             Ok(None) => {
                 let elapsed = started.elapsed();
                 if elapsed > timeout {
+                    tracing::warn!(
+                        pid,
+                        elapsed_s = elapsed.as_secs(),
+                        "probe timed out, killing"
+                    );
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!(
@@ -448,11 +481,20 @@ fn run_python_probe_with_watchdog(
                 tracing::info!(elapsed_s = elapsed.as_secs(), "{label} still running");
                 std::thread::sleep(std::time::Duration::from_secs(3));
             }
-            Err(e) => return Err(format!("try_wait probe: {e}")),
+            Err(e) => {
+                tracing::error!(?e, "probe try_wait error");
+                return Err(format!("try_wait probe: {e}"));
+            }
         }
     };
     let stdout_bytes = stdout_thread.join().unwrap_or_default();
     let stderr_bytes = stderr_thread.join().unwrap_or_default();
+    tracing::info!(
+        pid,
+        stdout_bytes = stdout_bytes.len(),
+        stderr_bytes = stderr_bytes.len(),
+        "probe pipes drained"
+    );
     Ok(std::process::Output {
         status,
         stdout: stdout_bytes,
