@@ -380,6 +380,16 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
 /// until exit) and in the install card (no phase emits = no UI
 /// movement). Returns the captured Output once the child exits, or
 /// errors out after `timeout` with the child killed.
+///
+/// stdout / stderr are drained on dedicated reader threads — torch's
+/// cold-start prints enough warning text on stderr (`oneDNN ...`,
+/// deprecations, MPS device discovery) to fill the kernel's 64 KB
+/// pipe buffer before the import finishes. With nothing reading the
+/// pipe, the child's next write blocks forever and try_wait keeps
+/// reporting "still running" indefinitely. Reading concurrently
+/// short-circuits that deadlock, which is the bug we hit on the
+/// first real install — the watchdog ticked once at elapsed=0 and
+/// then went silent.
 fn run_python_probe_with_watchdog(
     app: &AppHandle,
     python: &Path,
@@ -388,20 +398,37 @@ fn run_python_probe_with_watchdog(
     label: &str,
     timeout: std::time::Duration,
 ) -> Result<std::process::Output, String> {
+    use std::io::Read;
     let mut child = Command::new(python)
         .args(["-c", code])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("spawn probe: {e}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "probe child stdout missing".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "probe child stderr missing".to_string())?;
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut r = stdout;
+        let _ = r.read_to_end(&mut buf);
+        buf
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let mut r = stderr;
+        let _ = r.read_to_end(&mut buf);
+        buf
+    });
     let started = std::time::Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|e| format!("wait probe: {e}"));
-            }
+            Ok(Some(s)) => break s,
             Ok(None) => {
                 let elapsed = started.elapsed();
                 if elapsed > timeout {
@@ -418,15 +445,19 @@ fn run_python_probe_with_watchdog(
                     &format!("{label} ({} s)…", elapsed.as_secs()),
                     None,
                 );
-                // Mirror to the dev console — without this the
-                // 30-60 s torch import looks identical to a hang
-                // in `tauri dev` output.
                 tracing::info!(elapsed_s = elapsed.as_secs(), "{label} still running");
                 std::thread::sleep(std::time::Duration::from_secs(3));
             }
             Err(e) => return Err(format!("try_wait probe: {e}")),
         }
-    }
+    };
+    let stdout_bytes = stdout_thread.join().unwrap_or_default();
+    let stderr_bytes = stderr_thread.join().unwrap_or_default();
+    Ok(std::process::Output {
+        status,
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
+    })
 }
 
 #[cfg(unix)]
