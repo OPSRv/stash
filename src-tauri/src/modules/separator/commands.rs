@@ -146,7 +146,7 @@ async fn run_install_inner(
         // demucs.api. Re-run the cheap probe; on failure, wipe the
         // runtime and reinstall fresh so the user doesn't have to
         // open Settings → Видалити themselves.
-        if let Err(e) = installer::verify_runtime(data_dir) {
+        if let Err(e) = installer::verify_runtime(app, data_dir) {
             tracing::warn!(target: "separator", error = %e, "stale runtime — reinstalling");
             installer::emit_phase(
                 app,

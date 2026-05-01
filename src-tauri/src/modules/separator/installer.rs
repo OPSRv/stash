@@ -128,29 +128,33 @@ pub async fn run_runtime_install(app: &AppHandle, app_data: &Path) -> Result<(),
 /// install where the flag was stamped against a pre-fix venv (e.g.
 /// demucs 3.x without `demucs.api`). Caller handles the recovery —
 /// usually `purge_runtime` followed by a fresh `run_runtime_install`.
-pub fn verify_runtime(app_data: &Path) -> Result<String, String> {
+///
+/// Cold-start cost is the same as the install-time probe (30-60 s on
+/// macOS arm64 because libtorch loads on every fresh interpreter), so
+/// we drive it through the same watchdog helper to keep the UI alive
+/// during the wait.
+pub fn verify_runtime(app: &AppHandle, app_data: &Path) -> Result<String, String> {
     let python = python_path(app_data);
     if !python.is_file() {
         return Err(format!("python missing at {}", python.display()));
     }
-    let probe = Command::new(&python)
-        .args([
-            "-c",
-            "import demucs; \
-             from demucs.api import Separator; \
-             from BeatNet.BeatNet import BeatNet; \
-             import soundfile; \
-             print(demucs.__version__)",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("spawn probe: {e}"))?;
-    if !probe.status.success() {
-        let stderr = String::from_utf8_lossy(&probe.stderr);
+    let output = run_python_probe_with_watchdog(
+        app,
+        &python,
+        "import demucs; \
+         from demucs.api import Separator; \
+         from BeatNet.BeatNet import BeatNet; \
+         import soundfile; \
+         print(demucs.__version__)",
+        InstallPhase::Packages,
+        "Перевіряю venv",
+        std::time::Duration::from_secs(300),
+    )?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(stderr.lines().next().unwrap_or("probe failed").to_string());
     }
-    Ok(String::from_utf8_lossy(&probe.stdout).trim().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Wipe the entire runtime tree (uv, venv, staged payload, install
@@ -322,44 +326,103 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     if !status.success() {
         return Err(format!("uv pip install exited {status}"));
     }
-    // Sanity-probe so a venv with broken/missing wheels never gets the
-    // install flag stamped. We import the *exact* symbols `main.py`
-    // uses — a top-level `import demucs` is too lax, it succeeds even
-    // when pip dropped a 3.x demucs that lacks `demucs.api`. Catching
-    // that here turns "ModuleNotFoundError at run time" into a clear
-    // install-time failure with stderr attached.
-    let probe = Command::new(&python)
-        .args([
-            "-c",
-            "import demucs; \
-             from demucs.api import Separator; \
-             from BeatNet.BeatNet import BeatNet; \
-             import soundfile; \
-             print(demucs.__version__)",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("spawn import probe: {e}"))?;
-    if !probe.status.success() {
-        let stderr = String::from_utf8_lossy(&probe.stderr);
+    // Sanity-probe — exact symbols main.py uses. On a cold cache the
+    // libtorch + demucs.api import path takes 30-60 s on macOS arm64
+    // (MPS bindings, dora_search lazy probes, etc.); the watchdog
+    // below ticks every 3 s so the UI doesn't look frozen, and a
+    // 5-minute cap kills a truly hung interpreter so the user gets a
+    // clear error instead of silence.
+    emit(
+        app,
+        InstallPhase::Packages,
+        "Перевіряю venv (torch cold-start триває ~30–60 с)…",
+        None,
+    );
+    let probe_output = run_python_probe_with_watchdog(
+        app,
+        &python,
+        "import demucs; \
+         from demucs.api import Separator; \
+         from BeatNet.BeatNet import BeatNet; \
+         import soundfile; \
+         print(demucs.__version__)",
+        InstallPhase::Packages,
+        "Перевіряю venv",
+        std::time::Duration::from_secs(300),
+    )?;
+    if !probe_output.status.success() {
+        let stderr = String::from_utf8_lossy(&probe_output.stderr);
         return Err(format!(
             "Python venv collected wheels but cannot import demucs.api / \
              BeatNet / soundfile. The venv is in an inconsistent state — \
-             use «Settings → Separator → Видалити» and try again. \
+             use «Settings → Separator → Видалити все» and try again. \
              Detail:\n{}",
             stderr.trim()
         ));
     }
-    let demucs_version = String::from_utf8_lossy(&probe.stdout).trim().to_string();
+    let demucs_version = String::from_utf8_lossy(&probe_output.stdout)
+        .trim()
+        .to_string();
     tracing::info!(target: "separator", demucs_version, "venv import probe ok");
     emit(
         app,
         InstallPhase::Packages,
-        "Пакети встановлено",
+        &format!("demucs {demucs_version} готовий"),
         Some(1.0),
     );
     Ok(())
+}
+
+/// Run a Python -c probe and emit a "still working, Ns elapsed" tick
+/// every 3 seconds while it's running. Without this, the multi-second
+/// cold-start torch import looks identical to a hang both in the
+/// console (Command::output captures stdout/stderr — nothing prints
+/// until exit) and in the install card (no phase emits = no UI
+/// movement). Returns the captured Output once the child exits, or
+/// errors out after `timeout` with the child killed.
+fn run_python_probe_with_watchdog(
+    app: &AppHandle,
+    python: &Path,
+    code: &str,
+    phase: InstallPhase,
+    label: &str,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, String> {
+    let mut child = Command::new(python)
+        .args(["-c", code])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn probe: {e}"))?;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|e| format!("wait probe: {e}"));
+            }
+            Ok(None) => {
+                let elapsed = started.elapsed();
+                if elapsed > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "import probe timed out after {} s — see logs",
+                        elapsed.as_secs()
+                    ));
+                }
+                emit(
+                    app,
+                    phase,
+                    &format!("{label} ({} с)…", elapsed.as_secs()),
+                    None,
+                );
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+            Err(e) => return Err(format!("try_wait probe: {e}")),
+        }
+    }
 }
 
 #[cfg(unix)]
