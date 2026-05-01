@@ -298,17 +298,36 @@ fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
         return Err(format!("uv pip install exited {status}"));
     }
     // Sanity-probe so a venv with broken/missing wheels never gets the
-    // install flag stamped. `python -c "import demucs"` is the cheapest
-    // smoke test.
+    // install flag stamped. We import the *exact* symbols `main.py`
+    // uses — a top-level `import demucs` is too lax, it succeeds even
+    // when pip dropped a 3.x demucs that lacks `demucs.api`. Catching
+    // that here turns "ModuleNotFoundError at run time" into a clear
+    // install-time failure with stderr attached.
     let probe = Command::new(&python)
-        .args(["-c", "import demucs, BeatNet"])
+        .args([
+            "-c",
+            "import demucs; \
+             from demucs.api import Separator; \
+             from BeatNet.BeatNet import BeatNet; \
+             import soundfile; \
+             print(demucs.__version__)",
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .status()
+        .output()
         .map_err(|e| format!("spawn import probe: {e}"))?;
-    if !probe.success() {
-        return Err("import probe failed: demucs / BeatNet not callable from venv".into());
+    if !probe.status.success() {
+        let stderr = String::from_utf8_lossy(&probe.stderr);
+        return Err(format!(
+            "Python venv collected wheels but cannot import demucs.api / \
+             BeatNet / soundfile. The venv is in an inconsistent state — \
+             use «Settings → Separator → Видалити» and try again. \
+             Detail:\n{}",
+            stderr.trim()
+        ));
     }
+    let demucs_version = String::from_utf8_lossy(&probe.stdout).trim().to_string();
+    tracing::info!(target: "separator", demucs_version, "venv import probe ok");
     emit(
         app,
         InstallPhase::Packages,

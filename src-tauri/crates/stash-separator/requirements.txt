@@ -1,10 +1,14 @@
-# stash-separator runtime deps.
-# Pinned ranges; CI/release-build resolves a single set of compatible
-# wheels for macOS arm64. Bumping any line should be paired with a
-# rebuild of the PyInstaller bundle and a smoke test of the resulting
-# binary against a 30s test clip.
+# stash-separator runtime deps. uv resolves these inside the venv at
+# `Settings → Separator → Завантажити` and the resulting interpreter
+# is what the in-app job spawns.
+#
+# `demucs.api` only exists from demucs 4.0.0 onwards — earlier
+# versions don't expose the `Separator` class the sidecar imports.
+# Pinning exactly to 4.0.1 (the latest 4.x as of writing) takes
+# resolver ambiguity off the table; bumping has to be paired with
+# a smoke test against a real song.
 
-demucs>=4.0.1,<5
+demucs==4.0.1
 BeatNet>=1.1.0
 torch>=2.2,<3
 torchaudio>=2.2,<3
