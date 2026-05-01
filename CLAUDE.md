@@ -32,6 +32,15 @@ Each feature = self-contained module plugged into `src/modules/registry.ts`.
   Never eager-import the view at the top of `index.tsx` — it defeats code-splitting. `PopupShell` renders each visited tab inside `<Suspense>`, hiding inactive ones via `hidden` (state preserved; unopened tabs never mount). Hover on `TabButton` calls `preloadPopup()`.
 - **Rust**: mirror under `src-tauri/src/modules/<name>/`. Wire `<Name>State` as managed state and register all commands in `invoke_handler!` in `src-tauri/src/lib.rs`.
 
+### Out-of-process sidecars (Demucs, sherpa-onnx, anything heavy)
+
+Keep ML / heavyweight runtimes **outside** the macOS bundle. The pattern is:
+
+1. A separate workspace member under `src-tauri/crates/stash-<name>/` (Rust binary) **or** a Python tree under the same path (PyInstaller-frozen) — for libraries that don't have a usable Rust API.
+2. The main app downloads it lazily into `$APPLOCALDATA/<name>/` on first opt-in via Settings, behind a per-asset catalog (see `modules/diarization/catalog.rs` and `modules/separator/catalog.rs`).
+3. `release.yml` builds the sidecar once per tag and uploads it as a release asset. The catalog's `resolve_url` for runtime artifacts targets `https://github.com/<owner>/<repo>/releases/latest/download/<filename>` so a clean install always pulls a sidecar built against the matching app release.
+4. The pipeline spawns the sidecar via `std::process::Command`, streams progress over stderr lines like `progress\t<f>\t<phase>`, and parses a single-line JSON result on stdout. Failures still exit 0 with `{"error":"…"}` — the parent never has to interpret an exit code.
+
 ## Agent surface (Telegram + CLI + voice popup)
 
 The Telegram bot and AI assistant are a **first-class surface** for every module, not an option. Any new feature (command, tab, timer, action) **must** be reachable via:
