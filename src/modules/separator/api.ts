@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export type SeparatorAssetKind =
-  | 'sidecar'
   | 'htdemucs_6s'
   | 'htdemucs_ft_vocals'
   | 'htdemucs_ft_drums'
@@ -17,11 +16,33 @@ export type SeparatorAssetStatus = {
   local_path: string | null;
 };
 
+/** Status payload from `separator_status`. `ready` is the conjunction
+ *  of `runtime_ready` (uv + venv + pip packages staged) and the
+ *  required model being on disk; `runtime_ready` is exposed
+ *  separately so the UI can render the staged install card without
+ *  having to derive it from the asset list. */
 export type SeparatorStatus = {
   ready: boolean;
+  runtime_ready: boolean;
   ft_ready: boolean;
   assets: SeparatorAssetStatus[];
   default_output_dir: string;
+};
+
+/** Phase of the multi-step install. Mirrors `installer::InstallPhase`
+ *  on the Rust side; UI translates to ukrainian copy via a phase-map. */
+export type SeparatorInstallPhase =
+  | 'uv'
+  | 'python'
+  | 'venv'
+  | 'packages'
+  | 'models'
+  | 'done';
+
+export type SeparatorInstallEvent = {
+  phase: SeparatorInstallPhase;
+  message: string;
+  progress?: number;
 };
 
 export type SeparatorJobStatus =

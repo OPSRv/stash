@@ -8,12 +8,14 @@ const mockedInvoke = vi.mocked(invoke);
 
 const installed: SeparatorStatus = {
   ready: true,
+  runtime_ready: true,
   ft_ready: false,
   default_output_dir: '/Music/Stash Stems',
   assets: [],
 };
 const notInstalled: SeparatorStatus = {
   ready: false,
+  runtime_ready: false,
   ft_ready: false,
   default_output_dir: '/Music/Stash Stems',
   assets: [],

@@ -9,17 +9,10 @@ const mockedInvoke = vi.mocked(invoke);
 
 const notInstalled: SeparatorStatus = {
   ready: false,
+  runtime_ready: false,
   ft_ready: false,
   default_output_dir: '/Music/Stash Stems',
   assets: [
-    {
-      kind: 'sidecar',
-      label: 'stash-separator (sidecar bundle)',
-      size_bytes: 280_000_000,
-      optional: false,
-      downloaded: false,
-      local_path: null,
-    },
     {
       kind: 'htdemucs_6s',
       label: 'htdemucs_6s',
@@ -39,17 +32,9 @@ const notInstalled: SeparatorStatus = {
   ],
 };
 
-const installed: SeparatorStatus = {
-  ready: true,
-  ft_ready: false,
-  default_output_dir: '/Music/Stash Stems',
-  assets: notInstalled.assets.map((a) =>
-    a.optional ? a : { ...a, downloaded: true, local_path: `/x/${a.kind}` },
-  ),
-};
-
 const fullyInstalled: SeparatorStatus = {
   ready: true,
+  runtime_ready: true,
   ft_ready: true,
   default_output_dir: '/Music/Stash Stems',
   assets: notInstalled.assets.map((a) => ({
@@ -117,7 +102,6 @@ describe('SeparatorTab', () => {
     await waitFor(() =>
       expect(screen.getByTestId('separator-asset-list')).toBeInTheDocument(),
     );
-    expect(screen.getByTestId('asset-sidecar')).toBeInTheDocument();
     expect(screen.getByTestId('asset-htdemucs_6s')).toBeInTheDocument();
     expect(screen.getByTestId('asset-htdemucs_ft_vocals')).toBeInTheDocument();
   });

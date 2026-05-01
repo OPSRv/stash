@@ -10,6 +10,8 @@ import {
   remove as runRemove,
   type SeparatorAssetKind,
   type SeparatorDownloadEvent,
+  type SeparatorInstallEvent,
+  type SeparatorInstallPhase,
   type SeparatorStatus,
 } from '../modules/separator/api';
 import { SettingRow } from './SettingRow';
@@ -21,16 +23,35 @@ type AssetProgress = {
   done: boolean;
 };
 
-/** Settings → Separator: install / uninstall the Demucs+BeatNet sidecar
- *  and (optionally) the htdemucs_ft fine-tuned model pack.
+const PHASE_ORDER: SeparatorInstallPhase[] = [
+  'uv',
+  'python',
+  'venv',
+  'packages',
+  'models',
+  'done',
+];
+
+const PHASE_LABEL: Record<SeparatorInstallPhase, string> = {
+  uv: 'Завантажую uv',
+  python: 'Готую Python 3.11',
+  venv: 'Створюю venv',
+  packages: 'Ставлю demucs + BeatNet + torch',
+  models: 'Завантажую моделі',
+  done: 'Готово',
+};
+
+/** Settings → Separator: install / uninstall the uv-managed Python
+ *  runtime (uv → Python 3.11 → venv → demucs + BeatNet + torch) and
+ *  download Demucs model weights (htdemucs_6s + optional htdemucs_ft).
  *
- *  Mirrors the diarization/whisper install UX — per-asset progress bars
- *  driven by `separator:download` events, with the "Status" row giving
- *  a single primary action that flips between Download / Delete based on
- *  what's already on disk. */
+ *  Mirrors the diarization install UX, but the install pipeline has
+ *  five phases instead of a flat per-file progress, so we render a
+ *  staged card alongside the per-asset list. */
 export const SeparatorTab = () => {
   const [status, setStatus] = useState<SeparatorStatus | null>(null);
-  const [progress, setProgress] = useState<Record<string, AssetProgress>>({});
+  const [assetProgress, setAssetProgress] = useState<Record<string, AssetProgress>>({});
+  const [installPhase, setInstallPhase] = useState<SeparatorInstallEvent | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
@@ -47,9 +68,9 @@ export const SeparatorTab = () => {
 
   useEffect(() => {
     refresh();
-    const off = listen<SeparatorDownloadEvent>('separator:download', (e) => {
+    const offDl = listen<SeparatorDownloadEvent>('separator:download', (e) => {
       const id = e.payload.id;
-      setProgress((prev) => ({
+      setAssetProgress((prev) => ({
         ...prev,
         [id]: {
           received: e.payload.received,
@@ -59,20 +80,28 @@ export const SeparatorTab = () => {
       }));
       if (e.payload.done) refresh();
     });
+    const offInstall = listen<SeparatorInstallEvent>('separator:install', (e) => {
+      setInstallPhase(e.payload);
+      if (e.payload.phase === 'done') refresh();
+    });
     return () => {
-      off.then((f) => f()).catch(() => undefined);
+      offDl.then((f) => f()).catch(() => undefined);
+      offInstall.then((f) => f()).catch(() => undefined);
     };
   }, [refresh]);
 
   const downloadCore = async () => {
     setBusy(true);
     setError(null);
+    setInstallPhase(null);
     try {
       await runDownload(false);
+      setInstallPhase({ phase: 'done', message: 'Готово' });
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
+      refresh();
     }
   };
 
@@ -80,13 +109,12 @@ export const SeparatorTab = () => {
     setBusy(true);
     setError(null);
     try {
-      // `with_ft = true` re-downloads any missing required asset too,
-      // so a partial install converges with a single click.
       await runDownload(true);
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
+      refresh();
     }
   };
 
@@ -96,7 +124,8 @@ export const SeparatorTab = () => {
     setError(null);
     try {
       await runRemove(false);
-      setProgress({});
+      setAssetProgress({});
+      setInstallPhase(null);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -111,7 +140,7 @@ export const SeparatorTab = () => {
     setError(null);
     try {
       await runRemove(true);
-      setProgress((prev) => {
+      setAssetProgress((prev) => {
         const next = { ...prev };
         for (const k of [
           'htdemucs_ft_vocals',
@@ -147,7 +176,9 @@ export const SeparatorTab = () => {
           description={
             status.ready
               ? 'Demucs + BeatNet встановлено. Розкладка треку доступна на табі Stems.'
-              : 'Не встановлено. ~360 МБ для 6-стемного htdemucs_6s + сидекар.'
+              : status.runtime_ready
+                ? 'Python готовий, лишилось докачати моделі (~80 МБ).'
+                : 'Не встановлено. uv підтягне Python 3.11 + demucs + BeatNet локально (~1.5 ГБ за 5–10 хв) та htdemucs_6s модель (~80 МБ).'
           }
           control={
             status.ready ? (
@@ -163,11 +194,11 @@ export const SeparatorTab = () => {
             ) : (
               <Button
                 size="sm"
-                variant="primary"
+                variant="solid"
                 onClick={downloadCore}
                 disabled={busy}
               >
-                {busy ? 'Завантажую…' : 'Завантажити'}
+                {busy ? 'Встановлюю…' : 'Завантажити'}
               </Button>
             )
           }
@@ -209,13 +240,57 @@ export const SeparatorTab = () => {
           control={null}
         />
       </SettingsSection>
-      <SettingsSection label="ASSETS" divided={false}>
+      {(busy || installPhase) && (
+        <SettingsSection label="ВСТАНОВЛЕННЯ" divided={false}>
+          <ol
+            className="flex flex-col gap-1.5 text-meta"
+            data-testid="separator-install-phases"
+          >
+            {PHASE_ORDER.filter((p) => p !== 'done').map((p) => {
+              const currentIdx = installPhase
+                ? PHASE_ORDER.indexOf(installPhase.phase)
+                : -1;
+              const myIdx = PHASE_ORDER.indexOf(p);
+              const done = currentIdx > myIdx;
+              const active = installPhase?.phase === p;
+              const showProgress =
+                active && typeof installPhase?.progress === 'number';
+              return (
+                <li
+                  key={p}
+                  className={`flex items-center gap-3 ${
+                    done ? 'opacity-50' : active ? 'opacity-100' : 'opacity-40'
+                  }`}
+                  data-testid={`install-phase-${p}`}
+                  data-state={done ? 'done' : active ? 'active' : 'pending'}
+                >
+                  <span className="t-tertiary font-mono w-4">
+                    {done ? '✓' : active ? '·' : '·'}
+                  </span>
+                  <span className="flex-1 t-primary">{PHASE_LABEL[p]}</span>
+                  {showProgress && (
+                    <ProgressBar
+                      value={installPhase!.progress!}
+                      size="sm"
+                      className="w-32"
+                      ariaLabel={`${PHASE_LABEL[p]} ${Math.round(
+                        (installPhase!.progress ?? 0) * 100,
+                      )}%`}
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </SettingsSection>
+      )}
+      <SettingsSection label="MODELS" divided={false}>
         <ul
           className="flex flex-col gap-2 text-meta"
           data-testid="separator-asset-list"
         >
           {status.assets.map((a) => {
-            const p = progress[a.kind];
+            const p = assetProgress[a.kind];
             const done = a.downloaded || p?.done;
             const ratio = p && p.total > 0 ? p.received / p.total : 0;
             return (
@@ -257,7 +332,7 @@ export const SeparatorTab = () => {
       <ConfirmDialog
         open={confirmDeleteAll}
         title="Видалити все?"
-        description="Сидекар, моделі та fine-tuned пакет (~700 МБ) будуть видалені. Згодом можна буде знову завантажити."
+        description="uv, Python venv, demucs / BeatNet та всі моделі (~2 ГБ) будуть видалені. При наступному встановленні все скачається наново."
         confirmLabel="Видалити"
         tone="danger"
         onConfirm={deleteAll}
@@ -266,7 +341,7 @@ export const SeparatorTab = () => {
       <ConfirmDialog
         open={confirmDeleteFt}
         title="Прибрати htdemucs_ft?"
-        description="Будуть видалені 4 файли вагою ~320 МБ. 6-стемна модель і сидекар залишаться на місці."
+        description="Будуть видалені 4 файли вагою ~320 МБ. 6-стемна модель та Python-runtime залишаться на місці."
         confirmLabel="Прибрати"
         tone="danger"
         onConfirm={deleteFt}
