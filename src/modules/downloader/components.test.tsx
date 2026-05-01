@@ -270,6 +270,42 @@ describe('CompletedDownloadRow', () => {
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(onRetry).toHaveBeenCalled();
   });
+
+  it('Stems button is shown for audio downloads only and dispatches stash:navigate', async () => {
+    const user = userEvent.setup();
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+    render(
+      <CompletedDownloadRow
+        job={job({ status: 'completed', target_path: '/tmp/song.mp3' })}
+        zebra={false}
+        onDelete={() => {}}
+        onPlay={() => {}}
+        onRetry={() => {}}
+      />
+    );
+    const stems = screen.getByRole('button', { name: 'Розділити на стеми' });
+    await user.click(stems);
+    const ev = dispatchSpy.mock.calls.find(
+      (c) => (c[0] as Event).type === 'stash:navigate',
+    )?.[0] as CustomEvent | undefined;
+    expect(ev).toBeDefined();
+    expect(ev!.detail).toEqual({ tabId: 'separator', file: '/tmp/song.mp3' });
+  });
+
+  it('hides Stems button for non-audio downloads', () => {
+    render(
+      <CompletedDownloadRow
+        job={job({ status: 'completed', target_path: '/tmp/clip.mp4' })}
+        zebra={false}
+        onDelete={() => {}}
+        onPlay={() => {}}
+        onRetry={() => {}}
+      />
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Розділити на стеми' }),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe('CompletedDownloadTile', () => {

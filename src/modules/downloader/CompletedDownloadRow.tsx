@@ -5,6 +5,7 @@ import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { useToast } from '../../shared/ui/Toast';
 import { PlatformBadge } from './PlatformBadge';
 import { formatBytes, type DownloadJob } from './api';
+import { isSupportedAudio } from '../separator/api';
 
 interface CompletedDownloadRowProps {
   job: DownloadJob;
@@ -74,6 +75,23 @@ const CompletedDownloadRowImpl = ({
   };
 
   const canPurge = Boolean(job.target_path) && !failed;
+  // Stem-separation hand-off only makes sense for audio outputs.
+  // Video downloads land as mp4/webm; demucs can't read them and we'd
+  // rather not surface a button that's about to throw a confusing
+  // error inside the separator tab.
+  const canStems =
+    !failed &&
+    Boolean(job.target_path) &&
+    isSupportedAudio(job.target_path ?? '');
+
+  const sendToStems = () => {
+    if (!job.target_path) return;
+    window.dispatchEvent(
+      new CustomEvent('stash:navigate', {
+        detail: { tabId: 'separator', file: job.target_path },
+      }),
+    );
+  };
 
   return (
     <div className={`flex items-center gap-3 px-3 py-2 ${zebra ? 'bg-white/[0.02]' : ''}`}>
@@ -137,6 +155,17 @@ const CompletedDownloadRowImpl = ({
           title="Open with the system default app"
         >
           Open
+        </Button>
+      )}
+      {canStems && (
+        <Button
+          size="sm"
+          variant="soft"
+          onClick={sendToStems}
+          title="Розділити на стеми (Demucs) і визначити BPM"
+          aria-label="Розділити на стеми"
+        >
+          Stems
         </Button>
       )}
       {job.target_path && (
