@@ -6,6 +6,20 @@ This package is **not part of the macOS `.app` bundle**. It is built once per re
 
 The same out-of-process layout that `crates/stash-diarize/` uses for diarization, but with a Python toolchain instead of Rust because Demucs and BeatNet are Python-only.
 
+## Hosting the tarball somewhere other than the stash GitHub release
+
+The default download URL is `https://github.com/OPSRv/stash/releases/latest/download/stash-separator-macos-arm64.tar.gz`, which couples the sidecar's lifetime to your app release tags — every new tag re-publishes it. If you'd rather host the tarball on a stable mirror (HuggingFace dataset, Cloudflare R2, S3, plain object storage), set `STASH_SEPARATOR_URL` at app build time and the catalog picks it up via `option_env!`:
+
+```sh
+# Example: HuggingFace dataset, public, free, ~50 GB cap.
+STASH_SEPARATOR_URL='https://huggingface.co/<user>/stash-separator/resolve/main' \
+  npm run tauri build
+```
+
+The catalog appends `/<filename>` to whatever you provide, so the resolved URL becomes `<base>/stash-separator-macos-arm64.tar.gz`. HTTPS only — the in-app downloader refuses other schemes as a defensive guard.
+
+You still have to upload the tarball to your chosen host yourself; the build step that produces `dist/stash-separator/` is unchanged.
+
 ## Layout
 
 - `src/main.py` — CLI entry (`--mode analyze | separate | bpm`)

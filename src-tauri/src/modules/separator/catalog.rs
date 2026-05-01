@@ -19,17 +19,36 @@
 
 use serde::Serialize;
 
-/// Resolve the actual URL we'll fetch. Demucs models carry an immutable
-/// CDN URL; the sidecar tarball resolves against `releases/latest/`,
-/// which GitHub redirects to the matching `v*` tag uploaded by the
-/// release workflow.
+/// Resolve the actual URL we'll fetch. Demucs models carry an
+/// immutable CDN URL (`dl.fbaipublicfiles.com` — Meta hosts every
+/// htdemucs weight there). The sidecar tarball is *our* artifact, so
+/// we have to host it somewhere; by default it falls out of the GitHub
+/// release the running app was tagged from, but you can override the
+/// host at build time without touching the catalog:
+///
+/// ```sh
+/// STASH_SEPARATOR_URL='https://huggingface.co/<user>/stash-separator/resolve/main' \
+///     npm run tauri build
+/// ```
+///
+/// `<base>/{filename}` is the resulting URL. Useful when you'd rather
+/// not version-couple the sidecar to every app release — push the
+/// tarball to a HuggingFace dataset / Cloudflare R2 / S3 bucket once
+/// and forget about it. The override has to be HTTPS; `run_download`
+/// rejects anything else as a defensive guard.
 pub fn resolve_url(asset: &SeparatorAsset) -> String {
     match asset.subdir {
         AssetSubdir::Models | AssetSubdir::ModelsFt => asset.url.to_string(),
-        AssetSubdir::Bin => format!(
-            "https://github.com/OPSRv/stash/releases/latest/download/{}",
-            asset.filename,
-        ),
+        AssetSubdir::Bin => match option_env!("STASH_SEPARATOR_URL") {
+            Some(base) if !base.is_empty() => {
+                let trimmed = base.trim_end_matches('/');
+                format!("{trimmed}/{}", asset.filename)
+            }
+            _ => format!(
+                "https://github.com/OPSRv/stash/releases/latest/download/{}",
+                asset.filename,
+            ),
+        },
     }
 }
 
@@ -216,12 +235,23 @@ mod tests {
     }
 
     #[test]
-    fn sidecar_resolves_to_releases_latest() {
+    fn sidecar_resolves_to_releases_latest_by_default() {
+        // STASH_SEPARATOR_URL is a build-time override; without it the
+        // catalog must point at the stash GitHub release the user's
+        // current app build came from.
         let url = resolve_url(&SIDECAR);
-        assert!(
-            url.contains("/releases/latest/download/"),
-            "sidecar should resolve via /releases/latest/, got {url}",
-        );
+        let from_env = option_env!("STASH_SEPARATOR_URL").unwrap_or("");
+        if from_env.is_empty() {
+            assert!(
+                url.contains("/releases/latest/download/"),
+                "sidecar should resolve via /releases/latest/, got {url}",
+            );
+        } else {
+            assert!(
+                url.starts_with(from_env.trim_end_matches('/')),
+                "override base must prefix the resolved url; base={from_env} url={url}",
+            );
+        }
         assert!(url.ends_with(SIDECAR.filename));
     }
 
