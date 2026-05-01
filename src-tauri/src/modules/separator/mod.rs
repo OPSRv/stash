@@ -13,6 +13,7 @@
 
 pub mod catalog;
 pub mod commands;
+pub mod installer;
 pub mod jobs;
 pub mod pipeline;
 pub mod state;

@@ -1,12 +1,13 @@
-//! Catalog of artifacts the user opts into when enabling stem separation.
+//! Catalog of artifacts the user opts into when enabling stem
+//! separation.
 //!
 //! Two classes:
-//! - **Sidecar bundle** (`stash-separator-macos-arm64.tar.gz`) — the
-//!   PyInstaller `--onedir` archive built by `release.yml`. Contains
-//!   the Python interpreter + demucs + BeatNet + torch + their dylibs.
-//!   Resolves against `releases/latest/download/` so a fresh install
-//!   always pulls a runtime that the matching app release was built
-//!   against, no version drift.
+//! - **The Python runtime** — a uv-managed virtualenv at
+//!   `$APPLOCALDATA/separator/.venv` populated with `demucs + BeatNet
+//!   + torch + soundfile`. Not represented as a `SeparatorAsset`
+//!   because it isn't a single downloadable file: see
+//!   `installer::run_install` for the multi-phase setup
+//!   (`uv` → Python → venv → pip).
 //! - **Demucs models** — `*.th` files mirrored from
 //!   `dl.fbaipublicfiles.com`. The 6-stem model (`htdemucs_6s`) is
 //!   required because it's the only one that yields a separate
@@ -14,41 +15,21 @@
 //!   `htdemucs_ft` files are optional ("high-quality 4-stem"); the
 //!   user opts into them with a second checkbox in Settings.
 //!
-//! BeatNet weights live inside the PyInstaller bundle (`--collect-data
-//! BeatNet` in the spec), so they're not separate assets here.
+//! BeatNet weights ship inside the `BeatNet` pip package itself, so
+//! they aren't a separate asset either — the venv install already
+//! pulls them down.
 
 use serde::Serialize;
 
 /// Resolve the actual URL we'll fetch. Demucs models carry an
-/// immutable CDN URL (`dl.fbaipublicfiles.com` — Meta hosts every
-/// htdemucs weight there). The sidecar tarball is *our* artifact, so
-/// we have to host it somewhere; by default it falls out of the GitHub
-/// release the running app was tagged from, but you can override the
-/// host at build time without touching the catalog:
-///
-/// ```sh
-/// STASH_SEPARATOR_URL='https://huggingface.co/<user>/stash-separator/resolve/main' \
-///     npm run tauri build
-/// ```
-///
-/// `<base>/{filename}` is the resulting URL. Useful when you'd rather
-/// not version-couple the sidecar to every app release — push the
-/// tarball to a HuggingFace dataset / Cloudflare R2 / S3 bucket once
-/// and forget about it. The override has to be HTTPS; `run_download`
-/// rejects anything else as a defensive guard.
+/// immutable CDN URL — Meta hosts every htdemucs weight at
+/// `dl.fbaipublicfiles.com`. There is no sidecar tarball any more
+/// (see the migration commit), so this is a one-arm match today; the
+/// match is still here so adding a future asset that needs a derived
+/// URL doesn't have to rework every call site.
 pub fn resolve_url(asset: &SeparatorAsset) -> String {
     match asset.subdir {
         AssetSubdir::Models | AssetSubdir::ModelsFt => asset.url.to_string(),
-        AssetSubdir::Bin => match option_env!("STASH_SEPARATOR_URL") {
-            Some(base) if !base.is_empty() => {
-                let trimmed = base.trim_end_matches('/');
-                format!("{trimmed}/{}", asset.filename)
-            }
-            _ => format!(
-                "https://github.com/OPSRv/stash/releases/latest/download/{}",
-                asset.filename,
-            ),
-        },
     }
 }
 
@@ -58,26 +39,21 @@ pub struct SeparatorAsset {
     pub label: &'static str,
     pub filename: &'static str,
     pub size_bytes: u64,
-    /// Source URL for demucs model files. Empty for the sidecar bundle —
-    /// that one resolves dynamically via `resolve_url` so a fresh
-    /// install always pulls the runtime built against the running app
-    /// release.
+    /// Source URL for demucs model files.
     pub url: &'static str,
-    /// Where the file lives under `$APPLOCALDATA/separator/`. The
-    /// `Models` / `ModelsFt` paths nest under `models/hub/checkpoints/`
-    /// so we can point demucs's `TORCH_HOME` directly at `models/` and
-    /// it finds the weights via its standard `hub/checkpoints/<hash>.th`
-    /// layout, no symlinks or path rewriting needed.
+    /// Where the file lives under `$APPLOCALDATA/separator/`. Models
+    /// nest under `models/hub/checkpoints/` so we can point demucs's
+    /// `TORCH_HOME` directly at `models/` and it finds the weights via
+    /// its standard `hub/checkpoints/<hash>.th` layout, no symlinks
+    /// or path rewriting needed.
     pub subdir: AssetSubdir,
     /// `true` for assets behind the "high-quality 4-stem" opt-in.
-    /// Required assets must be present for separation to work at all.
     pub optional: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
-    Sidecar,
     Htdemucs6s,
     HtdemucsFtVocals,
     HtdemucsFtDrums,
@@ -88,26 +64,11 @@ pub enum AssetKind {
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetSubdir {
-    /// Sidecar tarball — `separator/bin/`.
-    Bin,
     /// `htdemucs_6s` weights — `separator/models/hub/checkpoints/`.
     Models,
     /// `htdemucs_ft` (4 stem-specific weights) — same path.
     ModelsFt,
 }
-
-pub const SIDECAR: SeparatorAsset = SeparatorAsset {
-    kind: AssetKind::Sidecar,
-    label: "stash-separator (sidecar bundle)",
-    filename: "stash-separator-macos-arm64.tar.gz",
-    // PyInstaller --onedir of demucs + BeatNet + torch + soundfile.
-    // Tighten once CI publishes a real artifact and we know the actual
-    // size.
-    size_bytes: 280_000_000,
-    url: "",
-    subdir: AssetSubdir::Bin,
-    optional: false,
-};
 
 pub const HTDEMUCS_6S: SeparatorAsset = SeparatorAsset {
     kind: AssetKind::Htdemucs6s,
@@ -161,9 +122,10 @@ pub const HTDEMUCS_FT_OTHER: SeparatorAsset = SeparatorAsset {
     optional: true,
 };
 
-/// Required assets — the minimum the user must download for separation
-/// to work at all.
-pub const REQUIRED: &[&SeparatorAsset] = &[&SIDECAR, &HTDEMUCS_6S];
+/// Required model the user must download for separation to work at
+/// all. The Python runtime is a separate prereq tracked outside the
+/// catalog (`state::runtime_ready`).
+pub const REQUIRED: &[&SeparatorAsset] = &[&HTDEMUCS_6S];
 
 /// The four htdemucs_ft model files — optional pack behind a settings
 /// checkbox.
@@ -175,7 +137,6 @@ pub const OPTIONAL_FT: &[&SeparatorAsset] = &[
 ];
 
 pub const ALL: &[&SeparatorAsset] = &[
-    &SIDECAR,
     &HTDEMUCS_6S,
     &HTDEMUCS_FT_VOCALS,
     &HTDEMUCS_FT_DRUMS,
@@ -197,13 +158,10 @@ pub fn size_is_plausible(expected: u64, got: u64) -> bool {
 }
 
 /// Smallest size we'll accept as "this is plausibly the asset, not a
-/// 404 HTML page". 50 MB on every kind is loose enough that future
-/// model shrinks won't trip us up but tight enough to reject any HTML
-/// error response, since both the sidecar tarball and every model file
-/// are multi-tens-of-megabytes.
+/// 404 HTML page". 50 MB on every kind: each htdemucs `.th` is ~80 MB,
+/// so 50 is a generous floor that still rejects any HTML error body.
 pub fn min_plausible_bytes(kind: AssetKind) -> u64 {
     match kind {
-        AssetKind::Sidecar => 50 * 1024 * 1024,
         AssetKind::Htdemucs6s
         | AssetKind::HtdemucsFtVocals
         | AssetKind::HtdemucsFtDrums
@@ -226,51 +184,17 @@ mod tests {
     }
 
     #[test]
-    fn resolved_urls_are_https() {
+    fn resolved_urls_are_https_and_match_catalog() {
         for a in ALL {
             let url = resolve_url(a);
             assert!(url.starts_with("https://"), "url not https: {url}");
+            assert_eq!(url, a.url);
             assert!(!a.filename.is_empty());
         }
     }
 
     #[test]
-    fn sidecar_resolves_to_releases_latest_by_default() {
-        // STASH_SEPARATOR_URL is a build-time override; without it the
-        // catalog must point at the stash GitHub release the user's
-        // current app build came from.
-        let url = resolve_url(&SIDECAR);
-        let from_env = option_env!("STASH_SEPARATOR_URL").unwrap_or("");
-        if from_env.is_empty() {
-            assert!(
-                url.contains("/releases/latest/download/"),
-                "sidecar should resolve via /releases/latest/, got {url}",
-            );
-        } else {
-            assert!(
-                url.starts_with(from_env.trim_end_matches('/')),
-                "override base must prefix the resolved url; base={from_env} url={url}",
-            );
-        }
-        assert!(url.ends_with(SIDECAR.filename));
-    }
-
-    #[test]
-    fn model_assets_keep_fixed_url() {
-        for a in [
-            &HTDEMUCS_6S,
-            &HTDEMUCS_FT_VOCALS,
-            &HTDEMUCS_FT_DRUMS,
-            &HTDEMUCS_FT_BASS,
-            &HTDEMUCS_FT_OTHER,
-        ] {
-            assert_eq!(resolve_url(a), a.url);
-        }
-    }
-
-    #[test]
     fn required_does_not_overlap_optional() {
-        // Catch a future edit accidentally moving an FT model into REQUIRED.
         for r in REQUIRED {
             assert!(!r.optional, "{} marked optional in REQUIRED", r.label);
         }
@@ -282,9 +206,7 @@ mod tests {
     #[test]
     fn ft_pack_is_complete() {
         // htdemucs_ft is meaningless unless all four stem-specific
-        // weights are present — partial install would mean "vocals
-        // model is fine-tuned, the rest is default". Sanity-check the
-        // pack size matches the four stems.
+        // weights are present.
         assert_eq!(OPTIONAL_FT.len(), 4);
     }
 }

@@ -1,10 +1,13 @@
 //! Tauri commands: install / run / cancel for the stem-separation +
-//! tempo-detection sidecar.
+//! tempo-detection pipeline.
 //!
-//! Same opt-in shape as `modules::diarization::commands` — the user
-//! installs once, then every separator action ("Розділити стеми",
-//! Telegram `/stems`, the LLM tool) checks `state::assets_ready` before
-//! kicking off any work.
+//! Install is a multi-step affair (uv → Python → venv → pip → models)
+//! orchestrated by `installer::run_runtime_install` plus the per-model
+//! download loop here. Both halves emit progress on
+//! `separator:install`. Run / cancel mirror the diarization shape:
+//! one job at a time (htdemucs_ft can peak at ~6 GB RAM), the worker
+//! thread holds the spawned `Child` and the cancel command kills its
+//! PID.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,11 +16,12 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::catalog::{self, AssetKind, SeparatorAsset, ALL, OPTIONAL_FT, REQUIRED};
+use super::installer;
 use super::jobs::{now_unix, source_dir_name, JobMode, JobStatus, SeparatorJob};
 use super::pipeline;
 use super::state::{
-    asset_path, assets_ready, ft_ready, models_root, output_dir_default, root_dir,
-    sidecar_executable, SeparatorState,
+    asset_path, ft_ready, install_flag, models_root, output_dir_default, python_path, ready,
+    root_dir, runtime_ready, script_path, SeparatorState,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,8 +44,11 @@ pub struct SeparatorAssetStatus {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SeparatorStatus {
-    /// Required pack (sidecar + htdemucs_6s) is fully installed.
+    /// Required runtime + model are both installed — separator can
+    /// service a job without further downloads.
     pub ready: bool,
+    /// Python runtime (uv + venv + pip packages) is fully installed.
+    pub runtime_ready: bool,
     /// All four htdemucs_ft files are installed.
     pub ft_ready: bool,
     pub assets: Vec<SeparatorAssetStatus>,
@@ -72,16 +79,18 @@ pub fn separator_status(app: AppHandle) -> Result<SeparatorStatus, String> {
         })
         .collect::<Vec<_>>();
     Ok(SeparatorStatus {
-        ready: assets_ready(&data_dir),
+        ready: ready(&data_dir),
+        runtime_ready: runtime_ready(&data_dir),
         ft_ready: ft_ready(&data_dir),
         assets,
         default_output_dir: output_dir_default().display().to_string(),
     })
 }
 
-/// Download whichever assets are missing. `with_ft = true` adds the
-/// optional htdemucs_ft pack (~320 MB). Idempotent — already-present
-/// files emit a `done` event and are skipped.
+/// Install / fix-up the runtime, then download whichever model assets
+/// are missing. `with_ft = true` adds the optional htdemucs_ft pack
+/// (~320 MB). Idempotent — every step short-circuits when its target
+/// is already in place.
 #[tauri::command]
 pub async fn separator_download(
     app: AppHandle,
@@ -94,13 +103,46 @@ pub async fn separator_download(
         .map_err(|e| format!("app_data_dir: {e}"))?;
     std::fs::create_dir_all(root_dir(&data_dir)).map_err(|e| format!("mkdir: {e}"))?;
 
+    // Concurrency guard for the whole install pipeline. Two parallel
+    // `uv pip install` runs against the same venv can produce a
+    // half-built Python environment that imports clean but fails on
+    // the first call (we've seen it during dev). One install at a
+    // time, please.
+    {
+        let mut flag = state.install_in_flight.lock().unwrap();
+        if *flag {
+            return Err("Встановлення вже триває".into());
+        }
+        *flag = true;
+    }
+    let result = run_install_inner(&app, &data_dir, &state, with_ft).await;
+    *state.install_in_flight.lock().unwrap() = false;
+    result
+}
+
+async fn run_install_inner(
+    app: &AppHandle,
+    data_dir: &Path,
+    state: &Arc<SeparatorState>,
+    with_ft: bool,
+) -> Result<(), String> {
+    if !runtime_ready(data_dir) {
+        installer::run_runtime_install(app, data_dir).await?;
+    }
+
     let mut targets: Vec<&SeparatorAsset> = REQUIRED.iter().copied().collect();
     if with_ft {
         targets.extend(OPTIONAL_FT.iter().copied());
     }
 
+    installer::emit_phase(
+        app,
+        installer::InstallPhase::Models,
+        "Завантажую моделі…",
+        None,
+    );
     for a in targets {
-        let path = asset_path(&data_dir, a);
+        let path = asset_path(data_dir, a);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?}: {e}"))?;
         }
@@ -108,12 +150,6 @@ pub async fn separator_download(
             .map(|meta| meta.len() >= catalog::min_plausible_bytes(a.kind))
             .unwrap_or(false)
         {
-            // Already on disk and plausible — short-circuit but make
-            // sure the sidecar tarball was actually unpacked, since the
-            // .tar.gz can survive across an interrupted install.
-            if a.kind == AssetKind::Sidecar {
-                ensure_sidecar_extracted(&data_dir)?;
-            }
             let _ = app.emit(
                 "separator:download",
                 DownloadEvent {
@@ -131,19 +167,16 @@ pub async fn separator_download(
                 return Err(format!("{} download already in progress", a.label));
             }
         }
-        let result = run_download(&app, a, &path).await;
-        if result.is_ok() && a.kind == AssetKind::Sidecar {
-            // Extract the tarball into bin/, then remove the archive so
-            // a future "is the sidecar installed?" check doesn't get
-            // confused between the unpacked tree and the archive sitting
-            // next to it.
-            extract_sidecar_archive(&path)?;
-            ensure_executable(&sidecar_executable(&data_dir))?;
-            let _ = std::fs::remove_file(&path);
-        }
+        let result = run_download(app, a, &path).await;
         state.in_flight.lock().unwrap().remove(a.filename);
         result?;
     }
+    installer::emit_phase(
+        app,
+        installer::InstallPhase::Done,
+        "Готово",
+        Some(1.0),
+    );
     Ok(())
 }
 
@@ -163,8 +196,10 @@ pub fn separator_delete(app: AppHandle, ft_only: bool) -> Result<(), String> {
         }
         return Ok(());
     }
-    // Full uninstall — wipe the entire `separator/` subtree so the bin
-    // directory's PyInstaller dist + any partial downloads go with it.
+    // Full uninstall — wipe the runtime and every model. Drop the
+    // install flag first so a concurrent ready-check can't catch a
+    // half-deleted state.
+    let _ = std::fs::remove_file(install_flag(&data_dir));
     let root = root_dir(&data_dir);
     if root.exists() {
         std::fs::remove_dir_all(&root)
@@ -205,8 +240,8 @@ pub fn enqueue_job(
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir: {e}"))?;
-    if !assets_ready(&data_dir) {
-        return Err("separator assets not installed".into());
+    if !ready(&data_dir) {
+        return Err("separator runtime / assets not installed".into());
     }
     let input = PathBuf::from(&args.input_path);
     if !input.is_file() {
@@ -255,9 +290,6 @@ pub fn separator_cancel(
     state: State<'_, Arc<SeparatorState>>,
     job_id: String,
 ) -> Result<(), String> {
-    // Mark the job cancelled first so the worker thread doesn't race
-    // with us: when wait_with_output returns, the worker checks the
-    // current status before flipping it to Failed/Completed.
     let was_running = {
         let mut jobs = state.jobs.lock().unwrap();
         let Some(j) = jobs.iter_mut().find(|j| j.id == job_id) else {
@@ -301,7 +333,6 @@ pub fn separator_clear_completed(state: State<'_, Arc<SeparatorState>>) {
 
 fn kind_str(k: AssetKind) -> &'static str {
     match k {
-        AssetKind::Sidecar => "sidecar",
         AssetKind::Htdemucs6s => "htdemucs_6s",
         AssetKind::HtdemucsFtVocals => "htdemucs_ft_vocals",
         AssetKind::HtdemucsFtDrums => "htdemucs_ft_drums",
@@ -311,9 +342,6 @@ fn kind_str(k: AssetKind) -> &'static str {
 }
 
 fn pick_model(requested: Option<&str>, data_dir: &Path) -> String {
-    // The UI/LLM may ask for a model the user hasn't installed; we fall
-    // back to whatever is available rather than letting demucs error
-    // out at runtime.
     let req = requested.unwrap_or("htdemucs_6s");
     match req {
         "htdemucs_ft" if ft_ready(data_dir) => "htdemucs_ft".into(),
@@ -324,91 +352,14 @@ fn pick_model(requested: Option<&str>, data_dir: &Path) -> String {
 }
 
 fn random_suffix() -> String {
-    // We don't need cryptographic uniqueness; the job id only needs to
-    // disambiguate jobs created within the same second. Hash of the
-    // current Instant is fine.
     use std::time::Instant;
     let n = format!("{:?}", Instant::now());
-    let mut h: u64 = 1469598103934665603; // FNV-1a offset
+    let mut h: u64 = 1469598103934665603;
     for b in n.as_bytes() {
         h ^= *b as u64;
         h = h.wrapping_mul(1099511628211);
     }
     format!("{:08x}", (h as u32))
-}
-
-#[cfg(unix)]
-fn ensure_executable(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    let meta = std::fs::metadata(path)
-        .map_err(|e| format!("stat {}: {e}", path.display()))?;
-    let mut perms = meta.permissions();
-    perms.set_mode(perms.mode() | 0o755);
-    std::fs::set_permissions(path, perms)
-        .map_err(|e| format!("chmod {}: {e}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn ensure_executable(_path: &Path) -> Result<(), String> {
-    Ok(())
-}
-
-/// Unpack the sidecar tarball into `separator/bin/`. We shell out to
-/// `tar` because macOS ships it natively and the alternative — adding
-/// `tar` + `flate2` to Cargo.toml — would bloat the main binary by a
-/// few hundred KB just to read a file the OS already knows how to.
-///
-/// After extraction we strip Gatekeeper's quarantine attribute from
-/// the unpacked tree. The downloaded tarball comes from a non-Apple
-/// source (GitHub Releases), so macOS slaps `com.apple.quarantine`
-/// on every file inside; running an unsigned PyInstaller binary with
-/// that attr present produces "stash-separator can't be opened" with
-/// no remedy from the in-app side. Stripping it on extract turns
-/// that into a single `bash -c xattr` instead of teaching every user
-/// the right Terminal incantation.
-fn extract_sidecar_archive(archive: &Path) -> Result<(), String> {
-    let parent = archive
-        .parent()
-        .ok_or_else(|| format!("archive has no parent dir: {}", archive.display()))?;
-    let status = std::process::Command::new("tar")
-        .arg("-xzf")
-        .arg(archive)
-        .arg("-C")
-        .arg(parent)
-        .status()
-        .map_err(|e| format!("spawn tar: {e}"))?;
-    if !status.success() {
-        return Err(format!("tar exited {status}"));
-    }
-    let bundle = parent.join("stash-separator");
-    if bundle.is_dir() {
-        let _ = std::process::Command::new("xattr")
-            .arg("-dr")
-            .arg("com.apple.quarantine")
-            .arg(&bundle)
-            .status();
-    }
-    Ok(())
-}
-
-/// Defend against an interrupted install where the .tar.gz was deleted
-/// but the unpack didn't finish — re-run the extract if the binary
-/// isn't there.
-fn ensure_sidecar_extracted(data_dir: &Path) -> Result<(), String> {
-    let bin = sidecar_executable(data_dir);
-    if bin.is_file() {
-        return Ok(());
-    }
-    let archive = root_dir(data_dir)
-        .join("bin")
-        .join(catalog::SIDECAR.filename);
-    if archive.is_file() {
-        extract_sidecar_archive(&archive)?;
-        ensure_executable(&bin)?;
-        let _ = std::fs::remove_file(&archive);
-    }
-    Ok(())
 }
 
 async fn run_download(
@@ -517,12 +468,9 @@ fn update_job<F: FnOnce(&mut SeparatorJob)>(
     Some(snapshot)
 }
 
-/// Find the next queued job and spawn a worker thread for it. Called
-/// after every job-state transition (push, cancel, completion) so the
-/// queue is single-threaded but always moves.
 fn pump_queue(app: &AppHandle, state: &Arc<SeparatorState>) {
     if state.active_pid.lock().unwrap().is_some() {
-        return; // a worker is already running
+        return;
     }
     let next_id = {
         let jobs = state.jobs.lock().unwrap();
@@ -546,30 +494,27 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
             return;
         }
     };
-    if !assets_ready(&data_dir) {
+    if !ready(&data_dir) {
         mark_failed(
             &app,
             &state,
             &job_id,
-            "separator assets not installed".into(),
+            "separator runtime / assets not installed".into(),
         );
         pump_queue(&app, &state);
         return;
     }
-    let bin = sidecar_executable(&data_dir);
+    let python = python_path(&data_dir);
+    let script = script_path(&data_dir);
     let models_root = models_root(&data_dir);
 
-    // Snapshot the job parameters so we don't hold the jobs-lock during
-    // the multi-second spawn / wait below.
     let snapshot = {
         let jobs = state.jobs.lock().unwrap();
         jobs.iter().find(|j| j.id == job_id).cloned()
     };
     let Some(job) = snapshot else {
-        return; // job got cleared between push and worker pickup
+        return;
     };
-
-    // The user may have cancelled while the job sat queued.
     if job.status == JobStatus::Cancelled {
         pump_queue(&app, &state);
         return;
@@ -582,7 +527,8 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
         j.started_at = now_unix();
     });
 
-    let mut cmd = std::process::Command::new(&bin);
+    let mut cmd = std::process::Command::new(&python);
+    cmd.arg(&script);
     cmd.arg("--mode").arg(job.mode.as_arg());
     cmd.arg("--input").arg(&job.input_path);
     cmd.arg("--out-dir").arg(&job.output_dir);
@@ -595,6 +541,10 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
         }
     }
     cmd.env("TORCH_HOME", &models_root);
+    // Force the Python stdout/stderr unbuffered so `progress` lines
+    // reach us promptly. CPython buffers when stdout is a pipe by
+    // default; this saves us a 4 KB-block delay on short clips.
+    cmd.env("PYTHONUNBUFFERED", "1");
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
@@ -602,7 +552,7 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            mark_failed(&app, &state, &job_id, format!("spawn sidecar: {e}"));
+            mark_failed(&app, &state, &job_id, format!("spawn python: {e}"));
             pump_queue(&app, &state);
             return;
         }
@@ -642,15 +592,12 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
     let output = match output {
         Ok(o) => o,
         Err(e) => {
-            mark_failed(&app, &state, &job_id, format!("wait sidecar: {e}"));
+            mark_failed(&app, &state, &job_id, format!("wait python: {e}"));
             pump_queue(&app, &state);
             return;
         }
     };
 
-    // Cancel-races: if the user already flipped status to Cancelled,
-    // keep it — the SIGTERM we sent would otherwise show up as
-    // `Failed: separator sidecar produced no output`.
     let was_cancelled = state
         .jobs
         .lock()
@@ -673,9 +620,6 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
             });
         }
         Err(e) => {
-            // Surface stderr tail in the error to give the user *some*
-            // diagnostic on a hard crash. Limit to the last 4 KB so we
-            // don't fill the panel with torch warnings.
             let stderr_tail = String::from_utf8_lossy(&output.stderr);
             let tail = stderr_tail
                 .chars()
@@ -709,8 +653,6 @@ mod tests {
     #[test]
     fn pick_model_falls_back_when_ft_missing() {
         let tmp = tempfile::TempDir::new().unwrap();
-        // ft pack is not installed → htdemucs_ft request degrades to
-        // 6s instead of failing later inside the sidecar.
         assert_eq!(pick_model(Some("htdemucs_ft"), tmp.path()), "htdemucs_6s");
         assert_eq!(pick_model(Some("htdemucs_6s"), tmp.path()), "htdemucs_6s");
         assert_eq!(pick_model(Some("htdemucs"), tmp.path()), "htdemucs");
