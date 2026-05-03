@@ -41,6 +41,11 @@ export const ConfirmDialog = ({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Capture-phase + stopImmediatePropagation so PopupShell's
+        // window Esc handler doesn't hide the whole popup behind the
+        // dialog. Same fix applied in `Modal`/`Lightbox`.
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         e.preventDefault();
         onCancel();
       } else if (e.key === 'Enter') {
@@ -50,8 +55,8 @@ export const ConfirmDialog = ({
         onConfirm(suppressibleLabel ? suppress : undefined);
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [open, onConfirm, onCancel, suppress, suppressibleLabel]);
 
   if (!open) return null;

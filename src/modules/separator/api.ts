@@ -119,6 +119,17 @@ export const cancel = (jobId: string): Promise<void> =>
 
 export const listJobs = (): Promise<SeparatorJob[]> => invoke('separator_list_jobs');
 
+/** Walk the user's stems output directory and reconstruct one job per
+ *  manifest.json found. Merged with any in-memory state by the Rust
+ *  side so a fresh popup process still surfaces historical runs. */
+export const scanDisk = (): Promise<SeparatorJob[]> => invoke('separator_scan_disk');
+
+/** Delete one completed/failed job — both the in-memory entry and the
+ *  on-disk output directory. Active runs (queued/running) should be
+ *  cancelled first via `cancel`. */
+export const removeJob = (jobId: string): Promise<void> =>
+  invoke('separator_remove_job', { jobId });
+
 export const clearCompleted = (): Promise<void> => invoke('separator_clear_completed');
 
 /** Audio extensions ffmpeg / soundfile can read. We don't validate
@@ -158,3 +169,19 @@ export const STEM_LABELS: Record<string, string> = {
   piano: 'Piano',
   other: 'Other',
 };
+
+/** RGB triplets per stem — used for the accent dots / left-border on
+ *  stem cards and the compact summary chips on collapsed rows. Picked
+ *  for legibility on the dark theme. Falls through to `other` for
+ *  anything not in the map. */
+export const STEM_COLORS: Record<string, string> = {
+  vocals: '236, 72, 153',
+  drums: '244, 114, 22',
+  bass: '139, 92, 246',
+  guitar: '34, 197, 94',
+  piano: '14, 165, 233',
+  other: '148, 163, 184',
+};
+
+export const stemColor = (key: string): string =>
+  STEM_COLORS[key.toLowerCase()] ?? STEM_COLORS.other;

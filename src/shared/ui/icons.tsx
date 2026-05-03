@@ -18,6 +18,12 @@ export const LinkIcon = ({ size = 14, className }: IconProps) => (
   </svg>
 );
 
+export const PaperclipIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M21 12.5 12.5 21a5.5 5.5 0 1 1-7.78-7.78L13 5a3.5 3.5 0 1 1 4.95 4.95L9.7 18.2a1.5 1.5 0 1 1-2.12-2.12l7.07-7.07" />
+  </svg>
+);
+
 export const ExternalIcon = ({ size = 13, className }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
     <path d="M14 4h6v6" />

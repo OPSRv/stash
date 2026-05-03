@@ -109,6 +109,16 @@ export const AppearanceTab = ({ settings, onChange }: AppearanceTabProps) => {
           }
           display={`${Math.round(settings.themePaneOpacity * 100)} %`}
         />
+        <SliderField
+          label="Blur"
+          description="Frosted-glass strength behind the popup."
+          value={settings.themeBlur}
+          min={0}
+          max={60}
+          step={1}
+          onChange={(v) => onChange('themeBlur', Math.max(0, Math.min(60, v)))}
+          display={`${settings.themeBlur} px`}
+        />
       </SettingsSection>
     </SettingsTab>
   );

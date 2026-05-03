@@ -135,6 +135,20 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
           }
         />
       </SettingsSection>
+
+      <SettingsSection label="POST-PROCESSING">
+        <SettingRow
+          title="Auto-send audio downloads to Stems"
+          description="When a completed download is audio (m4a, mp3, etc.), hand it to the Stems tab automatically — same as clicking the Stems button on the row. Requires Demucs to be installed in Settings → Stems."
+          control={
+            <Toggle
+              checked={settings.downloaderAutoStems}
+              onChange={(v) => onChange('downloaderAutoStems', v)}
+              label="Auto-send audio to Stems"
+            />
+          }
+        />
+      </SettingsSection>
     </SettingsTab>
   );
 };

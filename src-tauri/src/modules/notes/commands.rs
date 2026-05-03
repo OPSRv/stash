@@ -1,9 +1,9 @@
-use crate::modules::notes::media_server::MediaServer;
+use crate::modules::media_server::{MediaKind, MediaServerState};
 use crate::modules::notes::repo::{
     FolderFilter, Note, NoteAttachment, NoteFolder, NoteSummary, NotesRepo,
 };
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
 
 pub struct NotesState {
@@ -11,11 +11,6 @@ pub struct NotesState {
     /// clone a handle without duplicating the SQLite connection. Existing
     /// callers still `.lock()` through transparent `Arc` deref.
     pub repo: Arc<Mutex<NotesRepo>>,
-    /// Loopback HTTP server used to stream audio attachments to
-    /// WKWebView — see `media_server.rs` for why `asset://` is unsuitable.
-    /// Lazily booted on first audio playback so we don't hold a port
-    /// open for users who never open Notes.
-    pub media_server: OnceLock<MediaServer>,
 }
 
 fn now() -> i64 {
@@ -35,7 +30,7 @@ const ALLOWED_AUDIO_EXT: &[&str] = &[
     "webm", "ogg", "mp4", "m4a", "mp3", "wav", "aac", "flac", "opus", "aiff", "aif",
 ];
 
-fn audio_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn audio_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
         .app_data_dir()
@@ -44,6 +39,16 @@ fn audio_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("audio");
     std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
     Ok(base)
+}
+
+/// Optional fourth allowed root for the inline audio player: the
+/// user's stem-separation output dir (`~/Music/Stash Stems`). We
+/// don't create it on demand — Stash Stems is owned by the separator
+/// module; if the user never installed Demucs there's nothing to
+/// expose. Returns `None` when `dirs_next::audio_dir()` is missing
+/// (rare on macOS) instead of erroring, so notes still work.
+pub(crate) fn stems_root() -> Option<PathBuf> {
+    Some(crate::modules::separator::state::output_dir_default())
 }
 
 fn sanitize_ext(ext: &str) -> Result<String, String> {
@@ -228,7 +233,7 @@ pub fn notes_delete(
     to_string_err(state.repo.lock().unwrap().delete(id))
 }
 
-fn attachments_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn attachments_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
         .app_data_dir()
@@ -401,11 +406,20 @@ fn mime_from_extension(p: &Path) -> Option<String> {
 // hour-plus podcast audio + RAW photos / iPhone HEIF bursts.
 const MAX_AUDIO_BYTES: usize = 1024 * 1024 * 1024;
 const MAX_IMAGE_BYTES: usize = 100 * 1024 * 1024;
+/// 4 GiB ceiling for inline video embeds. Larger than audio/images so a
+/// few minutes of phone-camera footage (50–300 MB) lands without fuss,
+/// but still bounded — a 10 GB drag-drop is almost certainly a misclick.
+const MAX_VIDEO_BYTES: usize = 4 * 1024 * 1024 * 1024;
 const ALLOWED_IMAGE_EXT: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "heif",
 ];
+/// Container extensions accepted by the inline video embed path. Browser
+/// `<video>` only reliably plays a subset of these (mp4/m4v/webm/mov),
+/// but we still copy mkv/avi into the managed dir so the user can find
+/// them — the renderer falls back to a plain link when MIME refuses.
+const ALLOWED_VIDEO_EXT: &[&str] = &["mp4", "m4v", "mov", "webm", "mkv", "avi"];
 
-fn image_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn image_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
         .app_data_dir()
@@ -416,10 +430,29 @@ fn image_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(base)
 }
 
+pub(crate) fn video_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("notes")
+        .join("videos");
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    Ok(base)
+}
+
 fn sanitize_image_ext(ext: &str) -> Result<String, String> {
     let lower = ext.trim().trim_start_matches('.').to_ascii_lowercase();
     if !ALLOWED_IMAGE_EXT.contains(&lower.as_str()) {
         return Err(format!("unsupported image extension: .{lower}"));
+    }
+    Ok(lower)
+}
+
+fn sanitize_video_ext(ext: &str) -> Result<String, String> {
+    let lower = ext.trim().trim_start_matches('.').to_ascii_lowercase();
+    if !ALLOWED_VIDEO_EXT.contains(&lower.as_str()) {
+        return Err(format!("unsupported video extension: .{lower}"));
     }
     Ok(lower)
 }
@@ -549,6 +582,38 @@ pub fn notes_save_image_file(app: tauri::AppHandle, path: String) -> Result<Stri
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// Copy an on-disk video file into the managed videos dir. Mirrors
+/// `notes_save_audio_file` — the result is a stable absolute path the
+/// frontend embeds as `![caption](…)`, with the inline preview rendered
+/// by `MarkdownVideoEmbed` against the loopback `/video` stream URL.
+#[tauri::command]
+pub fn notes_save_video_file(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let src = Path::new(&path);
+    if !src.is_file() {
+        return Err(format!("not a file: {path}"));
+    }
+    let meta = std::fs::metadata(src).map_err(|e| e.to_string())?;
+    if (meta.len() as usize) > MAX_VIDEO_BYTES {
+        return Err(format!(
+            "video file exceeds {} GB limit",
+            MAX_VIDEO_BYTES / 1024 / 1024 / 1024
+        ));
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .ok_or_else(|| "file has no extension".to_string())?;
+    let ext = sanitize_video_ext(ext)?;
+    let dir = video_dir(&app)?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let dest = dir.join(format!("vid-{nanos}.{ext}"));
+    std::fs::copy(src, &dest).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 /// Read raw bytes of an image stored under the managed images dir. Used by
 /// the inline markdown image embed, which references files by absolute
 /// path from `![alt](…)`. Same scope guard as `notes_read_audio_path`.
@@ -581,9 +646,13 @@ pub fn notes_read_image_path(app: tauri::AppHandle, path: String) -> Result<Vec<
 pub fn notes_read_audio_path(app: tauri::AppHandle, path: String) -> Result<Vec<u8>, String> {
     let audio_root = audio_dir(&app)?;
     let attach_root = attachments_root(&app)?;
+    let stems = stems_root();
     let p = Path::new(&path);
     let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    if !canon.starts_with(&audio_root) && !canon.starts_with(&attach_root) {
+    let in_scope = canon.starts_with(&audio_root)
+        || canon.starts_with(&attach_root)
+        || stems.as_ref().is_some_and(|s| canon.starts_with(s));
+    if !in_scope {
         return Err("audio path is outside the managed audio directories".into());
     }
     if !p.is_file() {
@@ -593,39 +662,18 @@ pub fn notes_read_audio_path(app: tauri::AppHandle, path: String) -> Result<Vec<
 }
 
 /// Resolve a `http://127.0.0.1:<port>/audio?...` URL the frontend can
-/// hand to `<audio src>`. Boots the loopback media server on first call
-/// (idempotent, daemon thread). The token is per-process and never
-/// stored on disk; the path is validated against the same scope guards
-/// used by `notes_read_audio_path`. See `media_server.rs` for why
-/// `asset://` cannot be used for AVFoundation-backed playback.
+/// hand to `<audio src>`. The shared `MediaServerState` boots its
+/// accept loop on first call, validates the path against currently
+/// registered audio roots (notes audio dir, per-note attachments,
+/// stems), and returns a tokenised URL. See
+/// `modules/media_server/mod.rs` for why `asset://` cannot be used
+/// for AVFoundation-backed playback.
 #[tauri::command]
 pub fn notes_audio_stream_url(
-    app: tauri::AppHandle,
-    state: State<'_, NotesState>,
+    media: State<'_, Arc<MediaServerState>>,
     path: String,
 ) -> Result<String, String> {
-    let audio_root = audio_dir(&app)?;
-    let attach_root = attachments_root(&app)?;
-    let p = Path::new(&path);
-    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    if !canon.starts_with(&audio_root) && !canon.starts_with(&attach_root) {
-        return Err("audio path is outside the managed audio directories".into());
-    }
-    if !p.is_file() {
-        return Err("audio file is missing on disk".into());
-    }
-
-    let server = ensure_media_server(&app, &state)?;
-
-    let abs = canon
-        .to_str()
-        .ok_or_else(|| "audio path is not valid UTF-8".to_string())?;
-    let path_q = url_encode_component(abs);
-    let token_q = url_encode_component(&server.token);
-    Ok(format!(
-        "http://127.0.0.1:{}/audio?path={}&t={}",
-        server.port, path_q, token_q
-    ))
+    media.stream_url(MediaKind::Audio, &path)
 }
 
 /// Resolve a `http://127.0.0.1:<port>/image?...` URL the frontend can hand
@@ -633,74 +681,26 @@ pub fn notes_audio_stream_url(
 /// forced `notes_read_image_path` to materialise the whole file into the
 /// renderer just to wrap it in a Blob URL — at the 100 MB embed cap that
 /// translates to hundreds of MB of JSON parsing on every preview render.
-/// Same scope guards as `notes_read_image_path` (managed images dir +
-/// per-note attachments tree).
 #[tauri::command]
 pub fn notes_image_stream_url(
-    app: tauri::AppHandle,
-    state: State<'_, NotesState>,
+    media: State<'_, Arc<MediaServerState>>,
     path: String,
 ) -> Result<String, String> {
-    let img_root = image_dir(&app)?;
-    let attach_root = attachments_root(&app)?;
-    let p = Path::new(&path);
-    let canon = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    if !canon.starts_with(&img_root) && !canon.starts_with(&attach_root) {
-        return Err("image path is outside the managed images directories".into());
-    }
-    if !p.is_file() {
-        return Err("image file is missing on disk".into());
-    }
-
-    let server = ensure_media_server(&app, &state)?;
-
-    let abs = canon
-        .to_str()
-        .ok_or_else(|| "image path is not valid UTF-8".to_string())?;
-    let path_q = url_encode_component(abs);
-    let token_q = url_encode_component(&server.token);
-    Ok(format!(
-        "http://127.0.0.1:{}/image?path={}&t={}",
-        server.port, path_q, token_q
-    ))
+    media.stream_url(MediaKind::Image, &path)
 }
 
-/// Boot-or-fetch the loopback media server. Idempotent: the first caller
-/// (audio or image) wins the `OnceLock` race; later callers reuse the
-/// already-published handle. All three managed roots (audio, attachments,
-/// images) are passed in so route dispatch in `media_server.rs` can scope
-/// each request to the right subset.
-fn ensure_media_server(
-    app: &tauri::AppHandle,
-    state: &State<'_, NotesState>,
-) -> Result<MediaServer, String> {
-    if let Some(s) = state.media_server.get() {
-        return Ok(s.clone());
-    }
-    let audio_root = audio_dir(app)?;
-    let attach_root = attachments_root(app)?;
-    let img_root = image_dir(app)?;
-    let started = crate::modules::notes::media_server::start(audio_root, attach_root, img_root)?;
-    let _ = state.media_server.set(started.clone());
-    Ok(state.media_server.get().cloned().unwrap_or(started))
-}
-
-/// `application/x-www-form-urlencoded`-compatible encoder. Strict
-/// percent-encoding for everything outside RFC 3986 unreserved + a few
-/// path-safe extras — keeps the URL safe even when the source path
-/// has Cyrillic, spaces, `?`, `&`, `=` and other reserved bytes.
-fn url_encode_component(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.as_bytes() {
-        let b = *byte;
-        let ok = b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~');
-        if ok {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
+/// Resolve a `http://127.0.0.1:<port>/video?...` URL the frontend hands
+/// to `<video src>`. Files staged via `notes_save_video_file` land in
+/// `notes/videos/`, plus per-note attachments (so attachments-era
+/// videos still play once the inline button replaces the dedicated
+/// panel). Downloads land under the downloader's roots, registered
+/// separately by that module.
+#[tauri::command]
+pub fn notes_video_stream_url(
+    media: State<'_, Arc<MediaServerState>>,
+    path: String,
+) -> Result<String, String> {
+    media.stream_url(MediaKind::Video, &path)
 }
 
 /// Read a markdown file from disk. Rejects anything that is not a regular

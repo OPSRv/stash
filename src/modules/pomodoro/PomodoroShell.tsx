@@ -277,14 +277,15 @@ export const PomodoroShell = () => {
       } else if (e.metaKey && e.key === 'ArrowLeft' && isActive) {
         e.preventDefault();
         handleJumpTo(Math.max(0, snapshot.current_idx - 1));
-      } else if (e.key === 'Escape') {
+      } else if (e.key === 'Escape' && banner) {
+        e.preventDefault();
         setBanner(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isActive, isRunning, isPaused, snapshot.current_idx, snapshot.blocks.length]);
+  }, [isActive, isRunning, isPaused, snapshot.current_idx, snapshot.blocks.length, banner]);
 
   const elapsedSec = useMemo(() => {
     if (!isActive) return 0;

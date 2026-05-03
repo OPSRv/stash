@@ -22,6 +22,7 @@ import {
   TranslateIcon,
 } from '../../shared/ui/icons';
 import { notesSaveImageBytes } from './api';
+import { buildImageEmbed } from './audioEmbed';
 import { translateForNote } from './noteTranslate';
 
 export type NotesViewMode = 'edit' | 'split' | 'preview';
@@ -259,7 +260,11 @@ export const NoteEditor = ({
         .then((buf) => notesSaveImageBytes(new Uint8Array(buf), ext))
         .then((path) => {
           const cursor = el.selectionStart;
-          const snippet = `![image](${path})`;
+          // Use `buildImageEmbed` so paths landing in `Application Support`
+          // (or any dir with a space / parens) end up wrapped in `<…>` —
+          // bare `![image](/…/Application Support/…)` is not valid
+          // CommonMark and would render as raw text.
+          const snippet = buildImageEmbed(path, 'image');
           const next = value.slice(0, cursor) + snippet + value.slice(el.selectionEnd);
           onChange(next);
           requestAnimationFrame(() => {

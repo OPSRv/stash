@@ -11,7 +11,7 @@ const globalShortcuts: ShortcutGroup = {
   title: 'Global',
   items: [
     { keys: ['⌘⇧V'], label: 'Toggle Stash popup' },
-    { keys: ['⌘⇧N'], label: 'Quick-open Notes' },
+    { keys: ['⌘⇧J'], label: 'Quick-open Notes' },
     { keys: ['⌘⇧F'], label: 'Global search' },
     { keys: ['⌘⌥1', '⌘⌥2', '⌘⌥3'], label: 'Switch tab' },
     { keys: ['Esc'], label: 'Hide popup' },

@@ -12,7 +12,7 @@ type Props = {
    *  isn't pushed into a card-like shape. */
   glyph?: boolean;
   /** Optional keyboard-shortcut hint row above the action cluster.
-   *  E.g. `{ label: 'New note', kbd: '⌘⇧N' }`. */
+   *  E.g. `{ label: 'New note', kbd: '⌘⇧J' }`. */
   kbdHint?: { label: string; kbd: string };
   action?: ReactNode;
   variant?: 'default' | 'compact';

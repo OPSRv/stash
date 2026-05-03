@@ -122,6 +122,16 @@ pub fn spawn_download(
 
     let mut cmd = Command::new(yt_dlp);
     cmd.args(["--newline", "--no-warnings", "--no-playlist"])
+        // Replace whitespace, fullwidth bars and other shell-hostile
+        // characters in the saved filename so the path copy-pastes
+        // into a terminal or a markdown embed without needing
+        // angle-bracket wrapping. yt-dlp's `--restrict-filenames` is
+        // ASCII-only — it strips Cyrillic and accented letters. We
+        // still toggle it on because path round-tripping is the
+        // priority for the downloader → Stems → Notes flow; users
+        // who want native characters can rename the file in Finder
+        // afterwards.
+        .arg("--restrict-filenames")
         .arg("-o")
         .arg(&output_template)
         .arg("--print")

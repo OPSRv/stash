@@ -33,10 +33,19 @@ export const Lightbox = ({ src, alt, onClose, path }: LightboxProps) => {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      // Capture phase + `stopImmediatePropagation` so PopupShell's
+      // window-level Esc handler — which would otherwise hide the
+      // entire Stash popup — doesn't run while the lightbox is open.
+      // Without this guard, both listeners fire on the same `window`
+      // target and Esc closes the app instead of just the viewer.
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
 
   const copyToClipboard = async () => {

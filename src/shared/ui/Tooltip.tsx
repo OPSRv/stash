@@ -76,6 +76,19 @@ export const Tooltip = ({ label, children, side = 'top' }: TooltipProps) => {
 
   useEffect(() => () => cancelShow(), []);
 
+  // Reset visibility when the tooltip's label disappears (e.g. a TabButton
+  // becomes active and clears its label). Without this, `open=true` set by an
+  // earlier focus/hover persists across the early-return branch — and when
+  // the label later returns, the portal re-mounts already showing the bubble
+  // even though the user never re-hovered. Manifested as multiple tab
+  // tooltips visible at once after rapid tab switching.
+  useEffect(() => {
+    if (!label) {
+      cancelShow();
+      setOpen(false);
+    }
+  }, [label]);
+
   const reposition = useCallback(() => {
     const trigger = triggerRef.current;
     const lbl = labelRef.current;

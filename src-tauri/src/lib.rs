@@ -135,18 +135,21 @@ use modules::diarization::{
 };
 use modules::separator::{
     separator_cancel, separator_clear_completed, separator_delete, separator_download,
-    separator_list_jobs, separator_run, separator_status, SeparatorState,
+    separator_list_jobs, separator_remove_job, separator_run, separator_scan_disk,
+    separator_status, SeparatorState,
 };
 use modules::downloader::{
     commands::{
         dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_detect_quick, dl_extract_subtitles,
-        dl_list, dl_pause, dl_prune_history, dl_purge_cookies, dl_resume, dl_retry,
-        dl_set_cookies_browser, dl_set_downloads_dir, dl_set_max_parallel, dl_set_rate_limit,
-        dl_set_transcription, dl_start, dl_transcribe_job, dl_update_binary, dl_ytdlp_version,
+        dl_list, dl_media_stream_url, dl_pause, dl_prune_history, dl_purge_cookies, dl_resume,
+        dl_retry, dl_set_cookies_browser, dl_set_downloads_dir, dl_set_max_parallel,
+        dl_set_rate_limit, dl_set_transcription, dl_start, dl_transcribe_job, dl_update_binary,
+        dl_ytdlp_version,
     },
     jobs::JobRepo,
     runner::RunnerState,
 };
+use modules::media_server::{media_stream_url, MediaKind, MediaServerState};
 use modules::metronome::commands::{
     metronome_get_state, metronome_save_state, MetronomeStateHandle,
 };
@@ -161,10 +164,11 @@ use modules::notes::{
         notes_folders_list, notes_folders_reorder, notes_get, notes_image_stream_url,
         notes_list, notes_list_attachments, notes_read_audio_path, notes_read_file,
         notes_read_image_path, notes_remove_attachment, notes_save_audio_bytes,
-        notes_save_audio_file, notes_save_image_bytes, notes_save_image_file, notes_search,
-        notes_set_attachment_transcription, notes_set_audio_transcription, notes_set_folder,
-        notes_set_pinned, notes_transcribe_attachment, notes_transcribe_note_audio,
-        notes_update, notes_write_file, NotesState,
+        notes_save_audio_file, notes_save_image_bytes, notes_save_image_file,
+        notes_save_video_file, notes_search, notes_set_attachment_transcription,
+        notes_set_audio_transcription, notes_set_folder, notes_set_pinned,
+        notes_transcribe_attachment, notes_transcribe_note_audio, notes_update,
+        notes_video_stream_url, notes_write_file, NotesState,
     },
     repo::NotesRepo,
 };
@@ -400,7 +404,8 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_http::init());
 
     #[cfg(target_os = "macos")]
     {
@@ -423,8 +428,9 @@ pub fn run() {
                             let pos_state = app.state::<Arc<PopupPositionState>>();
                             toggle_popup(&win, &pos_state);
                         }
-                    } else if shortcut.matches(mods, tauri_plugin_global_shortcut::Code::KeyN) {
-                        // Quick-open Notes module and focus the editor.
+                    } else if shortcut.matches(mods, tauri_plugin_global_shortcut::Code::KeyJ) {
+                        // Quick-open Notes module and focus the editor. KeyJ
+                        // ("Jot") avoids ⌘⇧N which Finder owns for New Folder.
                         if let Some(win) = resolve_popup(app) {
                             // `emit` stays on the AppHandle so child webviews
                             // also receive it. Pass the tab payload first.
@@ -485,6 +491,8 @@ pub fn run() {
             dl_ytdlp_version,
             dl_update_binary,
             dl_purge_cookies,
+            dl_media_stream_url,
+            media_stream_url,
             open_data_folder,
             collect_logs,
             set_popup_vibrancy,
@@ -510,6 +518,8 @@ pub fn run() {
             notes_save_image_file,
             notes_read_image_path,
             notes_image_stream_url,
+            notes_save_video_file,
+            notes_video_stream_url,
             notes_list_attachments,
             notes_add_attachment,
             notes_remove_attachment,
@@ -662,6 +672,8 @@ pub fn run() {
             separator_cancel,
             separator_list_jobs,
             separator_clear_completed,
+            separator_remove_job,
+            separator_scan_disk,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,
             modules::ipc::install::stash_cli_uninstall,
@@ -758,11 +770,24 @@ pub fn run() {
                 )
             });
 
+            // Shared loopback media server. One process-wide instance,
+            // every module registers its own permitted roots. Boot the
+            // accept loop is lazy — managing the state here only sets
+            // up the dynamic root registry. See
+            // `modules/media_server/mod.rs`.
+            let media_server = Arc::new(MediaServerState::new());
+            app.manage(Arc::clone(&media_server));
+
             // Downloader runtime
             let downloads_dir = dirs_next::video_dir()
                 .unwrap_or_else(|| data_dir.join("Downloads"))
                 .join("Stash");
             std::fs::create_dir_all(&downloads_dir).ok();
+            // Downloads land in this dir as either audio or video — let
+            // the media server stream both kinds from it. Re-pointed in
+            // `dl_set_downloads_dir` when the user picks a new folder.
+            media_server.register(MediaKind::Audio, downloads_dir.clone());
+            media_server.register(MediaKind::Video, downloads_dir.clone());
             let dl_db_path = data_dir.join("downloads.sqlite");
             let mut dl_repo = JobRepo::new(Connection::open(&dl_db_path)?)?;
             // Prune completed/failed/cancelled rows older than 60 days on
@@ -783,10 +808,29 @@ pub fn run() {
             let notes_repo = NotesRepo::new(Connection::open(&notes_db)?)?;
             let notes_repo = Arc::new(Mutex::new(notes_repo));
             let notes_repo_for_telegram = Arc::clone(&notes_repo);
-            app.manage(NotesState {
-                repo: notes_repo,
-                media_server: std::sync::OnceLock::new(),
-            });
+            app.manage(NotesState { repo: notes_repo });
+
+            // Register the notes-managed roots with the shared media
+            // server. Audio = inline voice memos + per-note attachments
+            // + (optional) Stash Stems. Image = managed images +
+            // attachments. Video = managed videos + attachments.
+            if let Ok(audio_root) = modules::notes::commands::audio_dir(app.handle()) {
+                media_server.register(MediaKind::Audio, audio_root);
+            }
+            if let Ok(attach_root) = modules::notes::commands::attachments_root(app.handle()) {
+                media_server.register(MediaKind::Audio, attach_root.clone());
+                media_server.register(MediaKind::Image, attach_root.clone());
+                media_server.register(MediaKind::Video, attach_root);
+            }
+            if let Ok(image_root) = modules::notes::commands::image_dir(app.handle()) {
+                media_server.register(MediaKind::Image, image_root);
+            }
+            if let Ok(video_root) = modules::notes::commands::video_dir(app.handle()) {
+                media_server.register(MediaKind::Video, video_root);
+            }
+            if let Some(stems) = modules::notes::commands::stems_root() {
+                media_server.register(MediaKind::Audio, stems);
+            }
 
             // Pomodoro — timer engine runs in a std::thread so it survives
             // popup hide / webview unload. Frontend is only a projection.
@@ -1045,7 +1089,10 @@ pub fn run() {
                 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
                 let mods = Some(Modifiers::SUPER | Modifiers::SHIFT);
                 let toggle = Shortcut::new(mods, Code::KeyV);
-                let notes = Shortcut::new(mods, Code::KeyN);
+                // KeyJ ("Jot") instead of KeyN — ⌘⇧N is the standard macOS
+                // Finder shortcut for "New Folder", and stealing it system-wide
+                // breaks the user's muscle memory outside Stash.
+                let notes = Shortcut::new(mods, Code::KeyJ);
                 let voice = Shortcut::new(mods, Code::KeyA);
                 app.global_shortcut().register(toggle)?;
                 app.global_shortcut().register(notes)?;
@@ -1150,10 +1197,8 @@ pub fn run() {
             // future hot-restart (or test harness) does not leak ports
             // / file handles between runs.
             if let tauri::RunEvent::Exit = event {
-                if let Some(notes_state) = app_handle.try_state::<modules::notes::commands::NotesState>() {
-                    if let Some(server) = notes_state.media_server.get() {
-                        server.stop();
-                    }
+                if let Some(media) = app_handle.try_state::<Arc<MediaServerState>>() {
+                    media.stop();
                 }
             }
         });

@@ -949,7 +949,7 @@ async fn run_music_action(
     }
 }
 
-/// Mirror of the `⌘⇧N` shortcut for Notes: show the popup, focus it,
+/// Mirror of the `⌘⇧J` shortcut for Notes: show the popup, focus it,
 /// and tell the frontend to jump to the Music tab so `MusicShell`
 /// mounts and attaches the YouTube-Music child webview.
 fn reveal_music_tab(app: &tauri::AppHandle) {
@@ -1876,7 +1876,7 @@ impl CommandHandler for NavigateCmd {
 
 /// Emit `nav:activate` + show/focus the popup. The frontend shell listens
 /// and mounts the requested lazy tab inside `<Suspense>`; this is the
-/// same path used by `reveal_music_tab` and the `⌘⇧N` Notes shortcut.
+/// same path used by `reveal_music_tab` and the `⌘⇧J` Notes shortcut.
 fn reveal_tab(app: &tauri::AppHandle, tab_id: &str) {
     let _ = app.emit("nav:activate", tab_id);
     if let Some(win) = app.get_webview_window("popup") {

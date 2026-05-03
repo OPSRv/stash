@@ -17,6 +17,15 @@ export type Settings = {
   launchAtLogin: boolean;
   downloadsFolder: string | null;
   notifyOnDownloadComplete: boolean;
+  /**
+   * When set, every completed audio download (m4a, mp3, …) is automatically
+   * handed off to the Stems separator — same wiring as the per-row "Stems"
+   * button, just fired without a click. Video downloads are ignored because
+   * Demucs can't read mp4/webm, and a video user almost certainly doesn't
+   * want their files siphoned through 30s of demucs anyway. Off by default
+   * to keep the surprise factor low; users opt in from Settings → Downloads.
+   */
+  downloaderAutoStems: boolean;
   cookiesFromBrowser: CookiesBrowser;
   maxParallelDownloads: number;
   downloadRateLimit: string | null;
@@ -81,6 +90,20 @@ export type Settings = {
    * to type the moment the Claude CLI takes over the TTY.
    */
   terminalClaudeCommand: string;
+  /**
+   * Module ids the user has hidden from the popup tab bar. Stored as a
+   * "what to hide" set rather than "what to show" so that adding a new
+   * module to `registry.ts` automatically becomes visible — users only
+   * see this list when they explicitly turn something off.
+   */
+  hiddenModules: string[];
+  /**
+   * User-defined tab order. When non-empty, modules are sorted by their
+   * index here (unknown ids fall back to `registry.ts` order at the end).
+   * Empty array means "use the registry default order". Settings is always
+   * pinned last by the resolver regardless of what's stored.
+   */
+  moduleOrder: string[];
 };
 
 export type TerminalSnippet = {
@@ -129,6 +152,7 @@ export const DEFAULT_SETTINGS: Settings = {
   launchAtLogin: false,
   downloadsFolder: null,
   notifyOnDownloadComplete: true,
+  downloaderAutoStems: false,
   cookiesFromBrowser: null,
   maxParallelDownloads: 3,
   downloadRateLimit: null,
@@ -155,6 +179,8 @@ export const DEFAULT_SETTINGS: Settings = {
   popupHeight: 640,
   terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
   terminalClaudeCommand: 'claude',
+  hiddenModules: [],
+  moduleOrder: [],
 };
 
 const store = new LazyStore('settings.json', { autoSave: true, defaults: DEFAULT_SETTINGS });

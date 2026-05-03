@@ -37,8 +37,25 @@ export const buildModel = async (
       if (!cfg.baseUrl) {
         throw new Error('Custom provider requires a base URL');
       }
-      const { createOpenAI } = await import('@ai-sdk/openai');
-      return createOpenAI({ apiKey, baseURL: cfg.baseUrl })(cfg.model);
+      const [{ createOpenAI }, { fetch: tauriFetch }] = await Promise.all([
+        import('@ai-sdk/openai'),
+        import('@tauri-apps/plugin-http'),
+      ]);
+      // Two non-obvious choices, both forced by local LLM runtimes:
+      //   1. `.chat()` forces `/chat/completions`. The default call shape
+      //      hits the new Responses API (`/responses`) which Ollama /
+      //      LM Studio / Groq / DeepSeek do not implement.
+      //   2. `fetch: tauriFetch` routes the request through Rust instead
+      //      of WKWebView. WKWebView fires a CORS preflight on every
+      //      `Authorization`-bearing POST, and most local runtimes
+      //      either omit CORS headers or mishandle `OPTIONS` (LM Studio
+      //      logs `'messages' field is required` for the empty preflight
+      //      body). Rust has no CORS, so the call goes straight through.
+      return createOpenAI({
+        apiKey,
+        baseURL: cfg.baseUrl,
+        fetch: tauriFetch as typeof fetch,
+      }).chat(cfg.model);
     }
   }
 };

@@ -71,6 +71,11 @@ export const GlobalSearch = ({
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // Capture-phase + stopImmediatePropagation so PopupShell's
+        // window Esc handler doesn't hide the whole popup behind the
+        // search overlay. Same fix as `Modal`/`Lightbox`.
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         e.preventDefault();
         onClose();
       } else if (e.key === 'ArrowDown') {
@@ -85,8 +90,8 @@ export const GlobalSearch = ({
         onClose();
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [open, hits, active, onClose, onNavigate]);
 
   if (!open) return null;

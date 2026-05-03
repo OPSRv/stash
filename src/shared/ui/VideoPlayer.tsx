@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { mediaStreamUrl } from '../util/mediaStreamUrl';
 import { Tooltip } from './Tooltip';
 
 type VideoPlayerProps = {
@@ -39,11 +39,6 @@ const savePosition = (src: string, t: number) => {
   }
 };
 
-// Return the sibling `.vtt` subtitle path for a media file, if one exists
-// based on naming convention `<stem>.vtt` next to the media. The DOM
-// `<track>` element itself will silently ignore non-existent URLs.
-const siblingVtt = (src: string) => src.replace(/\.[^./]+$/, '.vtt');
-
 export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
@@ -51,6 +46,27 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [rate, setRate] = useState(1);
+  // Resolved loopback streaming URL for the file. The `src` prop stays
+  // the on-disk path (so resume positions key against a stable id),
+  // and we hand the tokenised http URL to `<video>`.
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStreamUrl(null);
+    setStreamError(null);
+    mediaStreamUrl(src)
+      .then((u) => {
+        if (!cancelled) setStreamUrl(u);
+      })
+      .catch((e) => {
+        if (!cancelled) setStreamError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [src]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -99,6 +115,12 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
       } else if (e.key === 'ArrowRight') {
         v.currentTime = Math.min(v.duration, v.currentTime + 5);
       } else if (e.key === 'Escape') {
+        // Capture-phase + stopImmediatePropagation so PopupShell's
+        // window Esc handler doesn't hide the whole Stash popup behind
+        // the player. Same fix as `Modal`/`Lightbox`.
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        e.preventDefault();
         onClose();
       } else if (e.key === 'f' || e.key === 'F') {
         if (document.fullscreenElement) document.exitFullscreen();
@@ -125,8 +147,8 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
         v.currentTime = (Number(e.key) / 10) * v.duration;
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
   }, [onClose]);
 
   const togglePlay = () => {
@@ -164,23 +186,30 @@ export const VideoPlayer = ({ src, onClose }: VideoPlayerProps) => {
         className="relative max-w-[90vw] max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <video
-          ref={videoRef}
-          src={convertFileSrc(src)}
-          className="max-h-[80vh] rounded-lg"
-          autoPlay
-          crossOrigin="anonymous"
-          onClick={togglePlay}
-        >
-          {/* Pick up a sibling .vtt subtitle track if yt-dlp downloaded one. */}
-          <track
-            kind="subtitles"
-            src={convertFileSrc(siblingVtt(src))}
-            srcLang="en"
-            label="Subtitles"
-            default
+        {streamError ? (
+          <div
+            className="max-h-[80vh] rounded-lg flex items-center justify-center text-meta px-6 py-10"
+            style={{ background: 'rgba(28,28,32,0.92)', color: 'rgba(239,68,68,0.95)' }}
+          >
+            Can&rsquo;t play this file: {streamError}
+          </div>
+        ) : (
+          <video
+            ref={videoRef}
+            // Loopback `http://127.0.0.1:<port>/video?...` from the
+            // shared media server. AVFoundation refuses to stream
+            // `asset://` past a few MB on macOS, so every video in
+            // the app routes through the loopback server. Subtitles
+            // would need the same treatment but downloads no longer
+            // ship sibling `.vtt` next to the media in the managed
+            // dirs we register, so the `<track>` element is dropped
+            // here — re-add once the server exposes a `/text` route.
+            src={streamUrl ?? undefined}
+            className="max-h-[80vh] rounded-lg"
+            autoPlay
+            onClick={togglePlay}
           />
-        </video>
+        )}
 
         {/* Controls */}
         <div className="mt-2 px-3 py-2 rounded-lg flex items-center gap-3" style={{ background: 'rgba(28,28,32,0.92)', border: '1px solid rgba(255,255,255,0.06)' }}>

@@ -13,6 +13,8 @@ type RehypePlugin = NonNullable<React.ComponentProps<typeof ReactMarkdown>['rehy
 import remarkGfm from 'remark-gfm';
 import { accent } from '../theme/accent';
 import { copyText } from '../util/clipboard';
+import { openExternalUrl } from './LinkifiedText';
+import { Tooltip } from './Tooltip';
 
 // rehype-highlight + the curated highlight.js grammars are ~250 KB of JS
 // that only matter when the rendered source contains a fenced code block.
@@ -54,18 +56,30 @@ const safeHref = (href: string | undefined): string | undefined => {
   return href;
 };
 
+// Inline anchors in rendered markdown route through the Tauri opener plugin
+// (external system browser) on click — `target="_blank"` inside a Tauri
+// webview is unreliable and often opens in-window. The Tooltip surfaces the
+// destination href so reading `[click here](…)` doesn't hide where it goes.
+// Mirrors the styling/handling used by `LinkifiedText` so plain-text and
+// markdown-rendered links look and behave identically.
 const baseAnchor: Components['a'] = ({ href, children, ...rest }) => {
   const safe = safeHref(href);
+  if (!safe) return <a {...rest}>{children}</a>;
   return (
-    <a
-      {...rest}
-      href={safe}
-      target="_blank"
-      rel="noreferrer noopener"
-      className="text-[color:rgba(var(--stash-accent-rgb),1)] underline decoration-dotted"
-    >
-      {children}
-    </a>
+    <Tooltip label={safe}>
+      <a
+        {...rest}
+        href={safe}
+        onClick={(e) => {
+          e.preventDefault();
+          void openExternalUrl(safe);
+        }}
+        className="underline decoration-dotted underline-offset-2 hover:decoration-solid transition-[text-decoration]"
+        style={{ color: 'rgb(var(--stash-accent-rgb))' }}
+      >
+        {children}
+      </a>
+    </Tooltip>
   );
 };
 

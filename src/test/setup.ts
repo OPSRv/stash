@@ -87,6 +87,10 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock('@tauri-apps/plugin-http', () => ({
+  fetch: vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+}));
+
 // jsdom doesn't ship ResizeObserver; @tanstack/react-virtual uses it to react
 // to scroll-element resizes. A stub is enough — tests render at fixed sizes.
 class ResizeObserverStub {

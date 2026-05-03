@@ -56,13 +56,17 @@ export const Drawer = ({
   useEffect(() => {
     if (!open || !dismissOnEscape) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
+      if (e.key !== 'Escape') return;
+      // Capture-phase + stopImmediatePropagation so PopupShell's
+      // window Esc handler doesn't hide the whole Stash popup behind
+      // the drawer. Same fix as `Modal`/`Lightbox`/`ConfirmDialog`.
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [open, onClose, dismissOnEscape]);
 
   if (!rendered) return null;

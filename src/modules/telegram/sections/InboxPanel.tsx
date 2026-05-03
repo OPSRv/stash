@@ -263,6 +263,24 @@ export function InboxPanel() {
 
   const clearSelection = () => setSelection(new Set());
 
+  // Esc clears the inbox selection without dismissing the entire Stash
+  // popup. Capture-phase + stopImmediatePropagation so PopupShell's
+  // window-level Esc handler — which would otherwise hide the popup —
+  // doesn't run while there's something selected. Same pattern as the
+  // shared `Modal`/`Lightbox` Esc fix.
+  useEffect(() => {
+    if (selection.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      clearSelection();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [selection.size]);
+
   const bulkDelete = async () => {
     setError(null);
     const ids = Array.from(selection);

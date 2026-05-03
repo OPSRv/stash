@@ -65,6 +65,7 @@ import { notesCreate } from '../notes/api';
 import { PreviewDialog } from './PreviewDialog';
 import { FilePreviewDialog } from './FilePreviewDialog';
 import { ContextMenu, type ContextMenuItem } from '../../shared/ui/ContextMenu';
+import { Lightbox } from '../../shared/ui/Lightbox';
 import { accent } from '../../shared/theme/accent';
 import { copyText } from '../../shared/util/clipboard';
 
@@ -110,6 +111,11 @@ export const ClipboardPopup = () => {
   const deleteConfirm = useSuppressibleConfirm<number>('clipboard.delete');
   const [previewId, setPreviewId] = useState<number | null>(null);
   const [filePreviewId, setFilePreviewId] = useState<number | null>(null);
+  /// Active full-popup `<Lightbox>` for image-kind clips. Click on the
+  /// thumbnail opens it; the row's copy-on-select handler is gated by
+  /// `stopPropagation` at the thumbnail button so the lightbox doesn't
+  /// stack with a copy.
+  const [lightboxPath, setLightboxPath] = useState<string | null>(null);
   const [revealedSecrets, setRevealedSecrets] = useState<Set<number>>(() => new Set());
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: number } | null>(null);
   const secretClearTimer = useRef<number | null>(null);
@@ -730,18 +736,9 @@ export const ClipboardPopup = () => {
         searchRef.current?.focus();
         return;
       }
-      if (e.key === 'Escape') {
-        if (selectedIds.size > 0) {
-          e.preventDefault();
-          clearSelection();
-          return;
-        }
-        if (query) {
-          e.preventDefault();
-          setQuery('');
-          return;
-        }
-      }
+      // Esc handling lives in a dedicated capture-phase effect below
+      // (`Esc → clear selection / query`) so PopupShell's window handler
+      // can't beat us to hiding the popup — see comment there.
       if (e.shiftKey && e.key === 'Enter' && !typingInInput) {
         e.preventDefault();
         copyAt(index);
@@ -766,6 +763,34 @@ export const ClipboardPopup = () => {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [flat, index, query, copyAt, handleTogglePin, handleDelete, selectedIds, clearSelection]);
+
+  // Esc → clear bulk selection or, failing that, the search query —
+  // without dismissing the entire Stash popup. PopupShell's window-level
+  // Esc handler also fires on bubble; we capture first and call
+  // `stopImmediatePropagation` whenever we have something to absorb.
+  // When neither a selection nor a query is active, we let the event
+  // through so the user's Esc still hides the popup as expected.
+  useEffect(() => {
+    if (selectedIds.size === 0 && !query) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (selectedIds.size > 0) {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        clearSelection();
+        return;
+      }
+      if (query) {
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        setQuery('');
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [selectedIds, query, clearSelection]);
 
   const totalBytes = useMemo(
     () => typed.reduce((sum, i) => sum + i.content.length, 0),
@@ -1168,11 +1193,26 @@ export const ClipboardPopup = () => {
     const hexSwatchColor =
       item.subtype === 'hex-color' && item.kind === 'text' ? item.content.trim() : null;
     const icon = imageMeta ? (
-      <img
-        src={convertFileSrc(imageMeta.path)}
-        alt=""
-        className="w-7 h-7 rounded-md object-cover"
-      />
+      // Click-on-thumbnail opens the in-popup `<Lightbox>`; click-on-row
+      // keeps copying. `stopPropagation` is mandatory — `Row.onSelect`
+      // lives on the outer container and would otherwise fire the copy
+      // path on top of the viewer open.
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setLightboxPath(imageMeta.path);
+        }}
+        title="Open image in viewer"
+        aria-label="Open image in viewer"
+        className="block w-7 h-7 rounded-md overflow-hidden ring-focus cursor-zoom-in"
+      >
+        <img
+          src={convertFileSrc(imageMeta.path)}
+          alt=""
+          className="w-full h-full object-cover"
+        />
+      </button>
     ) : hexSwatchColor ? (
       <span
         className="w-7 h-7 rounded-md block border [border-color:var(--hairline-strong)]"
@@ -1244,7 +1284,7 @@ export const ClipboardPopup = () => {
             )}
             {imageMeta && (
               <IconButton
-                onClick={() => openImageInViewer(imageMeta.path)}
+                onClick={() => setLightboxPath(imageMeta.path)}
                 title="Open in image viewer"
               >
                 <ExternalIcon size={12} />
@@ -1468,6 +1508,13 @@ export const ClipboardPopup = () => {
           />
         );
       })()}
+      {lightboxPath && (
+        <Lightbox
+          src={convertFileSrc(lightboxPath)}
+          path={lightboxPath}
+          onClose={() => setLightboxPath(null)}
+        />
+      )}
     </div>
   );
 };

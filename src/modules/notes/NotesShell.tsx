@@ -16,6 +16,7 @@ import {
   MagicWandIcon,
   MicIcon,
   PanelLeftIcon,
+  PaperclipIcon,
   PencilIcon,
   PinIcon,
   SearchIcon,
@@ -30,7 +31,6 @@ import { EmptyState } from '../../shared/ui/EmptyState';
 import { useSuppressibleConfirm } from '../../shared/hooks/useSuppressibleConfirm';
 import { copyText } from '../../shared/util/clipboard';
 import { revealFile } from '../../shared/util/revealFile';
-import { NoteAttachmentsPanel } from './NoteAttachmentsPanel';
 import { NoteAudioStrip } from './NoteAudioStrip';
 import { NoteEditor, type NotesViewMode } from './NoteEditor';
 import { MarkdownPreview } from './MarkdownPreview';
@@ -42,8 +42,12 @@ import { useAudioFileDrop } from './useAudioFileDrop';
 import {
   appendAudioEmbed,
   appendImageEmbed,
+  appendVideoEmbed,
   insertAudioEmbedAt,
   insertTranscriptAfterEmbed,
+  isAudioSrc,
+  isImageSrc,
+  isVideoSrc,
 } from './audioEmbed';
 import { toggleCheckboxAtLine } from './markdown';
 import { polishTranscript } from './polish';
@@ -60,6 +64,7 @@ import {
   notesSaveAudioBytes,
   notesSaveAudioFile,
   notesSaveImageFile,
+  notesSaveVideoFile,
   notesSearch,
   notesSetFolder,
   notesSetPinned,
@@ -1122,6 +1127,96 @@ export const NotesShell = () => {
 
   const { isDragOver, audioCount, imageCount } = useAudioFileDrop(onAudioFilesDropped);
 
+  /** Pick files via the OS dialog and embed them inline, mirroring the
+   *  drag-drop behaviour. Image/audio/video are saved into their managed
+   *  dirs and appended as markdown embeds; anything else is rejected
+   *  with a toast (the renderer has no inline cell for arbitrary docs).
+   *  Auto-transcribe still runs serially for the audio portion of the
+   *  batch — same as `onAudioFilesDropped`. */
+  const onAttachFilesClick = useCallback(async () => {
+    await invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
+    let picked: string | string[] | null = null;
+    try {
+      picked = await openDialog({ multiple: true, directory: false });
+    } catch (e) {
+      toast({
+        title: 'File picker failed',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+      return;
+    } finally {
+      await invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
+    }
+    if (!picked) return;
+    const paths = Array.isArray(picked) ? picked : [picked];
+    if (paths.length === 0) return;
+
+    let target = await resolveEmbedTarget();
+    const savedAudio: string[] = [];
+    let embedded = 0;
+    let rejected = 0;
+
+    for (const p of paths) {
+      const filename = p.split(/[\\/]/).pop() ?? 'file';
+      const caption = filename.replace(/\.[^.]+$/, '');
+      try {
+        if (isImageSrc(p)) {
+          const saved = await notesSaveImageFile(p);
+          const nextBody = appendImageEmbed(target.body, saved, caption);
+          await commitBodyUpdate(target, nextBody);
+          target = { ...target, body: nextBody, isNew: false };
+          embedded += 1;
+        } else if (isAudioSrc(p) && !isVideoSrc(p)) {
+          // Pure audio (mp3/wav/flac/etc.) — webm/mp4 fall through to the
+          // video branch below since the `<video>` player handles their
+          // audio track too and most users dropping `.mp4` mean a clip.
+          const saved = await notesSaveAudioFile(p);
+          const nextBody = appendAudioEmbed(target.body, saved, caption);
+          await commitBodyUpdate(target, nextBody);
+          target = { ...target, body: nextBody, isNew: false };
+          savedAudio.push(saved);
+          embedded += 1;
+        } else if (isVideoSrc(p)) {
+          const saved = await notesSaveVideoFile(p);
+          const nextBody = appendVideoEmbed(target.body, saved, caption);
+          await commitBodyUpdate(target, nextBody);
+          target = { ...target, body: nextBody, isNew: false };
+          embedded += 1;
+        } else {
+          rejected += 1;
+        }
+      } catch (e) {
+        console.error('attach failed', p, e);
+        toast({
+          title: 'Attach failed',
+          description: `${filename}: ${String(e)}`,
+          variant: 'error',
+        });
+      }
+    }
+
+    if (embedded > 0) {
+      setActiveId(target.id);
+      setViewMode('preview');
+      toast({
+        title: embedded === 1 ? 'Embedded' : `${embedded} files embedded`,
+        variant: 'success',
+        durationMs: 1800,
+      });
+      for (const savedPath of savedAudio) {
+        await runInlineTranscribe(target.id, savedPath);
+      }
+    }
+    if (rejected > 0) {
+      toast({
+        title: rejected === 1 ? 'File skipped' : `${rejected} files skipped`,
+        description: 'Only image, audio, and video files can be embedded inline.',
+        variant: 'default',
+      });
+    }
+  }, [resolveEmbedTarget, commitBodyUpdate, runInlineTranscribe, toast]);
+
   const onImport = useCallback(async () => {
     // Suspend popup auto-hide so focus shifting to the native file picker
     // does not blur-dismiss the popup and immediately close the dialog.
@@ -1440,6 +1535,13 @@ export const NotesShell = () => {
                     <MicIcon size={13} />
                   </IconButton>
                   <IconButton
+                    onClick={() => void onAttachFilesClick()}
+                    title="Attach file (image, audio, or video)"
+                    stopPropagation={false}
+                  >
+                    <PaperclipIcon size={13} />
+                  </IconButton>
+                  <IconButton
                     onClick={async () => {
                       try {
                         const trimmed = body.trim();
@@ -1571,24 +1673,6 @@ export const NotesShell = () => {
                 }}
               />
             )}
-            {activeId != null && (
-              <NoteAttachmentsPanel
-                noteId={activeId}
-                onEmbedMarkdown={(snippet) => {
-                  // Append as its own paragraph so the embed sits on a
-                  // clean line — the preview treats image/audio embeds
-                  // on a dedicated line specially (see MarkdownPreview).
-                  setBody((prev) => {
-                    const sep = prev.endsWith('\n\n') || prev.length === 0
-                      ? ''
-                      : prev.endsWith('\n')
-                      ? '\n'
-                      : '\n\n';
-                    return `${prev}${sep}${snippet}\n`;
-                  });
-                }}
-              />
-            )}
             <div
               className="flex-1 flex min-h-0 relative"
               style={{ ['--notes-zoom' as string]: String(notesZoom) }}
@@ -1651,7 +1735,7 @@ export const NotesShell = () => {
             icon={<PencilIcon size={24} />}
             title="No note selected"
             description="Pick something from the sidebar, or start fresh. Stash autosaves as you type."
-            kbdHint={{ label: 'New note', kbd: '⌘⇧N' }}
+            kbdHint={{ label: 'New note', kbd: '⌘⇧J' }}
             action={
               <div className="flex items-center gap-2">
                 <Button

@@ -88,7 +88,7 @@ expect_fun_call = "allow"
 
 [package]
 name = "stash-app"
-version = "0.1.18"
+version = "0.1.19"
 description = "Stash — macOS menubar multitool"
 authors = ["OPSRv"]
 edition = "2021"
@@ -175,6 +175,13 @@ async-trait = "0.1"
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# Used only by the AI module's JS-side fetch path (custom OpenAI-compatible
+# providers like LM Studio / Ollama). WKWebView fires a CORS preflight on
+# every `Authorization`-bearing POST, and most local LLM runtimes either
+# don't reply with the right CORS headers or crash on `OPTIONS`. Routing
+# through Rust skips the preflight entirely. Cloud providers stay on the
+# browser fetch — their APIs allow CORS from any origin.
+tauri-plugin-http = "2"
 # Synchronous, dependency-light HTTP server. Used by the Notes module to
 # expose audio attachments at `http://127.0.0.1:<port>/audio?...` so
 # WKWebView/AVFoundation can stream them — `asset://` cannot be opened

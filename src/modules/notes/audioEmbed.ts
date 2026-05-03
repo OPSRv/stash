@@ -27,6 +27,15 @@ const IMAGE_EXTS = new Set([
   'heif',
 ]);
 
+/// Video container extensions that promote a markdown `![…](…)` embed
+/// into the inline `<video>` player. Mirrors the Rust-side
+/// `ALLOWED_VIDEO_EXT`. Note the overlap with audio (`webm`, `mp4`):
+/// `isVideoSrc` is checked AFTER `isAudioSrc` callers — see
+/// `MarkdownPreview` — because a `.mp4` saved via the audio dir lives
+/// under that root and should keep playing as audio there. Files saved
+/// via the video dir are scoped separately at the media-server layer.
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi']);
+
 const extOf = (src: string): string => {
   // Strip query/fragment so `foo.mp3?v=1` still classifies correctly. `?`
   // and `#` are valid in URLs but never in the on-disk portion of our paths.
@@ -45,13 +54,44 @@ export const isImageSrc = (src: string | undefined | null): boolean => {
   return IMAGE_EXTS.has(extOf(src));
 };
 
+export const isVideoSrc = (src: string | undefined | null): boolean => {
+  if (!src) return false;
+  return VIDEO_EXTS.has(extOf(src));
+};
+
 /** Escape markdown link chars in the path so exotic filenames round-trip
  *  intact. Embed uses `<...>` angle-bracket variant whenever the path
  *  contains spaces or parens — the CommonMark-safe way to wrap file refs. */
-const formatEmbedSrc = (path: string): string => {
+export const formatEmbedSrc = (path: string): string => {
   if (/[()\s]/.test(path)) return `<${path.replace(/[<>]/g, '\\$&')}>`;
   return path;
 };
+
+/** Rewrite any `[label](path)` / `![alt](path)` whose `path` contains a
+ *  space or paren *and* isn't already wrapped in `<…>` so it becomes
+ *  CommonMark-valid (`<path>`-style). Idempotent: already-wrapped or
+ *  space-free refs pass through untouched.
+ *
+ *  Why: notes saved before `buildImageEmbed`/`buildAudioEmbed` was
+ *  introduced — and any markdown the user hand-types or drops in from
+ *  another tool — frequently use `![image](/Users/.../Application Support/…)`
+ *  with bare spaces, which CommonMark refuses to parse as a link/image
+ *  (the space terminates the URL token). Running `normaliseEmbedSrc` on
+ *  the source right before rendering means those notes still display
+ *  the embed instead of the raw `![image](…)` text.
+ *
+ *  Scope is tight on purpose: only `[…](…)` shapes (no autolinks, no
+ *  `[label][ref]` definitions), and the path can't contain `(` or `)`
+ *  itself (those are real ambiguous cases best left alone). */
+export const normaliseEmbedSrc = (source: string): string =>
+  source.replace(
+    /(!?\[[^\]\n]*\])\(([^<\n][^()\n]*)\)/g,
+    (match, prefix: string, path: string) => {
+      if (!/[\s]/.test(path)) return match;
+      const escaped = path.replace(/[<>]/g, '\\$&');
+      return `${prefix}(<${escaped}>)`;
+    },
+  );
 
 const escapeAlt = (s: string): string => s.replace(/([\\[\]])/g, '\\$1');
 
@@ -64,6 +104,12 @@ export const buildAudioEmbed = (path: string, caption = 'voice note'): string =>
 /** Same as `buildAudioEmbed` but for images — the caption doubles as alt
  *  text for screen-readers and becomes the fallback if the image fails. */
 export const buildImageEmbed = (path: string, caption = 'image'): string =>
+  `![${escapeAlt(caption)}](${formatEmbedSrc(path)})`;
+
+/** Markdown snippet for an inline video embed. Same `![alt](path)` shape
+ *  as audio/image — `MarkdownPreview` dispatches on `isVideoSrc` to swap
+ *  the renderer for `<video>`. */
+export const buildVideoEmbed = (path: string, caption = 'video'): string =>
   `![${escapeAlt(caption)}](${formatEmbedSrc(path)})`;
 
 const appendEmbed = (body: string, embed: string): string => {
@@ -80,6 +126,9 @@ export const appendAudioEmbed = (body: string, path: string, caption?: string): 
 
 export const appendImageEmbed = (body: string, path: string, caption?: string): string =>
   appendEmbed(body, buildImageEmbed(path, caption));
+
+export const appendVideoEmbed = (body: string, path: string, caption?: string): string =>
+  appendEmbed(body, buildVideoEmbed(path, caption));
 
 /** Insert an audio embed at `cursor` inside `body`, expanding to a standalone
  *  block by adding surrounding blank lines when needed. Returns the new body

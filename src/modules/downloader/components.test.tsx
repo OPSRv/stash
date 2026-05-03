@@ -389,7 +389,7 @@ describe('CompletedDownloadTile', () => {
         onDelete={vi.fn()}
       />
     );
-    expect(screen.getByRole('button', { name: /transcribe audio/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^transcribe$/i })).toBeInTheDocument();
   });
 
   it('does not render TranscriptArea for a completed video job', () => {
@@ -400,7 +400,7 @@ describe('CompletedDownloadTile', () => {
         onDelete={vi.fn()}
       />
     );
-    expect(screen.queryByRole('button', { name: /transcribe audio/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^transcribe$/i })).not.toBeInTheDocument();
   });
 
   it('clicking the transcribe button calls dl_transcribe_job', async () => {
@@ -413,7 +413,7 @@ describe('CompletedDownloadTile', () => {
         onDelete={vi.fn()}
       />
     );
-    await user.click(screen.getByRole('button', { name: /transcribe audio/i }));
+    await user.click(screen.getByRole('button', { name: /^transcribe$/i }));
     expect(invoke).toHaveBeenCalledWith('dl_transcribe_job', { id: 42 });
   });
 
@@ -437,7 +437,7 @@ describe('CompletedDownloadTile', () => {
     );
 
     // No transcript yet — transcribe button is visible
-    expect(screen.getByRole('button', { name: /transcribe audio/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^transcribe$/i })).toBeInTheDocument();
 
     // Fire the job_updated event
     await act(async () => {
@@ -446,6 +446,59 @@ describe('CompletedDownloadTile', () => {
       await new Promise((r) => setTimeout(r, 0));
     });
 
+    // Transcript is collapsed by default — the action chip flips to
+    // "Transcript". Open the drawer to read the text.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /^transcript$/i }));
     expect(screen.getByText('Hello world')).toBeInTheDocument();
+  });
+
+  it('shows a Stems button on a completed audio tile and dispatches stash:navigate', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/song.mp3' })}
+        onPlay={onPlay}
+        onDelete={vi.fn()}
+      />
+    );
+    const stems = screen.getByRole('button', { name: 'Stems' });
+    await user.click(stems);
+    // The tile is clickable as Play; the Stems click must NOT bubble up
+    // to the parent's onPlay handler.
+    expect(onPlay).not.toHaveBeenCalled();
+    const ev = dispatchSpy.mock.calls.find(
+      (c) => (c[0] as Event).type === 'stash:navigate',
+    )?.[0] as CustomEvent | undefined;
+    expect(ev).toBeDefined();
+    expect(ev!.detail).toEqual({ tabId: 'separator', file: '/tmp/song.mp3' });
+  });
+
+  it('hides the Stems button for a completed video tile', () => {
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Split into stems' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the Stems button for failed audio jobs', () => {
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'failed', target_path: '/tmp/song.mp3' })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Split into stems' }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -251,7 +251,7 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
           title="Test connection"
           description="Sends a 1-token request with your current settings to confirm everything is wired."
           control={
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col items-end gap-2">
               <Button
                 size="sm"
                 variant="soft"
@@ -267,7 +267,10 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
                 </span>
               )}
               {test.kind === 'err' && (
-                <span className="t-danger text-meta" aria-live="polite">
+                <span
+                  className="t-danger text-meta max-w-[420px] text-right break-words"
+                  aria-live="polite"
+                >
                   ✗ {test.message}
                 </span>
               )}

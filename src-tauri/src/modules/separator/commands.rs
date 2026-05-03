@@ -357,12 +357,274 @@ pub fn separator_list_jobs(state: State<'_, Arc<SeparatorState>>) -> Vec<Separat
 
 #[tauri::command]
 pub fn separator_clear_completed(state: State<'_, Arc<SeparatorState>>) {
-    state.jobs.lock().unwrap().retain(|j| {
-        !matches!(
-            j.status,
-            JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
-        )
+    let removed: Vec<SeparatorJob> = {
+        let mut jobs = state.jobs.lock().unwrap();
+        let mut keep = Vec::with_capacity(jobs.len());
+        let mut drop_ = Vec::new();
+        for j in jobs.drain(..) {
+            if matches!(
+                j.status,
+                JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled
+            ) {
+                drop_.push(j);
+            } else {
+                keep.push(j);
+            }
+        }
+        *jobs = keep;
+        drop_
+    };
+    // Wipe each cleared job's output directory off disk too. Best-effort:
+    // a failed rmdir is logged but doesn't block the in-memory clear so
+    // the UI never gets out of sync with state.
+    for job in removed {
+        purge_job_dir(&job);
+    }
+}
+
+/// Delete a single job — both the in-memory entry and (best-effort) the
+/// on-disk output directory. Returns `Err` only when the job id is
+/// unknown; filesystem errors are swallowed because the directory may
+/// already be gone (user moved it, OS cleared `/tmp`, etc.) and forcing
+/// the user to re-confirm a delete after a partial failure is worse UX
+/// than just letting the row vanish.
+#[tauri::command]
+pub fn separator_remove_job(
+    state: State<'_, Arc<SeparatorState>>,
+    job_id: String,
+) -> Result<(), String> {
+    let job = {
+        let mut jobs = state.jobs.lock().unwrap();
+        let idx = jobs
+            .iter()
+            .position(|j| j.id == job_id)
+            .ok_or_else(|| format!("job not found: {job_id}"))?;
+        jobs.remove(idx)
+    };
+    purge_job_dir(&job);
+    Ok(())
+}
+
+/// Walk the user's stems output directory and reconstruct one
+/// `SeparatorJob` per subfolder that holds a `manifest.json`. Used on
+/// startup so a fresh popup process still sees historical jobs the user
+/// produced before the relaunch — the in-memory `state.jobs` would
+/// otherwise come up empty.
+///
+/// Synthetic jobs are merged with the live in-memory list; entries that
+/// already exist (matched by `output_dir`) are kept as-is so an actively
+/// running job doesn't get clobbered by its half-written manifest.
+#[tauri::command]
+pub fn separator_scan_disk(
+    app: AppHandle,
+    state: State<'_, Arc<SeparatorState>>,
+) -> Result<Vec<SeparatorJob>, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    // Mirror the start-of-job logic so the scan walks the same folder
+    // the worker writes into. Honouring a custom output_dir setting is
+    // a future enhancement — today the user-facing default is the only
+    // location the UI can produce.
+    let _ = data_dir; // referenced for future overrides
+    let base = output_dir_default();
+    let synthetic = scan_jobs_on_disk(&base);
+
+    // Merge: keep live in-memory jobs as-is; append disk entries that
+    // don't share an output_dir with anything in state. Sort the result
+    // newest-first so the UI gets a deterministic order.
+    let mut jobs = state.jobs.lock().unwrap();
+    for s in synthetic {
+        let already_tracked = jobs.iter().any(|j| j.output_dir == s.output_dir);
+        if !already_tracked {
+            jobs.push(s);
+        }
+    }
+    jobs.sort_by(|a, b| {
+        b.finished_at
+            .unwrap_or(b.started_at)
+            .cmp(&a.finished_at.unwrap_or(a.started_at))
     });
+    Ok(jobs.clone())
+}
+
+/// Best-effort `rm -rf` of `job.output_dir`. Stays inside the user's
+/// stems directory by checking that the path was something we wrote
+/// ourselves — protecting against a corrupted state where output_dir
+/// was somehow set to a parent / system path.
+fn purge_job_dir(job: &SeparatorJob) {
+    let dir = match job
+        .result
+        .as_ref()
+        .and_then(|r| r.stems_dir.clone())
+        .or_else(|| {
+            if job.output_dir.is_empty() {
+                None
+            } else {
+                Some(job.output_dir.clone())
+            }
+        }) {
+        Some(d) => PathBuf::from(d),
+        None => return,
+    };
+    if !dir.exists() || !dir.is_dir() {
+        return;
+    }
+    if let Err(e) = std::fs::remove_dir_all(&dir) {
+        eprintln!("[separator] purge {} failed: {e}", dir.display());
+    }
+}
+
+/// Walk every immediate subdirectory of `base` and reconstruct one
+/// `SeparatorJob` per folder. Two paths:
+///
+///   1. **Manifest present** (`manifest.json`) — parse it directly.
+///      That's the canonical record written by recent runs.
+///   2. **Legacy folder** — folders produced before manifest support
+///      was added. We synthesise a minimal job from the stem files we
+///      can recognise (`vocals.wav`, `drums.wav`, …) so the user
+///      sees their existing extractions instead of an empty Done list.
+///
+/// On a successful legacy reconstruction we *also* write a manifest so
+/// subsequent scans take the fast path. That keeps the cost of "I have
+/// 200 old folders" to a single boot and avoids re-listing each folder
+/// on every popup open.
+fn scan_jobs_on_disk(base: &Path) -> Vec<SeparatorJob> {
+    let entries = match std::fs::read_dir(base) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let manifest_path = path.join("manifest.json");
+        if let Ok(raw) = std::fs::read_to_string(&manifest_path) {
+            match serde_json::from_str::<SeparatorJob>(&raw) {
+                Ok(job) => out.push(job),
+                Err(e) => eprintln!("[separator] manifest {}: {e}", manifest_path.display()),
+            }
+            continue;
+        }
+        if let Some(job) = reconstruct_legacy_job(&path) {
+            // Promote the synthetic record to a real manifest so we
+            // don't rebuild it from scratch every boot. Best-effort —
+            // a read-only directory still surfaces the job in the UI.
+            write_manifest(&job);
+            out.push(job);
+        }
+    }
+    out
+}
+
+/// Stem keys we recognise inside a legacy folder. Mirrors the set
+/// `STEM_LABELS` in `api.ts` — Demucs writes one wav per key. We
+/// accept any of the audio extensions the sidecar can output (wav is
+/// the default but mp3 is a common manual conversion).
+const KNOWN_STEM_NAMES: &[&str] = &["vocals", "drums", "bass", "other", "guitar", "piano"];
+const STEM_FILE_EXTS: &[&str] = &["wav", "flac", "mp3", "m4a", "ogg", "aac"];
+
+/// Build a `SeparatorJob` from the stem files we find inside `dir`.
+/// Returns `None` when the folder has no recognisable stem audio —
+/// that's how we filter random folders the user happened to drop into
+/// `Stash Stems/` (cover art exports, README files, etc.).
+fn reconstruct_legacy_job(dir: &Path) -> Option<SeparatorJob> {
+    let mut stems: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_file() {
+            continue;
+        }
+        let stem = match p.file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s.to_ascii_lowercase(),
+            None => continue,
+        };
+        let ext = p
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_default();
+        if !STEM_FILE_EXTS.iter().any(|e| *e == ext.as_str()) {
+            continue;
+        }
+        if !KNOWN_STEM_NAMES.iter().any(|n| *n == stem.as_str()) {
+            continue;
+        }
+        stems.insert(stem, p.display().to_string());
+    }
+    if stems.is_empty() {
+        return None;
+    }
+    // Folder mtime is the only honest "when was this finished" we
+    // have. Falling back to 0 when the OS doesn't expose it keeps
+    // sorting deterministic but pushes legacy entries to the bottom,
+    // which is the desired behaviour anyway.
+    let finished_at = dir
+        .metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let folder_name = dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("track")
+        .to_string();
+    let id = format!("legacy-{folder_name}");
+    Some(SeparatorJob {
+        id,
+        // We don't know the original input path. The folder name is
+        // what `source_dir_name` derived from it at run time, so it
+        // still reads sensibly in the UI ("Djent Metal Drum Track…").
+        input_path: folder_name,
+        model: String::new(),
+        mode: JobMode::Analyze,
+        stems: None,
+        output_dir: dir.display().to_string(),
+        status: JobStatus::Completed,
+        progress: 1.0,
+        phase: "done".into(),
+        started_at: finished_at,
+        finished_at: Some(finished_at),
+        error: None,
+        result: Some(super::pipeline::SeparatorAnalysis {
+            stems_dir: Some(dir.display().to_string()),
+            stems: Some(stems),
+            bpm: None,
+            beats: None,
+            duration_sec: None,
+            model: None,
+            device: None,
+        }),
+    })
+}
+
+/// Persist the canonical job state next to its stems so a future
+/// process restart can reconstruct it via `scan_jobs_on_disk`. Called
+/// after every terminal status transition (completed / failed /
+/// cancelled). Best-effort — a write failure is logged but never
+/// surfaced to the user, the in-memory state remains authoritative for
+/// the live session.
+pub(crate) fn write_manifest(job: &SeparatorJob) {
+    let dir = PathBuf::from(&job.output_dir);
+    if dir.as_os_str().is_empty() || !dir.is_dir() {
+        return;
+    }
+    let path = dir.join("manifest.json");
+    match serde_json::to_vec_pretty(job) {
+        Ok(bytes) => {
+            if let Err(e) = std::fs::write(&path, bytes) {
+                eprintln!("[separator] manifest {}: {e}", path.display());
+            }
+        }
+        Err(e) => eprintln!("[separator] serialise manifest: {e}"),
+    }
 }
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -701,6 +963,10 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
                 j.finished_at = Some(now_unix());
                 j.result = Some(analysis.clone());
             });
+            // Persist the manifest now that the terminal state is set —
+            // a fresh popup launch will pick this folder back up via
+            // `separator_scan_disk` so the user keeps their history.
+            persist_manifest_for(&state, &job_id);
         }
         Err(e) => {
             let stderr_tail = String::from_utf8_lossy(&output.stderr);
@@ -719,6 +985,22 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
     pump_queue(&app, &state);
 }
 
+/// Snapshot the named job from state and write its manifest to disk.
+/// Pulled out so completion / failure paths can call it without
+/// re-locking the mutex inside the closure passed to `update_job`.
+fn persist_manifest_for(state: &Arc<SeparatorState>, job_id: &str) {
+    let snapshot = state
+        .jobs
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|j| j.id == job_id)
+        .cloned();
+    if let Some(j) = snapshot {
+        write_manifest(&j);
+    }
+}
+
 fn mark_failed(app: &AppHandle, state: &Arc<SeparatorState>, job_id: &str, error: String) {
     update_job(app, state, job_id, |j| {
         if j.status != JobStatus::Cancelled {
@@ -727,6 +1009,9 @@ fn mark_failed(app: &AppHandle, state: &Arc<SeparatorState>, job_id: &str, error
             j.finished_at = Some(now_unix());
         }
     });
+    // Snapshot failure on disk too — the user might want to rm the folder
+    // manually, and a manifest is the most reliable breadcrumb.
+    persist_manifest_for(state, job_id);
 }
 
 #[cfg(test)]

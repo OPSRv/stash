@@ -5,6 +5,7 @@ import {
   insertAudioEmbedAt,
   insertTranscriptAfterEmbed,
   isAudioSrc,
+  normaliseEmbedSrc,
 } from './audioEmbed';
 
 describe('isAudioSrc', () => {
@@ -73,6 +74,44 @@ describe('insertAudioEmbedAt', () => {
     const body = 'one two';
     const r = insertAudioEmbedAt(body, 3, '/x/a.mp3', 'r');
     expect(r.body).toBe('one\n\n![r](/x/a.mp3)\n\n two');
+  });
+});
+
+describe('normaliseEmbedSrc', () => {
+  it('wraps unquoted image paths that contain spaces in angle brackets', () => {
+    const src = '![image](/Users/me/Application Support/foo.png)';
+    expect(normaliseEmbedSrc(src)).toBe(
+      '![image](</Users/me/Application Support/foo.png>)',
+    );
+  });
+  it('also normalises plain markdown links with spaces in the URL', () => {
+    expect(normaliseEmbedSrc('see [doc](/a b/c.md)')).toBe(
+      'see [doc](</a b/c.md>)',
+    );
+  });
+  it('leaves already angle-bracketed embeds untouched', () => {
+    const src = '![rec](</tmp/My Rec (2).mp3>)';
+    expect(normaliseEmbedSrc(src)).toBe(src);
+  });
+  it('leaves space-free paths untouched', () => {
+    const src = '![ok](/no/space/path.png)';
+    expect(normaliseEmbedSrc(src)).toBe(src);
+  });
+  it('does not rewrite paths that contain parentheses (left for the user)', () => {
+    // Bare `(...)` inside the URL is genuinely ambiguous — a CommonMark
+    // parser treats the first `)` as the closer. Don't try to outsmart it.
+    const src = '![x](/a (b)/c d.png)';
+    expect(normaliseEmbedSrc(src)).toBe(src);
+  });
+  it('handles multiple embeds in the same source independently', () => {
+    const src = 'a ![one](/p one.png) b ![two](/p/two.png) c';
+    expect(normaliseEmbedSrc(src)).toBe(
+      'a ![one](</p one.png>) b ![two](/p/two.png) c',
+    );
+  });
+  it('preserves non-link text untouched', () => {
+    const src = '# heading\n\n- [ ] task\n- [x] done\n\nprose';
+    expect(normaliseEmbedSrc(src)).toBe(src);
   });
 });
 

@@ -367,7 +367,10 @@ export const Timeline = ({
                     onBlur={(e) => commitName(block.id, e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') commitName(block.id, (e.target as HTMLInputElement).value);
-                      if (e.key === 'Escape') setEditingId(null);
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setEditingId(null);
+                      }
                     }}
                     className="pom-name-input"
                     style={{ fontSize: 12, width: '100%' }}

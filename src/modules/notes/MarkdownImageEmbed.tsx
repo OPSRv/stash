@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Lightbox } from '../../shared/ui/Lightbox';
 import { notesImageStreamUrl } from './api';
 
 type Props = {
@@ -18,6 +19,7 @@ type Props = {
 export const MarkdownImageEmbed = ({ src, alt }: Props) => {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState(false);
 
   // react-markdown URL-encodes spaces → restore them before Rust compares
   // the path against the managed images dir. Same decoding reasoning as
@@ -64,12 +66,24 @@ export const MarkdownImageEmbed = ({ src, alt }: Props) => {
   }
 
   return (
-    <img
-      src={url ?? undefined}
-      alt={alt ?? ''}
-      className="my-2 rounded-md max-w-full h-auto"
-      style={{ border: '1px solid rgba(255, 255, 255, 0.08)' }}
-      data-testid="md-image-embed"
-    />
+    <>
+      <img
+        src={url ?? undefined}
+        alt={alt ?? ''}
+        onClick={() => url && setZoomed(true)}
+        className="my-2 rounded-md max-w-full h-auto cursor-zoom-in"
+        style={{ border: '1px solid rgba(255, 255, 255, 0.08)' }}
+        data-testid="md-image-embed"
+        data-md-src={decodedSrc}
+      />
+      {zoomed && url && (
+        <Lightbox
+          src={url}
+          alt={alt}
+          path={decodedSrc}
+          onClose={() => setZoomed(false)}
+        />
+      )}
+    </>
   );
 };

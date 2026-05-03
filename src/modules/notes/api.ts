@@ -153,6 +153,21 @@ export const notesReadImageByPath = (path: string): Promise<Uint8Array> =>
 export const notesImageStreamUrl = (path: string): Promise<string> =>
   invoke<string>('notes_image_stream_url', { path });
 
+/** Copy an on-disk video file into the managed videos dir. Returns the
+ *  new absolute path so the caller can embed it via markdown's
+ *  `![caption](…)` syntax — `MarkdownVideoEmbed` resolves the path to a
+ *  loopback `/video` stream URL and renders it inside `<video>`. */
+export const notesSaveVideoFile = (path: string): Promise<string> =>
+  invoke('notes_save_video_file', { path });
+
+/** Resolve a `http://127.0.0.1:<port>/video?…` URL for a managed video
+ *  file. Same security model as audio/image: per-app token, paths scoped
+ *  to managed videos dir + per-note attachments root. Range-request
+ *  seeking is handled by the loopback server, so even multi-hundred-MB
+ *  clips scrub without IPC byte transfer. */
+export const notesVideoStreamUrl = (path: string): Promise<string> =>
+  invoke<string>('notes_video_stream_url', { path });
+
 export type NoteAttachment = {
   id: number;
   note_id: number;

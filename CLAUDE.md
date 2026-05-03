@@ -67,13 +67,13 @@ A tool must expose the **full functionality of its tab**, not fixed presets: the
 - **Rust → Frontend**: `app.emit("<module>:<event>", payload)` + `listen<T>(...)` in a `useEffect`.
 - **Cross-tab in frontend**: `window.dispatchEvent(new CustomEvent('stash:navigate', { detail: tabId }))`.
 
-## Testing (mandatory)
+## Testing (on demand)
 
-- Unit/component tests required for every feature and bugfix. Vitest + RTL, co-located `*.test.ts(x)`.
-- Global Tauri mocks live in `src/test/setup.ts` — override per-test with `vi.mocked(...)`.
-- Prefer role-based queries. When a button is a tab/toggle, use proper ARIA (`role="tab"`, `aria-pressed`, `aria-checked`).
-- Rust repos tested with `Connection::open_in_memory()`.
-- E2E (`tests/e2e/`) runs Playwright against Vite dev — **no Tauri IPC in e2e**.
+- **Tests are written when the user asks for them, not by default.** Implementation lands first, the user click-tests in `npm run tauri dev`, and only then — on a separate command ("напиши тести", "test coverage", etc.) — do we add or extend `*.test.ts(x)`. Visual / UX changes are easier to validate by eye than through RTL, and bundling tests with every diff slows iteration on this project.
+- **Existing tests are non-negotiable.** If a change breaks a `*.test.ts(x)` that already lives in the tree, fix the test in the same commit — that's *maintenance*, not new coverage.
+- **Rust pure-logic with non-trivial computation gets a `#[cfg(test)]` test even without a request.** Backend logic has no UI to click through, so a regression test there is the only safety net.
+- Stack: Vitest + RTL co-located `*.test.ts(x)`; Tauri mocks in `src/test/setup.ts` (override per-test with `vi.mocked(...)`); Rust repos via `Connection::open_in_memory()`; E2E in `tests/e2e/` runs Playwright against Vite dev with **no Tauri IPC**.
+- Prefer role-based queries (`role="tab"`, `aria-pressed`, `aria-checked` on toggleable controls).
 - **Storybook**: every new primitive in `src/shared/ui/` must ship a co-located `*.stories.tsx` — with `tags: ['autodocs']`, `argTypes` for every enum prop, and at least one story per state (tones/sizes/disabled/invalid, etc.). Check with `npm run storybook` (or `npm run build-storybook`). Stories are excluded from `tsc`/`vitest` — they complement unit tests, not replace them.
   - **Keep stories in sync.** Any prop/design change on a component that has `*.stories.tsx` must update the stories in the same commit (argTypes, args, cases for added/removed states). Run `npm run build-storybook` before commit — it catches references to removed props earlier than review.
 

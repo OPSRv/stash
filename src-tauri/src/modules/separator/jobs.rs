@@ -83,16 +83,57 @@ pub fn now_unix() -> i64 {
 }
 
 /// Stem of the input filename, sanitised for use as a directory name
-/// under the user's output dir. Strips parent path and extension; falls
-/// back to `"track"` when the input has no usable stem.
+/// under the user's output dir. Strips parent path and extension, then
+/// runs `sanitise_path_segment` so spaces, fullwidth pipes, brackets and
+/// other shell-hostile characters become `_` — copy-paste of a stem
+/// path into Notes / a terminal stays single-token, and the markdown
+/// audio embed doesn't need angle-bracket wrapping. Falls back to
+/// `"track"` when the input has no usable stem.
 pub fn source_dir_name(input_path: &str) -> String {
     use std::path::Path;
     Path::new(input_path)
         .file_stem()
         .and_then(|s| s.to_str())
-        .map(|s| s.trim().to_string())
+        .map(sanitise_path_segment)
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "track".to_string())
+}
+
+/// Replace any character that complicates a filesystem path with `_`:
+/// whitespace, fullwidth bars (yt-dlp's `｜`), brackets, parens, comma,
+/// `&`, `?`, `*`, `:`, `;`, `<`, `>`, `"`, `'`, backslash, pipe.
+/// Collapses runs of `_` and trims leading / trailing `_` so the
+/// result is a clean single-token name. Non-ASCII letters are kept —
+/// Cyrillic / accented filenames stay readable.
+pub fn sanitise_path_segment(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    let mut last_underscore = false;
+    for ch in trimmed.chars() {
+        let replace = ch.is_whitespace()
+            || matches!(
+                ch,
+                '｜' | '|' | '[' | ']' | '(' | ')' | '{' | '}' | ','
+                | '&' | '?' | '*' | ':' | ';' | '<' | '>' | '"' | '\''
+                | '\\' | '/'
+            );
+        if replace || ch == '_' {
+            // Both replaced characters and literal underscores count
+            // as separators so a sequence like `[_` collapses to a
+            // single `_` rather than `__`.
+            if !last_underscore {
+                out.push('_');
+                last_underscore = true;
+            }
+        } else {
+            out.push(ch);
+            last_underscore = false;
+        }
+    }
+    out.trim_matches('_').to_string()
 }
 
 #[cfg(test)]
@@ -123,5 +164,36 @@ mod tests {
         // ("dir"), which is the right behaviour — falling back to
         // "track" only when there's truly nothing to use.
         assert_eq!(source_dir_name("/path/to/dir/"), "dir");
+    }
+
+    #[test]
+    fn source_dir_name_sanitises_spaces_and_special_chars() {
+        // The yt-dlp default template lands titles with `｜` (fullwidth
+        // bar), spaces and `[id]` suffixes — those used to make a
+        // copy-pasted stem path break in shells / Notes.
+        assert_eq!(
+            source_dir_name(
+                "/Music/Stash Stems/Djent Metal Drum Track 115 BPM ｜ Preset 3.0 ｜ Reissued (HQ,HD) [_gqnwIZWCak].m4a"
+            ),
+            "Djent_Metal_Drum_Track_115_BPM_Preset_3.0_Reissued_HQ_HD_gqnwIZWCak"
+        );
+    }
+
+    #[test]
+    fn sanitise_path_segment_replaces_only_problematic_chars() {
+        assert_eq!(sanitise_path_segment("hello world"), "hello_world");
+        assert_eq!(sanitise_path_segment("a｜b"), "a_b");
+        // Trailing `_` survives next to a `.`, mid-segment underscores
+        // before extensions are not stripped — keeps the algorithm
+        // simple and the result still copy-paste-friendly.
+        assert_eq!(sanitise_path_segment("[tag] song (live).mp3"), "tag_song_live_.mp3");
+        // Multiple separators collapse to a single underscore.
+        assert_eq!(sanitise_path_segment("foo   bar"), "foo_bar");
+        assert_eq!(sanitise_path_segment("__leading_and_trailing__"), "leading_and_trailing");
+        // Non-ASCII letters stay intact — Cyrillic / accented filenames
+        // are still readable in the UI.
+        assert_eq!(sanitise_path_segment("Один в каное"), "Один_в_каное");
+        // Empty / whitespace-only input falls through cleanly.
+        assert_eq!(sanitise_path_segment("   "), "");
     }
 }

@@ -109,7 +109,10 @@ export const SessionSidebar = ({
                         onBlur={commitRename}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') commitRename();
-                          else if (e.key === 'Escape') setRenamingId(null);
+                          else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            setRenamingId(null);
+                          }
                         }}
                         onClick={(e) => e.stopPropagation()}
                         aria-label="Rename chat"

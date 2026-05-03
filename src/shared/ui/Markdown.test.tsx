@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, test, vi } from 'vitest';
 import { writeText as tauriWriteText } from '@tauri-apps/plugin-clipboard-manager';
 
@@ -24,8 +25,23 @@ describe('Markdown', () => {
     expect(items.map((i) => i.textContent)).toEqual(['one', 'two']);
     const link = screen.getByRole('link', { name: 'go' });
     expect(link.getAttribute('href')).toBe('https://example.com');
-    expect(link.getAttribute('target')).toBe('_blank');
-    expect(link.getAttribute('rel')).toBe('noreferrer noopener');
+  });
+
+  test('clicking a markdown link opens via the Tauri opener plugin', async () => {
+    const opener = await import('@tauri-apps/plugin-opener');
+    const spy = vi.spyOn(opener, 'openUrl').mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<Markdown source={'see [docs](https://tauri.app)'} />);
+    await user.click(screen.getByRole('link', { name: 'docs' }));
+    expect(spy).toHaveBeenCalledWith('https://tauri.app');
+  });
+
+  test('hovering a markdown link shows the destination href in a tooltip', () => {
+    render(<Markdown source={'see [docs](https://tauri.app)'} />);
+    // Tooltip mounts the bubble eagerly (hidden) so it can be queried by role
+    // without simulating hover — the label is the destination href.
+    const tooltip = screen.getByRole('tooltip', { hidden: true });
+    expect(tooltip.textContent).toBe('https://tauri.app');
   });
 
   test('renders fenced code with language class and copy button when enabled', async () => {

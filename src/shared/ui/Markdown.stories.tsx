@@ -79,3 +79,17 @@ export const CodeHeavy: Story = {
     </Stage>
   ),
 };
+
+export const Links: Story = {
+  render: () => (
+    <Stage>
+      <Markdown
+        source={`Inline-посилання в нотатці: [Tauri docs](https://tauri.app/v2/guide), [React](https://react.dev) та [Vitest](https://vitest.dev/guide/cli.html).
+
+Автолінк прямо у проз: https://example.com/docs?x=1.
+
+[js](javascript:alert(1)) лишається без href — XSS-схеми санітайзяться.`}
+      />
+    </Stage>
+  ),
+};

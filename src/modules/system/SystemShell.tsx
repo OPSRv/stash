@@ -294,6 +294,9 @@ export const SystemShell = () => {
         searchRef.current?.select();
       }
       if (e.key === 'Escape' && document.activeElement === searchRef.current) {
+        // Mark handled so PopupShell's global Esc doesn't blur again
+        // (or worse, hide the popup once a follow-up Esc lands on body).
+        e.preventDefault();
         setQuery('');
         searchRef.current?.blur();
       }

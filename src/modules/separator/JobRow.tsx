@@ -1,5 +1,7 @@
-import { Button } from '../../shared/ui/Button';
+import { IconButton } from '../../shared/ui/IconButton';
+import { CloseIcon } from '../../shared/ui/icons';
 import { ProgressBar } from '../../shared/ui/ProgressBar';
+import { Spinner } from '../../shared/ui/Spinner';
 import type { SeparatorJob } from './api';
 
 type JobRowProps = {
@@ -25,25 +27,23 @@ export function JobRow({ job, onCancel }: JobRowProps) {
   return (
     <div
       data-testid={`job-${job.id}`}
-      className="rounded-md border border-white/10 p-3"
+      className="rounded-md border [border-color:var(--hairline)] p-3 [background:var(--bg-row-active)]"
     >
       <div className="flex items-center gap-3">
+        <Spinner size={14} className="shrink-0 t-secondary" />
         <div className="flex-1 min-w-0">
-          <div className="t-primary text-body truncate">{filename(job.input_path)}</div>
-          <div className="text-meta opacity-60">{label}</div>
+          <div className="t-primary text-body truncate font-medium">
+            {filename(job.input_path)}
+          </div>
+          <div className="t-tertiary text-meta">{label}</div>
         </div>
-        <span className="t-tertiary text-meta font-mono">{percent}%</span>
-        <Button
-          size="sm"
-          variant="ghost"
-          tone="danger"
-          shape="square"
-          aria-label="Cancel"
+        <span className="t-secondary text-meta font-mono tabular-nums">{percent}%</span>
+        <IconButton
           title="Cancel"
           onClick={() => onCancel(job.id)}
         >
-          ×
-        </Button>
+          <CloseIcon size={13} />
+        </IconButton>
       </div>
       <ProgressBar
         value={job.progress}

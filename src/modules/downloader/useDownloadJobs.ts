@@ -6,6 +6,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification';
 import { loadSettings } from '../../settings/store';
+import { isSupportedAudio } from '../separator/api';
 import { list, type DownloadJob } from './api';
 
 interface UseDownloadJobsResult {
@@ -40,6 +41,11 @@ export const useDownloadJobs = (): UseDownloadJobsResult => {
   // download completion. Refreshed once per mount; users toggling the option
   // mid-session will see it apply on the next app launch (acceptable).
   const notifyOnCompleteRef = useRef(false);
+  // Same per-mount caching for the auto-stems handoff. When set, completed
+  // audio jobs are auto-routed to the Stems tab via the same `stash:navigate`
+  // event the manual button emits, so `SeparatorShell` picks them up
+  // unchanged.
+  const autoStemsRef = useRef(false);
 
   const reload = useCallback(() => {
     list()
@@ -63,6 +69,7 @@ export const useDownloadJobs = (): UseDownloadJobsResult => {
     loadSettings()
       .then((s) => {
         notifyOnCompleteRef.current = s.notifyOnDownloadComplete;
+        autoStemsRef.current = s.downloaderAutoStems;
       })
       .catch(() => {});
 
@@ -105,8 +112,20 @@ export const useDownloadJobs = (): UseDownloadJobsResult => {
       }),
       listen<{ id: number; path: string }>('downloader:completed', (e) => {
         reload();
-        const name = e.payload.path.split('/').pop() ?? 'Download';
+        const { path } = e.payload;
+        const name = path.split('/').pop() ?? 'Download';
         notify('Download finished', name);
+        // Auto-handoff to Stems if the user opted in *and* the file is one
+        // Demucs can read. Video downloads are intentionally skipped — the
+        // separator can't ingest mp4 / webm, so silently doing nothing is
+        // less surprising than dispatching an event that errors downstream.
+        if (autoStemsRef.current && isSupportedAudio(path)) {
+          window.dispatchEvent(
+            new CustomEvent('stash:navigate', {
+              detail: { tabId: 'separator', file: path },
+            }),
+          );
+        }
       }),
       listen<{ id: number }>('downloader:failed', () => {
         reload();

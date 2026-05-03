@@ -38,13 +38,20 @@ export const Modal = ({
   useEffect(() => {
     if (!open || !dismissOnEscape) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
+      if (e.key !== 'Escape') return;
+      // Capture phase + `stopImmediatePropagation` so PopupShell's
+      // window-level Esc handler — which would otherwise hide the entire
+      // Stash popup — doesn't fire while a modal is open. Both listeners
+      // sit on the same `window` target; without this guard the
+      // PopupShell handler runs first (registered earlier) and dismisses
+      // the popup before the modal closes.
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [open, onClose, dismissOnEscape]);
 
   if (!open) return null;

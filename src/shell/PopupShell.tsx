@@ -1,10 +1,11 @@
-import { Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { modules } from '../modules/registry';
+import { resolveVisibleModules } from '../modules/visibility';
 import { SUPPORTED_VIDEO_URL } from '../modules/downloader/downloads.constants';
 import { setPendingDownloaderUrl } from '../modules/downloader/pendingUrl';
 import { TabButton } from '../shared/ui/TabButton';
@@ -37,7 +38,23 @@ import { webchatCloseAll, type WebchatNowPlaying } from '../modules/web/webchatA
 import { applyTheme, subscribeTheme } from '../settings/theme';
 
 export const PopupShell = () => {
-  const visibleModules = modules;
+  // Module visibility & order live in `settings.json` via the cached
+  // `loadSettings()` — read once on cold-start, kept in memory across every
+  // ⌘⇧V toggle so we never re-stat the file when the user reopens the popup.
+  // We refresh the slice live on `stash:settings-changed` so the Modules
+  // tab can flip a toggle and see the tab bar update immediately.
+  const [modulePrefs, setModulePrefs] = useState<{
+    hidden: readonly string[];
+    order: readonly string[];
+  }>({ hidden: [], order: [] });
+  const visibleModules = useMemo(
+    () =>
+      resolveVisibleModules(modules, {
+        hiddenModules: modulePrefs.hidden,
+        moduleOrder: modulePrefs.order,
+      }),
+    [modulePrefs],
+  );
   const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const [indicator, setIndicator] = useState<{ left: number; width: number }>({
@@ -64,10 +81,29 @@ export const PopupShell = () => {
     { id: string; url: string }[]
   >([]);
 
+  // Long-lived listeners (clipboard auto-jump, now-playing bars) capture
+  // `openTab` once and may reach for ids that the user has since hidden.
+  // Read the current visibility through a ref so `openTab` always honours
+  // the latest setting without having to re-subscribe each effect.
+  const visibleIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    visibleIdsRef.current = new Set(visibleModules.map((m) => m.id));
+  }, [visibleModules]);
+
   const openTab = (id: string) => {
+    if (!visibleIdsRef.current.has(id)) return;
     setActiveId(id);
     setVisitedIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   };
+
+  // If the user hides the currently-active tab from Settings → Modules,
+  // fall back to the first visible module so the popup never lands on a
+  // module that no longer exists in the bar.
+  useEffect(() => {
+    if (visibleModules.length === 0) return;
+    if (visibleModules.some((m) => m.id === activeId)) return;
+    setActiveId(visibleModules[0].id);
+  }, [visibleModules, activeId]);
 
   // Position the active-tab pill. Uses layout effect so the indicator moves
   // on the same paint as the highlight changes — no flash on switch. We
@@ -181,12 +217,15 @@ export const PopupShell = () => {
   }, [activeId, visibleModules]);
 
   useEffect(() => {
+    let cancelled = false;
     const read = () => {
       loadSettings()
         .then((s) => {
+          if (cancelled) return;
           setWebchatServices(
             s.aiWebServices.map((w) => ({ id: w.id, url: w.url })),
           );
+          setModulePrefs({ hidden: s.hiddenModules, order: s.moduleOrder });
           applyTheme({
             mode: s.themeMode,
             blur: s.themeBlur,
@@ -209,6 +248,25 @@ export const PopupShell = () => {
         .catch(() => {});
     };
     read();
+    // Live-refresh the visibility prefs when the Modules tab toggles a
+    // module off/on or drags a row — Settings broadcasts this event after
+    // every `saveSetting`. Cheap to re-read; the cache hands back the same
+    // object on subsequent calls.
+    const onChanged = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail !== 'hiddenModules' && detail !== 'moduleOrder') return;
+      loadSettings()
+        .then((s) => {
+          if (cancelled) return;
+          setModulePrefs({ hidden: s.hiddenModules, order: s.moduleOrder });
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('stash:settings-changed', onChanged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('stash:settings-changed', onChanged);
+    };
   }, []);
 
   // Suspend popup auto-hide while the AI tab is active. Chat state
@@ -241,6 +299,24 @@ export const PopupShell = () => {
       if (e.key === 'Escape') {
         if (cheatsheetOpen) {
           setCheatsheetOpen(false);
+          return;
+        }
+        // A local handler already absorbed the Escape (cancel rename,
+        // clear search, dismiss banner, etc.) — defer to it. Otherwise
+        // *every* in-place edit cancellation would also dismiss the
+        // entire popup.
+        if (e.defaultPrevented) return;
+        // Pressing Esc while focus is in an editing surface should
+        // never dismiss the popup — that destroys all in-flight typing.
+        // No local handler claimed it (no preventDefault above), so
+        // treat Esc as a no-op here. The user can blur explicitly with
+        // a click or Tab; meanwhile their input is preserved.
+        if (
+          target &&
+          (target.tagName === 'INPUT' ||
+            target.tagName === 'TEXTAREA' ||
+            target.isContentEditable)
+        ) {
           return;
         }
         // Route through the Rust side so hiding uses the same path as the
@@ -280,15 +356,17 @@ export const PopupShell = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [cheatsheetOpen, visibleModules]);
 
-  // Rust can ask us to activate a specific tab (e.g. ⌘⇧N opens Notes).
+  // Rust can ask us to activate a specific tab (e.g. ⌘⇧J opens Notes).
+  // Hidden tabs are not eligible — if the user disabled Notes, ⌘⇧J is a
+  // no-op rather than a jump to an invisible module.
   useEffect(() => {
     const unlisten = listen<string>('nav:activate', (e) => {
-      if (modules.some((m) => m.id === e.payload)) openTab(e.payload);
+      if (visibleModules.some((m) => m.id === e.payload)) openTab(e.payload);
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
-  }, []);
+  }, [visibleModules]);
 
   // Rebuild the tray context menu to mirror the current tab set. When a
   // future Settings toggle lets the user hide or reorder modules, pushing
@@ -321,16 +399,34 @@ export const PopupShell = () => {
   }, [nowPlaying?.artwork]);
 
   // In-app navigation requests (e.g. clipboard → notes after "Save to note").
+  // Skip hidden tabs — emitting `stash:navigate` for a disabled module is
+  // a programmer error elsewhere; better to no-op than to land on a tab
+  // that is not in the bar.
+  //
+  // Two `detail` shapes flow through this channel:
+  //   - `string` — bare tab id (`'ai'`, `'translator'`, …). Used by simple
+  //     "go there" buttons.
+  //   - `{ tabId: string, file?: string }` — payload-bearing hand-off
+  //     (downloader → separator with a file path the receiver pre-fills).
+  // We accept both; the receiving tab itself listens to `stash:navigate`
+  // again for the file payload (see SeparatorShell).
   useEffect(() => {
     const onNavigate = (e: Event) => {
-      const id = (e as CustomEvent<string>).detail;
-      if (typeof id === 'string' && modules.some((m) => m.id === id)) {
+      const detail = (e as CustomEvent<unknown>).detail;
+      const id =
+        typeof detail === 'string'
+          ? detail
+          : detail && typeof detail === 'object' && 'tabId' in detail &&
+              typeof (detail as { tabId: unknown }).tabId === 'string'
+            ? (detail as { tabId: string }).tabId
+            : null;
+      if (id && visibleModules.some((m) => m.id === id)) {
         openTab(id);
       }
     };
     window.addEventListener('stash:navigate', onNavigate);
     return () => window.removeEventListener('stash:navigate', onNavigate);
-  }, []);
+  }, [visibleModules]);
 
   // When a new clipboard entry is a downloadable social-media URL, jump the
   // user into the Downloader tab and prefill the URL bar. We re-read the

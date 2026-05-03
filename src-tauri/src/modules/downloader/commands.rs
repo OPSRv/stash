@@ -10,6 +10,7 @@ use crate::modules::downloader::{
         CachedDetection, RunnerState,
     },
 };
+use crate::modules::media_server::{kind_for_extension, MediaServerState};
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -395,12 +396,39 @@ pub(crate) fn resolve_downloads_dir(
 #[tauri::command]
 pub fn dl_set_downloads_dir(
     state: State<'_, Arc<RunnerState>>,
+    media: State<'_, Arc<MediaServerState>>,
     path: Option<String>,
 ) -> Result<(), String> {
     let next = resolve_downloads_dir(&state.default_downloads_dir, path);
     std::fs::create_dir_all(&next).ok();
-    *state.downloads_dir.lock().unwrap() = next;
+    let prev = {
+        let mut guard = state.downloads_dir.lock().unwrap();
+        std::mem::replace(&mut *guard, next.clone())
+    };
+    // Re-point the media server scope so the loopback player keeps
+    // working with the new folder and stops accepting paths under the
+    // old one. Do both kinds — downloads can be either audio or video.
+    if prev != next {
+        media.unregister(crate::modules::media_server::MediaKind::Audio, &prev);
+        media.unregister(crate::modules::media_server::MediaKind::Video, &prev);
+    }
+    media.register(crate::modules::media_server::MediaKind::Audio, next.clone());
+    media.register(crate::modules::media_server::MediaKind::Video, next);
     Ok(())
+}
+
+/// Resolve a downloaded file's loopback streaming URL. Picks audio vs
+/// video by extension. Used by the shared `<VideoPlayer>` so a tap on a
+/// completed download tile streams through the same media server every
+/// other surface uses (notes inline embeds, etc.) — `asset://` cannot
+/// reach AVFoundation for files past a few MB.
+#[tauri::command]
+pub fn dl_media_stream_url(
+    media: State<'_, Arc<MediaServerState>>,
+    path: String,
+) -> Result<String, String> {
+    let kind = kind_for_extension(&path);
+    media.stream_url(kind, &path)
 }
 
 #[tauri::command]

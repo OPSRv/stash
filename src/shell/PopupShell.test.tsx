@@ -125,6 +125,37 @@ describe('PopupShell', () => {
     expect(invoke).toHaveBeenCalledWith('hide_popup');
   });
 
+  it('Esc with focus inside an input does not hide the popup', async () => {
+    const user = userEvent.setup();
+    render(<PopupShell />);
+    const search = await screen.findByRole('searchbox', undefined, {
+      timeout: 8000,
+    });
+    (search as HTMLInputElement).focus();
+    expect(document.activeElement).toBe(search);
+    vi.mocked(invoke).mockClear();
+    await user.keyboard('{Escape}');
+    expect(invoke).not.toHaveBeenCalledWith('hide_popup');
+    // Field stays focused — user keeps editing context, no surprise blur.
+    expect(document.activeElement).toBe(search);
+  });
+
+  it('Esc absorbed by a child handler (preventDefault) does not hide the popup', async () => {
+    const user = userEvent.setup();
+    render(<PopupShell />);
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
+    // Mirrors local rename/banner handlers — they call preventDefault on
+    // their own onKeyDown. PopupShell must defer to them.
+    const absorb = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') e.preventDefault();
+    };
+    window.addEventListener('keydown', absorb, true);
+    vi.mocked(invoke).mockClear();
+    await user.keyboard('{Escape}');
+    expect(invoke).not.toHaveBeenCalledWith('hide_popup');
+    window.removeEventListener('keydown', absorb, true);
+  });
+
   it('⌘⌥4 switches to the Notes module (bound to tabShortcutDigit, not index)', async () => {
     const user = userEvent.setup();
     render(<PopupShell />);
@@ -132,6 +163,37 @@ describe('PopupShell', () => {
     await user.keyboard('{Meta>}{Alt>}4{/Alt}{/Meta}');
     await screen.findByPlaceholderText(/search notes/i, undefined, { timeout: 8000 });
     // Notes input must be visible (not inside a hidden container).
+    const notesInput = document.querySelector(
+      'input[placeholder*="Search notes" i]',
+    );
+    expect(notesInput?.closest('[hidden]')).toBeNull();
+  });
+
+  it('stash:navigate with a bare-string detail switches the active tab', async () => {
+    render(<PopupShell />);
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
+    window.dispatchEvent(
+      new CustomEvent('stash:navigate', { detail: 'notes' }),
+    );
+    await screen.findByPlaceholderText(/search notes/i, undefined, { timeout: 8000 });
+    const notesInput = document.querySelector(
+      'input[placeholder*="Search notes" i]',
+    );
+    expect(notesInput?.closest('[hidden]')).toBeNull();
+  });
+
+  it('stash:navigate with `{ tabId, file }` detail switches the active tab too', async () => {
+    // Regression: PopupShell used to require `detail` to be a string. The
+    // downloader → separator hand-off uses an object payload, which silently
+    // failed to navigate and the user saw nothing happen on Stems click.
+    render(<PopupShell />);
+    await screen.findByRole('searchbox', undefined, { timeout: 8000 });
+    window.dispatchEvent(
+      new CustomEvent('stash:navigate', {
+        detail: { tabId: 'notes', file: '/tmp/song.mp3' },
+      }),
+    );
+    await screen.findByPlaceholderText(/search notes/i, undefined, { timeout: 8000 });
     const notesInput = document.querySelector(
       'input[placeholder*="Search notes" i]',
     );

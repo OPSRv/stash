@@ -20,7 +20,10 @@ describe('MarkdownPreview', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Title' })).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'docs' });
     expect(link).toHaveAttribute('href', 'https://example.com');
-    expect(link).toHaveAttribute('target', '_blank');
+    // Note links are routed through the Tauri opener (not target="_blank")
+    // and surface the destination in a Tooltip — see `Markdown.tsx`.
+    const tooltip = screen.getByRole('tooltip', { hidden: true });
+    expect(tooltip.textContent).toBe('https://example.com');
     expect(screen.getByText('npm').tagName).toBe('CODE');
   });
 
@@ -92,6 +95,24 @@ describe('MarkdownPreview', () => {
     expect(screen.queryByTestId('audio-waveform')).not.toBeInTheDocument();
   });
 
+  it('renders a local image embed when the path contains spaces (legacy notes)', () => {
+    // Older notes saved bare paths from `Application Support`-style dirs.
+    // CommonMark refuses to parse those as images because a space ends the
+    // URL token; `normaliseEmbedSrc` rewrites them to `<…>`-wrapped form
+    // before render so the image surfaces correctly instead of leaking the
+    // raw `![image](…)` source as plain text.
+    render(
+      <MarkdownPreview
+        source={'![image](/Users/me/Application Support/com.opsrv.stash/notes/images/img-1.png)'}
+      />
+    );
+    // `MarkdownImageEmbed` is the canonical local-image renderer — its
+    // presence confirms the embed parsed and dispatched correctly.
+    expect(screen.getByTestId('md-image-embed')).toBeInTheDocument();
+    // And the raw markdown text must NOT leak through.
+    expect(screen.queryByText(/!\[image\]/)).toBeNull();
+  });
+
   it('embeds a YouTube player for a bare youtu.be URL on its own line', () => {
     const { container } = render(
       <MarkdownPreview source={'before\n\nhttps://youtu.be/dQw4w9WgXcQ\n\nafter'} />
@@ -114,5 +135,54 @@ describe('MarkdownPreview', () => {
     expect(
       screen.getByRole('link', { name: 'https://example.org' }),
     ).toHaveAttribute('href', 'https://example.org');
+  });
+
+  it('promotes a standalone markdown link to a LinkEmbed preview card', () => {
+    render(
+      <MarkdownPreview source={'[Tauri docs](https://tauri.app)'} />
+    );
+    // The preview card is a button with the destination href as its
+    // accessible title — same hook `LinkEmbed.PreviewCard` exposes for
+    // bare-URL embeds.
+    const card = screen.getByRole('button', { name: /tauri\.app/i });
+    expect(card).toBeInTheDocument();
+    // No anchor remains in the document — the markdown link is consumed
+    // by the embed, not rendered alongside it.
+    expect(screen.queryByRole('link', { name: 'Tauri docs' })).toBeNull();
+  });
+
+  it('keeps an inline markdown link inline when wrapped in prose', () => {
+    render(
+      <MarkdownPreview source={'see [Tauri docs](https://tauri.app) for setup'} />
+    );
+    expect(screen.getByRole('link', { name: 'Tauri docs' })).toBeInTheDocument();
+    // No preview card was promoted — there's no card-style button in the
+    // paragraph.
+    expect(screen.queryByRole('button', { name: /tauri\.app/i })).toBeNull();
+  });
+
+  it('promotes a bare URL inside a tight ordered-list item to a LinkEmbed', () => {
+    // Tight lists (no blank lines between items) skip the inner <p>, so the
+    // promotion logic must also fire on <li>. The screenshot bug: a list
+    // ending with `4. https://claude.ai/…` rendered as a plain anchor.
+    const src =
+      '1. one\n2. two\n3. three\n4. https://claude.ai/chat/abc-def';
+    render(<MarkdownPreview source={src} />);
+    const card = screen.getByRole('button', { name: /claude\.ai/i });
+    expect(card).toBeInTheDocument();
+  });
+
+  it('promotes a standalone markdown link inside a list item too', () => {
+    const src = '- [Tauri docs](https://tauri.app)';
+    render(<MarkdownPreview source={src} />);
+    expect(screen.getByRole('button', { name: /tauri\.app/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Tauri docs' })).toBeNull();
+  });
+
+  it('keeps inline list-item links inline when there is surrounding prose', () => {
+    const src = '- see [Tauri docs](https://tauri.app) for setup';
+    render(<MarkdownPreview source={src} />);
+    expect(screen.getByRole('link', { name: 'Tauri docs' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /tauri\.app/i })).toBeNull();
   });
 });

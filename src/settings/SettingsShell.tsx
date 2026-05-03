@@ -17,6 +17,7 @@ import { ClipboardTab } from './ClipboardTab';
 import { DataTab } from './DataTab';
 import { DownloadsTab } from './DownloadsTab';
 import { GeneralTab } from './GeneralTab';
+import { ModulesTab } from './ModulesTab';
 import { NotesTab } from './NotesTab';
 import { SeparatorTab } from './SeparatorTab';
 import { TelegramTab } from './TelegramTab';
@@ -28,6 +29,7 @@ import { applyTheme, broadcastTheme } from './theme';
 
 type Tab =
   | 'general'
+  | 'modules'
   | 'appearance'
   | 'clipboard'
   | 'downloads'
@@ -64,6 +66,18 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <circle cx="12" cy="12" r="3" />
         <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+      </svg>
+    ),
+  },
+  {
+    id: 'modules',
+    label: 'Modules',
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        <rect x="14" y="14" width="7" height="7" rx="1.5" />
       </svg>
     ),
   },
@@ -339,6 +353,7 @@ export const SettingsShell = () => {
             onToggleAutostart={toggleAutostart}
           />
         )}
+        {tab === 'modules' && <ModulesTab settings={settings} onChange={update} />}
         {tab === 'appearance' && <AppearanceTab settings={settings} onChange={update} />}
         {tab === 'clipboard' && <ClipboardTab settings={settings} onChange={update} />}
         {tab === 'downloads' && <DownloadsTab settings={settings} onChange={update} />}

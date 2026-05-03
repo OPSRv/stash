@@ -28,6 +28,10 @@ function mockBackend({
   mockedInvoke.mockReset();
   mockedInvoke.mockImplementation(async (cmd: string) => {
     if (cmd === 'separator_status') return status;
+    // The shell now hydrates from disk first (`scanDisk`), with
+    // `listJobs` as a fallback. Both should return the same set in
+    // tests so neither path needs special-casing.
+    if (cmd === 'separator_scan_disk') return jobs;
     if (cmd === 'separator_list_jobs') return jobs;
     return undefined;
   });

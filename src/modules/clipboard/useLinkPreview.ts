@@ -57,3 +57,13 @@ export const __resetLinkPreviewCache = () => {
   cache.clear();
   inflight.clear();
 };
+
+/// Test/Storybook helper: pre-populate the preview cache so a render
+/// resolves synchronously without going through IPC. Use only from
+/// non-production code paths.
+export const __seedLinkPreviewCache = (
+  url: string,
+  preview: LinkPreview | null,
+) => {
+  cache.set(url, preview);
+};

@@ -456,7 +456,10 @@ export const WebShell = () => {
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setContextMenu(null);
+      }
     };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
