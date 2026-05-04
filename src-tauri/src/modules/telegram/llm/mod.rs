@@ -113,7 +113,7 @@ impl Default for LlmRequest {
             messages: Vec::new(),
             tools: Vec::new(),
             temperature: 0.2,
-            max_tokens: 1024,
+            max_tokens: 8192,
         }
     }
 }
@@ -165,7 +165,7 @@ mod tests {
         assert!(r.messages.is_empty());
         assert!(r.tools.is_empty());
         assert!((r.temperature - 0.2).abs() < f32::EPSILON);
-        assert_eq!(r.max_tokens, 1024);
+        assert_eq!(r.max_tokens, 8192);
     }
 
     #[test]

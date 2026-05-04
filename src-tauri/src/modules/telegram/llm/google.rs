@@ -228,10 +228,35 @@ fn tool_result_to_wire(msg: &ChatMessage) -> Value {
 }
 
 pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
-    let parts = value
+    let parts = match value
         .pointer("/candidates/0/content/parts")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| LlmError::BadResponse("missing candidates[0].content.parts".into()))?;
+    {
+        Some(p) => p,
+        None => {
+            // Gemini emits a candidate with no `content.parts` when the
+            // turn was cut short — most often `MAX_TOKENS` on thinking
+            // models that spent the whole budget reasoning, sometimes
+            // `SAFETY` / `RECITATION` / `PROHIBITED_CONTENT`. Surface
+            // the reason so the user knows whether to bump the cap or
+            // change the prompt.
+            let reason = value
+                .pointer("/candidates/0/finishReason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("UNKNOWN");
+            let msg = match reason {
+                "MAX_TOKENS" => "Gemini hit the output-token cap before producing a reply \
+                                 (thinking models burn the budget on reasoning — \
+                                 try a non-thinking model or raise the limit)"
+                    .to_string(),
+                "SAFETY" | "RECITATION" | "PROHIBITED_CONTENT" | "BLOCKLIST" => {
+                    format!("Gemini blocked the response ({reason})")
+                }
+                other => format!("Gemini returned no content (finishReason: {other})"),
+            };
+            return Err(LlmError::BadResponse(msg));
+        }
+    };
 
     let mut text = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
@@ -440,6 +465,39 @@ mod tests {
     fn from_wire_missing_candidates_is_bad_response() {
         let body = json!({ "error": "busted" });
         assert!(matches!(from_wire(&body), Err(LlmError::BadResponse(_))));
+    }
+
+    #[test]
+    fn from_wire_max_tokens_finish_reason_is_human_readable() {
+        let body = json!({
+            "candidates": [{
+                "finishReason": "MAX_TOKENS",
+                "content": { "role": "model" }
+            }]
+        });
+        match from_wire(&body) {
+            Err(LlmError::BadResponse(m)) => {
+                assert!(
+                    m.contains("MAX_TOKENS") || m.to_lowercase().contains("token"),
+                    "expected token-cap hint, got: {m}"
+                );
+            }
+            other => panic!("expected BadResponse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_wire_safety_finish_reason_surfaces_block() {
+        let body = json!({
+            "candidates": [{
+                "finishReason": "SAFETY",
+                "content": { "role": "model" }
+            }]
+        });
+        match from_wire(&body) {
+            Err(LlmError::BadResponse(m)) => assert!(m.contains("SAFETY")),
+            other => panic!("expected BadResponse, got {other:?}"),
+        }
     }
 
     #[test]
