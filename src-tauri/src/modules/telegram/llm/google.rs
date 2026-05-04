@@ -242,17 +242,31 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
             // change the prompt.
             let reason = value
                 .pointer("/candidates/0/finishReason")
-                .and_then(|v| v.as_str())
-                .unwrap_or("UNKNOWN");
-            let msg = match reason {
-                "MAX_TOKENS" => "Gemini hit the output-token cap before producing a reply \
-                                 (thinking models burn the budget on reasoning — \
-                                 try a non-thinking model or raise the limit)"
-                    .to_string(),
-                "SAFETY" | "RECITATION" | "PROHIBITED_CONTENT" | "BLOCKLIST" => {
-                    format!("Gemini blocked the response ({reason})")
+                .and_then(|v| v.as_str());
+            let block = value
+                .pointer("/promptFeedback/blockReason")
+                .and_then(|v| v.as_str());
+            let msg = match (reason, block) {
+                (Some("MAX_TOKENS"), _) => {
+                    "Gemini hit the output-token cap before producing a reply \
+                     (thinking models burn the budget on reasoning — \
+                     try a non-thinking model or raise the limit)"
+                        .to_string()
                 }
-                other => format!("Gemini returned no content (finishReason: {other})"),
+                (Some(r), _)
+                    if matches!(
+                        r,
+                        "SAFETY" | "RECITATION" | "PROHIBITED_CONTENT" | "BLOCKLIST"
+                    ) =>
+                {
+                    format!("Gemini blocked the response ({r})")
+                }
+                (_, Some(b)) => format!("Gemini blocked the prompt ({b})"),
+                (Some(r), _) => format!("Gemini returned no content (finishReason: {r})"),
+                (None, None) => format!(
+                    "Gemini returned an unrecognised response shape: {}",
+                    truncate(&value.to_string(), 400)
+                ),
             };
             return Err(LlmError::BadResponse(msg));
         }
