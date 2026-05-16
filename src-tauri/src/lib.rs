@@ -107,12 +107,17 @@ fn hide_popup(app: tauri::AppHandle) {
     }
 }
 
-/// Toggle the popup's "always on top" pin. Bundles three things that have to
-/// move together: the NSPanel window level (so the popup stays above other
-/// floating panels and fullscreen apps), the blur auto-hide flag, and
-/// `setAlwaysOnTop` as a non-macOS fallback. Calling this from a single
-/// command keeps the three in lockstep — the previous frontend-driven
-/// sequence drifted on Esc/blur and produced "pin sometimes doesn't pin".
+/// Toggle the popup's "always on top" pin. Bundles three things that have
+/// to move together: the NSPanel window level (so the popup stays above
+/// other apps' windows and fullscreen apps), `hidesOnDeactivate` (so
+/// switching to another app doesn't make AppKit auto-hide the panel),
+/// and the blur auto-hide flag the Tauri-side handler reads.
+///
+/// On macOS we deliberately do NOT also call `set_always_on_top` —
+/// Tauri's implementation calls `NSWindow.setLevel(NSFloatingWindowLevel=3)`
+/// which would silently clobber the higher level we just set, leaving the
+/// pinned popup sitting *below* other floating windows even though the
+/// pin button looks active.
 #[tauri::command]
 fn set_popup_pinned(app: tauri::AppHandle, pinned: bool) {
     if let Some(auto_hide) = app.try_state::<Arc<PopupAutoHide>>() {
@@ -122,15 +127,23 @@ fn set_popup_pinned(app: tauri::AppHandle, pinned: bool) {
     {
         use tauri_nspanel::ManagerExt;
         if let Ok(panel) = app.get_webview_panel("popup") {
-            // NSStatusWindowLevel = 25, above other floating panels +
-            // menubar; combined with the `FullScreenAuxiliary` collection
-            // behavior set at setup, the panel stays above fullscreen apps.
-            // Unpinned drops back to NSFloatingWindowLevel = 3 (the panel
-            // default while `is_floating_panel: true`).
+            // NSStatusWindowLevel = 25, above normal windows (0), floating
+            // panels (3) and the menu bar (24). Combined with the
+            // `FullScreenAuxiliary` collection behaviour set at panel
+            // creation, the popup stays above fullscreen apps too. When
+            // unpinned we drop back to NSFloatingWindowLevel = 3 (the
+            // floating-panel default).
             let level: i64 = if pinned { 25 } else { 3 };
             panel.set_level(level);
+            // Re-pin "stay visible when this app deactivates". We set it
+            // once at panel creation, but AppKit can reset the flag when
+            // the level changes, and missing this is why a pinned popup
+            // would disappear the moment the user clicked into Xcode /
+            // Chrome / Finder. Explicit re-apply keeps the contract.
+            panel.set_hides_on_deactivate(false);
         }
     }
+    #[cfg(not(target_os = "macos"))]
     if let Some(win) = resolve_popup(&app) {
         let _ = win.set_always_on_top(pinned);
     }

@@ -9,17 +9,21 @@
 //!   path, the same way we already bundle yt-dlp.
 //!
 //! Source: <https://evermeet.cx> — canonical macOS static builds maintained
-//! by the same people the yt-dlp docs point at. Distributed as a zip with a
-//! single binary inside. Integrity is verified against the SHA-256 published
-//! on the `info/<bin>/release` JSON endpoint of the same origin (same trust
-//! model as the yt-dlp installer: if TLS to evermeet.cx is intact, the
-//! manifest + binary either both come from the maintainer or neither does).
+//! by the same people the yt-dlp docs point at. Distributed as a zip with
+//! a single binary inside.
+//!
+//! Trust model: HTTPS to evermeet.cx, no extra SHA verification. The site
+//! exposes per-download GPG `.sig` URLs but no top-level SHA-256 in
+//! `info/<bin>/release`, so a sums-manifest check (the yt-dlp installer
+//! pattern) is not available. Adding GPG would mean shipping `gpg` +
+//! pinning a public key in this repo; Homebrew's own ffmpeg formula leans
+//! on the same TLS-to-evermeet trust, which is acceptable for a
+//! single-maintainer macOS-only tool.
 //!
 //! Linux/Windows: unsupported. Stash is a macOS menubar app; cross-platform
 //! support is out of scope here, and the resolver still picks up system
 //! ffmpeg on other platforms.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -27,10 +31,6 @@ use std::process::Command;
 const FFMPEG_ZIP_URL: &str = "https://evermeet.cx/ffmpeg/getrelease/zip";
 #[cfg(target_os = "macos")]
 const FFPROBE_ZIP_URL: &str = "https://evermeet.cx/ffmpeg/getrelease/ffprobe/zip";
-#[cfg(target_os = "macos")]
-const FFMPEG_INFO_URL: &str = "https://evermeet.cx/ffmpeg/info/ffmpeg/release";
-#[cfg(target_os = "macos")]
-const FFPROBE_INFO_URL: &str = "https://evermeet.cx/ffmpeg/info/ffprobe/release";
 
 /// Status of the bundled ffmpeg pair. `Some(dir)` when both binaries are
 /// present in `bin_dir`, otherwise `None`. Currently used internally by
@@ -115,26 +115,17 @@ pub fn force_reinstall(_bin_dir: &Path) -> Result<PathBuf, String> {
 
 #[cfg(target_os = "macos")]
 fn install_pair(bin_dir: &Path) -> Result<(), String> {
-    install_one(bin_dir, "ffmpeg", FFMPEG_ZIP_URL, FFMPEG_INFO_URL)?;
-    install_one(bin_dir, "ffprobe", FFPROBE_ZIP_URL, FFPROBE_INFO_URL)?;
+    install_one(bin_dir, "ffmpeg", FFMPEG_ZIP_URL)?;
+    install_one(bin_dir, "ffprobe", FFPROBE_ZIP_URL)?;
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
-fn install_one(bin_dir: &Path, binary: &str, zip_url: &str, info_url: &str) -> Result<(), String> {
-    let expected = fetch_expected_sha256(info_url)
-        .map_err(|e| format!("fetch {binary} info: {e}"))?;
+fn install_one(bin_dir: &Path, binary: &str, zip_url: &str) -> Result<(), String> {
     let zip_path = bin_dir.join(format!("{binary}.zip"));
     if let Err(e) = curl_to_file(zip_url, &zip_path) {
         let _ = std::fs::remove_file(&zip_path);
         return Err(format!("download {binary}: {e}"));
-    }
-    let actual = sha256_of_file(&zip_path).map_err(|e| format!("hash {binary} zip: {e}"))?;
-    if !actual.eq_ignore_ascii_case(&expected) {
-        let _ = std::fs::remove_file(&zip_path);
-        return Err(format!(
-            "{binary} digest mismatch: expected {expected}, got {actual}"
-        ));
     }
     // `-o` overwrites, `-j` flattens (some zips wrap the binary in a folder,
     // we always want it at bin_dir root).
@@ -155,20 +146,6 @@ fn install_one(bin_dir: &Path, binary: &str, zip_url: &str, info_url: &str) -> R
 }
 
 #[cfg(target_os = "macos")]
-fn fetch_expected_sha256(info_url: &str) -> Result<String, String> {
-    let out = Command::new("curl")
-        .args(["-L", "--fail", "-s", info_url])
-        .output()
-        .map_err(|e| format!("spawn curl: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("curl exited with {}", out.status));
-    }
-    let body = String::from_utf8_lossy(&out.stdout);
-    parse_sha256_from_info_json(&body)
-        .ok_or_else(|| format!("no sha256 field in info JSON: {body}"))
-}
-
-#[cfg(target_os = "macos")]
 fn curl_to_file(url: &str, dest: &Path) -> Result<(), String> {
     let status = Command::new("curl")
         .args(["-L", "--fail", "-o"])
@@ -180,42 +157,6 @@ fn curl_to_file(url: &str, dest: &Path) -> Result<(), String> {
         return Err(format!("curl exited with {status}"));
     }
     Ok(())
-}
-
-/// Pull the lowercase hex `sha256` field out of an evermeet info JSON.
-/// Kept off the type-driven serde path so a future schema tweak (extra
-/// fields, renamed siblings) doesn't break the installer.
-pub(crate) fn parse_sha256_from_info_json(body: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(body).ok()?;
-    value
-        .get("sha256")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_ascii_lowercase())
-}
-
-fn sha256_of_file(path: &Path) -> Result<String, String> {
-    use sha2::{Digest, Sha256};
-    let mut file = std::fs::File::open(path).map_err(|e| format!("open {path:?}: {e}"))?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = file
-            .read(&mut buf)
-            .map_err(|e| format!("read {path:?}: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hex_lower(&hasher.finalize()))
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        out.push_str(&format!("{b:02x}"));
-    }
-    out
 }
 
 #[cfg(unix)]
@@ -256,22 +197,6 @@ mod tests {
     fn version_line_rejects_non_ffmpeg_header() {
         assert_eq!(parse_ffmpeg_version_line("ffprobe version 7.1"), None);
         assert_eq!(parse_ffmpeg_version_line(""), None);
-    }
-
-    #[test]
-    fn sha256_extracted_from_info_json() {
-        let body = r#"{"name":"ffmpeg","version":"7.1","sha256":"DEADBEEF","size":12345}"#;
-        assert_eq!(
-            parse_sha256_from_info_json(body).as_deref(),
-            Some("deadbeef")
-        );
-    }
-
-    #[test]
-    fn sha256_missing_returns_none() {
-        let body = r#"{"name":"ffmpeg","version":"7.1"}"#;
-        assert_eq!(parse_sha256_from_info_json(body), None);
-        assert_eq!(parse_sha256_from_info_json("not json"), None);
     }
 
     #[test]
