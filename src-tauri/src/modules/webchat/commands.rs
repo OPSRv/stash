@@ -74,6 +74,15 @@ const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
   // default so (e.g.) ⌘R doesn't bypass our progress bar wiring.
   var SHORTCUT_KEYS = { 'r':1, '[':1, ']':1, 'l':1, 'w':1, '=':1, '+':1, '-':1, '0':1 };
   document.addEventListener('keydown', function(e){
+    // Esc — forward to host so the popup hides regardless of which
+    // child webview holds focus. No modifiers required.
+    if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      try {
+        var qs = new URLSearchParams({ kind: 'hide', service: SERVICE_ID });
+        new Image().src = 'stashnp://report/hide?' + qs.toString();
+      } catch(_) {}
+      return;
+    }
     if (!e.metaKey) return;
     var k = (e.key || '').toLowerCase();
     if (!SHORTCUT_KEYS[k]) return;

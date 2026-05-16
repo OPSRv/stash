@@ -106,6 +106,35 @@ fn hide_popup(app: tauri::AppHandle) {
         let _ = win.hide();
     }
 }
+
+/// Toggle the popup's "always on top" pin. Bundles three things that have to
+/// move together: the NSPanel window level (so the popup stays above other
+/// floating panels and fullscreen apps), the blur auto-hide flag, and
+/// `setAlwaysOnTop` as a non-macOS fallback. Calling this from a single
+/// command keeps the three in lockstep — the previous frontend-driven
+/// sequence drifted on Esc/blur and produced "pin sometimes doesn't pin".
+#[tauri::command]
+fn set_popup_pinned(app: tauri::AppHandle, pinned: bool) {
+    if let Some(auto_hide) = app.try_state::<Arc<PopupAutoHide>>() {
+        auto_hide.0.store(!pinned, Ordering::SeqCst);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+        if let Ok(panel) = app.get_webview_panel("popup") {
+            // NSStatusWindowLevel = 25, above other floating panels +
+            // menubar; combined with the `FullScreenAuxiliary` collection
+            // behavior set at setup, the panel stays above fullscreen apps.
+            // Unpinned drops back to NSFloatingWindowLevel = 3 (the panel
+            // default while `is_floating_panel: true`).
+            let level: i64 = if pinned { 25 } else { 3 };
+            panel.set_level(level);
+        }
+    }
+    if let Some(win) = resolve_popup(&app) {
+        let _ = win.set_always_on_top(pinned);
+    }
+}
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -141,10 +170,10 @@ use modules::separator::{
 use modules::downloader::{
     commands::{
         dl_cancel, dl_clear_completed, dl_delete, dl_detect, dl_detect_quick, dl_extract_subtitles,
-        dl_list, dl_media_stream_url, dl_pause, dl_prune_history, dl_purge_cookies, dl_resume,
-        dl_retry, dl_set_cookies_browser, dl_set_downloads_dir, dl_set_max_parallel,
-        dl_set_rate_limit, dl_set_transcription, dl_start, dl_transcribe_job, dl_update_binary,
-        dl_ytdlp_version,
+        dl_ffmpeg_status, dl_install_ffmpeg, dl_list, dl_media_stream_url, dl_pause,
+        dl_prune_history, dl_purge_cookies, dl_resume, dl_retry, dl_set_cookies_browser,
+        dl_set_downloads_dir, dl_set_max_parallel, dl_set_rate_limit, dl_set_transcription,
+        dl_start, dl_transcribe_job, dl_update_binary, dl_ytdlp_version,
     },
     jobs::JobRepo,
     runner::RunnerState,
@@ -337,6 +366,13 @@ pub fn run() {
                             serde_json::json!({ "service": service, "state": state }),
                         );
                     }
+                    // Esc inside a child webview → hide popup, same path as the
+                    // tray / ⌘⇧V toggle / parent's Esc handler.
+                    "hide" => {
+                        if let Some(win) = resolve_popup(app) {
+                            let _ = win.hide();
+                        }
+                    }
                     // Meta-chorded keys captured inside the child webview and
                     // bubbled up so the React shell can react (nav, zoom, URL
                     // bar focus, close tab).
@@ -490,6 +526,8 @@ pub fn run() {
             dl_transcribe_job,
             dl_ytdlp_version,
             dl_update_binary,
+            dl_ffmpeg_status,
+            dl_install_ffmpeg,
             dl_purge_cookies,
             dl_media_stream_url,
             media_stream_url,
@@ -501,6 +539,7 @@ pub fn run() {
             popup_position_reset,
             popup_position_status,
             hide_popup,
+            set_popup_pinned,
             open_system_settings,
             notes_list,
             notes_search,

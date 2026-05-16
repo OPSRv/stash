@@ -2,7 +2,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
 import { PopupShell } from './PopupShell';
@@ -45,26 +44,17 @@ describe('PopupShell', () => {
     expect(notesInput?.closest('[hidden]')).not.toBeNull();
   });
 
-  it('pin button toggles always-on-top and suppresses auto-hide', async () => {
+  it('pin button toggles set_popup_pinned', async () => {
     const user = userEvent.setup();
     render(<PopupShell />);
     const btn = screen.getByRole('button', { name: /pin window on top/i });
     expect(btn).toHaveAttribute('aria-pressed', 'false');
     await user.click(btn);
-    const win = getCurrentWindow() as unknown as {
-      setAlwaysOnTop: ReturnType<typeof vi.fn>;
-    };
-    expect(win.setAlwaysOnTop).toHaveBeenCalledWith(true);
-    expect(invoke).toHaveBeenCalledWith('set_popup_auto_hide', {
-      enabled: false,
-    });
+    expect(invoke).toHaveBeenCalledWith('set_popup_pinned', { pinned: true });
     const pinned = screen.getByRole('button', { name: /unpin window/i });
     expect(pinned).toHaveAttribute('aria-pressed', 'true');
     await user.click(pinned);
-    expect(win.setAlwaysOnTop).toHaveBeenLastCalledWith(false);
-    expect(invoke).toHaveBeenLastCalledWith('set_popup_auto_hide', {
-      enabled: true,
-    });
+    expect(invoke).toHaveBeenLastCalledWith('set_popup_pinned', { pinned: false });
   });
 
   it('auto-switches to Downloader when clipboard lands a supported URL', async () => {
@@ -125,7 +115,7 @@ describe('PopupShell', () => {
     expect(invoke).toHaveBeenCalledWith('hide_popup');
   });
 
-  it('Esc with focus inside an input does not hide the popup', async () => {
+  it('Esc with focus inside an input still hides the popup', async () => {
     const user = userEvent.setup();
     render(<PopupShell />);
     const search = await screen.findByRole('searchbox', undefined, {
@@ -135,9 +125,7 @@ describe('PopupShell', () => {
     expect(document.activeElement).toBe(search);
     vi.mocked(invoke).mockClear();
     await user.keyboard('{Escape}');
-    expect(invoke).not.toHaveBeenCalledWith('hide_popup');
-    // Field stays focused — user keeps editing context, no surprise blur.
-    expect(document.activeElement).toBe(search);
+    expect(invoke).toHaveBeenCalledWith('hide_popup');
   });
 
   it('Esc absorbed by a child handler (preventDefault) does not hide the popup', async () => {

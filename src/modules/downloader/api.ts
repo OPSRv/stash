@@ -103,6 +103,19 @@ export type YtDlpVersionInfo = {
 };
 export const ytDlpVersion = (): Promise<YtDlpVersionInfo> => invoke('dl_ytdlp_version');
 export const updateYtDlp = (): Promise<string> => invoke('dl_update_binary');
+
+export type FfmpegStatus = {
+  /// Resolved directory with both ffmpeg + ffprobe, null when neither
+  /// system nor bundled install is present.
+  dir: string | null;
+  /// True when the resolved dir is the Stash-managed bundle (under
+  /// `<downloads>/bin`) rather than a Homebrew/PATH install.
+  bundled: boolean;
+  /// `ffmpeg -version` token (e.g. "7.1").
+  version: string | null;
+};
+export const ffmpegStatus = (): Promise<FfmpegStatus> => invoke('dl_ffmpeg_status');
+export const installFfmpeg = (): Promise<string> => invoke('dl_install_ffmpeg');
 export const purgeCookies = (): Promise<void> => invoke('dl_purge_cookies');
 
 export const setDownloadsDir = (path: string | null): Promise<void> =>

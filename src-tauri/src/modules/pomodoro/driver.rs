@@ -108,11 +108,12 @@ pub fn emit_events(app: &AppHandle, events: &[EngineEvent]) {
             .builder()
             .title(&title)
             .body(&body)
+            .sound("default")
             .show();
         crate::modules::telegram::notifier::notify_if_paired(
             app,
             crate::modules::telegram::notifier::Category::Pomodoro,
-            format!("🍅 {title} · {block_name}"),
+            format!("🍅 {block_name}"),
         );
     }
     if let Some(EngineEvent::SessionDone {
@@ -129,6 +130,7 @@ pub fn emit_events(app: &AppHandle, events: &[EngineEvent]) {
             .builder()
             .title("Session complete")
             .body(&summary)
+            .sound("default")
             .show();
         crate::modules::telegram::notifier::notify_if_paired(
             app,

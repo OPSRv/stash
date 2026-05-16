@@ -6,6 +6,7 @@ import { NumberInput } from '../shared/ui/NumberInput';
 import { Toggle } from '../shared/ui/Toggle';
 import { SettingRow } from './SettingRow';
 import { SettingsSection, SettingsTab } from './SettingsLayout';
+import { FfmpegInstallRow } from './FfmpegInstallRow';
 import { YtDlpUpdateRow } from './YtDlpUpdateRow';
 import type { Settings } from './store';
 
@@ -43,6 +44,7 @@ export const DownloadsTab = ({ settings, onChange }: DownloadsTabProps) => {
     <SettingsTab>
       <SettingsSection label="BINARY">
         <YtDlpUpdateRow />
+        <FfmpegInstallRow />
       </SettingsSection>
 
       <SettingsSection label="STORAGE">

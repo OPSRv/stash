@@ -121,6 +121,20 @@ pub fn spawn_download(
         .to_string();
 
     let mut cmd = Command::new(yt_dlp);
+    // yt-dlp's postprocessing (audio extraction, mp4 mux) requires
+    // ffmpeg+ffprobe. Bundle launches under launchd inherit a minimal
+    // PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so even when the user has
+    // Homebrew's ffmpeg installed, yt-dlp can't find it via `which`.
+    // Resolution order: system (Homebrew/MacPorts/PATH) → bundled
+    // (downloaded via Settings → Downloads "Install ffmpeg"). When neither
+    // path is set up, yt-dlp surfaces its own "ffprobe and ffmpeg not
+    // found" error which the Settings panel translates into the install
+    // affordance.
+    let bundled_ffmpeg_dir = state.default_downloads_dir.join("bin");
+    let ffmpeg_extras = vec![bundled_ffmpeg_dir];
+    if let Some(dir) = super::resolver::find_ffmpeg_dir(&ffmpeg_extras) {
+        cmd.arg("--ffmpeg-location").arg(&dir);
+    }
     cmd.args(["--newline", "--no-warnings", "--no-playlist"])
         // Replace whitespace, fullwidth bars and other shell-hostile
         // characters in the saved filename so the path copy-pastes

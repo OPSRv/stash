@@ -2,7 +2,7 @@ use crate::modules::downloader::{
     detector::{
         fetch_info, fetch_oembed, pick_quality_options, QualityOption, QuickPreview, VideoInfo,
     },
-    installer,
+    ffmpeg_installer, installer,
     jobs::DownloadJob,
     platform::Platform,
     runner::{
@@ -470,6 +470,48 @@ pub async fn dl_ytdlp_version(
         latest,
         path: path.map(|p| p.display().to_string()),
     })
+}
+
+#[derive(Serialize)]
+pub struct FfmpegStatus {
+    /// Resolved directory containing both `ffmpeg` and `ffprobe`, or null
+    /// when neither system nor bundled paths have them.
+    pub dir: Option<String>,
+    /// True when the resolved dir is the one Stash bundled itself (under
+    /// `<downloads>/bin`). Lets the UI distinguish "system install" from
+    /// "Stash-managed install" without parsing paths on the frontend.
+    pub bundled: bool,
+    /// `ffmpeg -version` token (e.g. "7.1"), when a dir was found.
+    pub version: Option<String>,
+}
+
+#[tauri::command]
+pub async fn dl_ffmpeg_status(
+    state: State<'_, Arc<RunnerState>>,
+) -> Result<FfmpegStatus, String> {
+    let bundled_dir = state.default_downloads_dir.join("bin");
+    let extras = vec![bundled_dir.clone()];
+    let dir = super::resolver::find_ffmpeg_dir(&extras);
+    let bundled = dir.as_deref() == Some(bundled_dir.as_path());
+    let version = dir
+        .as_ref()
+        .and_then(|d| ffmpeg_installer::installed_version(d).ok());
+    Ok(FfmpegStatus {
+        dir: dir.map(|p| p.display().to_string()),
+        bundled,
+        version,
+    })
+}
+
+#[tauri::command]
+pub async fn dl_install_ffmpeg(state: State<'_, Arc<RunnerState>>) -> Result<String, String> {
+    let bin_dir = state.default_downloads_dir.join("bin");
+    let dir = tauri::async_runtime::spawn_blocking(move || {
+        ffmpeg_installer::force_reinstall(&bin_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    ffmpeg_installer::installed_version(&dir)
 }
 
 #[tauri::command]

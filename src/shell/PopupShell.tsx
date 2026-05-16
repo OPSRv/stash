@@ -302,26 +302,11 @@ export const PopupShell = () => {
           return;
         }
         // A local handler already absorbed the Escape (cancel rename,
-        // clear search, dismiss banner, etc.) — defer to it. Otherwise
-        // *every* in-place edit cancellation would also dismiss the
-        // entire popup.
+        // clear search, dismiss banner, modal close, etc.) — defer to it.
         if (e.defaultPrevented) return;
-        // Pressing Esc while focus is in an editing surface should
-        // never dismiss the popup — that destroys all in-flight typing.
-        // No local handler claimed it (no preventDefault above), so
-        // treat Esc as a no-op here. The user can blur explicitly with
-        // a click or Tab; meanwhile their input is preserved.
-        if (
-          target &&
-          (target.tagName === 'INPUT' ||
-            target.tagName === 'TEXTAREA' ||
-            target.isContentEditable)
-        ) {
-          return;
-        }
-        // Route through the Rust side so hiding uses the same path as the
-        // tray / ⌘⇧V toggle — `getCurrentWindow().hide()` was unreliable
-        // when focus sat on a child webview (Web / AI / Music).
+        // Esc always dismisses the popup, regardless of focus target —
+        // including inside inputs / textareas. Use Tab or click-out to
+        // blur without hiding.
         e.preventDefault();
         invoke('hide_popup').catch(() => {});
         return;
@@ -689,12 +674,11 @@ export const PopupShell = () => {
             onClick={async () => {
               const next = !pinned;
               setPinned(next);
-              try {
-                await getCurrentWindow().setAlwaysOnTop(next);
-              } catch {
-                // ignored: window API may be unavailable in tests
-              }
-              await invoke('set_popup_auto_hide', { enabled: !next }).catch(
+              // One Rust command bundles: NSPanel window level, auto-hide
+              // flag, and the cross-platform `set_always_on_top` fallback.
+              // Bundling avoids the race the split front-end sequence had
+              // (level set after blur fired, auto-hide stale).
+              await invoke('set_popup_pinned', { pinned: next }).catch(
                 () => {},
               );
             }}

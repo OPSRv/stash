@@ -2,6 +2,7 @@ pub mod arc_cookies;
 pub mod backup;
 pub mod commands;
 pub mod detector;
+pub mod ffmpeg_installer;
 pub mod installer;
 pub mod jobs;
 pub mod platform;

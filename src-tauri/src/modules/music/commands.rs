@@ -59,6 +59,18 @@ const INIT_SCRIPT: &str = r#"
   }
   setInterval(tick, 2000);
   setTimeout(tick, 800);
+
+  // Esc → forward to host so the popup hides even when focus sits
+  // inside the YouTube Music child webview. No modifiers, capture phase
+  // so YT Music's own handlers can't swallow it first.
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      try {
+        var qs = new URLSearchParams({ kind: 'hide' });
+        new Image().src = 'stashnp://report/hide?' + qs.toString();
+      } catch(_) {}
+    }
+  }, true);
 })();
 "#;
 

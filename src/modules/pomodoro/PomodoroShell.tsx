@@ -471,6 +471,19 @@ export const PomodoroShell = () => {
               <span>+ {p.label}</span>
             </Button>
           ))}
+          <IconButton
+            onClick={() => {
+              setBlocks([]);
+              setLoadedPresetId(null);
+            }}
+            disabled={blocks.length === 0}
+            title="Clear all blocks"
+            tone="danger"
+            tooltipSide="top"
+            data-testid="pom-clear-blocks"
+          >
+            <TrashIcon size={12} />
+          </IconButton>
           <div className="flex-1" />
           <span className="t-tertiary text-meta italic">
             drag to reorder · drag edge to resize · dbl-click to rename · right-click for more
