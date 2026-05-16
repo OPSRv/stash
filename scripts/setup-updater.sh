@@ -94,8 +94,6 @@ PY
 fi
 
 # ── 3. Print next-steps for CI ──────────────────────────────────────────────
-PRIVKEY_B64="$(base64 -i "$KEY_PATH" | tr -d '\n')"
-
 cat <<EOF
 
 \033[1;32m✓ Done.\033[0m
@@ -104,15 +102,16 @@ Add these secrets to the GitHub repo (Settings → Secrets and variables →
 Actions → New repository secret):
 
   Name:  TAURI_SIGNING_PRIVATE_KEY
-  Value: $PRIVKEY_B64
+  Value: (paste the verbatim contents of $KEY_PATH —
+          tauri-bundler expects the rsign-format text, NOT a re-base64ed copy)
 
   Name:  TAURI_SIGNING_PRIVATE_KEY_PASSWORD
   Value: (leave empty — keypair was generated without a password)
 
-Or with the gh CLI:
+Or with the gh CLI (note the redirection — \`-b\` would base64 it again):
 
-  gh secret set TAURI_SIGNING_PRIVATE_KEY        -b "$PRIVKEY_B64"
-  gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -b ""
+  gh secret set TAURI_SIGNING_PRIVATE_KEY -R OPSRv/stash < $KEY_PATH
+  gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD -R OPSRv/stash -b ""
 
 Then cut a new tag — release.yml will sign the .app.tar.gz and publish
 latest.json alongside it. Existing installs will see the update via
