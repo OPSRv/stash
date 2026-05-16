@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Stash",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "identifier": "com.opsrv.stash",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -47,7 +47,16 @@
       "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost ipc: http://ipc.localhost data: blob: https:; media-src 'self' asset: https://asset.localhost blob: data: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost https: wss: data: blob: http://127.0.0.1:*; frame-src 'self' https:;",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/**", "$APPLOCALDATA/**", "$HOME/Movies/Stash/**", "$HOME/Movies/Stash/.thumbs/**", "$VIDEO/**", "$TEMP/Stash/**", "$AUDIO/Stash Stems/**", "$HOME/Stash Stems/**"]
+        "scope": [
+          "$APPDATA/**",
+          "$APPLOCALDATA/**",
+          "$HOME/Movies/Stash/**",
+          "$HOME/Movies/Stash/.thumbs/**",
+          "$VIDEO/**",
+          "$TEMP/Stash/**",
+          "$AUDIO/Stash Stems/**",
+          "$HOME/Stash Stems/**"
+        ]
       }
     },
     "macOSPrivateApi": true
@@ -71,9 +80,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/OPSRv/stash/releases/download/nightly/latest.json"
+        "https://github.com/OPSRv/stash/releases/latest/download/latest.json"
       ],
-      "pubkey": ""
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM1OUEzOTkyNTZGMTE1OEQKUldTTkZmRldram1heFphSG1JZHFxSUxRRlB5TmdQUnVibU1mMVdNcG04Ui9SRmtjTjZmSWNGYmIK"
     }
   }
 }

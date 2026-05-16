@@ -66,7 +66,13 @@ jobs:
 
       - name: Build main app bundle (arm64)
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ''
+          # Decoded by `tauri-bundler` to sign the .app.tar.gz updater
+          # artifact. When the secret is empty (no setup-updater.sh run
+          # yet), the build still succeeds — it just doesn't emit a .sig,
+          # and the in-app updater falls back to the "manual download"
+          # path. See scripts/setup-updater.sh for one-time setup.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run tauri build -- --target aarch64-apple-darwin
 
       # `stash-diarize` is a separate workspace member that links
@@ -96,6 +102,35 @@ jobs:
               cp "$f" "release-assets/Stash_arm64.app.tar.gz"
               break
             done
+          fi
+          # Updater signature sidecar — only present when
+          # TAURI_SIGNING_PRIVATE_KEY was set on the build step. When it
+          # is, also emit the latest.json manifest the updater plugin polls.
+          if compgen -G "$BUNDLE/macos/*.app.tar.gz.sig" > /dev/null; then
+            for f in "$BUNDLE"/macos/*.app.tar.gz.sig; do
+              cp "$f" "release-assets/Stash_arm64.app.tar.gz.sig"
+              break
+            done
+            SIG_B64="$(cat release-assets/Stash_arm64.app.tar.gz.sig)"
+            VERSION="$(node -p "require('./package.json').version")"
+            TAG_NAME="${GITHUB_REF_NAME:-v$VERSION}"
+            PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/Stash_arm64.app.tar.gz"
+            cat > release-assets/latest.json <<JSON
+          {
+            "version": "$VERSION",
+            "notes": "See the GitHub release for details.",
+            "pub_date": "$PUB_DATE",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "$SIG_B64",
+                "url": "$DOWNLOAD_URL"
+              }
+            }
+          }
+          JSON
+          else
+            echo "::warning::no .sig produced — TAURI_SIGNING_PRIVATE_KEY secret missing? Updater plugin will fall back to manual install."
           fi
           # Diarization sidecar binary. Strip to drop debug info — the
           # downloader and the catalog `min_plausible_bytes` threshold
@@ -140,6 +175,8 @@ jobs:
           files: |
             release-assets/Stash_arm64.dmg
             release-assets/Stash_arm64.app.tar.gz
+            release-assets/Stash_arm64.app.tar.gz.sig
+            release-assets/latest.json
             release-assets/stash-diarize
             release-assets/libsherpa-onnx-c-api.dylib
             release-assets/libonnxruntime.1.17.1.dylib
