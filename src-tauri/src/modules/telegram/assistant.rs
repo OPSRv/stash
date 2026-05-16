@@ -56,6 +56,18 @@ impl Assistant {
     /// any intermediate tool rows) to the `chat` table in the same
     /// sequence the LLM saw them.
     pub async fn handle(&self, user_text: &str) -> Result<AssistantReply, LlmError> {
+        self.handle_at(user_text, None).await
+    }
+
+    /// Variant that overrides the wall-clock with `now_secs` (UTC). Used
+    /// by the Telegram transport to pipe the server-stamped `msg.date`
+    /// timestamp through, so a drifting local clock can't make the
+    /// assistant report the wrong time of day.
+    pub async fn handle_at(
+        &self,
+        user_text: &str,
+        now_secs: Option<i64>,
+    ) -> Result<AssistantReply, LlmError> {
         let ai_settings = AiSettings::load(self.state.as_ref());
 
         // 1. Load history + facts.
@@ -82,7 +94,7 @@ impl Assistant {
         // year sits in their training data and confidently answer
         // "today's date" with stale values. Injected per turn so the
         // first message after midnight already sees the new day.
-        messages.push(ChatMessage::system(current_time_prompt()));
+        messages.push(ChatMessage::system(current_time_prompt(now_secs)));
         if !facts.is_empty() {
             let joined = facts
                 .iter()
@@ -238,12 +250,18 @@ impl Assistant {
 /// expect from a chat assistant: ISO date, weekday, 24-hour clock,
 /// timezone offset. Pulled from `inbox::today_str` + a tiny clock
 /// helper so we don't add a chrono dependency.
-fn current_time_prompt() -> String {
+fn current_time_prompt(now_override: Option<i64>) -> String {
     use super::inbox::{local_offset_seconds_public, today_str};
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    // Prefer the timestamp from the incoming Telegram message — Telegram
+    // servers stamp it from authoritative UTC, so we sidestep a skewed
+    // local Mac clock. Fall back to SystemTime when no override is given
+    // (CLI / direct REPL invocation paths).
+    let now_secs = now_override.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    });
     let offset = local_offset_seconds_public();
     let local = now_secs + offset;
     let date = today_str(now_secs);
@@ -483,8 +501,21 @@ pub async fn handle_user_text(
     state: &Arc<TelegramState>,
     text: &str,
 ) -> Result<AssistantReply, LlmError> {
+    handle_user_text_at(app, state, text, None).await
+}
+
+/// Variant that lets callers supply the authoritative timestamp (UTC
+/// seconds). Telegram's transport plumbs `msg.date.timestamp()` through
+/// so the time prompt the model sees matches Telegram's server clock
+/// instead of the user's potentially-drifting Mac.
+pub async fn handle_user_text_at(
+    app: &tauri::AppHandle,
+    state: &Arc<TelegramState>,
+    text: &str,
+    now_secs: Option<i64>,
+) -> Result<AssistantReply, LlmError> {
     let assistant = build_runtime_assistant(app, state)?;
-    assistant.handle(text).await
+    assistant.handle_at(text, now_secs).await
 }
 
 fn history_to_message(row: &ChatRow) -> Option<ChatMessage> {

@@ -397,7 +397,7 @@ async fn handle_update(
             // provider not supported) falls back to the inbox so the
             // message isn't silently swallowed.
             send_typing(bot, chat_id).await;
-            match super::assistant::handle_user_text(app, state, &text).await {
+            match super::assistant::handle_user_text_at(app, state, &text, Some(msg.date.timestamp())).await {
                 Ok(reply) => {
                     let suffix = if reply.truncated {
                         "\n\n_(спрощено — досягнуто ліміту ланцюжка інструментів)_"
