@@ -2,7 +2,7 @@
 /// downloads shell auto-fill). Broader than `Platform::from_url` on the Rust
 /// side because it also needs to filter *before* invoking yt-dlp.
 export const SUPPORTED_VIDEO_URL =
-  /https?:\/\/(www\.)?(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|reddit\.com|vimeo\.com|twitch\.tv|facebook\.com|fb\.watch)/i;
+  /https?:\/\/([a-z0-9-]+\.)?(youtube\.com|youtu\.be|tiktok\.com|instagram\.com|twitter\.com|x\.com|reddit\.com|vimeo\.com|twitch\.tv|facebook\.com|fb\.watch)/i;
 
 /// Weaker check used to validate *manual* input: yt-dlp supports 1000+ sites,
 /// so we only want to reject things that clearly aren't URLs (e.g. someone

@@ -149,6 +149,8 @@ pub fn dl_start(
                 title.as_deref(),
                 thumbnail.as_deref(),
                 format_id.as_deref(),
+                &kind,
+                height.map(|h| h as i64),
                 now,
             ),
         )?
@@ -654,6 +656,8 @@ mod tests {
             created_at: 0,
             completed_at: Some(0),
             transcription: None,
+            kind: "video".into(),
+            target_height: None,
         }
     }
 

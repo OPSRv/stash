@@ -18,6 +18,13 @@ pub struct DownloadJob {
     pub created_at: i64,
     pub completed_at: Option<i64>,
     pub transcription: Option<String>,
+    /// "video" | "audio" — persisted so retry-after-restart can rebuild
+    /// the yt-dlp format selector without the in-memory JobSpawnArgs.
+    pub kind: String,
+    /// Optional max height (e.g. 1080) that the user picked at start time.
+    /// `None` means "best available" or audio-only. Same persistence
+    /// motivation as `kind`.
+    pub target_height: Option<i64>,
 }
 
 pub struct JobRepo {
@@ -42,18 +49,36 @@ impl JobRepo {
                 error          TEXT,
                 created_at     INTEGER NOT NULL,
                 completed_at   INTEGER,
-                transcription  TEXT
+                transcription  TEXT,
+                kind           TEXT NOT NULL DEFAULT 'video',
+                target_height  INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_download_jobs_created
                 ON download_jobs(created_at DESC);",
         )?;
-        // Idempotent migration: add `transcription` column to pre-existing DBs.
-        let has_transcription = conn
+        // Idempotent column adds for upgrades from older schemas. Each
+        // existence check is cheap and the ALTER is a no-op when the
+        // column is already there — keeps the upgrade path safe across
+        // forks of long-running installs.
+        let columns: std::collections::HashSet<String> = conn
             .prepare("PRAGMA table_info(download_jobs)")?
             .query_map([], |row| row.get::<_, String>(1))?
-            .any(|name| name.as_deref() == Ok("transcription"));
-        if !has_transcription {
+            .filter_map(Result::ok)
+            .collect();
+        if !columns.contains("transcription") {
             conn.execute_batch("ALTER TABLE download_jobs ADD COLUMN transcription TEXT;")?;
+        }
+        if !columns.contains("kind") {
+            // Default `video` matches the historical behaviour — every job
+            // before this column existed was a video download (audio was a
+            // later feature). Marks the row as kind=video so a retry after
+            // schema upgrade still does the right thing.
+            conn.execute_batch(
+                "ALTER TABLE download_jobs ADD COLUMN kind TEXT NOT NULL DEFAULT 'video';",
+            )?;
+        }
+        if !columns.contains("target_height") {
+            conn.execute_batch("ALTER TABLE download_jobs ADD COLUMN target_height INTEGER;")?;
         }
         Ok(Self { conn })
     }
@@ -65,13 +90,24 @@ impl JobRepo {
         title: Option<&str>,
         thumbnail_url: Option<&str>,
         format_id: Option<&str>,
+        kind: &str,
+        target_height: Option<i64>,
         created_at: i64,
     ) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO download_jobs
-             (url, platform, title, thumbnail_url, format_id, created_at, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending')",
-            params![url, platform, title, thumbnail_url, format_id, created_at],
+             (url, platform, title, thumbnail_url, format_id, kind, target_height, created_at, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending')",
+            params![
+                url,
+                platform,
+                title,
+                thumbnail_url,
+                format_id,
+                kind,
+                target_height,
+                created_at
+            ],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -191,6 +227,8 @@ impl JobRepo {
             created_at: row.get("created_at")?,
             completed_at: row.get("completed_at")?,
             transcription: row.get("transcription")?,
+            kind: row.get("kind").unwrap_or_else(|_| "video".into()),
+            target_height: row.get("target_height").ok(),
         })
     }
 }
@@ -213,6 +251,8 @@ mod tests {
                 Some("Nice post"),
                 None,
                 Some("22"),
+                "video",
+                Some(720),
                 100,
             )
             .unwrap();
@@ -227,7 +267,7 @@ mod tests {
     #[test]
     fn set_progress_flips_status_to_active() {
         let mut repo = fresh();
-        let id = repo.create("u", "g", None, None, None, 1).unwrap();
+        let id = repo.create("u", "g", None, None, None, "video", None, 1).unwrap();
         repo.set_progress(id, 0.5, Some(500), Some(1000)).unwrap();
         let job = repo.get(id).unwrap().unwrap();
         assert_eq!(job.status, "active");
@@ -238,7 +278,7 @@ mod tests {
     #[test]
     fn set_completed_stores_target_path() {
         let mut repo = fresh();
-        let id = repo.create("u", "g", None, None, None, 1).unwrap();
+        let id = repo.create("u", "g", None, None, None, "video", None, 1).unwrap();
         repo.set_completed(id, "/Movies/a.mp4", 999).unwrap();
         let job = repo.get(id).unwrap().unwrap();
         assert_eq!(job.status, "completed");
@@ -250,7 +290,7 @@ mod tests {
     #[test]
     fn set_failed_keeps_error_message() {
         let mut repo = fresh();
-        let id = repo.create("u", "g", None, None, None, 1).unwrap();
+        let id = repo.create("u", "g", None, None, None, "video", None, 1).unwrap();
         repo.set_failed(id, "yt-dlp exploded", 5).unwrap();
         let job = repo.get(id).unwrap().unwrap();
         assert_eq!(job.status, "failed");
@@ -260,8 +300,8 @@ mod tests {
     #[test]
     fn list_returns_newest_first() {
         let mut repo = fresh();
-        repo.create("older", "g", None, None, None, 100).unwrap();
-        repo.create("newer", "g", None, None, None, 200).unwrap();
+        repo.create("older", "g", None, None, None, "video", None, 100).unwrap();
+        repo.create("newer", "g", None, None, None, "video", None, 200).unwrap();
         let jobs = repo.list(10).unwrap();
         assert_eq!(jobs[0].url, "newer");
         assert_eq!(jobs[1].url, "older");
@@ -270,11 +310,11 @@ mod tests {
     #[test]
     fn clear_completed_keeps_active_jobs() {
         let mut repo = fresh();
-        let active = repo.create("a", "g", None, None, None, 1).unwrap();
+        let active = repo.create("a", "g", None, None, None, "video", None, 1).unwrap();
         repo.set_progress(active, 0.3, None, None).unwrap();
-        let done = repo.create("d", "g", None, None, None, 2).unwrap();
+        let done = repo.create("d", "g", None, None, None, "video", None, 2).unwrap();
         repo.set_completed(done, "/x", 10).unwrap();
-        let failed = repo.create("f", "g", None, None, None, 3).unwrap();
+        let failed = repo.create("f", "g", None, None, None, "video", None, 3).unwrap();
         repo.set_failed(failed, "oops", 20).unwrap();
 
         let removed = repo.clear_completed().unwrap();
@@ -287,11 +327,11 @@ mod tests {
     #[test]
     fn prune_completed_older_than_respects_cutoff() {
         let mut repo = fresh();
-        let old = repo.create("old", "g", None, None, None, 1).unwrap();
+        let old = repo.create("old", "g", None, None, None, "video", None, 1).unwrap();
         repo.set_completed(old, "/x", 100).unwrap();
-        let recent = repo.create("recent", "g", None, None, None, 2).unwrap();
+        let recent = repo.create("recent", "g", None, None, None, "video", None, 2).unwrap();
         repo.set_completed(recent, "/y", 900).unwrap();
-        let active = repo.create("active", "g", None, None, None, 3).unwrap();
+        let active = repo.create("active", "g", None, None, None, "video", None, 3).unwrap();
         repo.set_progress(active, 0.1, None, None).unwrap();
 
         let removed = repo.prune_completed_older_than(500).unwrap();
@@ -304,7 +344,7 @@ mod tests {
     #[test]
     fn delete_removes_single_job() {
         let mut repo = fresh();
-        let id = repo.create("u", "g", None, None, None, 1).unwrap();
+        let id = repo.create("u", "g", None, None, None, "video", None, 1).unwrap();
         repo.delete(id).unwrap();
         assert!(repo.get(id).unwrap().is_none());
     }
@@ -312,7 +352,7 @@ mod tests {
     #[test]
     fn set_transcription_stores_and_clears_text() {
         let mut repo = fresh();
-        let id = repo.create("u", "g", None, None, None, 1).unwrap();
+        let id = repo.create("u", "g", None, None, None, "video", None, 1).unwrap();
         repo.set_completed(id, "/audio/a.mp3", 99).unwrap();
 
         // Initially no transcription.

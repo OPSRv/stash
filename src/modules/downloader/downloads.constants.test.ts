@@ -9,6 +9,8 @@ describe('SUPPORTED_VIDEO_URL', () => {
   it.each([
     'https://youtube.com/watch?v=abc',
     'https://www.youtube.com/watch?v=abc',
+    'https://music.youtube.com/watch?v=abc',
+    'https://m.youtube.com/watch?v=abc',
     'https://youtu.be/abc',
     'http://tiktok.com/@user/video/1',
     'https://instagram.com/reel/xyz',

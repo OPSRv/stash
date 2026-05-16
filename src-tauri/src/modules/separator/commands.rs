@@ -886,6 +886,26 @@ fn run_worker(app: AppHandle, state: Arc<SeparatorState>, job_id: String) {
         }
     }
     cmd.env("TORCH_HOME", &models_root);
+    // demucs imports torchaudio, which calls ffprobe/ffmpeg on disk for
+    // any non-WAV input. The Stash bundle inherits launchd's minimal
+    // PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) — Homebrew's ffmpeg lives
+    // in `/opt/homebrew/bin` which isn't in there, so torchaudio
+    // surfaces `FileNotFoundError: 'ffprobe'`. Mirror the downloader
+    // fix: resolve the ffmpeg dir (system or Stash-bundled) and prepend
+    // it to PATH for the child.
+    // Look for ffmpeg/ffprobe in system paths and in the downloader's
+    // bundled bin dir (populated when the user clicks "Install ffmpeg"
+    // in Settings → Downloads). Plumbing the bundled path through
+    // makes a one-click Stems install work even when no system ffmpeg
+    // is present.
+    let mut ffmpeg_extras: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(runner) = app.try_state::<Arc<crate::modules::downloader::runner::RunnerState>>() {
+        ffmpeg_extras.push(runner.default_downloads_dir.join("bin"));
+    }
+    if let Some(dir) = crate::modules::downloader::resolver::find_ffmpeg_dir(&ffmpeg_extras) {
+        let existing = std::env::var("PATH").unwrap_or_default();
+        cmd.env("PATH", format!("{}:{}", dir.display(), existing));
+    }
     // Force the Python stdout/stderr unbuffered so `progress` lines
     // reach us promptly. CPython buffers when stdout is a pipe by
     // default; this saves us a 4 KB-block delay on short clips.

@@ -477,20 +477,34 @@ pub fn resume_download(state: &RunnerState, job_id: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// Restart a failed/cancelled job using its stored spawn args.
+/// Restart a failed/cancelled job using its stored spawn args. Falls back
+/// to the persisted DB row when the in-memory `job_specs` cache is empty
+/// — that's the case after an app restart, which is exactly when a user
+/// is most likely to click Retry on a previously-failed download.
 pub fn retry_download(
     app: AppHandle,
     state: Arc<RunnerState>,
     yt_dlp: &Path,
     job_id: i64,
 ) -> Result<(), String> {
-    let spec = state
-        .job_specs
-        .lock()
-        .unwrap()
-        .get(&job_id)
-        .cloned()
-        .ok_or_else(|| "no spawn args recorded for this job".to_string())?;
+    let spec = match state.job_specs.lock().unwrap().get(&job_id).cloned() {
+        Some(s) => s,
+        None => {
+            let job = state
+                .jobs
+                .lock()
+                .map_err(|_| "jobs db lock poisoned".to_string())?
+                .get(job_id)
+                .map_err(|e| format!("load job {job_id}: {e}"))?
+                .ok_or_else(|| format!("job {job_id} not found"))?;
+            JobSpawnArgs {
+                url: job.url,
+                height: job.target_height.map(|h| h as u32),
+                kind: job.kind,
+                skip_cookies: false,
+            }
+        }
+    };
     if let Ok(mut repo) = state.jobs.lock() {
         let _ = repo.set_status(job_id, "pending");
     }
