@@ -9,6 +9,7 @@
     "build:cli": "cargo build --manifest-path src-tauri/Cargo.toml -p stash-cli --release",
     "preview": "vite preview",
     "tauri": "tauri",
+    "tauri:build:signed": "if [ -f .env.signing ]; then set -a; . ./.env.signing; set +a; fi && tauri build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",

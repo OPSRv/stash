@@ -36,3 +36,8 @@ coverage/
 # Internal docs / scratch prototypes (not shipped)
 /docs/
 /stashnote/
+
+# Local signing identity (written by scripts/sign-local.sh, sourced by
+# `npm run tauri:build:signed`). Holds APPLE_SIGNING_IDENTITY so local
+# builds use the user's self-signed cert without CI ever seeing it.
+.env.signing
