@@ -43,3 +43,9 @@ coverage>=7
 # the Stems tab. Same model NeuralNote ships. Pure-Python wheel + a
 # TF/ONNX dependency; the ONNX backend is the lightest of the three.
 basic-pitch>=0.4
+# basic-pitch (or one of its transitive deps — likely pretty_midi or
+# librosa's audio backend) does a runtime `import pkg_resources`. That
+# module ships with `setuptools`, which Python 3.11+ no longer
+# auto-installs into fresh venvs, so without an explicit pin the import
+# crashes with `ModuleNotFoundError: No module named 'pkg_resources'`.
+setuptools>=68
