@@ -404,6 +404,21 @@ fn handle(request: tiny_http::Request, token: &str, roots: &RwLock<RootsInner>) 
             .expect("static cache-control header is well-formed"),
         Header::from_bytes("Content-Length", len.to_string().as_bytes())
             .expect("numeric content-length is well-formed"),
+        // `<audio>` / `<video>` play loopback URLs without CORS, but
+        // `fetch()` from the tauri://localhost origin is cross-origin
+        // and WKWebView rejects the response with a bare
+        // `TypeError: Load failed` unless ACAO is present. The Stems
+        // mixer pulls each stem via fetch() to skip the JSON-IPC byte
+        // tax; the per-request token in the URL is what actually gates
+        // access, so opening the bytes to any same-process renderer is
+        // safe.
+        Header::from_bytes("Access-Control-Allow-Origin", &b"*"[..])
+            .expect("static cors header is well-formed"),
+        Header::from_bytes(
+            "Access-Control-Expose-Headers",
+            &b"Content-Length, Content-Range, Accept-Ranges"[..],
+        )
+        .expect("static cors expose header is well-formed"),
     ];
     if is_partial {
         let cr = format!("bytes {start}-{end}/{total}");
