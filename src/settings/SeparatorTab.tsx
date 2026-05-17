@@ -192,16 +192,23 @@ export const SeparatorTab = () => {
           }
           control={
             <div className="flex gap-2">
-              {!status.ready && (
-                <Button
-                  size="sm"
-                  variant="solid"
-                  onClick={downloadCore}
-                  disabled={busy}
-                >
-                  {busy ? 'Installing…' : 'Install'}
-                </Button>
-              )}
+              <Button
+                size="sm"
+                variant={status.ready ? 'soft' : 'solid'}
+                onClick={downloadCore}
+                disabled={busy}
+                title={
+                  status.ready
+                    ? 'Re-sync the Python venv with requirements.txt — picks up new packages (e.g. basic-pitch for MIDI) after an app upgrade.'
+                    : 'Install uv + Python 3.11 + demucs + BeatNet'
+                }
+              >
+                {busy
+                  ? 'Installing…'
+                  : status.ready
+                    ? 'Re-install'
+                    : 'Install'}
+              </Button>
               <Button
                 size="sm"
                 variant="soft"

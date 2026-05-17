@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
@@ -162,12 +162,20 @@ export function StemMixer({
 
     (async () => {
       let longest = 0;
+      const failed: string[] = [];
       for (const stem of stems) {
         try {
-          const url = convertFileSrc(stem.path);
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const bytes = await res.arrayBuffer();
+          // Read raw bytes via the existing notes-audio reader — it
+          // already scope-allows the stems root. fetch(asset://) is
+          // unreliable on WKWebView for binary content, which is why
+          // the first iteration of this code surfaced
+          // "vocals: Load failed" and broke out of the loop entirely.
+          const arr = await invoke<number[]>('notes_read_audio_path', {
+            path: stem.path,
+          });
+          const bytes = new Uint8Array(arr).buffer;
+          // decodeAudioData consumes the ArrayBuffer, so this is the
+          // only place it's read.
           const buf = await ctx.decodeAudioData(bytes);
           if (cancelled) return;
           buffersRef.current.set(stem.name, buf);
@@ -179,15 +187,20 @@ export function StemMixer({
           const stemPeaks = computePeaks(buf, PEAK_BUCKETS);
           setPeaks((prev) => ({ ...prev, [stem.name]: stemPeaks }));
         } catch (e) {
+          // Don't bail the whole mixer over one bad stem — keep going
+          // so the user can still play the lanes that did load. We
+          // accumulate every failure and surface them all in one
+          // banner so the user sees the full picture, not just the
+          // first hiccup.
           if (!cancelled) {
-            setLoadError(
+            failed.push(
               `${stem.name}: ${e instanceof Error ? e.message : String(e)}`,
             );
           }
-          break;
         }
       }
       if (!cancelled) {
+        if (failed.length > 0) setLoadError(failed.join(' · '));
         setDuration(longest || durationHint || 0);
         setLoading(false);
       }

@@ -911,6 +911,15 @@ pub fn run() {
             // without juggling lifetimes through the Tauri state plumbing.
             app.manage(Arc::new(SeparatorState::new()));
 
+            // Hot-overwrite the staged Python entry point so a script-
+            // only fix (e.g. new --mode midi in v0.1.32) reaches an
+            // already-installed venv without making the user click
+            // Re-install. Tiny files; ignore errors here so a missing
+            // app-data dir at first launch doesn't block startup.
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                let _ = modules::separator::installer::stage_payload(&data_dir);
+            }
+
             // Terminal — PTY session lazily opened by the first `pty_open`
             // call from the frontend (once the xterm fit addon knows the
             // actual cell grid).

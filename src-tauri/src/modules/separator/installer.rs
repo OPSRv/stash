@@ -225,7 +225,7 @@ pub fn purge_runtime(app_data: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn stage_payload(app_data: &Path) -> Result<(), String> {
+pub fn stage_payload(app_data: &Path) -> Result<(), String> {
     let script = script_path(app_data);
     if let Some(parent) = script.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir: {e}"))?;
