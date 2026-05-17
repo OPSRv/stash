@@ -11,7 +11,7 @@ import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { Button } from '../../shared/ui/Button';
 import { IconButton } from '../../shared/ui/IconButton';
 import { useToast } from '../../shared/ui/Toast';
-import { PauseIcon, PlayIcon } from '../../shared/ui/icons';
+import { CopyIcon, ExternalIcon, NoteIcon, PauseIcon, PlayIcon } from '../../shared/ui/icons';
 import { revealFile } from '../../shared/util/revealFile';
 import { mixdown, STEM_LABELS, stemColor } from './api';
 
@@ -25,6 +25,18 @@ interface StemMixerProps {
   /// still decoding so the transport / waveforms can size themselves
   /// without a layout shift once peaks come in.
   durationHint?: number;
+  /// Per-stem actions surfaced as hover-revealed icon buttons on each
+  /// lane. Receiving them as props lets CompletedRow keep its shared
+  /// helpers (clipboard, toast, ipc) in one place; the mixer just
+  /// fires the callback when the user clicks the icon.
+  onReveal: (path: string) => void;
+  onCopyPath: (path: string) => void;
+  onCopyEmbed: (path: string, stemName: string) => void;
+  onExtractMidi: (path: string, stemName: string) => void;
+  /// `name` of the stem currently being converted to MIDI, or null.
+  /// Used to disable every MIDI button while one is running so the
+  /// user can't queue two simultaneous basic-pitch runs.
+  midiBusy: string | null;
 }
 
 type LaneState = {
@@ -75,7 +87,15 @@ function formatClock(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export function StemMixer({ stems, durationHint }: StemMixerProps) {
+export function StemMixer({
+  stems,
+  durationHint,
+  onReveal,
+  onCopyPath,
+  onCopyEmbed,
+  onExtractMidi,
+  midiBusy,
+}: StemMixerProps) {
   const { toast } = useToast();
 
   // Web Audio graph — single AudioContext per mixer instance. We rebuild
@@ -417,15 +437,22 @@ export function StemMixer({ stems, durationHint }: StemMixerProps) {
           <StemLane
             key={stem.name}
             name={stem.name}
+            path={stem.path}
             peaks={peaks[stem.name]}
             duration={duration}
             position={position}
             lane={lanes[stem.name] ?? DEFAULT_LANE}
             dimmed={anySolo && !(lanes[stem.name]?.solo ?? false)}
+            midiBusy={midiBusy === stem.name}
+            anyMidiBusy={midiBusy !== null}
             onMute={() => toggleMute(stem.name)}
             onSolo={() => toggleSolo(stem.name)}
             onVolume={(v) => setLane(stem.name, { volume: v })}
             onSeek={seek}
+            onReveal={() => onReveal(stem.path)}
+            onCopyPath={() => onCopyPath(stem.path)}
+            onCopyEmbed={() => onCopyEmbed(stem.path, stem.name)}
+            onExtractMidi={() => onExtractMidi(stem.path, stem.name)}
           />
         ))}
       </ul>
@@ -516,29 +543,45 @@ function Transport({
 
 interface LaneProps {
   name: string;
+  path: string;
   peaks: Float32Array | undefined;
   duration: number;
   position: number;
   lane: LaneState;
   dimmed: boolean;
+  midiBusy: boolean;
+  anyMidiBusy: boolean;
   onMute: () => void;
   onSolo: () => void;
   onVolume: (v: number) => void;
   onSeek: (t: number) => void;
+  onReveal: () => void;
+  onCopyPath: () => void;
+  onCopyEmbed: () => void;
+  onExtractMidi: () => void;
 }
 
 function StemLane({
   name,
+  path,
   peaks,
   duration,
   position,
   lane,
   dimmed,
+  midiBusy,
+  anyMidiBusy,
   onMute,
   onSolo,
   onVolume,
   onSeek,
+  onReveal,
+  onCopyPath,
+  onCopyEmbed,
+  onExtractMidi,
 }: LaneProps) {
+  // path is forwarded for callers that prefer absolute paths in tooltips.
+  void path;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const rgb = stemColor(name);
@@ -580,7 +623,7 @@ function StemLane({
 
   return (
     <li
-      className="flex items-stretch gap-2 px-2 py-1.5"
+      className="group flex items-stretch gap-2 px-2 py-1.5 hover:[background:rgba(255,255,255,0.02)]"
       data-testid={`mixer-lane-${name}`}
     >
       <div className="flex flex-col gap-1 w-28 shrink-0 justify-between">
@@ -641,6 +684,44 @@ function StemLane({
             aria-label={`${label} volume`}
           />
         </div>
+      </div>
+      {/* Hover-revealed per-stem actions. Sits to the right of the lane
+          header so clicks don't collide with mute/solo. */}
+      <div
+        className="flex items-center gap-0.5 shrink-0 self-start opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+        style={{ marginTop: 1 }}
+        data-testid={`mixer-lane-${name}-actions`}
+      >
+        <IconButton title="Show in Finder" onClick={onReveal}>
+          <ExternalIcon size={12} />
+        </IconButton>
+        <IconButton title="Copy as markdown for Notes" onClick={onCopyEmbed}>
+          <NoteIcon size={12} />
+        </IconButton>
+        <IconButton title="Copy file path" onClick={onCopyPath}>
+          <CopyIcon size={12} />
+        </IconButton>
+        <IconButton
+          title={
+            midiBusy
+              ? 'Extracting MIDI…'
+              : 'Extract MIDI (basic-pitch) — drag to Guitar Pro'
+          }
+          onClick={onExtractMidi}
+          disabled={anyMidiBusy}
+        >
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: 0.5,
+              lineHeight: 1,
+              opacity: midiBusy ? 0.5 : 1,
+            }}
+          >
+            MIDI
+          </span>
+        </IconButton>
       </div>
       <div
         ref={wrapRef}

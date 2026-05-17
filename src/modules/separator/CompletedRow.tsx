@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AudioPlayer } from '../../shared/ui/AudioPlayer';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { IconButton } from '../../shared/ui/IconButton';
-import { CloseIcon, CopyIcon, ExternalIcon, NoteIcon } from '../../shared/ui/icons';
+import { CloseIcon, ExternalIcon } from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
 import { accent } from '../../shared/theme/accent';
 import { revealFile } from '../../shared/util/revealFile';
@@ -265,84 +265,12 @@ export function CompletedRow({
               <StemMixer
                 stems={stemEntries.map(([name, path]) => ({ name, path }))}
                 durationHint={job.result?.duration_sec ?? undefined}
+                onReveal={(p) => revealFile(p)}
+                onCopyPath={copyPath}
+                onCopyEmbed={copyEmbed}
+                onExtractMidi={extractStemMidi}
+                midiBusy={midiBusy}
               />
-            </div>
-          )}
-          {stemEntries.length > 0 && (
-            <div>
-              <div className="text-meta opacity-50 mb-1.5 uppercase tracking-wide flex items-center gap-2">
-                <span>Stems</span>
-                <span
-                  className="flex-1 h-px"
-                  style={{ background: 'var(--hairline)' }}
-                />
-              </div>
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {stemEntries.map(([name, path]) => {
-                  const rgb = stemColor(name);
-                  return (
-                    <li
-                      key={name}
-                      className="group relative rounded-md border [border-color:var(--hairline)] p-2 transition-colors hover:[border-color:var(--hairline-strong)]"
-                      style={{
-                        background: 'rgba(255,255,255,0.025)',
-                        boxShadow: `inset 3px 0 0 0 rgb(${rgb})`,
-                      }}
-                      data-testid={`stem-${name}`}
-                    >
-                      <div className="flex items-center justify-between mb-1.5 gap-2">
-                        <span className="flex items-center gap-1.5 text-meta t-secondary font-medium truncate">
-                          <span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ background: `rgb(${rgb})` }}
-                            aria-hidden
-                          />
-                          {STEM_LABELS[name] ?? name}
-                        </span>
-                        <div
-                          className="flex gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
-                          data-testid={`stem-${name}-actions`}
-                        >
-                          <IconButton title="Show in Finder" onClick={() => revealFile(path)}>
-                            <ExternalIcon size={12} />
-                          </IconButton>
-                          <IconButton
-                            title="Copy as markdown for Notes"
-                            onClick={() => copyEmbed(path, name)}
-                          >
-                            <NoteIcon size={12} />
-                          </IconButton>
-                          <IconButton title="Copy file path" onClick={() => copyPath(path)}>
-                            <CopyIcon size={12} />
-                          </IconButton>
-                          <IconButton
-                            title={
-                              midiBusy === name
-                                ? 'Extracting MIDI…'
-                                : 'Extract MIDI (basic-pitch) — drag to Guitar Pro'
-                            }
-                            onClick={() => extractStemMidi(path, name)}
-                            disabled={midiBusy !== null}
-                          >
-                            <span
-                              style={{
-                                fontSize: 9,
-                                fontWeight: 700,
-                                letterSpacing: 0.5,
-                                lineHeight: 1,
-                                opacity: midiBusy === name ? 0.5 : 1,
-                              }}
-                            >
-                              MIDI
-                            </span>
-                          </IconButton>
-                        </div>
-                      </div>
-                      <AudioPlayer src={path} display="waveform" />
-                    </li>
-                  );
-                })}
-              </ul>
             </div>
           )}
         </div>
