@@ -1,3 +1,4 @@
+import './separator.css';
 import {
   useCallback,
   useEffect,
@@ -9,7 +10,11 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { Button } from '../../shared/ui/Button';
+import { RangeSlider } from '../../shared/ui/RangeSlider';
+import { TrackToggle } from '../../shared/ui/TrackToggle';
+import { TransportButton } from '../../shared/ui/TransportButton';
 import { IconButton } from '../../shared/ui/IconButton';
+// IconButton kept for the per-lane action strip (Reveal / Embed / Copy / MIDI).
 import { useToast } from '../../shared/ui/Toast';
 import { CopyIcon, ExternalIcon, NoteIcon, PauseIcon, PlayIcon } from '../../shared/ui/icons';
 import { revealFile } from '../../shared/util/revealFile';
@@ -503,40 +508,46 @@ function Transport({
   onMixdown,
 }: TransportProps) {
   return (
-    <div className="flex items-center gap-3 px-2.5 py-1.5 border-b [border-color:var(--hairline)]">
-      <IconButton
+    <div className="stash-stem-transport">
+      <TransportButton
+        size="md"
+        active={playing}
         title={playing ? 'Pause (Space)' : 'Play (Space)'}
         onClick={() => (playing ? onPause() : onPlay())}
         disabled={loading || duration === 0}
+        data-testid="mixer-play"
       >
         {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
-      </IconButton>
-      <span className="text-meta font-mono tabular-nums t-secondary shrink-0">
-        {formatClock(position)} / {formatClock(duration)}
+      </TransportButton>
+      <span className="text-meta font-mono tabular-nums t-secondary shrink-0 select-none">
+        {formatClock(position)}
+        <span className="opacity-40 px-1">/</span>
+        {formatClock(duration)}
       </span>
-      <input
-        type="range"
-        min={0}
-        max={Math.max(0.01, duration)}
-        step={0.01}
-        value={Math.min(position, duration || 0.01)}
-        onChange={(e) => onSeek(Number(e.target.value))}
-        className="flex-1 accent-[color:rgb(var(--stash-accent-rgb))]"
-        aria-label="Seek"
-        disabled={loading}
-      />
-      <div className="flex items-center gap-1 shrink-0">
-        <span className="text-meta opacity-50">VOL</span>
-        <input
-          type="range"
+      <div className="flex-1 min-w-0">
+        <RangeSlider
+          value={Math.min(position, duration || 0.01)}
+          onChange={onSeek}
           min={0}
-          max={1.5}
+          max={Math.max(0.01, duration)}
           step={0.01}
-          value={masterVolume}
-          onChange={(e) => onMasterVolume(Number(e.target.value))}
-          className="w-20 accent-[color:rgb(var(--stash-accent-rgb))]"
-          aria-label="Master volume"
+          label="Seek"
+          disabled={loading}
+          className="stash-stem-seek"
         />
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span className="text-meta opacity-50 tracking-wider">VOL</span>
+        <div className="w-24">
+          <RangeSlider
+            value={masterVolume}
+            onChange={onMasterVolume}
+            min={0}
+            max={1.5}
+            step={0.01}
+            label="Master volume"
+          />
+        </div>
       </div>
       <Button
         size="xs"
@@ -653,49 +664,38 @@ function StemLane({
             {label}
           </span>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
+        <div className="flex items-center gap-1.5">
+          <TrackToggle
+            tone="mute"
+            active={lane.muted}
             onClick={onMute}
-            aria-pressed={lane.muted}
-            className="text-meta font-bold rounded px-1 py-px transition-colors"
-            style={{
-              background: lane.muted
-                ? 'rgba(239, 68, 68, 0.25)'
-                : 'rgba(255,255,255,0.05)',
-              color: lane.muted ? '#fca5a5' : 'rgba(255,255,255,0.7)',
-              fontSize: 9,
-            }}
             title="Mute"
+            data-testid={`mixer-lane-${name}-mute`}
           >
             M
-          </button>
-          <button
-            type="button"
+          </TrackToggle>
+          <TrackToggle
+            tone="solo"
+            colorRgb={rgb}
+            active={lane.solo}
             onClick={onSolo}
-            aria-pressed={lane.solo}
-            className="text-meta font-bold rounded px-1 py-px transition-colors"
-            style={{
-              background: lane.solo
-                ? `rgba(${rgb}, 0.35)`
-                : 'rgba(255,255,255,0.05)',
-              color: lane.solo ? '#fff' : 'rgba(255,255,255,0.7)',
-              fontSize: 9,
-            }}
             title="Solo"
+            data-testid={`mixer-lane-${name}-solo`}
           >
             S
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={1.5}
-            step={0.01}
-            value={lane.volume}
-            onChange={(e) => onVolume(Number(e.target.value))}
-            className="flex-1 min-w-0 accent-[color:rgb(var(--stash-accent-rgb))]"
-            aria-label={`${label} volume`}
-          />
+          </TrackToggle>
+          <div className="flex-1 min-w-0">
+            <RangeSlider
+              value={lane.volume}
+              onChange={onVolume}
+              min={0}
+              max={1.5}
+              step={0.01}
+              label={`${label} volume`}
+              colorRgb={rgb}
+              data-testid={`mixer-lane-${name}-vol`}
+            />
+          </div>
         </div>
       </div>
       {/* Hover-revealed per-stem actions. Sits to the right of the lane

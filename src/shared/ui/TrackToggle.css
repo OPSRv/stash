@@ -1,0 +1,62 @@
+.stash-track-toggle {
+  appearance: none;
+  border: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    background-color 140ms var(--easing-standard),
+    color 140ms var(--easing-standard),
+    box-shadow 160ms var(--easing-standard);
+  /* Default accent — overridden per-tone below. */
+  --tt-rgb: var(--stash-accent-rgb);
+}
+.light .stash-track-toggle {
+  background: rgba(20, 22, 28, 0.05);
+  color: rgba(20, 22, 28, 0.65);
+}
+
+.stash-track-toggle:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+.light .stash-track-toggle:hover:not(:disabled) {
+  background: rgba(20, 22, 28, 0.1);
+  color: rgba(20, 22, 28, 0.95);
+}
+
+.stash-track-toggle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.stash-track-toggle[data-active='true'][data-tone='mute'] {
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  box-shadow: 0 0 12px -2px rgba(239, 68, 68, 0.4);
+}
+
+.stash-track-toggle[data-active='true'][data-tone='solo'] {
+  background: rgba(var(--tt-rgb), 0.28);
+  color: #fff;
+  box-shadow: 0 0 14px -2px rgba(var(--tt-rgb), 0.55);
+}
+
+.stash-track-toggle[data-active='true'][data-tone='neutral'] {
+  background: rgba(var(--stash-accent-rgb), 0.22);
+  color: #fff;
+  box-shadow: 0 0 12px -2px rgba(var(--stash-accent-rgb), 0.45);
+}
+
+.stash-track-toggle:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1.5px rgba(var(--stash-accent-rgb), 0.6),
+    0 0 14px -2px rgba(var(--stash-accent-rgb), 0.4);
+}

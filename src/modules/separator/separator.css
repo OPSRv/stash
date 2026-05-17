@@ -1,0 +1,44 @@
+/* Stems mixer transport — a thin pill bar at the top of the mixer
+ * card. Holds the play button, time readout, master scrubber, master
+ * volume and the Mix down action. */
+
+.stash-stem-transport {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hairline);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(var(--stash-accent-rgb), 0.05) 0%,
+      transparent 100%
+    ),
+    rgba(255, 255, 255, 0.015);
+}
+
+.light .stash-stem-transport {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(var(--stash-accent-rgb), 0.06) 0%,
+      transparent 100%
+    ),
+    rgba(20, 22, 28, 0.02);
+}
+
+/* The seek slider sits in the centre and absorbs the leftover width.
+ * We bump the track + thumb sizing slightly so it reads as the primary
+ * scrubber rather than another volume knob. */
+.stash-stem-seek::-webkit-slider-runnable-track,
+.stash-stem-seek::-moz-range-track {
+  height: 5px;
+}
+.stash-stem-seek::-webkit-slider-thumb,
+.stash-stem-seek::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+}
+.stash-stem-seek::-webkit-slider-thumb {
+  margin-top: -4.5px;
+}
