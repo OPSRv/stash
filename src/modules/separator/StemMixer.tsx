@@ -1232,22 +1232,18 @@ function ViewportBar({
   );
 }
 
-/// 12 evenly-spaced hues round the circle — one per chromatic root.
-/// The eye reads a chord progression as a colour pattern this way
-/// (same root = same colour), which is more legible than 24 unique
-/// label strings crammed into thin boxes.
-const CHORD_HUE: Record<string, number> = {
-  C: 0, 'C#': 30, D: 60, 'D#': 90, E: 120, F: 150,
-  'F#': 180, G: 210, 'G#': 240, A: 270, 'A#': 300, B: 330,
-};
-function chordTint(label: string, minor: boolean): string {
-  const root = label.replace(/m$/, '');
-  const hue = CHORD_HUE[root] ?? 0;
-  // Minor chords get lower saturation so a song flipping between
-  // major/minor of the same root reads as a clear hue/saturation
-  // change rather than two indistinguishable boxes.
-  const sat = minor ? 35 : 65;
-  return `hsl(${hue}deg ${sat}% 52%)`;
+/// Accent-only ribbon — same monochrome palette the rest of Stash
+/// uses (compare Pomodoro's chip / progress fills). We vary opacity
+/// per row index so neighbouring chord boxes are still visually
+/// separable even if both happen to be the same chord; the label
+/// text inside is what tells the user which chord it is.
+function chordTint(idx: number, minor: boolean): string {
+  // Three opacity steps cycled by index produce a calm "siding"
+  // rhythm. Minor chords drop a touch dimmer so a Cmaj-Cm flip
+  // reads as a tonal shift, not two identical tiles.
+  const steps = [0.18, 0.30, 0.22];
+  const a = steps[idx % steps.length] * (minor ? 0.75 : 1);
+  return `rgba(var(--stash-accent-rgb), ${a.toFixed(3)})`;
 }
 
 /// Thin horizontal track above the stem lanes that renders detected
@@ -1326,27 +1322,26 @@ function ChordRibbon({
         const left = ((lo - viewStart) / span) * 100;
         const width = ((hi - lo) / span) * 100;
         const minor = c.label.endsWith('m');
-        const tint = chordTint(c.label, minor);
+        const tint = chordTint(i, minor);
         return (
           <button
             key={`${i}-${c.start}`}
             type="button"
             onClick={() => onSeek(c.start)}
             title={`${c.label} · ${c.start.toFixed(1)}s → ${c.end.toFixed(1)}s`}
-            className="absolute top-0 bottom-0 font-mono tabular-nums hover:brightness-110 transition flex items-center justify-center"
+            className="absolute top-0 bottom-0 font-mono tabular-nums hover:brightness-125 transition flex items-center justify-center"
             style={{
               left: `${left}%`,
               width: `${Math.max(0.3, width)}%`,
               background: tint,
-              color: '#fff',
-              borderRight: '1px solid rgba(0,0,0,0.45)',
+              color: 'rgb(var(--stash-accent-rgb))',
+              borderRight: '1px solid rgba(255,255,255,0.06)',
               fontSize: 13,
-              fontWeight: 700,
+              fontWeight: 600,
               overflow: 'hidden',
               whiteSpace: 'nowrap',
               padding: '0 4px',
               letterSpacing: -0.2,
-              textShadow: '0 1px 2px rgba(0,0,0,0.7)',
             }}
           >
             {c.label}
