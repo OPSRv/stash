@@ -1,28 +1,47 @@
 import { memo, useCallback, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
-import { CloseIcon, PlayIcon, ReuseIcon, SplitViewIcon, WaveformIcon } from '../../shared/ui/icons';
+import {
+  CloseIcon,
+  CopyIcon,
+  ExternalIcon,
+  LinkIcon,
+  NoteIcon,
+  PlayIcon,
+  ReuseIcon,
+  SplitViewIcon,
+  TrashIcon,
+  WaveformIcon,
+} from '../../shared/ui/icons';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
+import { ContextMenu, type ContextMenuItem } from '../../shared/ui/ContextMenu';
 import { Spinner } from '../../shared/ui/Spinner';
 import { Tooltip } from '../../shared/ui/Tooltip';
 import { TranscriptArea } from '../../shared/ui/TranscriptArea';
 import { useTranscription, type TranscriptionHandlers } from '../../shared/hooks/useTranscription';
+import { useToast } from '../../shared/ui/Toast';
 import { extOf } from '../../shared/util/fileKind';
+import { copyText } from '../../shared/util/clipboard';
+import { revealFile } from '../../shared/util/revealFile';
 import { isSupportedAudio } from '../separator/api';
 import { PlatformBadge } from './PlatformBadge';
 import { list, setTranscription, transcribeJob } from './api';
 import type { DownloadJob } from './api';
 
-// Files the Whisper pipeline can transcribe. Audio formats decode
-// directly via symphonia; video containers (mp4/webm/mkv) get their
-// audio track demuxed by symphonia or the macOS afconvert / ffmpeg
-// fallback — the resulting PCM feeds the same whisper.cpp path. Gating
-// on "audio only" hid the Transcribe chip from every YouTube video
-// download, which was the whole point of the feature for spoken-word
-// content.
-const TRANSCRIBABLE_EXTS = new Set([
-  'mp3', 'm4a', 'wav', 'ogg', 'opus', 'flac', 'aac', 'aiff', 'aif',
-  'mp4', 'm4v', 'mov', 'webm', 'mkv',
-]);
+// Audio-only formats. Used to gate the Stems hand-off and to flip the
+// tile's primary click from `Play in popup` to `Reveal in Finder` —
+// Stash already has dedicated audio surfaces (Stems mixer, Notes audio
+// embed, Clipboard player), so an in-popup audio player adds nothing
+// and steals a click from the more useful "open the folder" action.
+const AUDIO_EXTS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'opus', 'flac', 'aac', 'aiff', 'aif']);
+// Video containers we ship from yt-dlp. Whisper can decode any of these
+// (symphonia reads the audio track; the macOS afconvert / ffmpeg
+// fallback handles whatever symphonia rejects).
+const VIDEO_EXTS = new Set(['mp4', 'm4v', 'mov', 'webm', 'mkv']);
+
+const isAudioExt = (path: string | null) =>
+  Boolean(path) && AUDIO_EXTS.has(extOf(path!));
+const isVideoExt = (path: string | null) =>
+  Boolean(path) && VIDEO_EXTS.has(extOf(path!));
 
 interface ChipButtonProps {
   onClick: (e: React.MouseEvent) => void;
@@ -56,6 +75,14 @@ const ChipButton = ({ onClick, label, title, icon, pressed }: ChipButtonProps) =
   </Tooltip>
 );
 
+/// Anything the Whisper pipeline can transcribe — audio formats decode
+/// directly via symphonia; video containers get their audio track
+/// demuxed by symphonia or the macOS afconvert / ffmpeg fallback.
+const TRANSCRIBABLE_EXTS = new Set([
+  ...AUDIO_EXTS,
+  ...VIDEO_EXTS,
+]);
+
 export const isAudioJob = (job: DownloadJob): boolean => {
   if (job.target_path) {
     return TRANSCRIBABLE_EXTS.has(extOf(job.target_path));
@@ -65,6 +92,10 @@ export const isAudioJob = (job: DownloadJob): boolean => {
 
 interface CompletedDownloadTileProps {
   job: DownloadJob;
+  /// Triggered only for video downloads. Audio tiles deliberately
+  /// route clicks to `Reveal in Finder` instead — Stash has more
+  /// useful audio surfaces (Stems, Notes, Clipboard) than an in-popup
+  /// player tab.
   onPlay: (path: string | null) => void;
   /// `purgeFile=true` means the user also asked to delete the file from disk.
   /// The tile shows a confirm dialog with an opt-in checkbox, mirroring the
@@ -74,6 +105,17 @@ interface CompletedDownloadTileProps {
   /// Retry a failed/cancelled download. Grid view renders a retry button on
   /// failed tiles so the user doesn't have to flip to list view to recover.
   onRetry?: (id: number) => void;
+  /// Save the video's subtitle track to a new note. yt-dlp serialises
+  /// extraction per-process so the parent disables every tile's chip
+  /// while one of them is running. Optional — when the parent doesn't
+  /// wire it, the chip is hidden.
+  onExtractSubtitles?: (job: DownloadJob) => void;
+  /// True while *any* tile's subtitle extraction is in flight. Disables
+  /// the chip across the grid so users can't queue two yt-dlp spawns.
+  extractingSubtitles?: boolean;
+  /// Tooltip override for the disabled state — explains whether *this*
+  /// tile is the busy one or another tile is blocking it.
+  extractingSubtitlesReason?: string;
 }
 
 const isFailure = (status: DownloadJob['status']) =>
@@ -84,22 +126,25 @@ const CompletedDownloadTileImpl = ({
   onPlay,
   onDelete,
   onRetry,
+  onExtractSubtitles,
+  extractingSubtitles = false,
+  extractingSubtitlesReason,
 }: CompletedDownloadTileProps) => {
   const failed = isFailure(job.status);
+  const { toast } = useToast();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const canPurge = Boolean(job.target_path) && !failed;
   const showTranscript = job.status === 'completed' && isAudioJob(job);
-  // Stems hand-off only applies to audio formats Demucs can read. Mirrors
-  // the row-view check in `CompletedDownloadRow` so both surfaces gate
-  // the action consistently — and quietly hides for video downloads.
+  // Stems hand-off only applies to audio formats Demucs can read.
   const canStems =
     !failed &&
     Boolean(job.target_path) &&
     isSupportedAudio(job.target_path ?? '');
+  const isVideo = isVideoExt(job.target_path);
+  const isAudio = isAudioExt(job.target_path);
+  const canSubtitles = !failed && isVideo && onExtractSubtitles != null;
 
   const sendToStems = (e: React.MouseEvent) => {
-    // The whole tile is clickable as Play; stop the click before it
-    // bubbles up to the parent's onPlay handler.
     e.stopPropagation();
     if (!job.target_path) return;
     window.dispatchEvent(
@@ -108,6 +153,55 @@ const CompletedDownloadTileImpl = ({
       }),
     );
   };
+
+  const reveal = useCallback(async () => {
+    if (!job.target_path) return;
+    try {
+      await revealFile(job.target_path);
+    } catch (e) {
+      toast({ title: 'Could not reveal file', description: String(e), variant: 'error' });
+    }
+  }, [job.target_path, toast]);
+
+  const openExternally = useCallback(async () => {
+    if (!job.target_path) return;
+    try {
+      const { openPath } = await import('@tauri-apps/plugin-opener');
+      await openPath(job.target_path);
+    } catch (e) {
+      toast({ title: 'Could not open file', description: String(e), variant: 'error' });
+    }
+  }, [job.target_path, toast]);
+
+  const openSourceUrl = useCallback(async () => {
+    if (!job.url) return;
+    try {
+      const { openUrl } = await import('@tauri-apps/plugin-opener');
+      await openUrl(job.url);
+    } catch (e) {
+      toast({ title: 'Could not open URL', description: String(e), variant: 'error' });
+    }
+  }, [job.url, toast]);
+
+  const copyPath = useCallback(async () => {
+    if (!job.target_path) return;
+    const ok = await copyText(job.target_path);
+    toast({
+      title: ok ? 'File path copied' : 'Copy failed',
+      variant: ok ? 'success' : 'error',
+      durationMs: 1600,
+    });
+  }, [job.target_path, toast]);
+
+  const copySourceUrl = useCallback(async () => {
+    if (!job.url) return;
+    const ok = await copyText(job.url);
+    toast({
+      title: ok ? 'Source URL copied' : 'Copy failed',
+      variant: ok ? 'success' : 'error',
+      durationMs: 1600,
+    });
+  }, [job.url, toast]);
 
   // Stable subscribe fn for useTranscription — listens to the three
   // downloader transcription events filtered to this job's id.
@@ -151,15 +245,136 @@ const CompletedDownloadTileImpl = ({
       subscribe,
     });
 
-  const openDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const openDelete = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setDeleteOpen(true);
   };
 
+  // Audio tiles route their primary click to Reveal in Finder — Stash
+  // already has dedicated audio surfaces and an in-popup player adds
+  // no value here. Video tiles keep the original behaviour.
   const onTileClick = () => {
-    if (failed) return; // retry is the only meaningful action on a failed tile
+    if (failed) return;
+    if (isAudio) {
+      void reveal();
+      return;
+    }
     onPlay(job.target_path);
   };
+
+  // ── right-click context menu ────────────────────────────────────────
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const onContextMenu = (e: React.MouseEvent) => {
+    if (!job.target_path && !job.url) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+  const menuItems: ContextMenuItem[] = (() => {
+    const items: ContextMenuItem[] = [];
+    if (isVideo && !failed && job.target_path) {
+      items.push({
+        kind: 'action',
+        label: 'Play in popup',
+        icon: <PlayIcon size={12} />,
+        onSelect: () => onPlay(job.target_path),
+      });
+    }
+    if (job.target_path && !failed) {
+      items.push({
+        kind: 'action',
+        label: 'Open in default app',
+        icon: <ExternalIcon size={12} />,
+        onSelect: () => void openExternally(),
+      });
+      items.push({
+        kind: 'action',
+        label: 'Reveal in Finder',
+        icon: <ExternalIcon size={12} />,
+        onSelect: () => void reveal(),
+      });
+    }
+    if (showTranscript && !failed) {
+      const running = transcribeStatus === 'running';
+      items.push({
+        kind: 'action',
+        label: running
+          ? 'Transcribing…'
+          : transcript
+            ? 'Re-transcribe'
+            : 'Transcribe',
+        icon: <WaveformIcon size={12} />,
+        disabled: running,
+        onSelect: () => transcribe(),
+      });
+    }
+    if (canStems) {
+      items.push({
+        kind: 'action',
+        label: 'Send to Stems',
+        icon: <SplitViewIcon size={12} />,
+        onSelect: () => {
+          if (job.target_path) {
+            window.dispatchEvent(
+              new CustomEvent('stash:navigate', {
+                detail: { tabId: 'separator', file: job.target_path },
+              }),
+            );
+          }
+        },
+      });
+    }
+    if (canSubtitles) {
+      items.push({
+        kind: 'action',
+        label: extractingSubtitles ? 'Subtitles busy…' : 'Save subtitles to Notes',
+        icon: <NoteIcon size={12} />,
+        disabled: extractingSubtitles,
+        onSelect: () => onExtractSubtitles!(job),
+      });
+    }
+    if (failed && onRetry) {
+      items.push({
+        kind: 'action',
+        label: 'Retry download',
+        icon: <ReuseIcon size={12} />,
+        onSelect: () => onRetry(job.id),
+      });
+    }
+    if (items.length > 0) items.push({ kind: 'separator' });
+    if (job.url) {
+      items.push({
+        kind: 'action',
+        label: 'Open source URL',
+        icon: <LinkIcon size={12} />,
+        onSelect: () => void openSourceUrl(),
+      });
+      items.push({
+        kind: 'action',
+        label: 'Copy source URL',
+        icon: <CopyIcon size={12} />,
+        onSelect: () => void copySourceUrl(),
+      });
+    }
+    if (job.target_path) {
+      items.push({
+        kind: 'action',
+        label: 'Copy file path',
+        icon: <CopyIcon size={12} />,
+        onSelect: () => void copyPath(),
+      });
+    }
+    items.push({ kind: 'separator' });
+    items.push({
+      kind: 'action',
+      label: 'Delete…',
+      icon: <TrashIcon size={12} />,
+      tone: 'danger',
+      onSelect: () => openDelete(),
+    });
+    return items;
+  })();
 
   // Inline transcript drawer is collapsed by default — keeps the tile
   // visually compact when a transcript exists. Toggled by the chip in
@@ -167,14 +382,19 @@ const CompletedDownloadTileImpl = ({
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const transcribing = transcribeStatus === 'running';
   const hasTranscript = transcript != null && transcript.length > 0;
-  const hasActions =
-    !failed && (showTranscript || canStems);
   const titleText = job.title ?? (job.target_path?.split('/').pop() ?? job.url);
+
+  // Click hint shown over the thumbnail. Audio gets the folder-reveal
+  // glyph (ExternalIcon — the same affordance used for "show in
+  // Finder" everywhere else in the app); video keeps the play icon.
+  const hoverIcon = isAudio ? <ExternalIcon size={20} className="text-white" /> : <PlayIcon size={22} className="text-white translate-x-[1px]" />;
+  const hoverHint = isAudio ? 'Reveal in Finder' : 'Play';
 
   return (
     <div
       className={`group relative rounded-lg overflow-hidden [background:var(--bg-hover)] border [border-color:var(--hairline)] transition-shadow hover:shadow-lg hover:shadow-black/30 ${failed ? 'cursor-default' : 'cursor-pointer'}`}
       onClick={onTileClick}
+      onContextMenu={onContextMenu}
     >
       <div
         className="aspect-video relative bg-black/60"
@@ -199,13 +419,16 @@ const CompletedDownloadTileImpl = ({
         </div>
 
         {!failed && (
-          <div
-            className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20"
-          >
-            <div className="w-12 h-12 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20">
-              <PlayIcon size={22} className="text-white translate-x-[1px]" />
+          <Tooltip label={hoverHint}>
+            <div
+              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20"
+              aria-hidden
+            >
+              <div className="w-12 h-12 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20">
+                {hoverIcon}
+              </div>
             </div>
-          </div>
+          </Tooltip>
         )}
         {failed && onRetry && (
           <Tooltip label={job.error ? `Retry — ${job.error}` : 'Retry download'}>
@@ -244,11 +467,17 @@ const CompletedDownloadTileImpl = ({
           {titleText}
         </div>
 
-        {hasActions && (
+        {!failed && job.target_path && (
           <div
             className="flex flex-wrap items-center gap-1.5"
             onClick={(e) => e.stopPropagation()}
           >
+            <ChipButton
+              onClick={() => void reveal()}
+              label="Reveal"
+              title="Show in Finder"
+              icon={<ExternalIcon size={11} />}
+            />
             {showTranscript && transcribing && (
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-meta t-secondary [background:var(--bg-hover-strong,rgba(255,255,255,0.05))] border [border-color:var(--hairline)]">
                 <Spinner size={10} />
@@ -291,6 +520,26 @@ const CompletedDownloadTileImpl = ({
                 icon={<SplitViewIcon size={11} />}
               />
             )}
+            {canSubtitles && (
+              <Tooltip
+                label={
+                  extractingSubtitles
+                    ? extractingSubtitlesReason ?? 'Another subtitle extraction is running'
+                    : 'Save subtitles to Notes'
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => onExtractSubtitles!(job)}
+                  disabled={extractingSubtitles}
+                  aria-label="Save subtitles to Notes"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-meta border [border-color:var(--hairline)] transition-colors t-secondary [background:rgba(255,255,255,0.025)] hover:t-primary hover:[background:rgba(255,255,255,0.06)] disabled:opacity-50"
+                >
+                  <NoteIcon size={11} />
+                  <span>CC</span>
+                </button>
+              </Tooltip>
+            )}
           </div>
         )}
 
@@ -328,6 +577,16 @@ const CompletedDownloadTileImpl = ({
         }}
         onCancel={() => setDeleteOpen(false)}
       />
+      {menu && (
+        <ContextMenu
+          open
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={closeMenu}
+          label="Download actions"
+        />
+      )}
     </div>
   );
 };
@@ -339,5 +598,8 @@ export const CompletedDownloadTile = memo(CompletedDownloadTileImpl, (a, b) =>
   a.job === b.job &&
   a.onPlay === b.onPlay &&
   a.onDelete === b.onDelete &&
-  a.onRetry === b.onRetry,
+  a.onRetry === b.onRetry &&
+  a.onExtractSubtitles === b.onExtractSubtitles &&
+  a.extractingSubtitles === b.extractingSubtitles &&
+  a.extractingSubtitlesReason === b.extractingSubtitlesReason,
 );

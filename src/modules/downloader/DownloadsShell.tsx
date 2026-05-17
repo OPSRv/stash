@@ -4,12 +4,10 @@ import { SectionLabel } from '../../shared/ui/SectionLabel';
 import { VideoPlayer } from '../../shared/ui/VideoPlayer';
 import { ActiveDownloadRow } from './ActiveDownloadRow';
 import { CompletedGrid } from './CompletedGrid';
-import { CompletedList } from './CompletedList';
 import { DetectSessionCard } from './DetectSessionCard';
 import { DownloadUrlBar } from './DownloadUrlBar';
 import { DropOverlay } from './DropOverlay';
 import { Button } from '../../shared/ui/Button';
-import { SegmentedControl } from '../../shared/ui/SegmentedControl';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { EmptyState } from '../../shared/ui/EmptyState';
 import { useToast } from '../../shared/ui/Toast';
@@ -35,12 +33,9 @@ import {
 import type { DetectSession } from './useVideoDetect';
 import { notesCreate } from '../notes/api';
 
-type CompletedView = 'list' | 'grid';
-
 export const DownloadsShell = () => {
   const [url, setUrl] = useState('');
   const [playing, setPlaying] = useState<string | null>(null);
-  const [completedView, setCompletedView] = useState<CompletedView>('grid');
   const [clearCompletedOpen, setClearCompletedOpen] = useState(false);
   const cancelConfirm = useSuppressibleConfirm<number>('downloader.cancel');
   const { toast } = useToast();
@@ -350,39 +345,18 @@ export const DownloadsShell = () => {
           <>
             <div className="px-4 pt-3 pb-2 flex items-center justify-between">
               <SectionLabel>Completed</SectionLabel>
-              <div className="flex items-center gap-2">
-                <SegmentedControl
-                  size="sm"
-                  ariaLabel="Completed view"
-                  value={completedView}
-                  onChange={setCompletedView}
-                  options={[
-                    { value: 'list', label: 'List' },
-                    { value: 'grid', label: 'Grid' },
-                  ]}
-                />
-                <Button size="xs" variant="ghost" onClick={() => setClearCompletedOpen(true)}>
-                  Clear
-                </Button>
-              </div>
+              <Button size="xs" variant="ghost" onClick={() => setClearCompletedOpen(true)}>
+                Clear
+              </Button>
             </div>
-            {completedView === 'list' ? (
-              <CompletedList
-                jobs={completed}
-                onPlay={handlePlay}
-                onDelete={handleDeleteJob}
-                onRetry={handleRetryJob}
-                onExtractSubtitles={handleExtractSubtitles}
-                extractingId={extractingId}
-              />
-            ) : (
-              <CompletedGrid
-                jobs={completed}
-                onPlay={handlePlay}
-                onDelete={handleDeleteJob}
-                onRetry={handleRetryJob}
-              />
-            )}
+            <CompletedGrid
+              jobs={completed}
+              onPlay={handlePlay}
+              onDelete={handleDeleteJob}
+              onRetry={handleRetryJob}
+              onExtractSubtitles={handleExtractSubtitles}
+              extractingId={extractingId}
+            />
           </>
         )}
 

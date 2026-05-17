@@ -5,7 +5,6 @@ import * as events from '@tauri-apps/api/event';
 const __emit = (events as unknown as { __emit: (e: string, p: unknown) => void }).__emit;
 import { invoke } from '@tauri-apps/api/core';
 import { ActiveDownloadRow } from './ActiveDownloadRow';
-import { CompletedDownloadRow } from './CompletedDownloadRow';
 import { CompletedDownloadTile } from './CompletedDownloadTile';
 import { DetectedPreviewCard } from './DetectedPreviewCard';
 import { DownloadUrlBar } from './DownloadUrlBar';
@@ -235,79 +234,6 @@ describe('ActiveDownloadRow', () => {
   });
 });
 
-describe('CompletedDownloadRow', () => {
-  it('shows Play & Reveal for a successful download with target_path', async () => {
-    const user = userEvent.setup();
-    const onPlay = vi.fn();
-    render(
-      <CompletedDownloadRow
-        job={job({ status: 'completed', target_path: '/tmp/video.mp4' })}
-        zebra={false}
-        onDelete={() => {}}
-        onPlay={onPlay}
-        onRetry={() => {}}
-      />
-    );
-    expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reveal' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Play' }));
-    expect(onPlay).toHaveBeenCalled();
-  });
-
-  it('shows Retry on failure instead of Play', async () => {
-    const user = userEvent.setup();
-    const onRetry = vi.fn();
-    render(
-      <CompletedDownloadRow
-        job={job({ status: 'failed', target_path: null, error: 'boom' })}
-        zebra
-        onDelete={() => {}}
-        onPlay={() => {}}
-        onRetry={onRetry}
-      />
-    );
-    expect(screen.queryByRole('button', { name: 'Play' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-    expect(onRetry).toHaveBeenCalled();
-  });
-
-  it('Stems button is shown for audio downloads only and dispatches stash:navigate', async () => {
-    const user = userEvent.setup();
-    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
-    render(
-      <CompletedDownloadRow
-        job={job({ status: 'completed', target_path: '/tmp/song.mp3' })}
-        zebra={false}
-        onDelete={() => {}}
-        onPlay={() => {}}
-        onRetry={() => {}}
-      />
-    );
-    const stems = screen.getByRole('button', { name: 'Split into stems' });
-    await user.click(stems);
-    const ev = dispatchSpy.mock.calls.find(
-      (c) => (c[0] as Event).type === 'stash:navigate',
-    )?.[0] as CustomEvent | undefined;
-    expect(ev).toBeDefined();
-    expect(ev!.detail).toEqual({ tabId: 'separator', file: '/tmp/song.mp3' });
-  });
-
-  it('hides Stems button for non-audio downloads', () => {
-    render(
-      <CompletedDownloadRow
-        job={job({ status: 'completed', target_path: '/tmp/clip.mp4' })}
-        zebra={false}
-        onDelete={() => {}}
-        onPlay={() => {}}
-        onRetry={() => {}}
-      />
-    );
-    expect(
-      screen.queryByRole('button', { name: 'Split into stems' }),
-    ).not.toBeInTheDocument();
-  });
-});
-
 describe('CompletedDownloadTile', () => {
   it('treats a click on the tile as Play for successful jobs', async () => {
     const user = userEvent.setup();
@@ -392,7 +318,7 @@ describe('CompletedDownloadTile', () => {
     expect(screen.getByRole('button', { name: /^transcribe$/i })).toBeInTheDocument();
   });
 
-  it('does not render TranscriptArea for a completed video job', () => {
+  it('renders Transcribe button on a completed video job (whisper decodes the audio track)', () => {
     render(
       <CompletedDownloadTile
         job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
@@ -400,7 +326,53 @@ describe('CompletedDownloadTile', () => {
         onDelete={vi.fn()}
       />
     );
-    expect(screen.queryByRole('button', { name: /^transcribe$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^transcribe$/i })).toBeInTheDocument();
+  });
+
+  it('audio tile click reveals in Finder instead of opening the in-popup player', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/song.m4a' })}
+        onPlay={onPlay}
+        onDelete={vi.fn()}
+      />
+    );
+    await user.click(screen.getByText('Some video'));
+    expect(onPlay).not.toHaveBeenCalled();
+    const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+    expect(revealItemInDir).toHaveBeenCalledWith('/tmp/song.m4a');
+  });
+
+  it('shows a Reveal chip on every completed tile', () => {
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'Reveal' })).toBeInTheDocument();
+  });
+
+  it('right-click opens a context menu with at minimum Reveal and Delete', async () => {
+    const user = userEvent.setup();
+    render(
+      <CompletedDownloadTile
+        job={job({ status: 'completed', target_path: '/tmp/v.mp4' })}
+        onPlay={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    );
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: screen.getByText('Some video'),
+    });
+    const menu = await screen.findByRole('menu', { name: 'Download actions' });
+    const { getByRole } = within(menu);
+    expect(getByRole('menuitem', { name: /reveal in finder/i })).toBeInTheDocument();
+    expect(getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
   });
 
   it('clicking the transcribe button calls dl_transcribe_job', async () => {
