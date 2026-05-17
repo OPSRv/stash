@@ -1034,6 +1034,78 @@ fn mark_failed(app: &AppHandle, state: &Arc<SeparatorState>, job_id: &str, error
     persist_manifest_for(state, job_id);
 }
 
+/// Run basic-pitch on a single audio file (typically a stem produced
+/// by an earlier separation job) and return the path to the resulting
+/// .mid. Synchronous from the UI's perspective — basic-pitch on a
+/// 3-minute stem is ~5 s on Apple Silicon, fast enough to skip the
+/// full job-queue machinery.
+#[tauri::command]
+pub async fn separator_extract_midi(
+    app: tauri::AppHandle,
+    stem_path: String,
+) -> Result<String, String> {
+    use tauri::Manager;
+
+    let input = std::path::PathBuf::from(&stem_path);
+    if !input.is_file() {
+        return Err(format!("stem not found: {stem_path}"));
+    }
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if !ready(&data_dir) {
+        return Err(
+            "Separator runtime not installed — open Settings → Separator → Install first.".into(),
+        );
+    }
+    let python = python_path(&data_dir);
+    let script = script_path(&data_dir);
+    // Land the .mid next to the source stem. Notes / Guitar Pro / DAWs
+    // expect to drag from the same folder; surfacing it elsewhere would
+    // force the user to chase it across two windows.
+    let out_dir = input
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "stem has no parent dir".to_string())?;
+
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let mut cmd = std::process::Command::new(&python);
+        cmd.arg(&script);
+        cmd.arg("--mode").arg("midi");
+        cmd.arg("--input").arg(&input);
+        cmd.arg("--out-dir").arg(&out_dir);
+        cmd.env("PYTHONUNBUFFERED", "1");
+        let output = cmd
+            .output()
+            .map_err(|e| format!("spawn python: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("basic-pitch failed ({}): {}", output.status, stderr.trim()));
+        }
+        // The sidecar writes a single JSON line on stdout. Use the last
+        // non-empty line to be tolerant of stray prints from
+        // dependencies (TensorFlow logs onto stdout in some configs).
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let json_line = stdout
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .next_back()
+            .ok_or_else(|| "no JSON line from sidecar".to_string())?;
+        let parsed: serde_json::Value = serde_json::from_str(json_line)
+            .map_err(|e| format!("parse sidecar JSON: {e}; line: {json_line}"))?;
+        if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+            return Err(err.to_string());
+        }
+        parsed
+            .get("midi_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| format!("no midi_path in sidecar JSON: {json_line}"))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -185,3 +185,9 @@ export const STEM_COLORS: Record<string, string> = {
 
 export const stemColor = (key: string): string =>
   STEM_COLORS[key.toLowerCase()] ?? STEM_COLORS.other;
+
+/// Extract MIDI from a single stem via basic-pitch in the separator
+/// venv. Returns the path of the freshly-written .mid (placed next to
+/// the input stem so the user can drag-and-drop straight to Guitar Pro).
+export const extractMidi = (stemPath: string): Promise<string> =>
+  invoke('separator_extract_midi', { stemPath });

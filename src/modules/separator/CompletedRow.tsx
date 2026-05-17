@@ -8,7 +8,7 @@ import { accent } from '../../shared/theme/accent';
 import { revealFile } from '../../shared/util/revealFile';
 import { formatDuration } from '../../shared/format/duration';
 import { buildAudioEmbed } from '../notes/audioEmbed';
-import { STEM_LABELS, stemColor, type SeparatorJob } from './api';
+import { STEM_LABELS, extractMidi, stemColor, type SeparatorJob } from './api';
 
 type CompletedRowProps = {
   job: SeparatorJob;
@@ -32,6 +32,37 @@ export function CompletedRow({
 }: CompletedRowProps) {
   const { toast } = useToast();
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [midiBusy, setMidiBusy] = useState<string | null>(null);
+
+  // Audio → MIDI for one stem via the basic-pitch helper in the
+  // separator venv. Drops the resulting .mid next to the source stem,
+  // reveals it in Finder, and surfaces a toast so the user knows
+  // where to drag it from.
+  const extractStemMidi = async (path: string, stemName: string) => {
+    setMidiBusy(stemName);
+    try {
+      const midi = await extractMidi(path);
+      toast({
+        title: 'MIDI ready',
+        description: midi,
+        variant: 'success',
+      });
+      try {
+        await revealFile(midi);
+      } catch {
+        // reveal-in-Finder is a convenience; the toast already says
+        // where the file is.
+      }
+    } catch (e) {
+      toast({
+        title: 'MIDI extraction failed',
+        description: String(e),
+        variant: 'error',
+      });
+    } finally {
+      setMidiBusy(null);
+    }
+  };
   const [expanded, setExpanded] = useState(defaultExpanded);
   const stems = job.result?.stems ?? {};
   const stemEntries = Object.entries(stems);
@@ -267,6 +298,27 @@ export function CompletedRow({
                           </IconButton>
                           <IconButton title="Copy file path" onClick={() => copyPath(path)}>
                             <CopyIcon size={12} />
+                          </IconButton>
+                          <IconButton
+                            title={
+                              midiBusy === name
+                                ? 'Extracting MIDI…'
+                                : 'Extract MIDI (basic-pitch) — drag to Guitar Pro'
+                            }
+                            onClick={() => extractStemMidi(path, name)}
+                            disabled={midiBusy !== null}
+                          >
+                            <span
+                              style={{
+                                fontSize: 9,
+                                fontWeight: 700,
+                                letterSpacing: 0.5,
+                                lineHeight: 1,
+                                opacity: midiBusy === name ? 0.5 : 1,
+                              }}
+                            >
+                              MIDI
+                            </span>
                           </IconButton>
                         </div>
                       </div>

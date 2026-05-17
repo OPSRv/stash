@@ -38,3 +38,8 @@ soundfile>=0.12
 # class statement raises `AttributeError: module 'coverage' has
 # no attribute 'types'`, and every `import librosa` fails.
 coverage>=7
+
+# Spotify's basic-pitch — audio → MIDI for the per-stem MIDI buttons in
+# the Stems tab. Same model NeuralNote ships. Pure-Python wheel + a
+# TF/ONNX dependency; the ONNX backend is the lightest of the three.
+basic-pitch>=0.4

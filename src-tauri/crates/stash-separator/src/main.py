@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="stash-separator")
     p.add_argument(
         "--mode",
-        choices=("analyze", "separate", "bpm"),
+        choices=("analyze", "separate", "bpm", "midi"),
         default="analyze",
         help="analyze = separate + bpm (default); separate = stems only; bpm = tempo only",
     )
@@ -189,6 +189,42 @@ def run_bpm(stems_paths: dict[str, str] | None, input_path: str) -> dict[str, An
     return {"bpm": round(tempo_val, 2), "beats": beats}
 
 
+def run_midi(input_path: str, out_dir: str) -> dict[str, Any]:
+    # Lazy-imported — basic-pitch pulls TensorFlow/ONNX which is ~200 MB
+    # and adds ~3 s of import time. The other --mode options should not
+    # pay that cost.
+    emit_progress(0.05, "loading basic-pitch")
+    from basic_pitch.inference import predict_and_save
+    from basic_pitch import ICASSP_2022_MODEL_PATH
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    emit_progress(0.15, "predicting notes")
+    # `predict_and_save` writes a `<stem>_basic_pitch.mid` next to the
+    # input by default; pin save_midi=True only and disable the heavier
+    # outputs (sonification WAV, model output npz, note CSV) — we just
+    # need the MIDI for Guitar Pro import.
+    predict_and_save(
+        audio_path_list=[input_path],
+        output_directory=out_dir,
+        save_midi=True,
+        sonify_midi=False,
+        save_model_outputs=False,
+        save_notes=False,
+        model_or_model_path=ICASSP_2022_MODEL_PATH,
+    )
+    emit_progress(0.95, "writing midi")
+    stem_name = Path(input_path).stem
+    midi_path = Path(out_dir) / f"{stem_name}_basic_pitch.mid"
+    if not midi_path.is_file():
+        # Fall back to a glob — older basic-pitch versions used
+        # `<stem>.mid` directly. Pick whatever lives in out_dir matching.
+        candidates = sorted(Path(out_dir).glob(f"{stem_name}*.mid"))
+        if not candidates:
+            raise RuntimeError(f"basic-pitch produced no .mid in {out_dir}")
+        midi_path = candidates[-1]
+    return {"midi_path": str(midi_path), "stem": stem_name}
+
+
 def audio_duration_sec(path: str) -> float | None:
     try:
         import soundfile as sf
@@ -222,6 +258,8 @@ def main() -> None:
     try:
         if args.mode == "bpm":
             payload.update(run_bpm(None, args.input))
+        elif args.mode == "midi":
+            payload.update(run_midi(args.input, args.out_dir))
         elif args.mode == "separate":
             paths = run_separate(args, device)
             payload["stems"] = paths
