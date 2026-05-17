@@ -16,6 +16,7 @@ import {
 } from '../modules/separator/api';
 import { SettingRow } from './SettingRow';
 import { SettingsSection, SettingsTab } from './SettingsLayout';
+import { NeuralNoteInstallRow } from './NeuralNoteInstallRow';
 
 type AssetProgress = {
   received: number;
@@ -348,6 +349,9 @@ export const SeparatorTab = () => {
             );
           })}
         </ul>
+      </SettingsSection>
+      <SettingsSection label="MIDI" divided={false}>
+        <NeuralNoteInstallRow />
       </SettingsSection>
       {error && (
         <p role="alert" className="text-meta text-red-300/80">

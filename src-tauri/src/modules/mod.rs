@@ -7,6 +7,7 @@ pub mod keepawake;
 pub mod media_server;
 pub mod metronome;
 pub mod music;
+pub mod neuralnote;
 pub mod notes;
 pub mod ocr;
 pub mod pomodoro;
