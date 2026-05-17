@@ -265,10 +265,17 @@ def run_chords(input_path: str) -> dict[str, Any]:
     # chroma_cqt — important when the input is a full mix with drums
     # and vocals colouring the harmonic content.
     chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop)
-    # Aggregate to one chroma vector per beat (mean across the frames
-    # spanning each beat). Cheap and gives stable labels even when a
-    # chord lasts a single beat.
-    beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.mean)
+    # Aggregate to one chroma vector per beat-interval. `pad=False`
+    # is critical: with the default pad=True librosa adds a column
+    # before the first beat and after the last one, leaving the
+    # output one longer than `len(beat_frames) - 1`. Downstream we
+    # index `beat_times` (length = len(beat_frames)) by the column
+    # index, which then crashes with IndexError on the trailing pad
+    # column. pad=False makes column `i` correspond exactly to the
+    # interval [beat_frames[i], beat_frames[i+1]).
+    beat_chroma = librosa.util.sync(
+        chroma, beat_frames, aggregate=np.mean, pad=False
+    )
 
     emit_progress(0.80, "matching templates")
     # Build templates: major = root + major-third + perfect-fifth;
@@ -297,6 +304,10 @@ def run_chords(input_path: str) -> dict[str, Any]:
     per_beat_labels: list[str | None] = [
         labels[int(b)] if v else None for b, v in zip(best, valid)
     ]
+    # Defensive clamp against librosa version drift: `per_beat_labels`
+    # must never exceed the number of usable boundary pairs in
+    # `beat_frames` (we index `beat_times[cursor]` below).
+    per_beat_labels = per_beat_labels[: max(0, len(beat_frames) - 1)]
 
     emit_progress(0.92, "merging segments")
     beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop)

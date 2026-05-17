@@ -280,6 +280,32 @@ export function StemMixer({
     persisted?.loop ?? null,
   );
   const [loopDraft, setLoopDraft] = useState<number | null>(null);
+  // Live drag-selection (DAW-style marquee). While the user holds the
+  // mouse on a lane, this tracks the [a, b] band that will turn into a
+  // committed loop on release. State at the mixer so the band shows
+  // across every lane, not only the one that initiated the gesture.
+  const [dragSel, setDragSel] = useState<{ a: number; b: number } | null>(null);
+  // Visible waveform window in seconds. `null` = full track. Cmd+wheel
+  // zooms around the cursor, plain wheel pans. Shared across every
+  // lane so the timeline stays in lock-step (GarageBand-style).
+  const [view, setView] = useState<{ start: number; end: number } | null>(null);
+  // Effective view bounds — falls back to the full track when no zoom
+  // is active or duration isn't known yet. Used by every lane and by
+  // the loop/drag band remapping.
+  const viewStart = view ? Math.max(0, Math.min(duration, view.start)) : 0;
+  const viewEnd =
+    view ? Math.max(viewStart + 0.05, Math.min(duration, view.end)) : duration;
+  const zoomed = view !== null && viewEnd - viewStart < duration - 0.01;
+  // Refs mirrored from the bounds above so the rAF playback tick can
+  // read the latest view without growing its dep chain (the tick is
+  // captured inside startSources and we don't want to tear it down on
+  // every zoom step).
+  const viewStartRef = useRef(0);
+  const viewEndRef = useRef(0);
+  useEffect(() => {
+    viewStartRef.current = viewStart;
+    viewEndRef.current = viewEnd;
+  }, [viewStart, viewEnd]);
   const loopRef = useRef<typeof loop>(null);
   useEffect(() => {
     loopRef.current = loop;
@@ -526,12 +552,24 @@ export function StemMixer({
           return;
         }
         liveTimeRef.current = next;
+        // Drive the playhead inside the currently visible window —
+        // when zoomed in, both bounds shrink, so the same `next`
+        // value maps to a different percentage. Clamp 0..100 so a
+        // playhead outside the view sits at the nearest edge until
+        // it scrolls back in.
+        const vS = viewStartRef.current;
+        const vE = viewEndRef.current;
+        const span = Math.max(0.001, vE - vS);
+        const visible = next >= vS && next <= vE;
         const pct =
           duration > 0
-            ? `${Math.min(100, (next / duration) * 100)}%`
+            ? `${Math.max(0, Math.min(100, ((next - vS) / span) * 100))}%`
             : '0%';
         playheadRefs.current.forEach((el) => {
-          if (el) el.style.left = pct;
+          if (el) {
+            el.style.left = pct;
+            el.style.opacity = visible ? '1' : '0';
+          }
         });
         rafRef.current = requestAnimationFrame(tick);
       };
@@ -593,7 +631,83 @@ export function StemMixer({
   const clearLoop = useCallback(() => {
     setLoop(null);
     setLoopDraft(null);
+    setDragSel(null);
   }, []);
+
+  /// Zoom centred on `pivotT` (seconds). Factor < 1 zooms in,
+  /// > 1 zooms out. Clamps to a 200 ms minimum visible window so
+  /// the canvas never collapses to a single bucket. Mouse / trackpad
+  /// callers pass `pivotT` = cursor time so the section under the
+  /// pointer stays visually pinned during the zoom — the GarageBand
+  /// behaviour users expect.
+  const zoomAt = useCallback(
+    (pivotT: number, factor: number) => {
+      if (!duration) return;
+      setView((prev) => {
+        const curStart = prev?.start ?? 0;
+        const curEnd = prev?.end ?? duration;
+        const curSpan = curEnd - curStart;
+        const nextSpan = Math.min(duration, Math.max(0.2, curSpan * factor));
+        if (Math.abs(nextSpan - duration) < 0.05) return null;
+        // Anchor the visible-fraction position of the pivot point so
+        // the time under the cursor stays put.
+        const pivotFrac = curSpan > 0 ? (pivotT - curStart) / curSpan : 0.5;
+        let start = pivotT - nextSpan * pivotFrac;
+        let end = start + nextSpan;
+        if (start < 0) {
+          start = 0;
+          end = nextSpan;
+        } else if (end > duration) {
+          end = duration;
+          start = duration - nextSpan;
+        }
+        return { start, end };
+      });
+    },
+    [duration],
+  );
+
+  /// Horizontal pan by `deltaT` seconds. Used by plain wheel scroll
+  /// when the view is zoomed in. No-op at full zoom (nothing to
+  /// scroll past).
+  const panBy = useCallback(
+    (deltaT: number) => {
+      if (!duration) return;
+      setView((prev) => {
+        if (!prev) return prev;
+        const span = prev.end - prev.start;
+        let start = prev.start + deltaT;
+        let end = start + span;
+        if (start < 0) {
+          start = 0;
+          end = span;
+        } else if (end > duration) {
+          end = duration;
+          start = duration - span;
+        }
+        return { start, end };
+      });
+    },
+    [duration],
+  );
+
+  const resetZoom = useCallback(() => setView(null), []);
+
+  /// Commit a marquee drag as a loop region. Tiny ranges (< 80 ms) are
+  /// almost certainly accidental — treat them as a no-op rather than
+  /// strapping the playhead to a single point and yanking it back
+  /// every frame.
+  const setLoopRange = useCallback(
+    (a: number, b: number) => {
+      const lo = Math.max(0, Math.min(a, b));
+      const hi = Math.min(duration, Math.max(a, b));
+      setDragSel(null);
+      if (hi - lo < 0.08) return;
+      setLoop({ a: lo, b: hi });
+      setLoopDraft(null);
+    },
+    [duration],
+  );
 
   const seek = useCallback(
     (t: number) => {
@@ -742,9 +856,19 @@ export function StemMixer({
       <ChordRibbon
         chords={chords}
         duration={duration}
+        viewStart={viewStart}
+        viewEnd={viewEnd}
         onSeek={seek}
         onDetect={onDetectChords}
         busy={!!chordsBusy}
+      />
+      <ViewportBar
+        duration={duration}
+        viewStart={viewStart}
+        viewEnd={viewEnd}
+        onPan={panBy}
+        onReset={resetZoom}
+        zoomed={zoomed}
       />
       <ul className="divide-y [&>li]:[border-color:var(--hairline)]">
         {stems.map((stem) => (
@@ -776,6 +900,17 @@ export function StemMixer({
             loop={loop}
             loopDraft={loopDraft}
             onSetLoopPoint={setLoopPoint}
+            dragSel={dragSel}
+            onDragStart={(t) => setDragSel({ a: t, b: t })}
+            onDragUpdate={(t) =>
+              setDragSel((prev) => (prev ? { ...prev, b: t } : null))
+            }
+            onSetLoopRange={setLoopRange}
+            onDragCancel={() => setDragSel(null)}
+            viewStart={viewStart}
+            viewEnd={viewEnd}
+            onZoom={zoomAt}
+            onPan={panBy}
           />
         ))}
       </ul>
@@ -935,6 +1070,115 @@ function Transport({
   );
 }
 
+/// Slim scrollbar that surfaces the zoomed-in viewport against the
+/// full track. Shows the entire duration as a track and the visible
+/// `[viewStart, viewEnd]` as a draggable thumb. Hidden when zoom is
+/// inactive — at full zoom there's nothing to scroll past. Doubles
+/// as a "reset zoom" affordance when the user double-clicks it.
+function ViewportBar({
+  duration,
+  viewStart,
+  viewEnd,
+  onPan,
+  onReset,
+  zoomed,
+}: {
+  duration: number;
+  viewStart: number;
+  viewEnd: number;
+  onPan: (deltaT: number) => void;
+  onReset: () => void;
+  zoomed: boolean;
+}) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ startX: number; startView: number } | null>(null);
+
+  if (!zoomed || duration <= 0) return null;
+  const left = (viewStart / duration) * 100;
+  const width = ((viewEnd - viewStart) / duration) * 100;
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const track = trackRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    const thumbLeftPx = (viewStart / duration) * rect.width;
+    const thumbWidthPx = ((viewEnd - viewStart) / duration) * rect.width;
+    const localX = e.clientX - rect.left;
+    // Click outside the thumb → snap it so the click point becomes
+    // the thumb centre (matches macOS scrollbar behaviour).
+    if (localX < thumbLeftPx || localX > thumbLeftPx + thumbWidthPx) {
+      const target = (localX / rect.width) * duration - (viewEnd - viewStart) / 2;
+      onPan(target - viewStart);
+    }
+    dragRef.current = { startX: e.clientX, startView: viewStart };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const track = trackRef.current;
+    if (!track) return;
+    const rect = track.getBoundingClientRect();
+    const dx = e.clientX - drag.startX;
+    const dt = (dx / rect.width) * duration;
+    const targetStart = drag.startView + dt;
+    onPan(targetStart - viewStart);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // capture already released
+    }
+  };
+
+  return (
+    <div
+      ref={trackRef}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onDoubleClick={onReset}
+      className="relative h-2 cursor-grab active:cursor-grabbing select-none border-b [border-color:var(--hairline)]"
+      style={{ background: 'rgba(255,255,255,0.04)', touchAction: 'none' }}
+      title="Scroll the zoomed view · double-click resets zoom"
+    >
+      <div
+        className="absolute top-0 bottom-0 rounded-sm pointer-events-none"
+        style={{
+          left: `${left}%`,
+          width: `${Math.max(2, width)}%`,
+          background: 'rgba(var(--stash-accent-rgb), 0.55)',
+          boxShadow:
+            'inset 1px 0 0 rgba(var(--stash-accent-rgb), 0.95), inset -1px 0 0 rgba(var(--stash-accent-rgb), 0.95)',
+        }}
+      />
+    </div>
+  );
+}
+
+/// 12 evenly-spaced hues round the circle — one per chromatic root.
+/// The eye reads a chord progression as a colour pattern this way
+/// (same root = same colour), which is more legible than 24 unique
+/// label strings crammed into thin boxes.
+const CHORD_HUE: Record<string, number> = {
+  C: 0, 'C#': 30, D: 60, 'D#': 90, E: 120, F: 150,
+  'F#': 180, G: 210, 'G#': 240, A: 270, 'A#': 300, B: 330,
+};
+function chordTint(label: string, minor: boolean): string {
+  const root = label.replace(/m$/, '');
+  const hue = CHORD_HUE[root] ?? 0;
+  // Minor chords get lower saturation so a song flipping between
+  // major/minor of the same root reads as a clear hue/saturation
+  // change rather than two indistinguishable boxes.
+  const sat = minor ? 35 : 65;
+  return `hsl(${hue}deg ${sat}% 52%)`;
+}
+
 /// Thin horizontal track above the stem lanes that renders detected
 /// chord segments. Segments are clickable — clicking seeks to the
 /// segment start, which is the practice-friendly way to jump straight
@@ -943,16 +1187,33 @@ function Transport({
 function ChordRibbon({
   chords,
   duration,
+  viewStart,
+  viewEnd,
   onSeek,
   onDetect,
   busy,
 }: {
   chords: ChordSegment[] | undefined;
   duration: number;
+  viewStart: number;
+  viewEnd: number;
   onSeek: (t: number) => void;
   onDetect: (() => void) | undefined;
   busy: boolean;
 }) {
+  const ribbonRef = useRef<HTMLDivElement | null>(null);
+  const [ribbonWidth, setRibbonWidth] = useState(0);
+  useEffect(() => {
+    const el = ribbonRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setRibbonWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    setRibbonWidth(el.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, [chords]);
+
   if (chords && chords.length === 0 && !busy) return null;
   if (!chords) {
     return (
@@ -974,38 +1235,60 @@ function ChordRibbon({
     );
   }
   if (duration <= 0) return null;
+
+  const span = Math.max(0.001, viewEnd - viewStart);
+  const pxPerSec = ribbonWidth > 0 ? ribbonWidth / span : 0;
+  // Hide labels on segments narrower than ~22 px — they only produce
+  // garbled overlapping text. Hover still reveals the chord via the
+  // native title tooltip on the segment button.
+  const labelMinWidthPx = 22;
+
+  // Pre-filter to the visible window so we don't iterate hundreds of
+  // off-screen segments while zoomed in.
+  const visible = chords.filter((c) => c.end >= viewStart && c.start <= viewEnd);
+
   return (
     <div
-      className="relative h-6 border-b [border-color:var(--hairline)] select-none"
-      style={{ background: 'rgba(255,255,255,0.015)' }}
+      ref={ribbonRef}
+      className="relative h-7 border-b [border-color:var(--hairline)] select-none"
+      style={{ background: 'rgba(0,0,0,0.18)' }}
       aria-label="Chord track"
     >
-      {chords.map((c, i) => {
-        const left = (c.start / duration) * 100;
-        const width = ((c.end - c.start) / duration) * 100;
+      {visible.map((c, i) => {
+        const lo = Math.max(viewStart, c.start);
+        const hi = Math.min(viewEnd, c.end);
+        const left = ((lo - viewStart) / span) * 100;
+        const width = ((hi - lo) / span) * 100;
+        const widthPx = (hi - lo) * pxPerSec;
+        const minor = c.label.endsWith('m');
+        const tint = chordTint(c.label, minor);
+        const showLabel = widthPx >= labelMinWidthPx;
         return (
           <button
             key={`${i}-${c.start}`}
             type="button"
             onClick={() => onSeek(c.start)}
             title={`${c.label} · ${c.start.toFixed(1)}s → ${c.end.toFixed(1)}s`}
-            className="absolute top-0 bottom-0 text-meta font-mono tabular-nums hover:brightness-125 transition"
+            className="absolute top-0 bottom-0 font-mono tabular-nums hover:brightness-125 transition"
             style={{
               left: `${left}%`,
               width: `${Math.max(0.3, width)}%`,
-              background: 'rgba(var(--stash-accent-rgb), 0.10)',
-              color: 'rgb(var(--stash-accent-rgb))',
-              borderRight: '1px solid rgba(var(--stash-accent-rgb), 0.25)',
+              background: tint,
+              color: 'rgba(0,0,0,0.85)',
+              borderRight: '1px solid rgba(0,0,0,0.35)',
+              fontSize: 11,
+              fontWeight: 600,
               overflow: 'hidden',
               textOverflow: 'clip',
               whiteSpace: 'nowrap',
-              paddingLeft: 4,
+              paddingLeft: showLabel ? 4 : 0,
               paddingRight: 2,
-              lineHeight: '22px',
+              lineHeight: '26px',
               textAlign: 'left',
+              letterSpacing: -0.2,
             }}
           >
-            {c.label}
+            {showLabel ? c.label : ''}
           </button>
         );
       })}
@@ -1074,6 +1357,26 @@ interface LaneProps {
   /// shift+click on the lane forwards here so the mixer can stage
   /// the next A/B endpoint or clear an active region.
   onSetLoopPoint: (t: number) => void;
+  /// Live marquee selection from the lane currently being dragged.
+  /// All lanes render the same band so the user gets DAW-style
+  /// cross-track visual feedback.
+  dragSel: { a: number; b: number } | null;
+  onDragStart: (t: number) => void;
+  onDragUpdate: (t: number) => void;
+  onDragCancel: () => void;
+  onSetLoopRange: (a: number, b: number) => void;
+  /// Visible-window bounds in seconds. Equal to [0, duration] when no
+  /// zoom is active. The lane uses these to slice the peaks array
+  /// and to remap loop / dragSel / beats / playhead from track-time
+  /// to view-relative percentages.
+  viewStart: number;
+  viewEnd: number;
+  /// Zoom around a time pivot (factor < 1 = in, > 1 = out).
+  /// Triggered from Cmd/Ctrl + wheel inside the waveform.
+  onZoom: (pivotT: number, factor: number) => void;
+  /// Horizontal pan by `deltaT` seconds. Plain wheel scroll when the
+  /// view is zoomed in.
+  onPan: (deltaT: number) => void;
 }
 
 function StemLane({
@@ -1100,6 +1403,15 @@ function StemLane({
   loop,
   loopDraft,
   onSetLoopPoint,
+  dragSel,
+  onDragStart,
+  onDragUpdate,
+  onDragCancel,
+  onSetLoopRange,
+  viewStart,
+  viewEnd,
+  onZoom,
+  onPan,
 }: LaneProps) {
   // path is forwarded for callers that prefer absolute paths in tooltips.
   void path;
@@ -1107,6 +1419,27 @@ function StemLane({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const rgb = stemColor(name);
   const label = STEM_LABELS[name] ?? name;
+
+  // Live width tracker so the canvas redraws when the popup is
+  // resized horizontally (or when the user reflows the tabs). We
+  // observe the wrap div directly because the canvas itself is
+  // pixel-buffer sized and only changes when we explicitly redraw.
+  const [wrapWidth, setWrapWidth] = useState(0);
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const w = e.contentRect.width;
+        // Skip jitter from sub-pixel layout — only redraw when the
+        // integer width actually changes.
+        setWrapWidth((prev) => (Math.abs(prev - w) > 0.5 ? w : prev));
+      }
+    });
+    ro.observe(wrap);
+    setWrapWidth(wrap.getBoundingClientRect().width);
+    return () => ro.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -1122,23 +1455,38 @@ function StemLane({
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const midY = canvas.height / 2;
-    const barWidth = canvas.width / peaks.length;
+    // Slice the peaks to the visible window. Peaks are uniformly
+    // distributed across the source duration, so we just map start /
+    // end time → bucket index. When zoomed in we draw fewer buckets
+    // across the same canvas width, which is exactly the look the
+    // user wants (zoomed-in waveform with thicker bars).
+    const total = peaks.length;
+    const span = Math.max(0.001, viewEnd - viewStart);
+    const startIdx = Math.max(
+      0,
+      Math.floor((viewStart / Math.max(0.001, duration)) * total),
+    );
+    const endIdx = Math.min(
+      total,
+      Math.ceil((viewEnd / Math.max(0.001, duration)) * total),
+    );
+    const visible = Math.max(1, endIdx - startIdx);
+    const barWidth = canvas.width / visible;
     ctx.fillStyle = `rgba(${rgb}, ${lane.muted || dimmed ? 0.18 : 0.85})`;
-    for (let i = 0; i < peaks.length; i++) {
-      const h = Math.max(1, peaks[i] * midY * 1.6);
+    for (let i = 0; i < visible; i++) {
+      const h = Math.max(1, peaks[startIdx + i] * midY * 1.6);
       const x = i * barWidth;
       ctx.fillRect(x, midY - h, Math.max(1, barWidth - 0.5), h * 2);
     }
-    // Beat grid on top of the waveform. Every 4th beat (downbeat in
-    // 4/4 — a heuristic, not a true meter detection) gets a brighter
-    // stroke so the eye can latch onto bars. librosa returns beats in
-    // seconds, so we just project onto the canvas via duration.
+    // Beat grid — same projection logic but in track time, not in
+    // bucket index, so a zoomed view shows beats spread out across
+    // the full canvas width.
     if (beats && beats.length > 0 && duration > 0) {
       ctx.lineWidth = Math.max(1, dpr);
       for (let i = 0; i < beats.length; i++) {
         const t = beats[i];
-        if (t < 0 || t > duration) continue;
-        const x = (t / duration) * canvas.width;
+        if (t < viewStart || t > viewEnd) continue;
+        const x = ((t - viewStart) / span) * canvas.width;
         const downbeat = i % 4 === 0;
         ctx.strokeStyle = `rgba(255, 255, 255, ${downbeat ? 0.32 : 0.14})`;
         ctx.beginPath();
@@ -1147,23 +1495,115 @@ function StemLane({
         ctx.stroke();
       }
     }
-  }, [peaks, lane.muted, dimmed, rgb, beats, duration]);
+  }, [peaks, lane.muted, dimmed, rgb, beats, duration, viewStart, viewEnd, wrapWidth]);
 
-  const onLaneClick = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Marquee-select state for this lane. We hold the pointer-down
+  // origin in a ref so pointermove can decide whether a click is
+  // really a drag (threshold: 4 px). `dragging` flips true after the
+  // user crosses that threshold so on pointerup we know to commit a
+  // loop range instead of seeking to the click point.
+  const dragOrigin = useRef<{ x: number; t: number } | null>(null);
+  const dragging = useRef(false);
+
+  const xToTime = (clientX: number): number | null => {
     const wrap = wrapRef.current;
-    if (!wrap || !duration) return;
+    if (!wrap || !duration) return null;
     const rect = wrap.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const t = (x / rect.width) * duration;
+    const ratio = (clientX - rect.left) / rect.width;
+    const t = viewStart + ratio * (viewEnd - viewStart);
+    return Math.max(0, Math.min(duration, t));
+  };
+
+  // Wheel: Cmd/Ctrl = zoom around cursor (GarageBand-style), plain
+  // wheel = horizontal pan inside the zoomed window. We swallow the
+  // event when we acted on it so the scrollable parent doesn't move
+  // out from under the mixer at the same time.
+  const onLaneWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!duration) return;
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      const t = xToTime(e.clientX);
+      if (t === null) return;
+      // 1.15 per "notch" feels right on macOS trackpads; exponentiate
+      // by the raw deltaY so a fast scroll zooms farther per gesture.
+      const factor = Math.pow(1.0015, e.deltaY);
+      onZoom(t, factor);
+      return;
+    }
+    // Pan only matters when we're actually zoomed in — otherwise
+    // there's nothing to scroll past, so let the parent handle it.
+    if (viewEnd - viewStart < duration - 0.01) {
+      e.preventDefault();
+      const span = viewEnd - viewStart;
+      const wrap = wrapRef.current;
+      const px = wrap?.getBoundingClientRect().width ?? 1;
+      onPan((e.deltaX !== 0 ? e.deltaX : e.deltaY) * (span / px));
+    }
+  };
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const t = xToTime(e.clientX);
+    if (t === null) return;
+    // shift+click keeps the legacy A/B picker available for users who
+    // prefer keyboard-style point-picking over a drag.
     if (e.shiftKey) {
       onSetLoopPoint(t);
       return;
     }
-    onSeek(t);
+    dragOrigin.current = { x: e.clientX, t };
+    dragging.current = false;
+    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const origin = dragOrigin.current;
+    if (!origin) return;
+    if (!dragging.current) {
+      if (Math.abs(e.clientX - origin.x) < 4) return;
+      dragging.current = true;
+      onDragStart(origin.t);
+    }
+    const t = xToTime(e.clientX);
+    if (t !== null) onDragUpdate(t);
+  };
+
+  const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const origin = dragOrigin.current;
+    dragOrigin.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // capture already released
+    }
+    if (!origin) return;
+    if (!dragging.current) {
+      // Plain click → seek to the click point.
+      onSeek(origin.t);
+      return;
+    }
+    dragging.current = false;
+    const end = xToTime(e.clientX) ?? origin.t;
+    onSetLoopRange(origin.t, end);
+  };
+
+  const onPointerCancel = () => {
+    dragOrigin.current = null;
+    dragging.current = false;
+    onDragCancel();
+  };
+
+  // Remap track-time into the visible-window percentage so every
+  // overlay (playhead, loop, drag band) stays in sync with the
+  // zoomed waveform. Returns null when the time is outside the
+  // window — callers hide the overlay in that case.
+  const viewSpan = Math.max(0.001, viewEnd - viewStart);
+  const tToPct = (t: number): number => ((t - viewStart) / viewSpan) * 100;
   const playheadLeft =
-    duration > 0 ? `${Math.min(100, (position / duration) * 100)}%` : '0%';
+    duration > 0
+      ? `${Math.max(0, Math.min(100, tToPct(position)))}%`
+      : '0%';
+  const playheadVisible = position >= viewStart && position <= viewEnd;
 
   return (
     <li
@@ -1273,37 +1713,70 @@ function StemLane({
       </div>
       <div
         ref={wrapRef}
-        onClick={onLaneClick}
-        className="relative flex-1 h-12 rounded-sm cursor-pointer"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onWheel={onLaneWheel}
+        className="relative flex-1 h-12 rounded-sm cursor-crosshair select-none"
         style={{
           background: `rgba(${rgb}, 0.05)`,
           boxShadow: `inset 0 0 0 1px rgba(${rgb}, 0.18)`,
+          touchAction: 'none',
         }}
       >
-        <canvas ref={canvasRef} className="block w-full h-full" />
-        {loop && duration > 0 && (
-          <div
-            aria-hidden
-            className="absolute top-0 bottom-0 pointer-events-none"
-            style={{
-              left: `${(loop.a / duration) * 100}%`,
-              width: `${((loop.b - loop.a) / duration) * 100}%`,
-              background: `rgba(${rgb}, 0.18)`,
-              boxShadow: `inset 1px 0 0 rgba(${rgb}, 0.8), inset -1px 0 0 rgba(${rgb}, 0.8)`,
-            }}
-          />
-        )}
-        {loopDraft !== null && duration > 0 && (
-          <div
-            aria-hidden
-            className="absolute top-0 bottom-0 pointer-events-none"
-            style={{
-              left: `${(loopDraft / duration) * 100}%`,
-              width: 0,
-              borderLeft: `1px dashed rgba(${rgb}, 0.9)`,
-            }}
-          />
-        )}
+        <canvas ref={canvasRef} className="block w-full h-full pointer-events-none" />
+        {dragSel && duration > 0 && (() => {
+          // Clip the in-progress band to the visible window — if the
+          // user started a drag while zoomed in and panned past it,
+          // we don't want a stray strip rendered off-grid.
+          const lo = Math.max(viewStart, Math.min(dragSel.a, dragSel.b));
+          const hi = Math.min(viewEnd, Math.max(dragSel.a, dragSel.b));
+          if (hi <= lo) return null;
+          return (
+            <div
+              aria-hidden
+              className="absolute top-0 bottom-0 pointer-events-none"
+              style={{
+                left: `${tToPct(lo)}%`,
+                width: `${tToPct(hi) - tToPct(lo)}%`,
+                background: `rgba(${rgb}, 0.28)`,
+                boxShadow: `inset 1px 0 0 rgba(${rgb}, 0.9), inset -1px 0 0 rgba(${rgb}, 0.9)`,
+              }}
+            />
+          );
+        })()}
+        {loop && duration > 0 && (() => {
+          const lo = Math.max(viewStart, loop.a);
+          const hi = Math.min(viewEnd, loop.b);
+          if (hi <= lo) return null;
+          return (
+            <div
+              aria-hidden
+              className="absolute top-0 bottom-0 pointer-events-none"
+              style={{
+                left: `${tToPct(lo)}%`,
+                width: `${tToPct(hi) - tToPct(lo)}%`,
+                background: `rgba(${rgb}, 0.18)`,
+                boxShadow: `inset 1px 0 0 rgba(${rgb}, 0.8), inset -1px 0 0 rgba(${rgb}, 0.8)`,
+              }}
+            />
+          );
+        })()}
+        {loopDraft !== null &&
+          duration > 0 &&
+          loopDraft >= viewStart &&
+          loopDraft <= viewEnd && (
+            <div
+              aria-hidden
+              className="absolute top-0 bottom-0 pointer-events-none"
+              style={{
+                left: `${tToPct(loopDraft)}%`,
+                width: 0,
+                borderLeft: `1px dashed rgba(${rgb}, 0.9)`,
+              }}
+            />
+          )}
         <div
           ref={registerPlayhead}
           aria-hidden
@@ -1313,6 +1786,7 @@ function StemLane({
             width: 1,
             background: `rgba(${rgb}, 0.95)`,
             boxShadow: `0 0 6px rgba(${rgb}, 0.7)`,
+            opacity: playheadVisible ? 1 : 0,
           }}
         />
       </div>
