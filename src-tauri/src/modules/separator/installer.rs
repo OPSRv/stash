@@ -365,7 +365,7 @@ fn ensure_venv(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
+pub fn ensure_packages(app: &AppHandle, app_data: &Path) -> Result<(), String> {
     emit(
         app,
         InstallPhase::Packages,

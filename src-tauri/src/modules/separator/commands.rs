@@ -156,6 +156,14 @@ async fn run_install_inner(
             );
             installer::purge_runtime(data_dir)?;
             installer::run_runtime_install(app, data_dir).await?;
+        } else {
+            // Even when verify_runtime passes, sync packages against
+            // the latest staged requirements.txt — that's the path
+            // that picks up new deps (e.g. basic-pitch added in
+            // v0.1.32) on a Re-install. uv pip install is idempotent
+            // and ~3-5 s when the venv already matches, so the cost
+            // is invisible to the user when nothing changed.
+            installer::ensure_packages(app, data_dir)?;
         }
     }
 
