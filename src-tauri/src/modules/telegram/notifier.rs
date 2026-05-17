@@ -25,6 +25,7 @@ pub enum Category {
     BatteryLow,
     DownloadComplete,
     Calendar,
+    KeepAwake,
 }
 
 impl Category {
@@ -34,6 +35,7 @@ impl Category {
             Category::BatteryLow => Duration::from_secs(60 * 60),
             Category::DownloadComplete => Duration::from_secs(2),
             Category::Calendar => Duration::from_secs(60),
+            Category::KeepAwake => Duration::from_secs(1),
         }
     }
 }

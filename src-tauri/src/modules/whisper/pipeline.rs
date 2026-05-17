@@ -189,13 +189,74 @@ pub fn decode_with_macos_fallback(path: &Path) -> Result<DecodedPcm, PipelineErr
                 error = %e,
                 "symphonia rejected the container — retrying via afconvert"
             );
-            let wav = afconvert_to_wav(path)?;
-            let result = decode(&wav);
-            let _ = std::fs::remove_file(&wav);
-            result
+            match afconvert_to_wav(path) {
+                Ok(wav) => {
+                    let result = decode(&wav);
+                    let _ = std::fs::remove_file(&wav);
+                    result
+                }
+                Err(afconvert_err) => {
+                    // afconvert chokes on browser-recorded WebM/Opus
+                    // (voice-popup → MediaRecorder). Try ffmpeg as the
+                    // last-resort decoder — it understands everything
+                    // afconvert + symphonia between them don't, and
+                    // we already resolve its location for the Downloader.
+                    tracing::info!(
+                        error = %afconvert_err,
+                        "afconvert rejected the container — retrying via ffmpeg"
+                    );
+                    let wav = ffmpeg_to_wav(path).map_err(|ff_err| {
+                        PipelineError::Decode(format!(
+                            "afconvert failed ({afconvert_err}); ffmpeg fallback failed ({ff_err})"
+                        ))
+                    })?;
+                    let result = decode(&wav);
+                    let _ = std::fs::remove_file(&wav);
+                    result
+                }
+            }
         }
         Err(e) => Err(e),
     }
+}
+
+/// ffmpeg fallback used when afconvert rejects the input — voice-popup
+/// recordings are WebM/Opus on every Chromium-derived WKWebView, which
+/// afconvert refuses to load (it surfaces a FOURCC error like
+/// `'typ?'`). ffmpeg understands the same set of containers yt-dlp
+/// does, so this round-trip is the universal last resort.
+fn ffmpeg_to_wav(path: &Path) -> Result<std::path::PathBuf, PipelineError> {
+    let ffmpeg_dir = crate::modules::downloader::resolver::find_ffmpeg_dir(&[])
+        .ok_or_else(|| PipelineError::Decode(
+            "ffmpeg not on PATH — install via Settings → Downloads → Install ffmpeg".into(),
+        ))?;
+    let temp = std::env::temp_dir().join(format!(
+        "stash-ffmpeg-{}-{}.wav",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
+    let output = std::process::Command::new(ffmpeg_dir.join("ffmpeg"))
+        .arg("-nostdin")
+        .arg("-hide_banner")
+        .arg("-loglevel").arg("error")
+        .arg("-i").arg(path)
+        // 16-bit little-endian PCM, the format symphonia handles best.
+        .arg("-ac").arg("1")
+        .arg("-ar").arg("16000")
+        .arg("-f").arg("wav")
+        .arg("-y")
+        .arg(&temp)
+        .output()
+        .map_err(|e| PipelineError::Decode(format!("ffmpeg spawn: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PipelineError::Decode(format!(
+            "ffmpeg failed ({}): {}",
+            output.status,
+            stderr.trim()
+        )));
+    }
+    Ok(temp)
 }
 
 /// Limit the fallback to errors that look like format/codec rejection;

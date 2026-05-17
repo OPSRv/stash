@@ -551,6 +551,8 @@ pub fn run() {
             popup_position_status,
             hide_popup,
             set_popup_pinned,
+            modules::keepawake::commands::keep_awake_set,
+            modules::keepawake::commands::keep_awake_status,
             open_system_settings,
             notes_list,
             notes_search,
@@ -991,6 +993,7 @@ pub fn run() {
                 modules::telegram::module_cmds::NotesListCmd::new(notes_repo_for_telegram),
             );
             telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::KeepAwakeCmd);
             telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
             telegram_state.register_command(
                 modules::telegram::module_cmds::RemindCmd::new(Arc::clone(&telegram_state)),
@@ -1156,6 +1159,11 @@ pub fn run() {
                 data_dir.join("popup_position.json"),
             ));
             app.manage(Arc::clone(&popup_pos_state));
+
+            let keep_awake_state = std::sync::Arc::new(
+                modules::keepawake::KeepAwakeState::new(),
+            );
+            app.manage(std::sync::Arc::clone(&keep_awake_state));
 
             if let Some(win) = app.get_webview_window("popup") {
                 #[cfg(target_os = "macos")]

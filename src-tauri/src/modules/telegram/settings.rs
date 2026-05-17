@@ -269,6 +269,11 @@ pub fn category_enabled(state: &TelegramState, category: super::notifier::Catego
         Category::DownloadComplete => settings.download_complete,
         Category::BatteryLow => settings.battery_low,
         Category::Calendar => settings.calendar,
+        // KeepAwake has no per-category toggle — the feature's own
+        // on/off already controls whether nudges are scheduled, and
+        // hiding them via a second setting would make the user wonder
+        // why their Mac is still caffeinated without reminders.
+        Category::KeepAwake => true,
     }
 }
 

@@ -3,6 +3,7 @@ pub mod clipboard;
 pub mod diarization;
 pub mod downloader;
 pub mod ipc;
+pub mod keepawake;
 pub mod media_server;
 pub mod metronome;
 pub mod music;
