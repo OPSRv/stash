@@ -560,6 +560,26 @@ export function StemMixer({
         const vS = viewStartRef.current;
         const vE = viewEndRef.current;
         const span = Math.max(0.001, vE - vS);
+        // Auto-pan while zoomed in: once the playhead crosses the
+        // right ~85% of the visible window, slide the viewport to
+        // bring it back to ~15%. Keeps the cursor on screen during
+        // playback without yanking the view every frame. Skip when
+        // the view already covers the whole track.
+        if (span < duration - 0.01) {
+          if (next > vS + span * 0.85) {
+            setView({
+              start: Math.min(duration - span, next - span * 0.15),
+              end: Math.min(duration, next - span * 0.15 + span),
+            });
+          } else if (next < vS) {
+            // User seeked backward past the visible window — recenter
+            // on the new playhead so it's not stuck off-screen.
+            setView({
+              start: Math.max(0, next - span * 0.15),
+              end: Math.max(span, next - span * 0.15 + span),
+            });
+          }
+        }
         const visible = next >= vS && next <= vE;
         const pct =
           duration > 0
@@ -1236,13 +1256,8 @@ function ChordRibbon({
   }
   if (duration <= 0) return null;
 
+  void ribbonWidth; // tracked only so resize-induced rerenders happen
   const span = Math.max(0.001, viewEnd - viewStart);
-  const pxPerSec = ribbonWidth > 0 ? ribbonWidth / span : 0;
-  // Hide labels on segments narrower than ~22 px — they only produce
-  // garbled overlapping text. Hover still reveals the chord via the
-  // native title tooltip on the segment button.
-  const labelMinWidthPx = 22;
-
   // Pre-filter to the visible window so we don't iterate hundreds of
   // off-screen segments while zoomed in.
   const visible = chords.filter((c) => c.end >= viewStart && c.start <= viewEnd);
@@ -1259,37 +1274,31 @@ function ChordRibbon({
         const hi = Math.min(viewEnd, c.end);
         const left = ((lo - viewStart) / span) * 100;
         const width = ((hi - lo) / span) * 100;
-        const widthPx = (hi - lo) * pxPerSec;
         const minor = c.label.endsWith('m');
         const tint = chordTint(c.label, minor);
-        const showLabel = widthPx >= labelMinWidthPx;
         return (
           <button
             key={`${i}-${c.start}`}
             type="button"
             onClick={() => onSeek(c.start)}
             title={`${c.label} · ${c.start.toFixed(1)}s → ${c.end.toFixed(1)}s`}
-            className="absolute top-0 bottom-0 font-mono tabular-nums hover:brightness-110 transition"
+            className="absolute top-0 bottom-0 font-mono tabular-nums hover:brightness-110 transition flex items-center justify-center"
             style={{
               left: `${left}%`,
               width: `${Math.max(0.3, width)}%`,
               background: tint,
               color: '#fff',
               borderRight: '1px solid rgba(0,0,0,0.45)',
-              fontSize: 12,
+              fontSize: 13,
               fontWeight: 700,
               overflow: 'hidden',
-              textOverflow: 'clip',
               whiteSpace: 'nowrap',
-              paddingLeft: showLabel ? 5 : 0,
-              paddingRight: 2,
-              lineHeight: '30px',
-              textAlign: 'left',
+              padding: '0 4px',
               letterSpacing: -0.2,
-              textShadow: '0 1px 2px rgba(0,0,0,0.65)',
+              textShadow: '0 1px 2px rgba(0,0,0,0.7)',
             }}
           >
-            {showLabel ? c.label : ''}
+            {c.label}
           </button>
         );
       })}

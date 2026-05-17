@@ -316,7 +316,7 @@ export function CompletedRow({
                 onDelete={(path, name) => setStemDelete({ name, path })}
                 beats={job.result?.beats}
                 chords={chords ?? undefined}
-                onDetectChords={chords ? undefined : runChordDetection}
+                onDetectChords={runChordDetection}
                 chordsBusy={chordsBusy}
               />
             </div>
