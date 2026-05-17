@@ -9,6 +9,7 @@ import { revealFile } from '../../shared/util/revealFile';
 import { formatDuration } from '../../shared/format/duration';
 import { buildAudioEmbed } from '../notes/audioEmbed';
 import { STEM_LABELS, extractMidi, stemColor, type SeparatorJob } from './api';
+import { StemMixer } from './StemMixer';
 
 type CompletedRowProps = {
   job: SeparatorJob;
@@ -248,6 +249,21 @@ export function CompletedRow({
               <AudioPlayer
                 src={job.input_path}
                 display="waveform"
+                durationHint={job.result?.duration_sec ?? undefined}
+              />
+            </div>
+          )}
+          {stemEntries.length > 0 && (
+            <div className="mb-3">
+              <div className="text-meta opacity-50 mb-1.5 uppercase tracking-wide flex items-center gap-2">
+                <span>Mixer</span>
+                <span
+                  className="flex-1 h-px"
+                  style={{ background: 'var(--hairline)' }}
+                />
+              </div>
+              <StemMixer
+                stems={stemEntries.map(([name, path]) => ({ name, path }))}
                 durationHint={job.result?.duration_sec ?? undefined}
               />
             </div>

@@ -177,8 +177,8 @@ use modules::diarization::{
 };
 use modules::separator::{
     separator_cancel, separator_clear_completed, separator_delete, separator_download,
-    separator_extract_midi, separator_list_jobs, separator_remove_job, separator_run,
-    separator_scan_disk, separator_status, SeparatorState,
+    separator_extract_midi, separator_list_jobs, separator_mixdown, separator_remove_job,
+    separator_run, separator_scan_disk, separator_status, SeparatorState,
 };
 use modules::downloader::{
     commands::{
@@ -722,6 +722,7 @@ pub fn run() {
             diarization_delete,
             separator_status,
             separator_extract_midi,
+            separator_mixdown,
             separator_download,
             separator_delete,
             separator_run,

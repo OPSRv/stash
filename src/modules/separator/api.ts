@@ -191,3 +191,12 @@ export const stemColor = (key: string): string =>
 /// the input stem so the user can drag-and-drop straight to Guitar Pro).
 export const extractMidi = (stemPath: string): Promise<string> =>
   invoke('separator_extract_midi', { stemPath });
+
+/// Sum a set of stems via ffmpeg amix at the supplied per-stem gains
+/// into a single .wav. Gain is linear (0..1.5+); muted lanes should be
+/// dropped from the array before sending. Returns the final path.
+export const mixdown = (
+  outPath: string,
+  stems: { path: string; gain: number }[],
+): Promise<string> =>
+  invoke('separator_mixdown', { outPath, stems });

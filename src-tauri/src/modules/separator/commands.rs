@@ -1034,6 +1034,88 @@ fn mark_failed(app: &AppHandle, state: &Arc<SeparatorState>, job_id: &str, error
     persist_manifest_for(state, job_id);
 }
 
+/// Inputs for the per-stem mixdown. The frontend sends an array of
+/// (path, gain) pairs after applying its mute/solo policy and master
+/// volume — Rust just multiplies each input by its supplied gain and
+/// sums into a single WAV at `out_path` via ffmpeg's amix filter.
+#[derive(serde::Deserialize, Debug)]
+pub struct MixdownStem {
+    pub path: String,
+    /// Linear gain (0..~1.5). Capped at 4.0 on the Rust side so a stray
+    /// frontend bug can't blow eardrums.
+    pub gain: f32,
+}
+
+#[tauri::command]
+pub async fn separator_mixdown(
+    out_path: String,
+    stems: Vec<MixdownStem>,
+) -> Result<String, String> {
+    if stems.is_empty() {
+        return Err("no stems to mix".into());
+    }
+    if out_path.trim().is_empty() {
+        return Err("missing output path".into());
+    }
+    let out = std::path::PathBuf::from(&out_path);
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("mkdir {parent:?}: {e}"))?;
+    }
+    // Use the same resolver chain the downloader does (system Homebrew /
+    // PATH / bundled). When ffmpeg is missing, surface the install hint
+    // instead of letting the spawn error speak for itself.
+    let ffmpeg_dir = crate::modules::downloader::resolver::find_ffmpeg_dir(&[])
+        .ok_or_else(|| {
+            "ffmpeg not found — Settings → Downloads → Install ffmpeg".to_string()
+        })?;
+    let ffmpeg = ffmpeg_dir.join("ffmpeg");
+
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let mut cmd = std::process::Command::new(&ffmpeg);
+        cmd.arg("-nostdin").arg("-hide_banner").arg("-y");
+        for s in &stems {
+            cmd.arg("-i").arg(&s.path);
+        }
+        // Build the filter graph: pre-gain each input then amix at
+        // normalize=0 so identical gain stems sum at their natural
+        // levels (default amix normalises = divides by N inputs, which
+        // makes a 6-stem mix sound quiet).
+        let mut parts: Vec<String> = Vec::with_capacity(stems.len() + 1);
+        for (i, s) in stems.iter().enumerate() {
+            let g = s.gain.clamp(0.0, 4.0);
+            parts.push(format!("[{i}:a]volume={g}[a{i}]"));
+        }
+        let labels: String = (0..stems.len())
+            .map(|i| format!("[a{i}]"))
+            .collect::<Vec<_>>()
+            .join("");
+        let n = stems.len();
+        parts.push(format!("{labels}amix=inputs={n}:normalize=0[mix]"));
+        let filter = parts.join(";");
+        cmd.arg("-filter_complex").arg(&filter);
+        cmd.arg("-map").arg("[mix]");
+        cmd.arg("-ac").arg("2");
+        cmd.arg("-ar").arg("44100");
+        cmd.arg(&out);
+        let output = cmd
+            .output()
+            .map_err(|e| format!("spawn ffmpeg: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "ffmpeg mixdown failed ({}): {}",
+                output.status,
+                stderr.trim()
+            ));
+        }
+        Ok(out.display().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(result)
+}
+
 /// Run basic-pitch on a single audio file (typically a stem produced
 /// by an earlier separation job) and return the path to the resulting
 /// .mid. Synchronous from the UI's perspective — basic-pitch on a
