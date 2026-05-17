@@ -132,6 +132,25 @@ export const removeJob = (jobId: string): Promise<void> =>
 
 export const clearCompleted = (): Promise<void> => invoke('separator_clear_completed');
 
+export type ChordSegment = {
+  start: number;
+  end: number;
+  label: string;
+};
+
+/// Run beat-synchronous chord recognition on the given audio file.
+/// The sidecar does template-matching on a CENS chromagram (no extra
+/// pip deps). Best on the full input mix; results on isolated stems
+/// can be noisy because drums/vocals carry little harmonic info.
+export const extractChords = (inputPath: string): Promise<ChordSegment[]> =>
+  invoke('separator_extract_chords', { inputPath });
+
+/// Resolve (and lazily materialise) a small PNG used as the ghost icon
+/// for drag-out. tauri-plugin-drag insists on a real filesystem path,
+/// so we cache one inside APPDATA on first call.
+export const dragIconPath = (): Promise<string> =>
+  invoke('separator_drag_icon_path');
+
 /** Delete one stem file from a completed job — both the .wav on disk
  *  and its `.peaks` sidecar, then drop the entry from the job manifest
  *  so the mixer lane disappears on the next render. Use for empty /

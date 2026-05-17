@@ -48,9 +48,9 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="stash-separator")
     p.add_argument(
         "--mode",
-        choices=("analyze", "separate", "bpm", "midi"),
+        choices=("analyze", "separate", "bpm", "midi", "chords"),
         default="analyze",
-        help="analyze = separate + bpm (default); separate = stems only; bpm = tempo only",
+        help="analyze = separate + bpm (default); separate = stems only; bpm = tempo only; chords = harmonic analysis",
     )
     p.add_argument("--input", required=True, help="path to audio file")
     p.add_argument("--out-dir", required=True, help="destination directory for stems")
@@ -225,6 +225,112 @@ def run_midi(input_path: str, out_dir: str) -> dict[str, Any]:
     return {"midi_path": str(midi_path), "stem": stem_name}
 
 
+# Chroma pitch labels — index 0 = C, 1 = C#, …, 11 = B. Matches
+# librosa.feature.chroma_*'s output ordering. Sharps preferred over
+# flats to match how popular-music tabs are usually written.
+CHROMA_LABELS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def run_chords(input_path: str) -> dict[str, Any]:
+    """Beat-synchronous chord recognition via chroma template matching.
+
+    No external chord lib — we build a 24-chord template bank (12
+    major + 12 minor triads) and pick the best match for each beat's
+    mean chroma vector. Quality is roughly on par with sonic
+    visualiser's chordino at default settings, which is what most
+    musicians need for practice. Adjacent identical labels are merged
+    into single segments so the UI gets a tidy chord chart, not a
+    one-label-per-beat noise track.
+    """
+    import librosa
+    import numpy as np
+
+    emit_progress(0.05, "loading audio")
+    y, sr = librosa.load(input_path, sr=22050, mono=True)
+    if y.size == 0:
+        return {"chords": []}
+
+    emit_progress(0.30, "beat tracking")
+    hop = 512
+    _, beat_frames = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop, units="frames")
+    if beat_frames.size < 2:
+        # Fall back to fixed 0.5 s chunks when beat tracking gives us
+        # nothing usable (very short or very noisy clips).
+        frame_step = max(1, int(0.5 * sr / hop))
+        total = int(np.ceil(y.size / hop))
+        beat_frames = np.arange(0, total, frame_step)
+
+    emit_progress(0.55, "chroma")
+    # chroma_cens is more robust to timbre/instrumentation than
+    # chroma_cqt — important when the input is a full mix with drums
+    # and vocals colouring the harmonic content.
+    chroma = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop)
+    # Aggregate to one chroma vector per beat (mean across the frames
+    # spanning each beat). Cheap and gives stable labels even when a
+    # chord lasts a single beat.
+    beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.mean)
+
+    emit_progress(0.80, "matching templates")
+    # Build templates: major = root + major-third + perfect-fifth;
+    # minor = root + minor-third + perfect-fifth. Normalised to unit
+    # length so the dot product is cosine similarity.
+    maj = np.array([1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0], dtype=float)
+    min_ = np.array([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0], dtype=float)
+    templates = []
+    labels: list[str] = []
+    for r in range(12):
+        templates.append(np.roll(maj, r))
+        labels.append(CHROMA_LABELS[r])
+        templates.append(np.roll(min_, r))
+        labels.append(f"{CHROMA_LABELS[r]}m")
+    T = np.stack(templates)
+    T /= np.linalg.norm(T, axis=1, keepdims=True)
+    # Per-beat best template. Skip beats whose chroma magnitude is
+    # tiny (silence / drum-only) — mark them as None so the merger
+    # below extends the previous chord through the gap instead of
+    # littering the timeline with bogus C labels.
+    norms = np.linalg.norm(beat_chroma, axis=0, keepdims=True)
+    valid = (norms > 1e-3).flatten()
+    chroma_norm = beat_chroma / np.maximum(norms, 1e-9)
+    scores = T @ chroma_norm  # 24 x n_beats
+    best = np.argmax(scores, axis=0)
+    per_beat_labels: list[str | None] = [
+        labels[int(b)] if v else None for b, v in zip(best, valid)
+    ]
+
+    emit_progress(0.92, "merging segments")
+    beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop)
+    # Tack the audio end on so the last segment closes cleanly.
+    end_time = float(y.size / sr)
+    segments: list[dict[str, Any]] = []
+    cursor = 0
+    while cursor < len(per_beat_labels):
+        lbl = per_beat_labels[cursor]
+        if lbl is None:
+            cursor += 1
+            continue
+        run_end = cursor
+        while (
+            run_end + 1 < len(per_beat_labels)
+            and per_beat_labels[run_end + 1] == lbl
+        ):
+            run_end += 1
+        start = float(beat_times[cursor])
+        # Stop at the next beat's onset (or audio end on the last run).
+        next_idx = run_end + 1
+        stop = (
+            float(beat_times[next_idx])
+            if next_idx < len(beat_times)
+            else end_time
+        )
+        # Filter out vanishingly short blips that are almost certainly
+        # template-matching jitter, not real chord changes.
+        if stop - start >= 0.18:
+            segments.append({"start": round(start, 3), "end": round(stop, 3), "label": lbl})
+        cursor = run_end + 1
+    return {"chords": segments}
+
+
 def audio_duration_sec(path: str) -> float | None:
     try:
         import soundfile as sf
@@ -260,6 +366,8 @@ def main() -> None:
             payload.update(run_bpm(None, args.input))
         elif args.mode == "midi":
             payload.update(run_midi(args.input, args.out_dir))
+        elif args.mode == "chords":
+            payload.update(run_chords(args.input))
         elif args.mode == "separate":
             paths = run_separate(args, device)
             payload["stems"] = paths

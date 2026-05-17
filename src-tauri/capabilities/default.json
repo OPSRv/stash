@@ -12,6 +12,7 @@
     "autostart:default",
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
+    "drag:default",
     {
       "identifier": "opener:allow-reveal-item-in-dir",
       "allow": [{ "path": "$HOME/**" }]

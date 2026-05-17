@@ -177,9 +177,9 @@ use modules::diarization::{
 };
 use modules::separator::{
     separator_cancel, separator_clear_completed, separator_delete, separator_delete_stem,
-    separator_download, separator_extract_midi, separator_list_jobs, separator_mixdown,
-    separator_read_peaks, separator_remove_job, separator_run, separator_scan_disk,
-    separator_status, separator_write_peaks, SeparatorState,
+    separator_download, separator_drag_icon_path, separator_extract_chords, separator_extract_midi, separator_list_jobs,
+    separator_mixdown, separator_read_peaks, separator_remove_job, separator_run,
+    separator_scan_disk, separator_status, separator_write_peaks, SeparatorState,
 };
 use modules::downloader::{
     commands::{
@@ -451,6 +451,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init());
@@ -734,6 +735,8 @@ pub fn run() {
             separator_clear_completed,
             separator_remove_job,
             separator_delete_stem,
+            separator_drag_icon_path,
+            separator_extract_chords,
             separator_scan_disk,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,

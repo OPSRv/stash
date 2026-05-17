@@ -18,7 +18,7 @@ import { IconButton } from '../../shared/ui/IconButton';
 import { useToast } from '../../shared/ui/Toast';
 import { CopyIcon, ExternalIcon, NoteIcon, PauseIcon, PlayIcon, TrashIcon } from '../../shared/ui/icons';
 import { revealFile } from '../../shared/util/revealFile';
-import { mediaStreamUrl, mixdown, readPeaks, STEM_LABELS, stemColor, writePeaks } from './api';
+import { dragIconPath, mediaStreamUrl, mixdown, readPeaks, STEM_LABELS, stemColor, writePeaks, type ChordSegment } from './api';
 
 interface StemMixerProps {
   /// Stable identifier for the job whose stems we're mixing. Used as
@@ -57,6 +57,14 @@ interface StemMixerProps {
   /// every beat; the user can toggle the overlay via a transport
   /// button. Empty / missing → toggle is hidden.
   beats?: number[];
+  /// Detected chord segments, if the user has already run chord
+  /// detection on this job. Rendered as a thin ribbon above the
+  /// lanes; clicking a segment seeks to its start.
+  chords?: ChordSegment[];
+  /// Callback to trigger chord detection. Hidden when `chords` is
+  /// already populated. `chordsBusy` drives the loading state.
+  onDetectChords?: () => void;
+  chordsBusy?: boolean;
 }
 
 type LaneState = {
@@ -85,6 +93,38 @@ type PersistedMixerState = {
 };
 
 const persistKey = (jobId: string) => `stash:separator:mixer:${jobId}`;
+
+/// Module-level cache for the drag ghost icon path — one IPC call per
+/// session is plenty. The promise itself is cached so concurrent first
+/// drags share a single resolution.
+let dragIconPromise: Promise<string> | null = null;
+const resolveDragIcon = () => {
+  if (!dragIconPromise) {
+    dragIconPromise = dragIconPath().catch((e) => {
+      dragIconPromise = null;
+      throw e;
+    });
+  }
+  return dragIconPromise;
+};
+
+/// Begin a native drag-out for the given stem path. macOS requires the
+/// drag session to start synchronously inside a real mouse-down event,
+/// so we eagerly call `startDrag` and let the plugin take over the
+/// pointer. The ghost icon resolution is awaited inline — first drag
+/// of a session pays one IPC round-trip, subsequent drags are instant.
+async function startStemDrag(stemPath: string) {
+  try {
+    const { startDrag } = await import('@crabnebula/tauri-plugin-drag');
+    const icon = await resolveDragIcon();
+    await startDrag({ item: [stemPath], icon });
+  } catch (e) {
+    // Silent best-effort — a failed drag (e.g. plugin not present in a
+    // browser-only dev build, ghost icon write blocked) shouldn't toast
+    // because the user is mid-gesture; they'll re-try if they meant it.
+    console.warn('[stems] drag-out failed', e);
+  }
+}
 
 function loadPersisted(jobId: string): PersistedMixerState | null {
   if (!jobId) return null;
@@ -147,6 +187,9 @@ export function StemMixer({
   midiBusy,
   onDelete,
   beats,
+  chords,
+  onDetectChords,
+  chordsBusy,
 }: StemMixerProps) {
   const { toast } = useToast();
 
@@ -195,6 +238,36 @@ export function StemMixer({
   });
   const [masterVolume, setMasterVolume] = useState(persisted?.master ?? 1);
   const [mixing, setMixing] = useState(false);
+  // Playback rate (0.5..2.0). Applied to every AudioBufferSourceNode
+  // so the user can slow a song down for practice. Note: this
+  // changes pitch alongside tempo (vinyl-style). Proper pitch-
+  // preserved time-stretch needs a phase vocoder — wired separately
+  // through ffmpeg's atempo filter when we add HQ rendering.
+  const [playbackRate, setPlaybackRate] = useState(1);
+  // Mirror rate into a ref so live sources can be retuned without
+  // teardown — Web Audio's `playbackRate` is an AudioParam so it
+  // accepts a smooth ramp from any thread.
+  const playbackRateRef = useRef(playbackRate);
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+    sourcesRef.current.forEach((src) => {
+      try {
+        src.playbackRate.value = playbackRate;
+      } catch {
+        // node already torn down — next start will pick up the rate.
+      }
+    });
+  }, [playbackRate]);
+  // Prefetch the drag plugin module + ghost icon path right after
+  // mount. macOS wants `startDrag` called as part of a mouse-down
+  // gesture; doing the IPC + dynamic import lazily inside the handler
+  // would still work (the event loop yields cleanly) but warming the
+  // cache here means the very first drag is also instant.
+  useEffect(() => {
+    void import('@crabnebula/tauri-plugin-drag').catch(() => {});
+    void resolveDragIcon().catch(() => {});
+  }, []);
+
   // Beat-grid overlay default-on when librosa supplied beats. The
   // user can hide it via the transport button for a clean waveform.
   const hasBeats = (beats?.length ?? 0) > 0;
@@ -406,6 +479,7 @@ export function StemMixer({
         if (fromOffset >= buf.duration) continue;
         const src = ctx.createBufferSource();
         src.buffer = buf;
+        src.playbackRate.value = playbackRateRef.current;
         src.connect(gain);
         src.start(now, fromOffset);
         sourcesRef.current.set(stem.name, src);
@@ -417,7 +491,13 @@ export function StemMixer({
       // mixer rerender × 60) to ~6 ms (style writes + 4 rerenders).
       const tick = () => {
         if (!ctxRef.current) return;
-        const elapsed = ctxRef.current.currentTime - playStartTimeRef.current;
+        // Audio-domain elapsed time. Web Audio's `playbackRate`
+        // multiplies how many sample-seconds advance per real
+        // second, so the playhead has to scale real elapsed by the
+        // live rate to stay in sync with what the user hears.
+        const elapsed =
+          (ctxRef.current.currentTime - playStartTimeRef.current) *
+          playbackRateRef.current;
         const next = playStartOffsetRef.current + elapsed;
         // Loop wrap — keep restarting from `a` whenever the playhead
         // crosses `b`. We check before the duration-stop branch so a
@@ -471,7 +551,9 @@ export function StemMixer({
 
   const pause = useCallback(() => {
     if (!ctxRef.current) return;
-    const elapsed = ctxRef.current.currentTime - playStartTimeRef.current;
+    const elapsed =
+      (ctxRef.current.currentTime - playStartTimeRef.current) *
+      playbackRateRef.current;
     const current = playStartOffsetRef.current + elapsed;
     stopSources();
     setPosition(Math.min(duration, Math.max(0, current)));
@@ -649,12 +731,21 @@ export function StemMixer({
         loop={loop}
         loopDraft={loopDraft}
         onClearLoop={clearLoop}
+        playbackRate={playbackRate}
+        onPlaybackRate={setPlaybackRate}
       />
       {loadError && (
         <div className="px-3 py-2 text-meta" style={{ color: '#f87171' }}>
           {loadError}
         </div>
       )}
+      <ChordRibbon
+        chords={chords}
+        duration={duration}
+        onSeek={seek}
+        onDetect={onDetectChords}
+        busy={!!chordsBusy}
+      />
       <ul className="divide-y [&>li]:[border-color:var(--hairline)]">
         {stems.map((stem) => (
           <StemLane
@@ -712,6 +803,8 @@ interface TransportProps {
   loop: { a: number; b: number } | null;
   loopDraft: number | null;
   onClearLoop: () => void;
+  playbackRate: number;
+  onPlaybackRate: (v: number) => void;
 }
 
 function Transport({
@@ -732,6 +825,8 @@ function Transport({
   loop,
   loopDraft,
   onClearLoop,
+  playbackRate,
+  onPlaybackRate,
 }: TransportProps) {
   return (
     <div className="stash-stem-transport">
@@ -775,6 +870,31 @@ function Transport({
           />
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => {
+          // Cycle 1.0 → 0.75 → 0.5 → 1.25 → 1.0 — the four ratios
+          // worth practicing at. Shift+click resets straight to 1.0.
+          const steps = [1, 0.75, 0.5, 1.25];
+          const i = steps.findIndex((s) => Math.abs(s - playbackRate) < 0.01);
+          onPlaybackRate(steps[(i + 1) % steps.length]);
+        }}
+        onDoubleClick={() => onPlaybackRate(1)}
+        title={`Speed: ${playbackRate.toFixed(2)}× — click to cycle, double-click to reset (changes pitch too)`}
+        className="text-meta font-mono tabular-nums shrink-0 select-none rounded px-1.5 py-0.5 transition-colors"
+        style={{
+          background:
+            playbackRate === 1 ? 'transparent' : 'rgba(var(--stash-accent-rgb), 0.12)',
+          color:
+            playbackRate === 1 ? 'var(--text-secondary)' : 'rgb(var(--stash-accent-rgb))',
+          border:
+            playbackRate === 1
+              ? '1px solid var(--hairline)'
+              : '1px solid rgba(var(--stash-accent-rgb), 0.32)',
+        }}
+      >
+        {playbackRate.toFixed(2)}×
+      </button>
       {hasBeats && (
         <IconButton
           title={showBeats ? 'Hide beat grid' : 'Show beat grid'}
@@ -811,6 +931,84 @@ function Transport({
       >
         {mixing ? 'Mixing…' : 'Mix down'}
       </Button>
+    </div>
+  );
+}
+
+/// Thin horizontal track above the stem lanes that renders detected
+/// chord segments. Segments are clickable — clicking seeks to the
+/// segment start, which is the practice-friendly way to jump straight
+/// to "the F#m bit". When no chords are cached yet we surface a
+/// "Detect chords" CTA so the user knows the feature is available.
+function ChordRibbon({
+  chords,
+  duration,
+  onSeek,
+  onDetect,
+  busy,
+}: {
+  chords: ChordSegment[] | undefined;
+  duration: number;
+  onSeek: (t: number) => void;
+  onDetect: (() => void) | undefined;
+  busy: boolean;
+}) {
+  if (chords && chords.length === 0 && !busy) return null;
+  if (!chords) {
+    return (
+      <div className="flex items-center justify-end px-3 py-1 border-b [border-color:var(--hairline)]">
+        <button
+          type="button"
+          onClick={onDetect}
+          disabled={busy || !onDetect}
+          className="text-meta px-2 py-0.5 rounded transition-colors disabled:opacity-50"
+          style={{
+            background: 'rgba(var(--stash-accent-rgb), 0.10)',
+            color: 'rgb(var(--stash-accent-rgb))',
+            border: '1px solid rgba(var(--stash-accent-rgb), 0.30)',
+          }}
+        >
+          {busy ? 'Detecting chords…' : 'Detect chords'}
+        </button>
+      </div>
+    );
+  }
+  if (duration <= 0) return null;
+  return (
+    <div
+      className="relative h-6 border-b [border-color:var(--hairline)] select-none"
+      style={{ background: 'rgba(255,255,255,0.015)' }}
+      aria-label="Chord track"
+    >
+      {chords.map((c, i) => {
+        const left = (c.start / duration) * 100;
+        const width = ((c.end - c.start) / duration) * 100;
+        return (
+          <button
+            key={`${i}-${c.start}`}
+            type="button"
+            onClick={() => onSeek(c.start)}
+            title={`${c.label} · ${c.start.toFixed(1)}s → ${c.end.toFixed(1)}s`}
+            className="absolute top-0 bottom-0 text-meta font-mono tabular-nums hover:brightness-125 transition"
+            style={{
+              left: `${left}%`,
+              width: `${Math.max(0.3, width)}%`,
+              background: 'rgba(var(--stash-accent-rgb), 0.10)',
+              color: 'rgb(var(--stash-accent-rgb))',
+              borderRight: '1px solid rgba(var(--stash-accent-rgb), 0.25)',
+              overflow: 'hidden',
+              textOverflow: 'clip',
+              whiteSpace: 'nowrap',
+              paddingLeft: 4,
+              paddingRight: 2,
+              lineHeight: '22px',
+              textAlign: 'left',
+            }}
+          >
+            {c.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -973,7 +1171,20 @@ function StemLane({
       data-testid={`mixer-lane-${name}`}
     >
       <div className="flex flex-col gap-1 w-28 shrink-0 justify-between">
-        <div className="flex items-center gap-1.5 min-w-0">
+        <div
+          className="flex items-center gap-1.5 min-w-0 cursor-grab active:cursor-grabbing select-none"
+          onMouseDown={(e) => {
+            // Native drag-out to Finder / Logic / Ableton. macOS
+            // takes over the cursor the moment startDrag fires, so
+            // we kick it off straight from the mouse-down event —
+            // any other handler on this row stops listening as the
+            // drag session begins.
+            if (e.button !== 0) return;
+            e.preventDefault();
+            void startStemDrag(path);
+          }}
+          title={`Drag ${label} to Finder / DAW`}
+        >
           <span
             className="w-2 h-2 rounded-full shrink-0"
             style={{ background: `rgb(${rgb})` }}
@@ -981,7 +1192,6 @@ function StemLane({
           />
           <span
             className="text-meta t-secondary font-medium truncate"
-            title={label}
           >
             {label}
           </span>

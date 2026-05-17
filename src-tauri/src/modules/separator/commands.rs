@@ -424,6 +424,30 @@ pub fn separator_remove_job(
     Ok(())
 }
 
+/// Resolve (and lazily materialise) a path to a small PNG used as the
+/// drag-ghost icon when the user drags a stem out of the mixer. The
+/// `tauri-plugin-drag` API insists on a real filesystem path for the
+/// cursor preview — and bundled resources can be tricky to expose to
+/// arbitrary plugins at runtime — so we keep a per-install copy in
+/// `$APPLOCALDATA/stash/separator/drag-icon.png`. Embedded at compile
+/// time via `include_bytes!`, written on first use; subsequent calls
+/// short-circuit on `is_file()`.
+#[tauri::command]
+pub fn separator_drag_icon_path(app: AppHandle) -> Result<String, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    let dir = root_dir(&data_dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {e}"))?;
+    let path = dir.join("drag-icon.png");
+    if !path.is_file() {
+        const PNG: &[u8] = include_bytes!("../../../icons/64x64.png");
+        std::fs::write(&path, PNG).map_err(|e| format!("write icon: {e}"))?;
+    }
+    Ok(path.display().to_string())
+}
+
 /// Delete a single stem file (and its `.peaks` sidecar) from a completed
 /// job, and drop it from the job's manifest so future popup opens
 /// don't try to load it. The job itself stays alive — this is meant
@@ -1335,6 +1359,91 @@ pub async fn separator_extract_midi(
     .map_err(|e| e.to_string())??;
 
     Ok(result)
+}
+
+/// One detected chord segment, written by the sidecar's chord
+/// recogniser. Times are seconds from the start of the input file.
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct ChordSegment {
+    pub start: f32,
+    pub end: f32,
+    pub label: String,
+}
+
+/// Run beat-synchronous chord recognition over an input track via the
+/// sidecar's `--mode chords` path. Pure-librosa template matching, so
+/// no extra Python deps to install. Best on the full mix or the
+/// `other` stem (drums + vocals don't carry harmonic info worth
+/// matching against).
+#[tauri::command]
+pub async fn separator_extract_chords(
+    app: AppHandle,
+    input_path: String,
+) -> Result<Vec<ChordSegment>, String> {
+    let input = std::path::PathBuf::from(&input_path);
+    if !input.is_file() {
+        return Err(format!("input not found: {input_path}"));
+    }
+    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if !ready(&data_dir) {
+        return Err(
+            "Separator runtime not installed — open Settings → Separator → Install first.".into(),
+        );
+    }
+    let python = python_path(&data_dir);
+    let script = script_path(&data_dir);
+    let out_dir = input
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::env::temp_dir());
+
+    let segments = tauri::async_runtime::spawn_blocking(
+        move || -> Result<Vec<ChordSegment>, String> {
+            let mut cmd = std::process::Command::new(&python);
+            cmd.arg(&script);
+            cmd.arg("--mode").arg("chords");
+            cmd.arg("--input").arg(&input);
+            cmd.arg("--out-dir").arg(&out_dir);
+            cmd.env("PYTHONUNBUFFERED", "1");
+            let output = cmd
+                .output()
+                .map_err(|e| format!("spawn python: {e}"))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!(
+                    "chord detection failed ({}): {}",
+                    output.status,
+                    stderr.trim()
+                ));
+            }
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let line = stdout
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .next_back()
+                .ok_or_else(|| "no JSON line from sidecar".to_string())?;
+            let parsed: serde_json::Value = serde_json::from_str(line)
+                .map_err(|e| format!("parse sidecar JSON: {e}; line: {line}"))?;
+            if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+                return Err(err.to_string());
+            }
+            let arr = parsed
+                .get("chords")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let mut out = Vec::with_capacity(arr.len());
+            for v in arr {
+                let seg: ChordSegment = serde_json::from_value(v)
+                    .map_err(|e| format!("bad chord segment: {e}"))?;
+                out.push(seg);
+            }
+            Ok(out)
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(segments)
 }
 
 #[cfg(test)]

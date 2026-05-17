@@ -8,7 +8,7 @@ import { accent } from '../../shared/theme/accent';
 import { revealFile } from '../../shared/util/revealFile';
 import { formatDuration } from '../../shared/format/duration';
 import { buildAudioEmbed } from '../notes/audioEmbed';
-import { STEM_LABELS, deleteStem, extractMidi, stemColor, type SeparatorJob } from './api';
+import { STEM_LABELS, deleteStem, extractChords, extractMidi, stemColor, type ChordSegment, type SeparatorJob } from './api';
 import { StemMixer } from './StemMixer';
 
 type CompletedRowProps = {
@@ -40,6 +40,41 @@ export function CompletedRow({
     name: string;
     path: string;
   } | null>(null);
+  // Lazily-computed chord track. Cached in localStorage per job so a
+  // 10–30 s detection only runs once per song. `null` = not requested
+  // yet, `[]` = ran but produced nothing, otherwise the segments.
+  const chordKey = `stash:separator:chords:${job.id}`;
+  const [chords, setChords] = useState<ChordSegment[] | null>(() => {
+    try {
+      const raw = localStorage.getItem(chordKey);
+      return raw ? (JSON.parse(raw) as ChordSegment[]) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [chordsBusy, setChordsBusy] = useState(false);
+
+  const runChordDetection = async () => {
+    if (chordsBusy) return;
+    setChordsBusy(true);
+    try {
+      const segments = await extractChords(job.input_path);
+      setChords(segments);
+      try {
+        localStorage.setItem(chordKey, JSON.stringify(segments));
+      } catch {
+        // Quota — chords are pure UX sugar, fine to lose.
+      }
+    } catch (e) {
+      toast({
+        title: 'Chord detection failed',
+        description: String(e),
+        variant: 'error',
+      });
+    } finally {
+      setChordsBusy(false);
+    }
+  };
 
   // Audio → MIDI for one stem via the basic-pitch helper in the
   // separator venv. Drops the resulting .mid next to the source stem,
@@ -280,6 +315,9 @@ export function CompletedRow({
                 midiBusy={midiBusy}
                 onDelete={(path, name) => setStemDelete({ name, path })}
                 beats={job.result?.beats}
+                chords={chords ?? undefined}
+                onDetectChords={chords ? undefined : runChordDetection}
+                chordsBusy={chordsBusy}
               />
             </div>
           )}
