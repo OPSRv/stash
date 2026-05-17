@@ -16,7 +16,7 @@ import { TransportButton } from '../../shared/ui/TransportButton';
 import { IconButton } from '../../shared/ui/IconButton';
 // IconButton kept for the per-lane action strip (Reveal / Embed / Copy / MIDI).
 import { useToast } from '../../shared/ui/Toast';
-import { CopyIcon, ExternalIcon, NoteIcon, PauseIcon, PlayIcon, TrashIcon } from '../../shared/ui/icons';
+import { CopyIcon, ExternalIcon, NextIcon, NoteIcon, PauseIcon, PlayIcon, PrevIcon, TrashIcon } from '../../shared/ui/icons';
 import { revealFile } from '../../shared/util/revealFile';
 import { dragIconPath, mediaStreamUrl, mixdown, readPeaks, STEM_LABELS, stemColor, writePeaks, type ChordSegment } from './api';
 
@@ -537,16 +537,13 @@ export function StemMixer({
         // loop region that touches the end of the track keeps looping
         // instead of stopping playback.
         const lp = loopRef.current;
-        // Wrap only when the current run started inside the region.
-        // Lets the user seek past B with a regular click without the
-        // tick yanking them back, while still looping cleanly when
-        // playback actually originates inside [a, b].
-        if (
-          lp &&
-          next >= lp.b &&
-          playStartOffsetRef.current >= lp.a &&
-          playStartOffsetRef.current < lp.b
-        ) {
+        // Wrap when playback has been moving through the loop region.
+        // The `playStartOffset < b` guard lets the user seek PAST B
+        // explicitly without the tick yanking them back; meanwhile a
+        // user who set the loop mid-playback (playStartOffset = 0,
+        // loop [30, 40], playhead climbing through 30→40) still
+        // loops cleanly because 0 < 40.
+        if (lp && next >= lp.b && playStartOffsetRef.current < lp.b) {
           liveTimeRef.current = lp.a;
           startSources(lp.a);
           return;
@@ -796,6 +793,12 @@ export function StemMixer({
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         seek(position + (e.shiftKey ? 10 : 5));
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        seek(0);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        seek(duration);
       } else if (e.key === 'l' || e.key === 'L') {
         // L mirrors shift+click on the current position — quickly
         // stage A then B without reaching for the lane with the mouse.
@@ -808,7 +811,7 @@ export function StemMixer({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [play, pause, playing, position, seek, setLoopPoint, clearLoop, loop, loopDraft]);
+  }, [play, pause, playing, position, seek, setLoopPoint, clearLoop, loop, loopDraft, duration]);
 
   // ── lane controls ────────────────────────────────────────────────
   const setLane = (name: string, patch: Partial<LaneState>) =>
@@ -1024,6 +1027,15 @@ function Transport({
     <div className="stash-stem-transport">
       <TransportButton
         size="md"
+        title="Jump to start (Home)"
+        onClick={() => onSeek(0)}
+        disabled={loading || duration === 0}
+        data-testid="mixer-rewind"
+      >
+        <PrevIcon size={14} />
+      </TransportButton>
+      <TransportButton
+        size="md"
         active={playing}
         title={playing ? 'Pause (Space)' : 'Play (Space)'}
         onClick={() => (playing ? onPause() : onPlay())}
@@ -1031,6 +1043,15 @@ function Transport({
         data-testid="mixer-play"
       >
         {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
+      </TransportButton>
+      <TransportButton
+        size="md"
+        title="Jump to end (End)"
+        onClick={() => onSeek(duration)}
+        disabled={loading || duration === 0}
+        data-testid="mixer-skip-end"
+      >
+        <NextIcon size={14} />
       </TransportButton>
       <span className="text-meta font-mono tabular-nums t-secondary shrink-0 select-none">
         {formatClock(position)}
@@ -1560,6 +1581,73 @@ function StemLane({
   // loop range instead of seeking to the click point.
   const dragOrigin = useRef<{ x: number; t: number } | null>(null);
   const dragging = useRef(false);
+  // Auto-scroll bookkeeping for the marquee. While the pointer hovers
+  // within `EDGE_PX` of the lane's left/right edge during a drag, we
+  // pan the viewport on a 16 ms timer so the user can extend a
+  // selection past the visible window without releasing the mouse.
+  // `lastPointerX` lets the tick keep extending the drag even when
+  // the user's mouse is physically stationary.
+  const lastPointerX = useRef(0);
+  const autoScrollTimer = useRef<number | null>(null);
+  // Refs that mirror current props so the interval reads the latest
+  // viewport bounds without us having to tear down + restart it on
+  // every pan step (which would jitter the cadence).
+  const viewRefLocal = useRef({ start: viewStart, end: viewEnd, duration });
+  useEffect(() => {
+    viewRefLocal.current = { start: viewStart, end: viewEnd, duration };
+  }, [viewStart, viewEnd, duration]);
+
+  const stopAutoScroll = () => {
+    if (autoScrollTimer.current !== null) {
+      window.clearInterval(autoScrollTimer.current);
+      autoScrollTimer.current = null;
+    }
+  };
+  const startAutoScroll = () => {
+    if (autoScrollTimer.current !== null) return;
+    autoScrollTimer.current = window.setInterval(() => {
+      const wrap = wrapRef.current;
+      if (!wrap || !dragging.current) {
+        stopAutoScroll();
+        return;
+      }
+      const r = wrap.getBoundingClientRect();
+      const px = lastPointerX.current;
+      const fromLeft = px - r.left;
+      const fromRight = r.right - px;
+      const edge = 30;
+      const view = viewRefLocal.current;
+      const span = view.end - view.start;
+      if (span >= view.duration - 0.01) {
+        stopAutoScroll();
+        return;
+      }
+      // 3 % of the visible span per tick scales with zoom — at high
+      // zoom we still cross a meaningful chunk per second, at low
+      // zoom we don't blast past the destination.
+      const stepFrac = 0.03;
+      if (fromLeft < edge) {
+        const intensity = Math.max(0, (edge - fromLeft) / edge);
+        onPan(-span * stepFrac * intensity);
+      } else if (fromRight < edge) {
+        const intensity = Math.max(0, (edge - fromRight) / edge);
+        onPan(span * stepFrac * intensity);
+      } else {
+        stopAutoScroll();
+        return;
+      }
+      // Re-derive the time under the (stationary) pointer after the
+      // pan so the drag's `b` endpoint keeps tracking the cursor.
+      const v = viewRefLocal.current;
+      const ratio = (px - r.left) / r.width;
+      const t = Math.max(
+        0,
+        Math.min(v.duration, v.start + ratio * (v.end - v.start)),
+      );
+      onDragUpdate(t);
+    }, 16);
+  };
+  useEffect(() => () => stopAutoScroll(), []);
 
   const xToTime = (clientX: number): number | null => {
     const wrap = wrapRef.current;
@@ -1626,13 +1714,27 @@ function StemLane({
       dragging.current = true;
       onDragStart(origin.t);
     }
+    lastPointerX.current = e.clientX;
     const t = xToTime(e.clientX);
     if (t !== null) onDragUpdate(t);
+    // Decide whether we need auto-pan: pointer in the edge zone +
+    // there's somewhere to scroll. Pure pointer-driven check; the
+    // interval keeps firing while the user lingers in the zone.
+    const wrap = wrapRef.current;
+    if (wrap && viewEnd - viewStart < duration - 0.01) {
+      const r = wrap.getBoundingClientRect();
+      const edge = 30;
+      const nearEdge =
+        e.clientX - r.left < edge || r.right - e.clientX < edge;
+      if (nearEdge) startAutoScroll();
+      else stopAutoScroll();
+    }
   };
 
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const origin = dragOrigin.current;
     dragOrigin.current = null;
+    stopAutoScroll();
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
@@ -1652,6 +1754,7 @@ function StemLane({
   const onPointerCancel = () => {
     dragOrigin.current = null;
     dragging.current = false;
+    stopAutoScroll();
     onDragCancel();
   };
 
