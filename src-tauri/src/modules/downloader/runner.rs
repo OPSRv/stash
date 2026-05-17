@@ -136,16 +136,16 @@ pub fn spawn_download(
         cmd.arg("--ffmpeg-location").arg(&dir);
     }
     cmd.args(["--newline", "--no-warnings", "--no-playlist"])
-        // Replace whitespace, fullwidth bars and other shell-hostile
-        // characters in the saved filename so the path copy-pastes
-        // into a terminal or a markdown embed without needing
-        // angle-bracket wrapping. yt-dlp's `--restrict-filenames` is
-        // ASCII-only — it strips Cyrillic and accented letters. We
-        // still toggle it on because path round-tripping is the
-        // priority for the downloader → Stems → Notes flow; users
-        // who want native characters can rename the file in Finder
-        // afterwards.
-        .arg("--restrict-filenames")
+        // Previously toggled `--restrict-filenames` for path
+        // round-trippability into a terminal. The cost was that yt-dlp
+        // strips Cyrillic / accented letters entirely — a video titled
+        // `Epolets - Прага` saved as `Epolets [<id>].m4a`, losing the
+        // song title every Stash surface (Stems header, Notes embed)
+        // shows to the user. None of those surfaces shell out with the
+        // path, so the round-tripping argument is moot. yt-dlp's
+        // default sanitisation still replaces filesystem-hostile
+        // characters (`/`, `:`, `<`, `>`, `|`) with fullwidth
+        // equivalents, so paths remain safe on every FS we care about.
         .arg("-o")
         .arg(&output_template)
         .arg("--print")

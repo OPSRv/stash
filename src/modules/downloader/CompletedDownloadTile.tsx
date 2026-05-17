@@ -12,7 +12,17 @@ import { PlatformBadge } from './PlatformBadge';
 import { list, setTranscription, transcribeJob } from './api';
 import type { DownloadJob } from './api';
 
-const AUDIO_EXTS = new Set(['mp3', 'm4a', 'wav', 'ogg', 'opus', 'flac', 'aac', 'aiff', 'aif']);
+// Files the Whisper pipeline can transcribe. Audio formats decode
+// directly via symphonia; video containers (mp4/webm/mkv) get their
+// audio track demuxed by symphonia or the macOS afconvert / ffmpeg
+// fallback — the resulting PCM feeds the same whisper.cpp path. Gating
+// on "audio only" hid the Transcribe chip from every YouTube video
+// download, which was the whole point of the feature for spoken-word
+// content.
+const TRANSCRIBABLE_EXTS = new Set([
+  'mp3', 'm4a', 'wav', 'ogg', 'opus', 'flac', 'aac', 'aiff', 'aif',
+  'mp4', 'm4v', 'mov', 'webm', 'mkv',
+]);
 
 interface ChipButtonProps {
   onClick: (e: React.MouseEvent) => void;
@@ -48,7 +58,7 @@ const ChipButton = ({ onClick, label, title, icon, pressed }: ChipButtonProps) =
 
 export const isAudioJob = (job: DownloadJob): boolean => {
   if (job.target_path) {
-    return AUDIO_EXTS.has(extOf(job.target_path));
+    return TRANSCRIBABLE_EXTS.has(extOf(job.target_path));
   }
   return false;
 };
