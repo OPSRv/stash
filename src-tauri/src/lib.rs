@@ -998,6 +998,7 @@ pub fn run() {
             );
             telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
             telegram_state.register_command(modules::telegram::module_cmds::KeepAwakeCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::LaunchClaudeCmd);
             telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
             telegram_state.register_command(
                 modules::telegram::module_cmds::RemindCmd::new(Arc::clone(&telegram_state)),

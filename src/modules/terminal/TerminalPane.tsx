@@ -413,6 +413,20 @@ export const TerminalPane = ({
     [id],
   );
 
+  // Listen for the cross-process "launch Claude" trigger fired by
+  // TerminalShell when /claude_code arrives over Telegram / CLI. Only
+  // the pane whose id matches the event detail runs — TerminalShell
+  // picks the focused pane so we never get parallel launches.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail !== id) return;
+      launchClaudeRef.current?.();
+    };
+    window.addEventListener('stash:terminal-launch-claude', handler);
+    return () => window.removeEventListener('stash:terminal-launch-claude', handler);
+  }, [id]);
+
   const launchClaude = useCallback(async () => {
     const cmd = (claudeCommand || 'claude').trim();
     if (!cmd) return;
@@ -431,6 +445,14 @@ export const TerminalPane = ({
       );
     }
   }, [claudeCommand, composeOpen, id]);
+
+  // Mirror launchClaude into a ref so the cross-window event listener
+  // (registered once on mount) always invokes the freshest closure
+  // without re-binding on every claudeCommand change.
+  const launchClaudeRef = useRef(launchClaude);
+  useEffect(() => {
+    launchClaudeRef.current = launchClaude;
+  }, [launchClaude]);
 
   const restart = useCallback(async () => {
     // Reach into Rust first — it remembers the last cwd announced via

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 
 import { ptyClose, ptyGetCwd } from './api';
@@ -117,6 +118,28 @@ export const TerminalShell = () => {
     const leaves = collectLeafIds(active.root);
     if (!leaves.includes(focusedPane)) setFocusedPane(leaves[0]);
   }, [tabs, activeId, focusedPane]);
+
+  // Bridge for /claude_code Telegram + CLI command. Backend fires
+  // `terminal:launch_claude`; we forward it as a window CustomEvent
+  // scoped to the currently focused pane so exactly one pane runs the
+  // launcher (instead of every mounted TerminalPane racing).
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    listen('terminal:launch_claude', () => {
+      const paneId = focusedPaneRef.current;
+      if (!paneId) return;
+      window.dispatchEvent(
+        new CustomEvent('stash:terminal-launch-claude', { detail: paneId }),
+      );
+    })
+      .then((fn) => {
+        dispose = fn;
+      })
+      .catch(() => {});
+    return () => {
+      dispose?.();
+    };
+  }, []);
 
   // Auto-clear maximize when its pane no longer exists in the active
   // tab (could have been closed or dragged elsewhere).
