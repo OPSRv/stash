@@ -1250,8 +1250,8 @@ function ChordRibbon({
   return (
     <div
       ref={ribbonRef}
-      className="relative h-7 border-b [border-color:var(--hairline)] select-none"
-      style={{ background: 'rgba(0,0,0,0.18)' }}
+      className="relative h-8 border-b [border-color:var(--hairline)] select-none"
+      style={{ background: 'rgba(0,0,0,0.25)' }}
       aria-label="Chord track"
     >
       {visible.map((c, i) => {
@@ -1269,23 +1269,24 @@ function ChordRibbon({
             type="button"
             onClick={() => onSeek(c.start)}
             title={`${c.label} · ${c.start.toFixed(1)}s → ${c.end.toFixed(1)}s`}
-            className="absolute top-0 bottom-0 font-mono tabular-nums hover:brightness-125 transition"
+            className="absolute top-0 bottom-0 font-mono tabular-nums hover:brightness-110 transition"
             style={{
               left: `${left}%`,
               width: `${Math.max(0.3, width)}%`,
               background: tint,
-              color: 'rgba(0,0,0,0.85)',
-              borderRight: '1px solid rgba(0,0,0,0.35)',
-              fontSize: 11,
-              fontWeight: 600,
+              color: '#fff',
+              borderRight: '1px solid rgba(0,0,0,0.45)',
+              fontSize: 12,
+              fontWeight: 700,
               overflow: 'hidden',
               textOverflow: 'clip',
               whiteSpace: 'nowrap',
-              paddingLeft: showLabel ? 4 : 0,
+              paddingLeft: showLabel ? 5 : 0,
               paddingRight: 2,
-              lineHeight: '26px',
+              lineHeight: '30px',
               textAlign: 'left',
               letterSpacing: -0.2,
+              textShadow: '0 1px 2px rgba(0,0,0,0.65)',
             }}
           >
             {showLabel ? c.label : ''}
@@ -1515,31 +1516,37 @@ function StemLane({
   };
 
   // Wheel: Cmd/Ctrl = zoom around cursor (GarageBand-style), plain
-  // wheel = horizontal pan inside the zoomed window. We swallow the
-  // event when we acted on it so the scrollable parent doesn't move
-  // out from under the mixer at the same time.
-  const onLaneWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    if (!duration) return;
-    if (e.metaKey || e.ctrlKey) {
-      e.preventDefault();
-      const t = xToTime(e.clientX);
-      if (t === null) return;
-      // 1.15 per "notch" feels right on macOS trackpads; exponentiate
-      // by the raw deltaY so a fast scroll zooms farther per gesture.
-      const factor = Math.pow(1.0015, e.deltaY);
-      onZoom(t, factor);
-      return;
-    }
-    // Pan only matters when we're actually zoomed in — otherwise
-    // there's nothing to scroll past, so let the parent handle it.
-    if (viewEnd - viewStart < duration - 0.01) {
-      e.preventDefault();
-      const span = viewEnd - viewStart;
-      const wrap = wrapRef.current;
-      const px = wrap?.getBoundingClientRect().width ?? 1;
-      onPan((e.deltaX !== 0 ? e.deltaX : e.deltaY) * (span / px));
-    }
-  };
+  // wheel = horizontal pan inside the zoomed window. React's
+  // synthetic `onWheel` attaches passively in modern browsers, so
+  // `preventDefault` is silently dropped — the popup keeps scrolling
+  // behind us. Bind a native non-passive listener instead so the
+  // page actually stops when we handle the event.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!duration) return;
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const rect = wrap.getBoundingClientRect();
+        const ratio = (e.clientX - rect.left) / rect.width;
+        const t = Math.max(0, Math.min(duration, viewStart + ratio * (viewEnd - viewStart)));
+        const factor = Math.pow(1.0015, e.deltaY);
+        onZoom(t, factor);
+        return;
+      }
+      if (viewEnd - viewStart < duration - 0.01) {
+        e.preventDefault();
+        e.stopPropagation();
+        const span = viewEnd - viewStart;
+        const px = wrap.getBoundingClientRect().width || 1;
+        onPan((e.deltaX !== 0 ? e.deltaX : e.deltaY) * (span / px));
+      }
+    };
+    wrap.addEventListener('wheel', onWheel, { passive: false });
+    return () => wrap.removeEventListener('wheel', onWheel);
+  }, [duration, viewStart, viewEnd, onZoom, onPan]);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -1717,7 +1724,6 @@ function StemLane({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
-        onWheel={onLaneWheel}
         className="relative flex-1 h-12 rounded-sm cursor-crosshair select-none"
         style={{
           background: `rgba(${rgb}, 0.05)`,

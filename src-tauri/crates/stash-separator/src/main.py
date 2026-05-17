@@ -308,6 +308,28 @@ def run_chords(input_path: str) -> dict[str, Any]:
     # must never exceed the number of usable boundary pairs in
     # `beat_frames` (we index `beat_times[cursor]` below).
     per_beat_labels = per_beat_labels[: max(0, len(beat_frames) - 1)]
+    # Median-style smoothing pass: chroma matching jitters between
+    # adjacent root candidates (e.g. C major <-> A minor share two
+    # notes), which produces a noisy one-beat-per-segment ribbon
+    # before merging. Replace each beat with the most-common label
+    # in a 5-beat window centred on it. Musically this rounds short
+    # passing chords into the surrounding bar — the right trade
+    # for a chord chart you want to read while practising.
+    if len(per_beat_labels) >= 5:
+        smoothed: list[str | None] = []
+        win = 2  # ±2 beats → 5-wide window
+        for i in range(len(per_beat_labels)):
+            lo = max(0, i - win)
+            hi = min(len(per_beat_labels), i + win + 1)
+            counts: dict[str | None, int] = {}
+            for lbl in per_beat_labels[lo:hi]:
+                counts[lbl] = counts.get(lbl, 0) + 1
+            # Tie-break: prefer the beat's own label so we don't
+            # ping-pong on a 50/50 window. `max` is stable on Python
+            # 3.7+, so equal counts keep insertion order.
+            best_lbl = max(counts.items(), key=lambda kv: kv[1])[0]
+            smoothed.append(best_lbl)
+        per_beat_labels = smoothed
 
     emit_progress(0.92, "merging segments")
     beat_times = librosa.frames_to_time(beat_frames, sr=sr, hop_length=hop)
