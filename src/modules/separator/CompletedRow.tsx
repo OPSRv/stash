@@ -248,6 +248,7 @@ export function CompletedRow({
               </div>
               <AudioPlayer
                 src={job.input_path}
+                loader="stream"
                 display="waveform"
                 durationHint={job.result?.duration_sec ?? undefined}
               />

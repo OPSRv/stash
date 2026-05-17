@@ -88,7 +88,7 @@ expect_fun_call = "allow"
 
 [package]
 name = "stash-app"
-version = "0.1.36"
+version = "0.1.37"
 description = "Stash — macOS menubar multitool"
 authors = ["OPSRv"]
 edition = "2021"
