@@ -163,6 +163,17 @@ async fn run_install_inner(
             // v0.1.32) on a Re-install. uv pip install is idempotent
             // and ~3-5 s when the venv already matches, so the cost
             // is invisible to the user when nothing changed.
+            //
+            // Stage main.py + requirements.txt FIRST. Without this,
+            // ensure_packages would feed `uv pip install` the file
+            // that's already on disk — i.e. whichever requirements
+            // shipped at first-install time — and any newly added pin
+            // (setuptools, a fresh dep) would silently never reach the
+            // venv. That's how the basic-pitch / pkg_resources fix in
+            // v0.1.40 failed to actually land on users who clicked
+            // Re-install: the new pin was compiled into the binary
+            // but never written out, so uv re-installed the old set.
+            installer::stage_payload(data_dir)?;
             installer::ensure_packages(app, data_dir)?;
         }
     }
