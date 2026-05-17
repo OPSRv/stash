@@ -1042,6 +1042,85 @@ fn mark_failed(app: &AppHandle, state: &Arc<SeparatorState>, job_id: &str, error
     persist_manifest_for(state, job_id);
 }
 
+/// Cache shape on disk: the same `Vec<f32>` the frontend computes in
+/// the Web Audio peak summariser, stored as raw little-endian f32 bytes
+/// next to the source stem as `<stem>.peaks`. Format chosen for size
+/// (600 floats = 2.4 KB) and zero parse cost (a single typed-array
+/// view on the receiving side).
+const PEAKS_EXT: &str = "peaks";
+const PEAKS_VERSION_MAGIC: u32 = 0x50_4B_53_31; // "PKS1"
+const PEAKS_DEFAULT_BUCKETS: u32 = 600;
+
+fn peaks_sidecar_path(stem: &std::path::Path) -> std::path::PathBuf {
+    let mut p = stem.to_path_buf();
+    let new_name = match stem.file_name().and_then(|n| n.to_str()) {
+        Some(n) => format!("{n}.{PEAKS_EXT}"),
+        None => format!("stash.{PEAKS_EXT}"),
+    };
+    p.set_file_name(new_name);
+    p
+}
+
+/// Try to load cached peaks for the given stem. Returns `None` when the
+/// sidecar is missing, has the wrong header, or its mtime is older than
+/// the underlying .wav (the cache is invalidated by a fresh demucs run
+/// that overwrites the stem in place).
+#[tauri::command]
+pub fn separator_read_peaks(stem_path: String) -> Option<Vec<f32>> {
+    let stem = std::path::PathBuf::from(&stem_path);
+    let cache = peaks_sidecar_path(&stem);
+    let stem_meta = std::fs::metadata(&stem).ok()?;
+    let cache_meta = std::fs::metadata(&cache).ok()?;
+    let stem_mtime = stem_meta.modified().ok()?;
+    let cache_mtime = cache_meta.modified().ok()?;
+    if cache_mtime < stem_mtime {
+        return None;
+    }
+    let bytes = std::fs::read(&cache).ok()?;
+    if bytes.len() < 8 {
+        return None;
+    }
+    let magic = u32::from_le_bytes(bytes[0..4].try_into().ok()?);
+    if magic != PEAKS_VERSION_MAGIC {
+        return None;
+    }
+    let len = u32::from_le_bytes(bytes[4..8].try_into().ok()?) as usize;
+    let expected = 8 + len * 4;
+    if bytes.len() < expected {
+        return None;
+    }
+    let mut out = Vec::with_capacity(len);
+    for chunk in bytes[8..expected].chunks_exact(4) {
+        out.push(f32::from_le_bytes(chunk.try_into().ok()?));
+    }
+    Some(out)
+}
+
+/// Persist freshly-computed peaks alongside the stem. Silent best-effort
+/// — a write failure (read-only disk, race with stem deletion) is not
+/// surfaced to the user because the next session simply re-computes.
+#[tauri::command]
+pub fn separator_write_peaks(stem_path: String, peaks: Vec<f32>) -> Result<(), String> {
+    if peaks.is_empty() {
+        return Err("no peaks supplied".into());
+    }
+    let stem = std::path::PathBuf::from(&stem_path);
+    let cache = peaks_sidecar_path(&stem);
+    let mut bytes: Vec<u8> = Vec::with_capacity(8 + peaks.len() * 4);
+    bytes.extend_from_slice(&PEAKS_VERSION_MAGIC.to_le_bytes());
+    bytes.extend_from_slice(&(peaks.len() as u32).to_le_bytes());
+    for v in &peaks {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    std::fs::write(&cache, &bytes).map_err(|e| format!("write {cache:?}: {e}"))?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn peaks_default_buckets() -> u32 {
+    PEAKS_DEFAULT_BUCKETS
+}
+
 /// Inputs for the per-stem mixdown. The frontend sends an array of
 /// (path, gain) pairs after applying its mute/solo policy and master
 /// volume — Rust just multiplies each input by its supplied gain and

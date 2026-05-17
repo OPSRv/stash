@@ -200,3 +200,26 @@ export const mixdown = (
   stems: { path: string; gain: number }[],
 ): Promise<string> =>
   invoke('separator_mixdown', { outPath, stems });
+
+/// Load cached peak summary written next to the stem by a previous
+/// session. Returns null on cache miss / stale cache so the caller
+/// computes a fresh one.
+export const readPeaks = (stemPath: string): Promise<Float32Array | null> =>
+  invoke<number[] | null>('separator_read_peaks', { stemPath }).then((p) =>
+    p ? Float32Array.from(p) : null,
+  );
+
+export const writePeaks = (stemPath: string, peaks: Float32Array): Promise<void> =>
+  invoke('separator_write_peaks', {
+    stemPath,
+    peaks: Array.from(peaks),
+  });
+
+/// Resolve a file path to a streamable http://127.0.0.1:<port>/audio?…
+/// URL served by the in-process MediaServer. Used by the Stems mixer
+/// to fetch stem bytes as a binary ArrayBuffer — avoids the
+/// `Vec<u8>→Vec<number>→JSON→Uint8Array` round-trip the previous
+/// invoke('notes_read_audio_path') path paid (≈4x byte traffic + GC
+/// spikes for any non-trivial stem).
+export const mediaStreamUrl = (path: string): Promise<string> =>
+  invoke('media_stream_url', { path });
