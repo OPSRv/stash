@@ -772,6 +772,29 @@ export function StemMixer({
 
   // Space / left / right keyboard control while the mixer is focused.
   const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Pixel offset between the mixer's left edge and the start of the
+  // waveform area inside a lane. Drives the chord-ribbon / viewport-bar
+  // alignment so chord labels land directly above the matching part
+  // of the wave, instead of starting at x=0 which would slide them
+  // ~280 px to the left of the underlying timing.
+  const [waveGutterPx, setWaveGutterPx] = useState(0);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => {
+      const wave = root.querySelector<HTMLDivElement>('[data-stem-wave]');
+      if (!wave) return;
+      const rootRect = root.getBoundingClientRect();
+      const waveRect = wave.getBoundingClientRect();
+      const next = Math.max(0, Math.round(waveRect.left - rootRect.left));
+      setWaveGutterPx((prev) => (Math.abs(prev - next) > 0.5 ? next : prev));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, [stems.length]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const root = rootRef.current;
@@ -919,6 +942,7 @@ export function StemMixer({
         onSeek={seek}
         onDetect={onDetectChords}
         busy={!!chordsBusy}
+        leftGutterPx={waveGutterPx}
       />
       <ViewportBar
         duration={duration}
@@ -927,6 +951,7 @@ export function StemMixer({
         onPan={panBy}
         onReset={resetZoom}
         zoomed={zoomed}
+        leftGutterPx={waveGutterPx}
       />
       <ul className="divide-y [&>li]:[border-color:var(--hairline)]">
         {stems.map((stem) => (
@@ -1174,6 +1199,7 @@ function ViewportBar({
   onPan,
   onReset,
   zoomed,
+  leftGutterPx,
 }: {
   duration: number;
   viewStart: number;
@@ -1181,6 +1207,7 @@ function ViewportBar({
   onPan: (deltaT: number) => void;
   onReset: () => void;
   zoomed: boolean;
+  leftGutterPx: number;
 }) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ startX: number; startView: number } | null>(null);
@@ -1229,26 +1256,35 @@ function ViewportBar({
   };
 
   return (
-    <div
-      ref={trackRef}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onDoubleClick={onReset}
-      className="relative h-2 cursor-grab active:cursor-grabbing select-none border-b [border-color:var(--hairline)]"
-      style={{ background: 'rgba(255,255,255,0.04)', touchAction: 'none' }}
-      title="Scroll the zoomed view · double-click resets zoom"
-    >
+    <div className="flex h-2 border-b [border-color:var(--hairline)]">
+      {leftGutterPx > 0 && (
+        <div
+          style={{ width: leftGutterPx }}
+          className="shrink-0"
+          aria-hidden
+        />
+      )}
       <div
-        className="absolute top-0 bottom-0 rounded-sm pointer-events-none"
-        style={{
-          left: `${left}%`,
-          width: `${Math.max(2, width)}%`,
-          background: 'rgba(var(--stash-accent-rgb), 0.55)',
-          boxShadow:
-            'inset 1px 0 0 rgba(var(--stash-accent-rgb), 0.95), inset -1px 0 0 rgba(var(--stash-accent-rgb), 0.95)',
-        }}
-      />
+        ref={trackRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={onReset}
+        className="relative flex-1 cursor-grab active:cursor-grabbing select-none"
+        style={{ background: 'rgba(255,255,255,0.04)', touchAction: 'none' }}
+        title="Scroll the zoomed view · double-click resets zoom"
+      >
+        <div
+          className="absolute top-0 bottom-0 rounded-sm pointer-events-none"
+          style={{
+            left: `${left}%`,
+            width: `${Math.max(2, width)}%`,
+            background: 'rgba(var(--stash-accent-rgb), 0.55)',
+            boxShadow:
+              'inset 1px 0 0 rgba(var(--stash-accent-rgb), 0.95), inset -1px 0 0 rgba(var(--stash-accent-rgb), 0.95)',
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -1280,6 +1316,7 @@ function ChordRibbon({
   onSeek,
   onDetect,
   busy,
+  leftGutterPx,
 }: {
   chords: ChordSegment[] | undefined;
   duration: number;
@@ -1288,6 +1325,7 @@ function ChordRibbon({
   onSeek: (t: number) => void;
   onDetect: (() => void) | undefined;
   busy: boolean;
+  leftGutterPx: number;
 }) {
   const ribbonRef = useRef<HTMLDivElement | null>(null);
   const [ribbonWidth, setRibbonWidth] = useState(0);
@@ -1332,11 +1370,21 @@ function ChordRibbon({
 
   return (
     <div
-      ref={ribbonRef}
-      className="relative h-8 border-b [border-color:var(--hairline)] select-none"
+      className="relative h-8 border-b [border-color:var(--hairline)] flex"
       style={{ background: 'rgba(0,0,0,0.25)' }}
-      aria-label="Chord track"
     >
+      {leftGutterPx > 0 && (
+        <div
+          style={{ width: leftGutterPx }}
+          className="shrink-0"
+          aria-hidden
+        />
+      )}
+      <div
+        ref={ribbonRef}
+        className="relative flex-1 select-none"
+        aria-label="Chord track"
+      >
       {visible.map((c, i) => {
         const lo = Math.max(viewStart, c.start);
         const hi = Math.min(viewEnd, c.end);
@@ -1369,6 +1417,7 @@ function ChordRibbon({
           </button>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -1882,6 +1931,7 @@ function StemLane({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        data-stem-wave
         className="relative flex-1 h-12 rounded-sm cursor-crosshair select-none"
         style={{
           background: `rgba(${rgb}, 0.05)`,
