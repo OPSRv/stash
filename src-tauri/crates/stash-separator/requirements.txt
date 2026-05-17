@@ -46,6 +46,11 @@ basic-pitch>=0.4
 # basic-pitch (or one of its transitive deps — likely pretty_midi or
 # librosa's audio backend) does a runtime `import pkg_resources`. That
 # module ships with `setuptools`, which Python 3.11+ no longer
-# auto-installs into fresh venvs, so without an explicit pin the import
-# crashes with `ModuleNotFoundError: No module named 'pkg_resources'`.
-setuptools>=68
+# auto-installs into fresh venvs. A bare `>=68` was tempting but
+# `setuptools` 81.0.0 (2025-07) removed the `pkg_resources` module
+# outright (it was deprecated in 80.x). Without an upper bound uv
+# resolves to the newest matching wheel (~81+), basic-pitch's runtime
+# `import pkg_resources` still crashes, and the user sees the same
+# ModuleNotFoundError they saw before the pin was added. Cap at <81
+# so we land on the last series that still ships the shim.
+setuptools>=68,<81
