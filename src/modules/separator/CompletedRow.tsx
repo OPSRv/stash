@@ -315,6 +315,7 @@ export function CompletedRow({
                 midiBusy={midiBusy}
                 onDelete={(path, name) => setStemDelete({ name, path })}
                 beats={job.result?.beats}
+                bpm={job.result?.bpm}
                 chords={chords ?? undefined}
                 onDetectChords={runChordDetection}
                 chordsBusy={chordsBusy}

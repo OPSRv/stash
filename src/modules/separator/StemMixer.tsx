@@ -57,6 +57,12 @@ interface StemMixerProps {
   /// every beat; the user can toggle the overlay via a transport
   /// button. Empty / missing → toggle is hidden.
   beats?: number[];
+  /// Detected tempo in BPM. Surfaced as a small badge in the
+  /// transport so the practising user can read it at a glance, and
+  /// used by `setLoopRange` to snap the marquee endpoints to the
+  /// nearest beat when the user holds the loop without explicit
+  /// snap configuration.
+  bpm?: number;
   /// Detected chord segments, if the user has already run chord
   /// detection on this job. Rendered as a thin ribbon above the
   /// lanes; clicking a segment seeks to its start.
@@ -187,6 +193,7 @@ export function StemMixer({
   midiBusy,
   onDelete,
   beats,
+  bpm,
   chords,
   onDetectChords,
   chordsBusy,
@@ -716,17 +723,44 @@ export function StemMixer({
   /// Commit a marquee drag as a loop region. Tiny ranges (< 80 ms) are
   /// almost certainly accidental — treat them as a no-op rather than
   /// strapping the playhead to a single point and yanking it back
-  /// every frame.
+  /// every frame. When BPM-derived beats are available we snap both
+  /// endpoints to the nearest beat — practising a 4-bar loop is way
+  /// easier when the start/end already align with the bar grid.
+  const snapToBeat = useCallback(
+    (t: number): number => {
+      if (!beats || beats.length === 0) return t;
+      // Binary search for the nearest beat — beats are sorted by
+      // construction (librosa emits ascending times).
+      let lo = 0;
+      let hi = beats.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (beats[mid] < t) lo = mid + 1;
+        else hi = mid;
+      }
+      const after = beats[lo];
+      const before = lo > 0 ? beats[lo - 1] : after;
+      return Math.abs(after - t) < Math.abs(t - before) ? after : before;
+    },
+    [beats],
+  );
+
   const setLoopRange = useCallback(
     (a: number, b: number) => {
       const lo = Math.max(0, Math.min(a, b));
       const hi = Math.min(duration, Math.max(a, b));
       setDragSel(null);
       if (hi - lo < 0.08) return;
-      setLoop({ a: lo, b: hi });
+      const snappedLo = snapToBeat(lo);
+      const snappedHi = snapToBeat(hi);
+      // Fall back to raw bounds when snapping collapses the region
+      // (e.g. both ends snap to the same beat on a very short drag).
+      const finalLo = snappedHi - snappedLo >= 0.08 ? snappedLo : lo;
+      const finalHi = snappedHi - snappedLo >= 0.08 ? snappedHi : hi;
+      setLoop({ a: finalLo, b: finalHi });
       setLoopDraft(null);
     },
-    [duration],
+    [duration, snapToBeat],
   );
 
   const seek = useCallback(
@@ -867,6 +901,7 @@ export function StemMixer({
         onClearLoop={clearLoop}
         playbackRate={playbackRate}
         onPlaybackRate={setPlaybackRate}
+        bpm={bpm}
       />
       {loadError && (
         <div className="px-3 py-2 text-meta" style={{ color: '#f87171' }}>
@@ -960,6 +995,7 @@ interface TransportProps {
   onClearLoop: () => void;
   playbackRate: number;
   onPlaybackRate: (v: number) => void;
+  bpm?: number;
 }
 
 function Transport({
@@ -982,6 +1018,7 @@ function Transport({
   onClearLoop,
   playbackRate,
   onPlaybackRate,
+  bpm,
 }: TransportProps) {
   return (
     <div className="stash-stem-transport">
@@ -1000,6 +1037,20 @@ function Transport({
         <span className="opacity-40 px-1">/</span>
         {formatClock(duration)}
       </span>
+      {bpm != null && Number.isFinite(bpm) && (
+        <span
+          className="text-meta font-mono tabular-nums shrink-0 select-none rounded px-1.5 py-0.5"
+          title={`Tempo · ${bpm.toFixed(1)} BPM (librosa beat track on drums stem)`}
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            color: 'var(--text-secondary)',
+            border: '1px solid var(--hairline)',
+          }}
+        >
+          {bpm.toFixed(0)}
+          <span className="opacity-50 ml-0.5">bpm</span>
+        </span>
+      )}
       <div className="flex-1 min-w-0">
         <RangeSlider
           value={Math.min(position, duration || 0.01)}
