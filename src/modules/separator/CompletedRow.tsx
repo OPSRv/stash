@@ -8,7 +8,7 @@ import { accent } from '../../shared/theme/accent';
 import { revealFile } from '../../shared/util/revealFile';
 import { formatDuration } from '../../shared/format/duration';
 import { buildAudioEmbed } from '../notes/audioEmbed';
-import { STEM_LABELS, extractMidi, stemColor, type SeparatorJob } from './api';
+import { STEM_LABELS, deleteStem, extractMidi, stemColor, type SeparatorJob } from './api';
 import { StemMixer } from './StemMixer';
 
 type CompletedRowProps = {
@@ -34,6 +34,12 @@ export function CompletedRow({
   const { toast } = useToast();
   const [removeOpen, setRemoveOpen] = useState(false);
   const [midiBusy, setMidiBusy] = useState<string | null>(null);
+  // Pending per-stem delete — when set, a confirm dialog is shown.
+  // Cleared on confirm (after the backend drops the file) or cancel.
+  const [stemDelete, setStemDelete] = useState<{
+    name: string;
+    path: string;
+  } | null>(null);
 
   // Audio → MIDI for one stem via the basic-pitch helper in the
   // separator venv. Drops the resulting .mid next to the source stem,
@@ -264,6 +270,7 @@ export function CompletedRow({
                 />
               </div>
               <StemMixer
+                jobId={job.id}
                 stems={stemEntries.map(([name, path]) => ({ name, path }))}
                 durationHint={job.result?.duration_sec ?? undefined}
                 onReveal={(p) => revealFile(p)}
@@ -271,12 +278,44 @@ export function CompletedRow({
                 onCopyEmbed={copyEmbed}
                 onExtractMidi={extractStemMidi}
                 midiBusy={midiBusy}
+                onDelete={(path, name) => setStemDelete({ name, path })}
+                beats={job.result?.beats}
               />
             </div>
           )}
         </div>
       )}
 
+      <ConfirmDialog
+        open={stemDelete !== null}
+        title={
+          stemDelete
+            ? `Delete ${STEM_LABELS[stemDelete.name] ?? stemDelete.name} stem?`
+            : ''
+        }
+        description={
+          stemDelete
+            ? `Removes the file from disk:\n${stemDelete.path}`
+            : ''
+        }
+        confirmLabel="Delete"
+        tone="danger"
+        onConfirm={async () => {
+          const target = stemDelete;
+          setStemDelete(null);
+          if (!target) return;
+          try {
+            await deleteStem(job.id, target.name);
+          } catch (e) {
+            toast({
+              title: 'Delete failed',
+              description: String(e),
+              variant: 'error',
+            });
+          }
+        }}
+        onCancel={() => setStemDelete(null)}
+      />
       <ConfirmDialog
         open={removeOpen}
         title="Delete this extraction?"

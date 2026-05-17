@@ -105,6 +105,13 @@ export function SeparatorShell() {
     // in which case the local state was already correct.
     setJobs((prev) => prev.filter((j) => j.id !== id));
     api.removeJob(id).catch((e) => setSubmitError(String(e)));
+    // Drop the saved mixer state too — keeping it would leak entries
+    // for jobs the user already discarded.
+    try {
+      localStorage.removeItem(`stash:separator:mixer:${id}`);
+    } catch {
+      // localStorage may be disabled; the leftover key is harmless.
+    }
   }, []);
 
   const clearAllCompleted = useCallback(async () => {

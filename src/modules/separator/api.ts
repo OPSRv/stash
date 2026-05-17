@@ -132,6 +132,15 @@ export const removeJob = (jobId: string): Promise<void> =>
 
 export const clearCompleted = (): Promise<void> => invoke('separator_clear_completed');
 
+/** Delete one stem file from a completed job — both the .wav on disk
+ *  and its `.peaks` sidecar, then drop the entry from the job manifest
+ *  so the mixer lane disappears on the next render. Use for empty /
+ *  silent stems demucs produces on tracks that don't contain that
+ *  instrument. The backend re-emits `separator:job` with the trimmed
+ *  stems map. */
+export const deleteStem = (jobId: string, stemName: string): Promise<void> =>
+  invoke('separator_delete_stem', { jobId, stemName });
+
 /** Audio extensions ffmpeg / soundfile can read. We don't validate
  *  content type here — demucs / soundfile fail loudly on a misnamed
  *  file, and the alternative (sniffing magic bytes from the renderer)

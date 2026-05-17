@@ -176,10 +176,10 @@ use modules::diarization::{
     diarization_delete, diarization_download, diarization_status, DiarizationState,
 };
 use modules::separator::{
-    separator_cancel, separator_clear_completed, separator_delete, separator_download,
-    separator_extract_midi, separator_list_jobs, separator_mixdown, separator_read_peaks,
-    separator_remove_job, separator_run, separator_scan_disk, separator_status,
-    separator_write_peaks, SeparatorState,
+    separator_cancel, separator_clear_completed, separator_delete, separator_delete_stem,
+    separator_download, separator_extract_midi, separator_list_jobs, separator_mixdown,
+    separator_read_peaks, separator_remove_job, separator_run, separator_scan_disk,
+    separator_status, separator_write_peaks, SeparatorState,
 };
 use modules::downloader::{
     commands::{
@@ -733,6 +733,7 @@ pub fn run() {
             separator_list_jobs,
             separator_clear_completed,
             separator_remove_job,
+            separator_delete_stem,
             separator_scan_disk,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,

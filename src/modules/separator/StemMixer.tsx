@@ -16,11 +16,17 @@ import { TransportButton } from '../../shared/ui/TransportButton';
 import { IconButton } from '../../shared/ui/IconButton';
 // IconButton kept for the per-lane action strip (Reveal / Embed / Copy / MIDI).
 import { useToast } from '../../shared/ui/Toast';
-import { CopyIcon, ExternalIcon, NoteIcon, PauseIcon, PlayIcon } from '../../shared/ui/icons';
+import { CopyIcon, ExternalIcon, NoteIcon, PauseIcon, PlayIcon, TrashIcon } from '../../shared/ui/icons';
 import { revealFile } from '../../shared/util/revealFile';
 import { mediaStreamUrl, mixdown, readPeaks, STEM_LABELS, stemColor, writePeaks } from './api';
 
 interface StemMixerProps {
+  /// Stable identifier for the job whose stems we're mixing. Used as
+  /// the localStorage key for mixer state (volumes, mute/solo,
+  /// master, beat-grid toggle, loop region) so the user returns to
+  /// the same mix every time they re-open this job. Empty string =
+  /// don't persist.
+  jobId: string;
   /// Ordered list of stems. Component renders one lane per entry, in
   /// the supplied order. Re-running the parent with a different set
   /// resets transport state — we treat the component as bound to a
@@ -42,6 +48,15 @@ interface StemMixerProps {
   /// Used to disable every MIDI button while one is running so the
   /// user can't queue two simultaneous basic-pitch runs.
   midiBusy: string | null;
+  /// Delete the stem file from disk and drop the lane. Parent should
+  /// guard with a confirm dialog — once accepted, the backend
+  /// re-emits the job with the stem removed and the lane vanishes.
+  onDelete: (path: string, stemName: string) => void;
+  /// Beat times in seconds (librosa output, ascending). When present,
+  /// the mixer renders thin vertical lines on each lane waveform at
+  /// every beat; the user can toggle the overlay via a transport
+  /// button. Empty / missing → toggle is hidden.
+  beats?: number[];
 }
 
 type LaneState = {
@@ -56,6 +71,33 @@ type LaneState = {
 };
 
 const DEFAULT_LANE: LaneState = { volume: 1, muted: false, solo: false };
+
+/// Snapshot persisted to localStorage keyed by jobId. Versioned with
+/// `v` so a future schema change can ignore stale blobs instead of
+/// throwing. Loop+beat-grid toggles live here too — they're UI
+/// concerns, not pipeline state, so the renderer owns them.
+type PersistedMixerState = {
+  v: 1;
+  master: number;
+  showBeats: boolean;
+  loop: { a: number; b: number } | null;
+  lanes: Record<string, LaneState>;
+};
+
+const persistKey = (jobId: string) => `stash:separator:mixer:${jobId}`;
+
+function loadPersisted(jobId: string): PersistedMixerState | null {
+  if (!jobId) return null;
+  try {
+    const raw = localStorage.getItem(persistKey(jobId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedMixerState;
+    if (parsed.v !== 1) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 /// Number of waveform bars per lane. 600 fits a ~900 px popup nicely
 /// without over-sampling and keeps draw time at ~1 ms.
@@ -95,6 +137,7 @@ function formatClock(seconds: number): string {
 }
 
 export function StemMixer({
+  jobId,
   stems,
   durationHint,
   onReveal,
@@ -102,6 +145,8 @@ export function StemMixer({
   onCopyEmbed,
   onExtractMidi,
   midiBusy,
+  onDelete,
+  beats,
 }: StemMixerProps) {
   const { toast } = useToast();
 
@@ -134,13 +179,62 @@ export function StemMixer({
   // smooth without forcing a React rerender each frame.
   const playheadRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
+  // Restore the previous mix on mount. We read synchronously inside
+  // the useState initialiser so the very first render already has
+  // the saved volumes / mute-solo / master in place — no flash of
+  // defaults followed by a snap-to-saved.
+  const persisted = useMemo(() => loadPersisted(jobId), [jobId]);
+
   const [lanes, setLanes] = useState<Record<string, LaneState>>(() => {
     const init: Record<string, LaneState> = {};
-    for (const s of stems) init[s.name] = { ...DEFAULT_LANE };
+    for (const s of stems) {
+      init[s.name] =
+        persisted?.lanes?.[s.name] ?? { ...DEFAULT_LANE };
+    }
     return init;
   });
-  const [masterVolume, setMasterVolume] = useState(1);
+  const [masterVolume, setMasterVolume] = useState(persisted?.master ?? 1);
   const [mixing, setMixing] = useState(false);
+  // Beat-grid overlay default-on when librosa supplied beats. The
+  // user can hide it via the transport button for a clean waveform.
+  const hasBeats = (beats?.length ?? 0) > 0;
+  const [showBeats, setShowBeats] = useState(persisted?.showBeats ?? hasBeats);
+  // A-B loop region. `draft` holds the first shift-click while the
+  // user picks the second endpoint; `loop` is the active region.
+  // Both endpoints are seconds. We mirror `loop` into a ref so the
+  // rAF playback tick reads the latest bounds without a dep chain.
+  const [loop, setLoop] = useState<{ a: number; b: number } | null>(
+    persisted?.loop ?? null,
+  );
+  const [loopDraft, setLoopDraft] = useState<number | null>(null);
+  const loopRef = useRef<typeof loop>(null);
+  useEffect(() => {
+    loopRef.current = loop;
+  }, [loop]);
+
+  // Persist on change, debounced 300 ms so dragging a slider doesn't
+  // hammer localStorage 60×/s. We intentionally don't include
+  // `loopDraft` — it's a transient picking step, not user-meaningful
+  // state worth preserving across remounts.
+  useEffect(() => {
+    if (!jobId) return;
+    const id = window.setTimeout(() => {
+      const snapshot: PersistedMixerState = {
+        v: 1,
+        master: masterVolume,
+        showBeats,
+        loop,
+        lanes,
+      };
+      try {
+        localStorage.setItem(persistKey(jobId), JSON.stringify(snapshot));
+      } catch {
+        // Quota exceeded / private mode — best-effort, the next
+        // session just opens with defaults.
+      }
+    }, 300);
+    return () => window.clearTimeout(id);
+  }, [jobId, masterVolume, showBeats, loop, lanes]);
 
   const anySolo = useMemo(
     () => Object.values(lanes).some((l) => l.solo),
@@ -325,6 +419,25 @@ export function StemMixer({
         if (!ctxRef.current) return;
         const elapsed = ctxRef.current.currentTime - playStartTimeRef.current;
         const next = playStartOffsetRef.current + elapsed;
+        // Loop wrap — keep restarting from `a` whenever the playhead
+        // crosses `b`. We check before the duration-stop branch so a
+        // loop region that touches the end of the track keeps looping
+        // instead of stopping playback.
+        const lp = loopRef.current;
+        // Wrap only when the current run started inside the region.
+        // Lets the user seek past B with a regular click without the
+        // tick yanking them back, while still looping cleanly when
+        // playback actually originates inside [a, b].
+        if (
+          lp &&
+          next >= lp.b &&
+          playStartOffsetRef.current >= lp.a &&
+          playStartOffsetRef.current < lp.b
+        ) {
+          liveTimeRef.current = lp.a;
+          startSources(lp.a);
+          return;
+        }
         if (next >= duration) {
           setPosition(duration);
           setPlaying(false);
@@ -365,6 +478,41 @@ export function StemMixer({
     setPlaying(false);
   }, [duration]);
 
+  /// Place an A or B marker, or clear an active loop. The flow:
+  ///   1st shift-click → record the timestamp as draft A.
+  ///   2nd shift-click → close the region (A = min, B = max).
+  ///   shift-click while a loop is active → clear it.
+  /// Picking the second endpoint within 50 ms of the first is treated
+  /// as a clear so a double-tap aborts an accidental first click.
+  const setLoopPoint = useCallback(
+    (t: number) => {
+      const clamped = Math.max(0, Math.min(duration, t));
+      if (loop) {
+        setLoop(null);
+        setLoopDraft(null);
+        return;
+      }
+      if (loopDraft === null) {
+        setLoopDraft(clamped);
+        return;
+      }
+      const a = Math.min(loopDraft, clamped);
+      const b = Math.max(loopDraft, clamped);
+      if (b - a < 0.05) {
+        setLoopDraft(null);
+        return;
+      }
+      setLoop({ a, b });
+      setLoopDraft(null);
+    },
+    [duration, loop, loopDraft],
+  );
+
+  const clearLoop = useCallback(() => {
+    setLoop(null);
+    setLoopDraft(null);
+  }, []);
+
   const seek = useCallback(
     (t: number) => {
       const clamped = Math.max(0, Math.min(duration, t));
@@ -398,11 +546,19 @@ export function StemMixer({
       } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         seek(position + (e.shiftKey ? 10 : 5));
+      } else if (e.key === 'l' || e.key === 'L') {
+        // L mirrors shift+click on the current position — quickly
+        // stage A then B without reaching for the lane with the mouse.
+        e.preventDefault();
+        setLoopPoint(position);
+      } else if (e.key === 'Escape' && (loop || loopDraft !== null)) {
+        e.preventDefault();
+        clearLoop();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [play, pause, playing, position, seek]);
+  }, [play, pause, playing, position, seek, setLoopPoint, clearLoop, loop, loopDraft]);
 
   // ── lane controls ────────────────────────────────────────────────
   const setLane = (name: string, patch: Partial<LaneState>) =>
@@ -487,6 +643,12 @@ export function StemMixer({
         onMixdown={handleMixdown}
         mixing={mixing}
         loading={loading}
+        hasBeats={hasBeats}
+        showBeats={showBeats}
+        onToggleBeats={() => setShowBeats((v) => !v)}
+        loop={loop}
+        loopDraft={loopDraft}
+        onClearLoop={clearLoop}
       />
       {loadError && (
         <div className="px-3 py-2 text-meta" style={{ color: '#f87171' }}>
@@ -518,6 +680,11 @@ export function StemMixer({
             onCopyPath={() => onCopyPath(stem.path)}
             onCopyEmbed={() => onCopyEmbed(stem.path, stem.name)}
             onExtractMidi={() => onExtractMidi(stem.path, stem.name)}
+            onDelete={() => onDelete(stem.path, stem.name)}
+            beats={showBeats ? beats : undefined}
+            loop={loop}
+            loopDraft={loopDraft}
+            onSetLoopPoint={setLoopPoint}
           />
         ))}
       </ul>
@@ -539,6 +706,12 @@ interface TransportProps {
   onSeek: (t: number) => void;
   onMasterVolume: (v: number) => void;
   onMixdown: () => void;
+  hasBeats: boolean;
+  showBeats: boolean;
+  onToggleBeats: () => void;
+  loop: { a: number; b: number } | null;
+  loopDraft: number | null;
+  onClearLoop: () => void;
 }
 
 function Transport({
@@ -553,6 +726,12 @@ function Transport({
   onSeek,
   onMasterVolume,
   onMixdown,
+  hasBeats,
+  showBeats,
+  onToggleBeats,
+  loop,
+  loopDraft,
+  onClearLoop,
 }: TransportProps) {
   return (
     <div className="stash-stem-transport">
@@ -596,6 +775,32 @@ function Transport({
           />
         </div>
       </div>
+      {hasBeats && (
+        <IconButton
+          title={showBeats ? 'Hide beat grid' : 'Show beat grid'}
+          onClick={onToggleBeats}
+          active={showBeats}
+        >
+          <BeatGridIcon size={12} />
+        </IconButton>
+      )}
+      {(loop || loopDraft !== null) && (
+        <button
+          type="button"
+          onClick={onClearLoop}
+          title="Clear loop region"
+          className="text-meta font-mono tabular-nums shrink-0 select-none rounded px-1.5 py-0.5 transition-colors"
+          style={{
+            background: 'rgba(var(--stash-accent-rgb), 0.12)',
+            color: 'rgb(var(--stash-accent-rgb))',
+            border: '1px solid rgba(var(--stash-accent-rgb), 0.32)',
+          }}
+        >
+          {loop
+            ? `${formatClock(loop.a)} ↔ ${formatClock(loop.b)} ×`
+            : `A ${formatClock(loopDraft ?? 0)} · pick B…`}
+        </button>
+      )}
       <Button
         size="xs"
         variant="soft"
@@ -607,6 +812,26 @@ function Transport({
         {mixing ? 'Mixing…' : 'Mix down'}
       </Button>
     </div>
+  );
+}
+
+/// Tiny grid glyph — three short vertical bars; communicates "beat
+/// grid" without competing with the rest of the transport row.
+function BeatGridIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+    >
+      <line x1="2.5" y1="2" x2="2.5" y2="10" />
+      <line x1="6" y1="2" x2="6" y2="10" />
+      <line x1="9.5" y1="2" x2="9.5" y2="10" />
+    </svg>
   );
 }
 
@@ -635,6 +860,22 @@ interface LaneProps {
   onCopyPath: () => void;
   onCopyEmbed: () => void;
   onExtractMidi: () => void;
+  onDelete: () => void;
+  /// Optional beat times (seconds) rendered as faint vertical lines
+  /// over the waveform; passing `undefined` keeps the canvas clean.
+  /// Lane redraws on toggle because `beats` enters the layout deps.
+  beats?: number[];
+  /// Active A-B loop region (seconds). When set, the lane renders a
+  /// translucent band between the endpoints and the transport tick
+  /// wraps playback back to `a` whenever it crosses `b`.
+  loop: { a: number; b: number } | null;
+  /// First endpoint of a pending loop (shift-click in flight). Drawn
+  /// as a single dashed vertical line so the user can see what's
+  /// staged before they commit B with the next click.
+  loopDraft: number | null;
+  /// shift+click on the lane forwards here so the mixer can stage
+  /// the next A/B endpoint or clear an active region.
+  onSetLoopPoint: (t: number) => void;
 }
 
 function StemLane({
@@ -656,6 +897,11 @@ function StemLane({
   onCopyPath,
   onCopyEmbed,
   onExtractMidi,
+  onDelete,
+  beats,
+  loop,
+  loopDraft,
+  onSetLoopPoint,
 }: LaneProps) {
   // path is forwarded for callers that prefer absolute paths in tooltips.
   void path;
@@ -685,14 +931,37 @@ function StemLane({
       const x = i * barWidth;
       ctx.fillRect(x, midY - h, Math.max(1, barWidth - 0.5), h * 2);
     }
-  }, [peaks, lane.muted, dimmed, rgb]);
+    // Beat grid on top of the waveform. Every 4th beat (downbeat in
+    // 4/4 — a heuristic, not a true meter detection) gets a brighter
+    // stroke so the eye can latch onto bars. librosa returns beats in
+    // seconds, so we just project onto the canvas via duration.
+    if (beats && beats.length > 0 && duration > 0) {
+      ctx.lineWidth = Math.max(1, dpr);
+      for (let i = 0; i < beats.length; i++) {
+        const t = beats[i];
+        if (t < 0 || t > duration) continue;
+        const x = (t / duration) * canvas.width;
+        const downbeat = i % 4 === 0;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${downbeat ? 0.32 : 0.14})`;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+    }
+  }, [peaks, lane.muted, dimmed, rgb, beats, duration]);
 
   const onLaneClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const wrap = wrapRef.current;
     if (!wrap || !duration) return;
     const rect = wrap.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    onSeek((x / rect.width) * duration);
+    const t = (x / rect.width) * duration;
+    if (e.shiftKey) {
+      onSetLoopPoint(t);
+      return;
+    }
+    onSeek(t);
   };
 
   const playheadLeft =
@@ -788,6 +1057,9 @@ function StemLane({
             MIDI
           </span>
         </IconButton>
+        <IconButton title="Delete stem (removes file)" onClick={onDelete}>
+          <TrashIcon size={12} />
+        </IconButton>
       </div>
       <div
         ref={wrapRef}
@@ -799,6 +1071,29 @@ function StemLane({
         }}
       >
         <canvas ref={canvasRef} className="block w-full h-full" />
+        {loop && duration > 0 && (
+          <div
+            aria-hidden
+            className="absolute top-0 bottom-0 pointer-events-none"
+            style={{
+              left: `${(loop.a / duration) * 100}%`,
+              width: `${((loop.b - loop.a) / duration) * 100}%`,
+              background: `rgba(${rgb}, 0.18)`,
+              boxShadow: `inset 1px 0 0 rgba(${rgb}, 0.8), inset -1px 0 0 rgba(${rgb}, 0.8)`,
+            }}
+          />
+        )}
+        {loopDraft !== null && duration > 0 && (
+          <div
+            aria-hidden
+            className="absolute top-0 bottom-0 pointer-events-none"
+            style={{
+              left: `${(loopDraft / duration) * 100}%`,
+              width: 0,
+              borderLeft: `1px dashed rgba(${rgb}, 0.9)`,
+            }}
+          />
+        )}
         <div
           ref={registerPlayhead}
           aria-hidden

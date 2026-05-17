@@ -20,8 +20,9 @@ pub mod state;
 
 pub use commands::{
     enqueue_job, separator_cancel, separator_clear_completed, separator_delete,
-    separator_download, separator_list_jobs, separator_remove_job, separator_run,
-    separator_extract_midi, separator_mixdown, separator_read_peaks, separator_scan_disk, separator_status, separator_write_peaks, SeparatorRunArgs,
+    separator_delete_stem, separator_download, separator_list_jobs, separator_remove_job,
+    separator_run, separator_extract_midi, separator_mixdown, separator_read_peaks,
+    separator_scan_disk, separator_status, separator_write_peaks, SeparatorRunArgs,
 };
 pub use jobs::{JobStatus, SeparatorJob};
 pub use state::SeparatorState;

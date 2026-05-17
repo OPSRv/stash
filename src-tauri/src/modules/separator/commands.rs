@@ -424,6 +424,57 @@ pub fn separator_remove_job(
     Ok(())
 }
 
+/// Delete a single stem file (and its `.peaks` sidecar) from a completed
+/// job, and drop it from the job's manifest so future popup opens
+/// don't try to load it. The job itself stays alive — this is meant
+/// for the common case of demucs producing an empty / silent stem
+/// (e.g. piano on a track with no piano) that the user wants gone.
+///
+/// Best-effort on the filesystem side: a missing file is not an error
+/// (the user may have deleted it manually) — we still update the
+/// manifest so the UI lane vanishes. Re-emits the job on
+/// `separator:job` so SeparatorShell picks up the new stem list.
+#[tauri::command]
+pub fn separator_delete_stem(
+    app: AppHandle,
+    state: State<'_, Arc<SeparatorState>>,
+    job_id: String,
+    stem_name: String,
+) -> Result<(), String> {
+    let snapshot = {
+        let mut jobs = state.jobs.lock().unwrap();
+        let job = jobs
+            .iter_mut()
+            .find(|j| j.id == job_id)
+            .ok_or_else(|| format!("job not found: {job_id}"))?;
+        let result = job
+            .result
+            .as_mut()
+            .ok_or_else(|| "job has no result".to_string())?;
+        let stems = result
+            .stems
+            .as_mut()
+            .ok_or_else(|| "job has no stems".to_string())?;
+        let path = stems
+            .remove(&stem_name)
+            .ok_or_else(|| format!("stem not in job: {stem_name}"))?;
+        let stem_path = PathBuf::from(&path);
+        if stem_path.is_file() {
+            if let Err(e) = std::fs::remove_file(&stem_path) {
+                eprintln!("[separator] rm stem {}: {e}", stem_path.display());
+            }
+        }
+        let peaks = peaks_sidecar_path(&stem_path);
+        if peaks.is_file() {
+            let _ = std::fs::remove_file(&peaks);
+        }
+        job.clone()
+    };
+    write_manifest(&snapshot);
+    let _ = app.emit("separator:job", snapshot);
+    Ok(())
+}
+
 /// Walk the user's stems output directory and reconstruct one
 /// `SeparatorJob` per subfolder that holds a `manifest.json`. Used on
 /// startup so a fresh popup process still sees historical jobs the user
