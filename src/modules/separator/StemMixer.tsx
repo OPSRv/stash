@@ -48,8 +48,10 @@ type LaneState = {
   /// User-set linear gain (0..1.5). >1 boosts a bit for quiet stems.
   volume: number;
   muted: boolean;
-  /// At most one stem can be solo'd. When any stem is solo, every
-  /// non-solo stem mutes regardless of its own mute flag.
+  /// Any number of stems can be solo'd. When at least one stem is
+  /// solo, every non-solo stem is silenced regardless of its own
+  /// mute flag, and solo'd stems play even if their mute is on
+  /// (solo overrides mute — Logic / Ableton / Pro Tools semantics).
   solo: boolean;
 };
 
@@ -412,16 +414,12 @@ export function StemMixer({
   const toggleMute = (name: string) =>
     setLane(name, { muted: !(lanes[name]?.muted ?? false) });
 
-  const toggleSolo = (name: string) => {
-    const wasSolo = lanes[name]?.solo ?? false;
-    setLanes((prev) => {
-      const next: Record<string, LaneState> = {};
-      for (const [k, v] of Object.entries(prev)) {
-        next[k] = { ...v, solo: k === name ? !wasSolo : false };
-      }
-      return next;
-    });
-  };
+  // DAW-style solo: any number of lanes can be solo'd simultaneously.
+  // When any solo is active, only solo'd lanes are audible (see
+  // effectiveGain — solo overrides the lane's own mute flag too,
+  // matching Logic / Ableton / Pro Tools).
+  const toggleSolo = (name: string) =>
+    setLane(name, { solo: !(lanes[name]?.solo ?? false) });
 
   // ── mixdown ──────────────────────────────────────────────────────
   const handleMixdown = async () => {
