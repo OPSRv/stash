@@ -64,6 +64,7 @@ pub fn diarize_samples(
     sidecar_bin: &Path,
     segmentation_model: &Path,
     embedding_model: &Path,
+    num_speakers: Option<i32>,
 ) -> Result<Vec<SpeakerSegment>, String> {
     use std::io::Write;
 
@@ -74,9 +75,15 @@ pub fn diarize_samples(
         ));
     }
 
-    let mut child = std::process::Command::new(sidecar_bin)
-        .arg(segmentation_model)
-        .arg(embedding_model)
+    let mut cmd = std::process::Command::new(sidecar_bin);
+    cmd.arg(segmentation_model).arg(embedding_model);
+    // Only forward the flag when the caller actually wants to pin the
+    // cluster count; older sidecars without the flag still accept the
+    // 2-positional form and stay backward-compatible.
+    if let Some(n) = num_speakers.filter(|n| *n > 0) {
+        cmd.arg("--num-clusters").arg(n.to_string());
+    }
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -222,6 +229,7 @@ pub async fn transcribe_with_optional_diarization(
     audio: PathBuf,
     language: Option<String>,
     enabled: bool,
+    num_speakers: Option<i32>,
 ) -> Result<String, String> {
     use crate::modules::whisper::commands as whisper_cmd;
     use crate::modules::whisper::pipeline as wp;
@@ -253,7 +261,7 @@ pub async fn transcribe_with_optional_diarization(
         // buffer — no second decode pass. On any failure we degrade
         // gracefully to plain text rather than abort the whole
         // transcription.
-        let speakers = match diarize_samples(samples, &sidecar_bin, &seg_path, &emb_path) {
+        let speakers = match diarize_samples(samples, &sidecar_bin, &seg_path, &emb_path, num_speakers) {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "diarization failed, returning plain transcript");
@@ -417,7 +425,7 @@ mod tests {
         // produce a less obvious "No such file or directory".
         let missing = std::path::Path::new("/tmp/__stash_diarize_does_not_exist__");
         let dummy = std::path::Path::new("/tmp/_no_model");
-        let err = diarize_samples(vec![0.0; 16], missing, dummy, dummy).unwrap_err();
+        let err = diarize_samples(vec![0.0; 16], missing, dummy, dummy, None).unwrap_err();
         assert!(
             err.contains("not installed"),
             "expected install hint, got: {err}"

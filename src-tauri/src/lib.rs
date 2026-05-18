@@ -172,6 +172,10 @@ use modules::clipboard::{
     monitor::{ArboardReader, Monitor},
     repo::ClipboardRepo,
 };
+use modules::converter::{
+    converter_cancel, converter_clear_completed, converter_list_jobs, converter_remove_job,
+    converter_run, converter_status, converter_transcribe_to_file, ConverterState,
+};
 use modules::diarization::{
     diarization_delete, diarization_download, diarization_status, DiarizationState,
 };
@@ -262,9 +266,13 @@ use modules::translator::{
     repo::TranslationsRepo,
 };
 use modules::voice::commands::{
-    voice_ask, voice_get_settings, voice_set_settings, voice_transcribe,
+    voice_ask, voice_get_quick_commands, voice_get_settings, voice_list_commands,
+    voice_save_attachment, voice_set_quick_commands, voice_set_settings, voice_transcribe,
 };
-use modules::voice::popup::{voice_popup_hide, voice_popup_show, voice_popup_toggle};
+use modules::voice::popup::{
+    voice_popup_get_pinned, voice_popup_hide, voice_popup_set_pinned, voice_popup_show,
+    voice_popup_toggle, VoicePopupAutoHide,
+};
 use modules::webchat::commands::{
     webchat_back, webchat_close, webchat_close_all, webchat_current_url, webchat_embed,
     webchat_forward, webchat_hide, webchat_hide_all, webchat_reload, webchat_set_zoom,
@@ -613,9 +621,15 @@ pub fn run() {
             voice_ask,
             voice_get_settings,
             voice_set_settings,
+            voice_list_commands,
+            voice_get_quick_commands,
+            voice_set_quick_commands,
+            voice_save_attachment,
             voice_popup_show,
             voice_popup_hide,
             voice_popup_toggle,
+            voice_popup_set_pinned,
+            voice_popup_get_pinned,
             global_search,
             system_list_processes,
             system_kill_process,
@@ -738,6 +752,13 @@ pub fn run() {
             separator_drag_icon_path,
             separator_extract_chords,
             separator_scan_disk,
+            converter_status,
+            converter_run,
+            converter_cancel,
+            converter_list_jobs,
+            converter_remove_job,
+            converter_clear_completed,
+            converter_transcribe_to_file,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,
             modules::ipc::install::stash_cli_uninstall,
@@ -917,6 +938,10 @@ pub fn run() {
             // worker thread (`commands::run_worker`) can hold a reference
             // without juggling lifetimes through the Tauri state plumbing.
             app.manage(Arc::new(SeparatorState::new()));
+            // Converter (ffmpeg orchestrator). Same Arc shape — the
+            // worker thread holds it for the duration of a job, and
+            // the on-disk `jobs.json` hydrates lazily on first command.
+            app.manage(Arc::new(ConverterState::new()));
 
             // Hot-overwrite the staged Python entry point so a script-
             // only fix (e.g. new --mode midi in v0.1.32) reaches an
@@ -1176,6 +1201,8 @@ pub fn run() {
 
             let auto_hide = Arc::new(PopupAutoHide(AtomicBool::new(true)));
             app.manage(Arc::clone(&auto_hide));
+            let voice_auto_hide = Arc::new(VoicePopupAutoHide::default());
+            app.manage(Arc::clone(&voice_auto_hide));
 
             let popup_pos_state = Arc::new(PopupPositionState::load(
                 data_dir.join("popup_position.json"),
@@ -1256,13 +1283,15 @@ pub fn run() {
                     }
                 }
                 let voice_clone = voice_win.clone();
+                let voice_auto_hide_clone = Arc::clone(&voice_auto_hide);
                 voice_win.on_window_event(move |event| {
                     if let WindowEvent::Focused(false) = event {
-                        // Mic-permission and a few system-level
-                        // pickers blur the capsule briefly; we
-                        // tolerate that — hide is best-effort and
-                        // the user can re-summon with ⌘⇧A.
-                        let _ = voice_clone.hide();
+                        // Skip auto-hide while the popup is pinned —
+                        // pinning bumps the NSPanel level so the user
+                        // explicitly wants it floating above other apps.
+                        if voice_auto_hide_clone.0.load(Ordering::SeqCst) {
+                            let _ = voice_clone.hide();
+                        }
                     }
                 });
             }

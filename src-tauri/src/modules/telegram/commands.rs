@@ -547,7 +547,7 @@ pub async fn telegram_retry_transcribe(
             // since the original recording landed.
             let diarize = super::settings::AiSettings::load(&state_clone).diarization_enabled;
             crate::modules::diarization::pipeline::transcribe_with_optional_diarization(
-                &app_clone, abs, None, diarize,
+                &app_clone, abs, None, diarize, None,
             )
             .await
         } else {

@@ -3,36 +3,34 @@ import { invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { accent } from '../../shared/theme/accent';
-import { UploadIcon, WaveformIcon } from '../../shared/ui/icons';
-import { ALL_SUPPORTED_EXTENSIONS, isSupportedMedia } from './api';
+import { UploadIcon, SpeakerIcon } from '../../shared/ui/icons';
+import { isSupportedMedia, SUPPORTED_EXTENSIONS } from './api';
 
 type DropZoneProps = {
   onPick: (path: string) => void;
-  /** When the user navigated here from another module with a file
-   *  pre-selected, surface it as a `data-pending-file` attr so a
-   *  selector can drive Playwright. */
   pendingFile?: string | null;
-  /** When `true`, render a one-line bar (~44px) instead of the centered
-   *  hero. Used by the shell when there's already history below — full
-   *  hero treatment is only justified on the empty state. */
+  /// One-line bar variant. Switches on once the user has at least one
+  /// pending or completed job — the hero treatment is only justified
+  /// on the empty state.
   compact?: boolean;
 };
 
+/// Drag-and-drop + file-picker for the converter. Accepts the union of
+/// audio and video extensions ffmpeg recognises (see api.ts). Mirrors
+/// `modules/separator/DropZone` — the Tauri-2 webview-level drag-drop
+/// is the only way to get real filesystem paths under hardened builds.
 export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps) {
   const [over, setOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const pickFile = useCallback(async () => {
     setError(null);
-    // The native file picker steals focus; without auto-hide off, the
-    // popup's blur handler would dismiss us mid-pick. Mirrors the
-    // pattern in `SettingsShell` folder picker.
     await invoke('set_popup_auto_hide', { enabled: false });
     try {
       const sel = await openDialog({
         multiple: false,
         directory: false,
-        filters: [{ name: 'Audio / Video', extensions: ALL_SUPPORTED_EXTENSIONS }],
+        filters: [{ name: 'Media', extensions: SUPPORTED_EXTENSIONS }],
       });
       if (typeof sel === 'string' && sel) onPick(sel);
     } catch (e) {
@@ -42,11 +40,6 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
     }
   }, [onPick]);
 
-  // Tauri 2 OS-level drag-drop. HTML5 drop events don't carry the
-  // absolute path in Tauri — `dataTransfer.files[0].path` is unreliable
-  // and undefined under hardened WebView builds. The webview-level
-  // `onDragDropEvent` is the only way to get real filesystem paths.
-  // Mirrors `notes/useAudioFileDrop.ts`.
   const onPickRef = useRef(onPick);
   useEffect(() => {
     onPickRef.current = onPick;
@@ -60,14 +53,14 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
       .onDragDropEvent((event) => {
         const p = event.payload;
         if (p.type === 'enter') {
-          const audioPaths = p.paths.filter(isSupportedMedia);
-          if (audioPaths.length > 0) setOver(true);
+          const accepted = p.paths.filter(isSupportedMedia);
+          if (accepted.length > 0) setOver(true);
         } else if (p.type === 'leave') {
           setOver(false);
         } else if (p.type === 'drop') {
           setOver(false);
-          const audioPaths = p.paths.filter(isSupportedMedia);
-          if (audioPaths.length === 0) {
+          const accepted = p.paths.filter(isSupportedMedia);
+          if (accepted.length === 0) {
             const first = p.paths[0];
             if (first) {
               const ext = first.split('.').pop() ?? '';
@@ -76,8 +69,8 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
             return;
           }
           setError(null);
-          // First file wins — separator processes one job at a time.
-          onPickRef.current(audioPaths[0]);
+          // First file wins — converter handles one queue at a time.
+          onPickRef.current(accepted[0]);
         }
       })
       .then((fn) => {
@@ -85,7 +78,7 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
         else unlisten = fn;
       })
       .catch(() => {
-        /* outside Tauri (tests, vite preview) — drop is a no-op there */
+        /* outside Tauri */
       });
 
     return () => {
@@ -94,8 +87,6 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
     };
   }, []);
 
-  // Keyboard activation — `role="button"` without Enter / Space handlers
-  // is a screen-reader trap. Both stick to the same WAI-ARIA convention.
   const onKey = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -107,11 +98,11 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
   );
 
   const commonProps = {
-    'data-testid': 'separator-dropzone',
+    'data-testid': 'converter-dropzone',
     'data-pending-file': pendingFile ?? undefined,
     role: 'button' as const,
     tabIndex: 0,
-    'aria-label': 'Drop or pick an audio file',
+    'aria-label': 'Drop or pick an audio / video file',
     onClick: pickFile,
     onKeyDown: onKey,
   };
@@ -135,10 +126,10 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
             }}
             aria-hidden
           >
-            {over ? <UploadIcon size={14} /> : <WaveformIcon size={14} />}
+            {over ? <UploadIcon size={14} /> : <SpeakerIcon size={14} />}
           </div>
           <span className="t-primary text-meta font-medium truncate">
-            {over ? 'Drop to start splitting' : 'Drop an audio file or click to pick'}
+            {over ? 'Drop to load' : 'Drop a media file or click to pick'}
           </span>
           <span className="t-tertiary text-meta truncate ml-auto">
             audio + video
@@ -165,9 +156,7 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
       {...commonProps}
       className="group relative flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed px-6 py-10 text-center transition-all duration-150 cursor-pointer ring-focus"
       style={{
-        borderColor: over
-          ? 'rgb(var(--stash-accent-rgb))'
-          : 'var(--hairline)',
+        borderColor: over ? 'rgb(var(--stash-accent-rgb))' : 'var(--hairline)',
         background: over ? accent(0.08) : 'transparent',
       }}
     >
@@ -179,14 +168,14 @@ export function DropZone({ onPick, pendingFile, compact = false }: DropZoneProps
         }}
         aria-hidden
       >
-        {over ? <UploadIcon size={20} /> : <WaveformIcon size={20} />}
+        {over ? <UploadIcon size={20} /> : <SpeakerIcon size={20} />}
       </div>
       <div className="flex flex-col gap-1">
         <p className="t-primary text-body font-medium">
-          {over ? 'Drop to start splitting' : 'Drop an audio file or click to pick'}
+          {over ? 'Drop to load' : 'Drop an audio or video file'}
         </p>
         <p className="t-tertiary text-meta">
-          Audio or video — demucs pulls the audio track out automatically
+          Convert · extract audio · transcribe · split into stems
         </p>
       </div>
       {error && (

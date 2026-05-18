@@ -1,6 +1,7 @@
 import type { ModuleDefinition } from './types';
 import { aiModule } from './ai';
 import { clipboardModule } from './clipboard';
+import { converterModule } from './converter';
 import { devModule } from './dev';
 import { downloaderModule } from './downloader';
 import { metronomeModule } from './metronome';
@@ -25,6 +26,7 @@ export const modules: ModuleDefinition[] = [
   telegramModule,
   musicModule,
   separatorModule,
+  converterModule,
   metronomeModule,
   pomodoroModule,
   terminalModule,

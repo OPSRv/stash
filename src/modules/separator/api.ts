@@ -177,12 +177,46 @@ export const SUPPORTED_EXTENSIONS = [
   'opus',
 ];
 
-export const isSupportedAudio = (path: string): boolean => {
+/** Video containers we accept on the drop zone too. Demucs / torchaudio
+ *  decode any non-WAV input through ffmpeg under the hood, so feeding it
+ *  a `.mov` from an iPhone or a `.mp4` recording works identically to
+ *  feeding it the audio track alone — the Python side just decodes the
+ *  audio stream and ignores the picture. Mirrors the converter's
+ *  `SUPPORTED_VIDEO_EXTENSIONS`. */
+export const SUPPORTED_VIDEO_EXTENSIONS = [
+  'mp4',
+  'm4v',
+  'mov',
+  'webm',
+  'mkv',
+  'avi',
+  'wmv',
+  'flv',
+  'mpg',
+  'mpeg',
+  '3gp',
+  'ts',
+  'mts',
+  'm2ts',
+];
+
+export const ALL_SUPPORTED_EXTENSIONS = [
+  ...SUPPORTED_EXTENSIONS,
+  ...SUPPORTED_VIDEO_EXTENSIONS,
+];
+
+const extOf = (path: string): string => {
   const dot = path.lastIndexOf('.');
-  if (dot < 0) return false;
-  const ext = path.slice(dot + 1).toLowerCase();
-  return SUPPORTED_EXTENSIONS.includes(ext);
+  return dot < 0 ? '' : path.slice(dot + 1).toLowerCase();
 };
+
+export const isSupportedAudio = (path: string): boolean =>
+  SUPPORTED_EXTENSIONS.includes(extOf(path));
+
+/** Anything demucs can pull an audio track out of: native audio + any
+ *  video container ffmpeg understands. */
+export const isSupportedMedia = (path: string): boolean =>
+  ALL_SUPPORTED_EXTENSIONS.includes(extOf(path));
 
 /** Display labels for the six htdemucs_6s stems. The 4-stem htdemucs /
  *  htdemucs_ft models drop the `guitar` and `piano` entries — UI code

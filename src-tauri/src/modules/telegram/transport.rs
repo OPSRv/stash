@@ -654,6 +654,7 @@ async fn handle_media(
                 audio_abs,
                 None,
                 diarize,
+                None,
             )
             .await
             {

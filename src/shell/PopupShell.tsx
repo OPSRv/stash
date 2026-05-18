@@ -36,6 +36,7 @@ import { musicHide, type NowPlaying } from '../modules/music/api';
 import { WebchatNowPlayingBar } from '../modules/web/WebchatNowPlayingBar';
 import { webchatCloseAll, type WebchatNowPlaying } from '../modules/web/webchatApi';
 import { applyTheme, subscribeTheme } from '../settings/theme';
+import { UpdateAvailableModal } from './UpdateAvailableModal';
 
 export const PopupShell = () => {
   // Module visibility & order live in `settings.json` via the cached
@@ -777,6 +778,7 @@ export const PopupShell = () => {
         onClose={() => setSearchOpen(false)}
         onNavigate={(tab) => openTab(tab)}
       />
+      <UpdateAvailableModal />
     </div>
   );
 };

@@ -460,6 +460,9 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::stash::SeparateStems);
     tools.register(super::tools::stash::DetectBpm);
     tools.register(super::tools::stash::GetSeparatorJob);
+    tools.register(super::tools::stash::ConvertMedia);
+    tools.register(super::tools::stash::TranscribeToFile);
+    tools.register(super::tools::stash::GetConverterJob);
     if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>()
     {
         tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));

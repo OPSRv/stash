@@ -54,15 +54,42 @@ fn main() {
 }
 
 fn run() -> Result<Vec<Segment>, String> {
+    // Parse `<seg> <emb> [--num-clusters N]`. The optional flag lets
+    // the parent pin the cluster count when the user already knows how
+    // many speakers are in the recording — sherpa's threshold-based
+    // auto-clustering then ignores `threshold` and uses the exact `N`.
+    // Omit the flag (or set N <= 0) to keep threshold-driven auto.
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        return Err(format!(
-            "usage: {} <segmentation.onnx> <embedding.onnx>  # PCM f32le 16k mono on stdin",
-            args.first().map(String::as_str).unwrap_or("stash-diarize"),
-        ));
+    let progname = args.first().map(String::as_str).unwrap_or("stash-diarize");
+    let usage =
+        format!("usage: {progname} <segmentation.onnx> <embedding.onnx> [--num-clusters N]");
+    let positional: Vec<&String> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--"))
+        .collect();
+    if positional.len() != 2 {
+        return Err(usage);
     }
-    let seg = std::path::PathBuf::from(&args[1]);
-    let emb = std::path::PathBuf::from(&args[2]);
+    let mut num_clusters_override: Option<i32> = None;
+    let mut i = 1;
+    while i < args.len() {
+        let a = &args[i];
+        if a == "--num-clusters" {
+            let v = args
+                .get(i + 1)
+                .ok_or_else(|| format!("--num-clusters requires a value\n{usage}"))?;
+            num_clusters_override = Some(
+                v.parse::<i32>()
+                    .map_err(|e| format!("--num-clusters parse: {e}"))?,
+            );
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    let seg = std::path::PathBuf::from(positional[0]);
+    let emb = std::path::PathBuf::from(positional[1]);
     if !seg.is_file() {
         return Err(format!("segmentation model not found: {}", seg.display()));
     }
@@ -80,11 +107,19 @@ fn run() -> Result<Vec<Segment>, String> {
     // the rationale (threshold 0.6 holds 2-person conversations
     // together; -1 picks cluster count via threshold; 0.3 / 0.5
     // suppresses two-frame "speakers" on consonants).
+    // num_clusters semantics: positive N pins the count, -1 falls back
+    // to threshold-based auto. Treat any non-positive override as
+    // "auto" so callers can pass 0 from a "auto" UI selection without
+    // special-casing.
+    let num_clusters = num_clusters_override
+        .filter(|n| *n > 0)
+        .map(Some)
+        .unwrap_or(Some(-1));
     let mut d = Diarize::new(
         &seg,
         &emb,
         DiarizeConfig {
-            num_clusters: Some(-1),
+            num_clusters,
             threshold: Some(0.6),
             min_duration_on: Some(0.3),
             min_duration_off: Some(0.5),

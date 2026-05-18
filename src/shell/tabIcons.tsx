@@ -35,6 +35,7 @@ export const TAB_ICON_COLORS: Record<string, string> = {
   telegram: '#3ba9ee',
   music: '#fb7185',
   separator: '#22d3ee',
+  converter: '#facc15',
   metronome: '#fb923c',
   pomodoro: '#ef4444',
   terminal: '#84cc16',
@@ -145,6 +146,27 @@ export const TAB_ICONS: Record<string, ReactNode> = {
       <path d="M3 12h13" />
       <path d="M3 18h16" />
       <circle cx="20" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  converter: (
+    /* Two opposing arrows — the universal "convert / swap" glyph.
+       Top arrow points right with its head on the right edge, bottom
+       points left with the head on the left. Reads as in-out media
+       transcoding without needing the explicit A→B framing other
+       glyphs in this set use. */
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M4 8h14m0 0-3-3m3 3-3 3" />
+      <path d="M20 16H6m0 0 3-3m-3 3 3 3" />
     </svg>
   ),
   metronome: (
