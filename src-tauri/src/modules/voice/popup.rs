@@ -10,9 +10,25 @@
 //! status (for keyboard input) without yanking foreground focus from
 //! the user's editor.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tauri::{AppHandle, Manager};
 
 const VOICE_LABEL: &str = "voice-popup";
+
+/// Pin state for the voice popup. Mirrors the main popup's
+/// `PopupAutoHide` flag — when pinned the blur handler skips
+/// `win.hide()` so switching to another app leaves the capsule
+/// floating on top. Stored as a dedicated state so it survives
+/// re-creation of the window between hides.
+pub struct VoicePopupAutoHide(pub AtomicBool);
+
+impl Default for VoicePopupAutoHide {
+    fn default() -> Self {
+        // auto-hide on by default — same UX as the unpinned main popup.
+        Self(AtomicBool::new(true))
+    }
+}
 /// Vertical gap between the capsule's bottom edge and the screen
 /// bottom. Mirrors macOS Dictation HUD spacing — far enough off the
 /// edge to dodge an auto-hidden Dock without floating in the middle
@@ -30,6 +46,41 @@ pub fn voice_popup_hide(app: AppHandle) -> Result<(), String> {
         let _ = win.hide();
     }
     Ok(())
+}
+
+/// Pin / unpin the voice popup. Mirrors `set_popup_pinned` in lib.rs
+/// for the main popup: bumps the NSPanel level above other windows
+/// (NSStatusWindowLevel = 25), turns off auto-hide-on-blur so app
+/// switches don't dismiss it, and re-applies `set_hides_on_deactivate`
+/// because AppKit can reset that flag when the level changes.
+#[tauri::command]
+pub fn voice_popup_set_pinned(
+    app: AppHandle,
+    state: tauri::State<'_, std::sync::Arc<VoicePopupAutoHide>>,
+    pinned: bool,
+) -> Result<(), String> {
+    state.0.store(!pinned, Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_nspanel::ManagerExt;
+        if let Ok(panel) = app.get_webview_panel(VOICE_LABEL) {
+            let level: i64 = if pinned { 25 } else { 3 };
+            panel.set_level(level);
+            panel.set_hides_on_deactivate(false);
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(win) = app.get_webview_window(VOICE_LABEL) {
+        let _ = win.set_always_on_top(pinned);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn voice_popup_get_pinned(
+    state: tauri::State<'_, std::sync::Arc<VoicePopupAutoHide>>,
+) -> bool {
+    !state.0.load(Ordering::SeqCst)
 }
 
 #[tauri::command]
