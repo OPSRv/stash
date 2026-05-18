@@ -38,6 +38,7 @@ export const TAB_ICON_COLORS: Record<string, string> = {
   metronome: '#fb923c',
   pomodoro: '#ef4444',
   terminal: '#84cc16',
+  dev: '#10b981',
   system: '#94a3b8',
   settings: '#a1a1aa',
 };
@@ -193,6 +194,26 @@ export const TAB_ICONS: Record<string, ReactNode> = {
     >
       <polyline points="4 7 9 12 4 17" />
       <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  ),
+  dev: (
+    /* Code chevrons + slash — the universal "developer tools" glyph.
+       Left `<`, right `>`, diagonal `/` between them so it reads at
+       13×13 without merging into a horizontal blur. */
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="m8 8-4 4 4 4" />
+      <path d="m16 8 4 4-4 4" />
+      <path d="m14 5-4 14" />
     </svg>
   ),
   system: (
