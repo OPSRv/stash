@@ -48,14 +48,50 @@ pub struct FileSecretStore {
 impl FileSecretStore {
     /// `path` must be a full file path (including filename). The parent
     /// directory must already exist or `set` will fail.
+    ///
+    /// The encryption key is derived from a per-install random salt
+    /// stored next to the secrets file (`.secrets.salt`) so the
+    /// envelope survives hostname changes — switching Wi-Fi networks,
+    /// running `scutil --set HostName`, or even a fresh macOS major
+    /// upgrade can flip the value the kernel reports, and an
+    /// hostname-derived key would silently lose all secrets on the
+    /// next launch. As a migration path we also try the legacy
+    /// hostname-derived key; if it decodes, we re-encrypt under the
+    /// stable key and the user never notices.
     pub fn new(path: PathBuf) -> Result<Self, String> {
-        let key = derive_key()?;
-        let cache = load_from_disk(&path, &key).unwrap_or_default();
-        Ok(Self {
+        let salt_path = path.with_file_name(".secrets.salt");
+        let (key, legacy_key) = load_or_create_key(&salt_path)?;
+        let mut cache = load_from_disk(&path, &key).unwrap_or_default();
+        let mut migrated = false;
+        if cache.accounts.is_empty() {
+            if let Some(c) = load_from_disk(&path, &legacy_key) {
+                if !c.accounts.is_empty() {
+                    cache = c;
+                    migrated = true;
+                }
+            }
+        }
+        let store = Self {
             path,
             key,
             cache: Mutex::new(cache),
-        })
+        };
+        if migrated {
+            // Re-write under the stable key so the next launch finds
+            // it directly without touching the hostname fallback.
+            let snapshot = {
+                let c = store.cache.lock().unwrap();
+                Envelope {
+                    accounts: c.accounts.clone(),
+                }
+            };
+            if let Err(e) = store.persist(&snapshot) {
+                tracing::warn!(error = %e, "file_secrets: legacy → stable migration write failed");
+            } else {
+                tracing::info!("file_secrets: migrated hostname-keyed store to stable salt");
+            }
+        }
+        Ok(store)
     }
 
     fn persist(&self, env: &Envelope) -> Result<(), String> {
@@ -136,13 +172,56 @@ fn load_from_disk(path: &std::path::Path, key: &[u8; 16]) -> Option<Envelope> {
 }
 
 fn derive_key() -> Result<[u8; 16], String> {
-    // Tie the key to this machine so copying the file off the box doesn't
-    // yield a decryptable secret on another host.
+    // Legacy key derivation kept for migration only. New installs use
+    // `load_or_create_key`; this stays so existing on-disk envelopes
+    // can be decrypted once and rewritten under the stable salt.
     let host = hostname();
     let mut key = [0u8; 16];
     pbkdf2::<Hmac<Sha256>>(host.as_bytes(), b"stash-telegram", 260_000, &mut key)
         .map_err(|e| format!("pbkdf2: {e}"))?;
     Ok(key)
+}
+
+/// Load (or generate) a per-install random salt and derive the AES key
+/// from it. Returns `(current, legacy)` so the caller can transparently
+/// migrate envelopes written by an older build.
+///
+/// The salt file lives next to `.secrets.bin` with `0600` perms; both
+/// files together are needed to decrypt, so dropping just one onto
+/// another machine still won't yield secrets. Tradeoff: anyone with
+/// read access to BOTH files can decrypt — same threat model as the
+/// original hostname approach.
+fn load_or_create_key(salt_path: &std::path::Path) -> Result<([u8; 16], [u8; 16]), String> {
+    let salt = match fs::read(salt_path) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            let mut bytes = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut bytes);
+            // Best-effort write — if disk is full / read-only, we still
+            // continue with the freshly generated salt in memory so the
+            // current session works; the next launch will regenerate.
+            if let Some(parent) = salt_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if let Err(e) = fs::write(salt_path, bytes) {
+                tracing::warn!(path = %salt_path.display(), error = %e, "salt write failed");
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(
+                    salt_path,
+                    fs::Permissions::from_mode(0o600),
+                );
+            }
+            bytes.to_vec()
+        }
+    };
+    let mut key = [0u8; 16];
+    pbkdf2::<Hmac<Sha256>>(&salt, b"stash-telegram", 260_000, &mut key)
+        .map_err(|e| format!("pbkdf2: {e}"))?;
+    let legacy = derive_key()?;
+    Ok((key, legacy))
 }
 
 fn hostname() -> String {

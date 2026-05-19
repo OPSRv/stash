@@ -25,7 +25,7 @@ pub mod presets;
 pub mod state;
 
 pub use commands::{
-    converter_cancel, converter_clear_completed, converter_list_jobs, converter_remove_job,
-    converter_run, converter_status, converter_transcribe_to_file,
+    converter_cancel, converter_clear_completed, converter_list_jobs, converter_read_transcript,
+    converter_remove_job, converter_run, converter_status, converter_transcribe_to_file,
 };
 pub use state::ConverterState;

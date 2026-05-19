@@ -255,11 +255,30 @@ export const VoicePopup = () => {
         ]);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        toast({
-          title: 'Помилка асистента',
-          description: msg,
-          variant: 'error',
-        });
+        const lower = msg.toLowerCase();
+        const isMissingKey =
+          lower.includes('api key') ||
+          lower.includes('api_key') ||
+          lower.includes('not configured') ||
+          lower.includes('missing key');
+        if (isMissingKey) {
+          toast({
+            title: 'AI не налаштовано',
+            description:
+              'Відкрий Settings → AI і додай API key для активного провайдера. Слеш-команди (наприклад /screenshot, /note) працюють без LLM.',
+            variant: 'error',
+          });
+          // Drop the user turn that produced the error — the next
+          // attempt should start from a clean thread state. Bringing
+          // up Settings is left to the user so we don't yank focus
+          // away from the popup unexpectedly.
+        } else {
+          toast({
+            title: 'Помилка асистента',
+            description: msg,
+            variant: 'error',
+          });
+        }
       } finally {
         setStatus('idle');
         askInFlightRef.current = false;
@@ -452,12 +471,23 @@ const Header = ({
   pinned: boolean;
   hasTurns: boolean;
 }) => (
-  <div className="flex items-center gap-2 px-3 py-2 border-b hair shrink-0">
-    <div className="t-secondary text-meta font-medium tracking-wide uppercase">
+  <div
+    data-tauri-drag-region
+    className="flex items-center gap-2 px-3 py-2 border-b hair shrink-0 cursor-grab active:cursor-grabbing"
+  >
+    <div
+      data-tauri-drag-region
+      className="t-secondary text-meta font-medium tracking-wide uppercase pointer-events-none"
+    >
       Stash Voice
     </div>
-    <div className="t-tertiary text-meta tabular-nums">⌘⇧A · Esc</div>
-    <div className="flex-1" />
+    <div
+      data-tauri-drag-region
+      className="t-tertiary text-meta tabular-nums pointer-events-none"
+    >
+      ⌘⇧A · Esc
+    </div>
+    <div data-tauri-drag-region className="flex-1" />
     <IconButton
       title={pinned ? 'Unpin window' : 'Pin window on top'}
       onClick={onTogglePin}

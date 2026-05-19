@@ -2,9 +2,11 @@ import { useState } from 'react';
 
 import { aiDeleteApiKey, aiSetApiKey } from '../modules/ai/api';
 import { buildModel } from '../modules/ai/provider';
+import { Badge } from '../shared/ui/Badge';
 import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
 import { SegmentedControl } from '../shared/ui/SegmentedControl';
+import { Select } from '../shared/ui/Select';
 import { Textarea } from '../shared/ui/Textarea';
 import { useToast } from '../shared/ui/Toast';
 
@@ -36,6 +38,59 @@ const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: 'google', label: 'Google' },
   { value: 'custom', label: 'Custom' },
 ];
+
+/// Curated, provider-specific model catalogs. Lets the user pick from
+/// a short list of "what to use" labels instead of memorising bare
+/// model ids. The trailing `__custom__` sentinel keeps the door open
+/// for any id the provider supports outside our curation — useful for
+/// pre-release SKUs, OpenRouter aliases, etc.
+const CUSTOM_SENTINEL = '__custom__';
+
+type ModelOption = {
+  id: string;
+  label: string;
+  hint?: string;
+};
+
+const MODEL_CATALOG: Record<Exclude<AiProvider, 'custom'>, ModelOption[]> = {
+  anthropic: [
+    {
+      id: 'claude-opus-4-7',
+      label: 'Claude Opus 4.7',
+      hint: 'Найрозумніша, найдорожча',
+    },
+    {
+      id: 'claude-sonnet-4-6',
+      label: 'Claude Sonnet 4.6',
+      hint: 'Баланс ціна/якість',
+    },
+    {
+      id: 'claude-haiku-4-5-20251001',
+      label: 'Claude Haiku 4.5',
+      hint: 'Швидка і дешева',
+    },
+  ],
+  openai: [
+    { id: 'gpt-4o', label: 'GPT-4o', hint: 'Універсальна, мультимодальна' },
+    { id: 'gpt-4o-mini', label: 'GPT-4o mini', hint: 'Дешева 4o' },
+    { id: 'o3-mini', label: 'o3-mini', hint: 'Reasoning, швидка' },
+    { id: 'o1', label: 'o1', hint: 'Reasoning, складні задачі' },
+    { id: 'o1-mini', label: 'o1-mini', hint: 'Reasoning, дешева' },
+  ],
+  google: [
+    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', hint: 'Топ-моделька' },
+    {
+      id: 'gemini-2.5-flash',
+      label: 'Gemini 2.5 Flash',
+      hint: 'Швидка і дешева',
+    },
+    {
+      id: 'gemini-2.5-flash-lite',
+      label: 'Gemini 2.5 Flash Lite',
+      hint: 'Найдешевша',
+    },
+  ],
+};
 
 const modelPlaceholder = (p: AiProvider): string => {
   switch (p) {
@@ -158,56 +213,66 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
         />
         <SettingRow
           title="Model"
-          description="Exact model id as the provider expects it. Not validated — new models work the moment your provider adds them."
+          description="Обери з курованого списку або введи власний id (напр. з OpenRouter). Список не валідується — нові моделі провайдера працюють одразу."
           control={
-            <Input
-              size="sm"
-              aria-label="Model name"
-              placeholder={modelPlaceholder(settings.aiProvider)}
+            <ModelPicker
+              provider={settings.aiProvider}
               value={settings.aiModel}
-              onChange={(e) => onChange('aiModel', e.currentTarget.value)}
-              className="w-[280px]"
+              onChange={(v) => onChange('aiModel', v)}
             />
           }
         />
         <SettingRow
           title="API key"
-          description={
-            keyStored
-              ? 'A key is saved for this provider. Type a new value and Save to replace.'
-              : 'Saved to the app settings file. No internet round-trip, no keychain.'
-          }
+          description="Спочатку пробує OS Keychain; на unsigned-білдах падає у зашифрований файл поряд із SQLite."
           control={
-            <div className="flex items-center gap-2">
-              <Input
-                size="sm"
-                aria-label="API key"
-                type={showKey ? 'text' : 'password'}
-                placeholder={keyStored ? '••••••••' : 'sk-…'}
-                value={keyInput}
-                onChange={(e) => setKeyInput(e.currentTarget.value)}
-                maxLength={512}
-                spellCheck={false}
-                autoComplete="off"
-                className="w-[240px]"
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setShowKey((v) => !v)}
-                aria-label={showKey ? 'Hide key' : 'Show key'}
-                title={showKey ? 'Hide' : 'Show'}
-              >
-                {showKey ? 'Hide' : 'Show'}
-              </Button>
-              <Button size="sm" variant="soft" tone="accent" onClick={saveKey} disabled={!keyInput.trim()}>
-                Save
-              </Button>
-              {keyStored && (
-                <Button size="sm" variant="ghost" tone="danger" onClick={clearKey}>
-                  Clear
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2">
+                {keyStored ? (
+                  <Badge tone="success" title="API key is stored for this provider">
+                    ✓ Saved
+                  </Badge>
+                ) : (
+                  <Badge tone="warning" title="No API key for this provider yet">
+                    Not configured
+                  </Badge>
+                )}
+                <Input
+                  size="sm"
+                  aria-label="API key"
+                  type={showKey ? 'text' : 'password'}
+                  placeholder={keyStored ? 'Replace key…' : keyPlaceholder(settings.aiProvider)}
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.currentTarget.value)}
+                  maxLength={512}
+                  spellCheck={false}
+                  autoComplete="off"
+                  className="w-[240px]"
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowKey((v) => !v)}
+                  aria-label={showKey ? 'Hide key' : 'Show key'}
+                  title={showKey ? 'Hide' : 'Show'}
+                >
+                  {showKey ? 'Hide' : 'Show'}
                 </Button>
-              )}
+                <Button
+                  size="sm"
+                  variant="soft"
+                  tone="accent"
+                  onClick={saveKey}
+                  disabled={!keyInput.trim()}
+                >
+                  Save
+                </Button>
+                {keyStored && (
+                  <Button size="sm" variant="ghost" tone="danger" onClick={clearKey}>
+                    Clear
+                  </Button>
+                )}
+              </div>
             </div>
           }
         />
@@ -280,4 +345,95 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
       </SettingsSection>
     </SettingsTab>
   );
+};
+
+// ---------------------------- Model picker ----------------------------
+
+type ModelPickerProps = {
+  provider: AiProvider;
+  value: string;
+  onChange: (next: string) => void;
+};
+
+/// Two-mode model selector: a Select with curated options when the
+/// provider has a catalog, plus a "Custom…" sentinel that drops the
+/// user back into a free-form Input. The free-form path is required —
+/// model ids drift faster than we can hand-edit a list, and OpenRouter
+/// / OpenAI-compat endpoints accept arbitrary names.
+const ModelPicker = ({ provider, value, onChange }: ModelPickerProps) => {
+  // Custom provider: free-form id only (we have no curated list).
+  if (provider === 'custom') {
+    return (
+      <Input
+        size="sm"
+        aria-label="Model id"
+        placeholder="model id as your provider expects it"
+        value={value}
+        onChange={(e) => onChange(e.currentTarget.value)}
+        className="w-[280px]"
+      />
+    );
+  }
+
+  const catalog = MODEL_CATALOG[provider];
+  const known = catalog.find((m) => m.id === value);
+  const showCustom = value.trim().length > 0 && !known;
+  const selectValue = showCustom ? CUSTOM_SENTINEL : known?.id ?? '';
+
+  const options = [
+    ...catalog.map((m) => ({
+      value: m.id,
+      label: m.hint ? `${m.label} · ${m.hint}` : m.label,
+    })),
+    { value: CUSTOM_SENTINEL, label: 'Custom…' },
+  ];
+
+  return (
+    <div className="flex flex-col items-end gap-1.5">
+      <div className="w-[320px]">
+        <Select<string>
+          size="sm"
+          value={selectValue}
+          onChange={(next) => {
+            if (next === CUSTOM_SENTINEL) {
+              // Keep whatever the user already typed when flipping to
+              // Custom — otherwise the input flashes empty and they
+              // have to re-type.
+              if (!showCustom) onChange('');
+              return;
+            }
+            onChange(next);
+          }}
+          options={options}
+          placeholder="Select a model…"
+        />
+      </div>
+      {showCustom && (
+        <Input
+          size="sm"
+          aria-label="Custom model id"
+          placeholder={modelPlaceholder(provider)}
+          value={value}
+          onChange={(e) => onChange(e.currentTarget.value)}
+          className="w-[320px]"
+        />
+      )}
+      {known && (
+        <code className="t-tertiary text-meta">{known.id}</code>
+      )}
+    </div>
+  );
+};
+
+const keyPlaceholder = (p: AiProvider): string => {
+  switch (p) {
+    case 'openai':
+      return 'sk-…';
+    case 'anthropic':
+      return 'sk-ant-…';
+    case 'google':
+      return 'AIza…';
+    case 'custom':
+      return 'API key';
+  }
 };

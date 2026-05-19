@@ -451,6 +451,33 @@ fn save_transcript_as_note(app: &AppHandle, stem: &str, body: &str) -> Result<i6
     guard.create(&title, body, now).map_err(|e| e.to_string())
 }
 
+/// Read a converter job's output file as UTF-8 text. Restricted to
+/// paths we already wrote ourselves — looking up by job_id means the
+/// frontend can't ask us to slurp `/etc/shadow`, even though the
+/// command is invoked from a renderer that the user controls.
+#[tauri::command]
+pub fn converter_read_transcript(
+    app: AppHandle,
+    state: State<'_, Arc<ConverterState>>,
+    job_id: String,
+) -> Result<String, String> {
+    ensure_loaded(&app, &state);
+    let path = {
+        let jobs = state.jobs.lock().unwrap();
+        let Some(j) = jobs.iter().find(|j| j.id == job_id) else {
+            return Err(format!("job not found: {job_id}"));
+        };
+        if !matches!(j.status, JobStatus::Completed) {
+            return Err("job not finished".into());
+        }
+        j.output_path.clone()
+    };
+    if path.is_empty() {
+        return Err("job has no output".into());
+    }
+    std::fs::read_to_string(&path).map_err(|e| format!("read {path}: {e}"))
+}
+
 #[tauri::command]
 pub fn converter_cancel(
     app: AppHandle,

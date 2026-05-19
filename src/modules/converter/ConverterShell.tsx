@@ -102,23 +102,27 @@ export function ConverterShell() {
   }, [pendingFile]);
 
   const startTranscribe = useCallback(
-    async (opts: Omit<api.TranscribeArgs, 'inputPath'>) => {
+    (opts: Omit<api.TranscribeArgs, 'inputPath'>) => {
       if (!pendingFile) return;
+      // Close the modal immediately — the job row in the queue already
+      // surfaces progress, so blocking the dialog until whisper.cpp
+      // finishes (can take minutes) leaves the user staring at a
+      // disabled "Transcribing…" button with nothing else to do. The
+      // backend keeps the promise alive so we still pick up note_id +
+      // errors when it resolves.
+      const file = pendingFile;
       setSubmitError(null);
-      setBusyKind('transcribe');
-      try {
-        const result = await api.transcribeToFile({
-          inputPath: pendingFile,
-          ...opts,
+      setTranscribeOpen(false);
+      setPendingFile(null);
+      setLastTranscribeNoteId(null);
+      api
+        .transcribeToFile({ inputPath: file, ...opts })
+        .then((result) => {
+          setLastTranscribeNoteId(result.note_id ?? null);
+        })
+        .catch((e) => {
+          setSubmitError(String(e));
         });
-        setTranscribeOpen(false);
-        setLastTranscribeNoteId(result.note_id ?? null);
-        setPendingFile(null);
-      } catch (e) {
-        setSubmitError(String(e));
-      } finally {
-        setBusyKind(null);
-      }
     },
     [pendingFile],
   );

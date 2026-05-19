@@ -173,8 +173,9 @@ use modules::clipboard::{
     repo::ClipboardRepo,
 };
 use modules::converter::{
-    converter_cancel, converter_clear_completed, converter_list_jobs, converter_remove_job,
-    converter_run, converter_status, converter_transcribe_to_file, ConverterState,
+    converter_cancel, converter_clear_completed, converter_list_jobs, converter_read_transcript,
+    converter_remove_job, converter_run, converter_status, converter_transcribe_to_file,
+    ConverterState,
 };
 use modules::diarization::{
     diarization_delete, diarization_download, diarization_status, DiarizationState,
@@ -759,6 +760,7 @@ pub fn run() {
             converter_remove_job,
             converter_clear_completed,
             converter_transcribe_to_file,
+            converter_read_transcript,
             modules::ipc::install::stash_cli_status,
             modules::ipc::install::stash_cli_install,
             modules::ipc::install::stash_cli_uninstall,
