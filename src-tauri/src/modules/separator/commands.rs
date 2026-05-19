@@ -342,10 +342,11 @@ pub fn enqueue_job(
 
 #[tauri::command]
 pub fn separator_cancel(
+    app: AppHandle,
     state: State<'_, Arc<SeparatorState>>,
     job_id: String,
 ) -> Result<(), String> {
-    let was_running = {
+    let (was_running, snapshot) = {
         let mut jobs = state.jobs.lock().unwrap();
         let Some(j) = jobs.iter_mut().find(|j| j.id == job_id) else {
             return Err(format!("job not found: {job_id}"));
@@ -356,14 +357,32 @@ pub fn separator_cancel(
         let was = j.status == JobStatus::Running;
         j.status = JobStatus::Cancelled;
         j.finished_at = Some(now_unix());
-        was
+        (was, j.clone())
     };
+    // Notify the UI immediately so the row leaves the "Running" state even
+    // if the python child takes a while to wind down (heavy Demucs models
+    // can spend seconds in native torch code before SIGTERM lands).
+    emit_job(&app, &snapshot);
     if was_running {
         if let Some(pid) = *state.active_pid.lock().unwrap() {
             let _ = std::process::Command::new("/bin/kill")
                 .arg("-TERM")
                 .arg(pid.to_string())
                 .status();
+            // Escalate to SIGKILL after a short grace period if the child
+            // ignored SIGTERM (torch native ops occasionally do). Guard
+            // against PID reuse by checking the worker still owns this pid.
+            let pid_kill = pid;
+            let state_kill = Arc::clone(state.inner());
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+                if *state_kill.active_pid.lock().unwrap() == Some(pid_kill) {
+                    let _ = std::process::Command::new("/bin/kill")
+                        .arg("-KILL")
+                        .arg(pid_kill.to_string())
+                        .status();
+                }
+            });
         }
     }
     Ok(())
