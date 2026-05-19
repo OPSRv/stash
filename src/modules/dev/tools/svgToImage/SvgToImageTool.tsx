@@ -3,20 +3,20 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 import { Button } from '../../../../shared/ui/Button';
 import { SegmentedControl } from '../../../../shared/ui/SegmentedControl';
 import { Textarea } from '../../../../shared/ui/Textarea';
 
-type Format = 'png' | 'jpg' | 'webp';
+type Format = 'png' | 'jpg' | 'webp' | 'svg';
 type Scale = 'auto' | '1' | '2' | '3' | '4';
 
 const FORMAT_OPTIONS: ReadonlyArray<{ value: Format; label: string }> = [
   { value: 'png', label: 'PNG' },
   { value: 'jpg', label: 'JPG' },
   { value: 'webp', label: 'WebP' },
+  { value: 'svg', label: 'SVG' },
 ];
 
 const SCALE_OPTIONS: ReadonlyArray<{ value: Scale; label: string; title?: string }> = [
@@ -31,6 +31,25 @@ const MIME: Record<Format, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
   webp: 'image/webp',
+  svg: 'image/svg+xml',
+};
+
+/// Figma exports often pull `<image href="data:image/png;base64,…"/>`
+/// or `<image xlink:href="data:…"/>` into the markup. Drawing an
+/// `<img src="blob:…">` that resolves to such an SVG taints the
+/// canvas in WKWebView, so `canvas.toBlob` throws a SecurityError.
+/// Encoding the whole SVG as a `data:` URL keeps the rasterised
+/// embedded images same-origin to the SVG document itself, which
+/// dodges the taint check. base64 encoding is safe for any byte; the
+/// alternative (URL-encoding) blows up the size and trips up on
+/// stray `#` chars from gradient ids.
+const svgDataUrl = (source: string): string => {
+  // `unescape(encodeURIComponent(...))` is the canonical way to fold
+  // arbitrary UTF-8 markup into a Latin-1 byte string that `btoa` can
+  // swallow without throwing on multi-byte chars (Cyrillic labels,
+  // emoji glyphs, …).
+  const utf8 = unescape(encodeURIComponent(source));
+  return `data:image/svg+xml;base64,${btoa(utf8)}`;
 };
 
 const DEFAULT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
@@ -108,7 +127,6 @@ export function SvgToImageTool() {
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const objectUrlRef = useRef<string | null>(null);
 
   // Parse the source on every keystroke. Cheap (DOMParser is sync) and
   // gives the user immediate feedback when their paste breaks.
@@ -124,33 +142,17 @@ export function SvgToImageTool() {
   }, [parsed]);
 
   // Refresh the live preview whenever the parsed SVG changes. We
-  // re-serialise via Blob/Image so the preview matches exactly what
-  // the canvas pipeline will render — catches xmlns / namespace
-  // issues that a literal `dangerouslySetInnerHTML` would mask.
+  // feed the markup through the same `data:` URL we use for the
+  // raster pipeline so any rendering issue surfaces here first —
+  // Blob URLs cause WKWebView to taint downstream canvases when the
+  // SVG embeds a `<image data:…/>` block (Figma exports do this).
   useEffect(() => {
     if (!parsedSvg) {
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
       setPreviewUrl(null);
       return;
     }
-    const blob = new Blob([parsedSvg.source], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    objectUrlRef.current = url;
-    setPreviewUrl(url);
+    setPreviewUrl(svgDataUrl(parsedSvg.source));
   }, [parsedSvg]);
-
-  // Free the last preview Blob URL on unmount — leaving them attached
-  // is a slow leak when the user opens/closes the tool repeatedly.
-  useEffect(
-    () => () => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    },
-    [],
-  );
 
   const handleSourceChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setSource(e.target.value);
@@ -164,44 +166,91 @@ export function SvgToImageTool() {
       const outW = Math.max(1, Math.round(parsedSvg.width * factor));
       const outH = Math.max(1, Math.round(parsedSvg.height * factor));
 
-      const blob = new Blob([parsedSvg.source], { type: 'image/svg+xml' });
-      const url = URL.createObjectURL(blob);
-      try {
-        const img = new Image();
-        img.src = url;
-        await img.decode();
-
-        const canvas = document.createElement('canvas');
-        canvas.width = outW;
-        canvas.height = outH;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Canvas 2D context unavailable');
-        // JPG has no alpha — fill a white background so transparency
-        // doesn't render as black. PNG/WebP keep transparency intact.
-        if (format === 'jpg') {
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, outW, outH);
-        }
-        ctx.drawImage(img, 0, 0, outW, outH);
-
-        const out = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob((b) => resolve(b), MIME[format], format === 'jpg' ? 0.92 : undefined),
-        );
-        if (!out) throw new Error('Browser could not encode the image.');
+      // SVG passthrough — no canvas, no rasterisation. Useful when
+      // the source has been cleaned up (xmlns injected) and the user
+      // just wants the normalised markup on disk.
+      if (format === 'svg') {
+        const out = new Blob([parsedSvg.source], { type: MIME.svg });
         const outUrl = URL.createObjectURL(out);
         try {
           const a = document.createElement('a');
           a.href = outUrl;
-          a.download = `svg-export-${outW}x${outH}.${ext(format)}`;
+          a.download = `svg-export-${parsedSvg.width}x${parsedSvg.height}.svg`;
           document.body.appendChild(a);
           a.click();
           a.remove();
         } finally {
           URL.revokeObjectURL(outUrl);
         }
-      } finally {
-        URL.revokeObjectURL(url);
+        setError(null);
+        return;
       }
+
+      // Use a data: URL instead of a Blob URL. WKWebView treats
+      // blob: as a foreign origin when the SVG embeds raster images
+      // (Figma exports do this), which taints the canvas and makes
+      // `toBlob` throw SecurityError. Data URLs are treated as same
+      // origin to the SVG document, so the canvas stays clean.
+      const dataUrl = svgDataUrl(parsedSvg.source);
+      const img = new Image();
+      img.decoding = 'async';
+      img.src = dataUrl;
+      try {
+        await img.decode();
+      } catch (e) {
+        throw new Error(
+          `SVG could not be rendered: ${
+            e instanceof Error ? e.message : String(e)
+          }. Try downloading as SVG instead.`,
+        );
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = outW;
+      canvas.height = outH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas 2D context unavailable');
+      // JPG has no alpha — fill a white background so transparency
+      // doesn't render as black. PNG/WebP keep transparency intact.
+      if (format === 'jpg') {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, outW, outH);
+      }
+      ctx.drawImage(img, 0, 0, outW, outH);
+
+      let out: Blob | null = null;
+      try {
+        out = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(
+            (b) => resolve(b),
+            MIME[format],
+            format === 'jpg' ? 0.92 : undefined,
+          ),
+        );
+      } catch (e) {
+        // Most commonly thrown when the canvas got tainted by an
+        // external resource (cross-origin font, remote `<image>`).
+        // Surfacing the recovery hint is more useful than the raw
+        // browser message.
+        throw new Error(
+          `Browser refused to export the canvas (${
+            e instanceof Error ? e.message : String(e)
+          }). The SVG likely references an external image or font — embed it as a data URL, or download as SVG instead.`,
+        );
+      }
+      if (!out) throw new Error('Browser could not encode the image.');
+      const outUrl = URL.createObjectURL(out);
+      try {
+        const a = document.createElement('a');
+        a.href = outUrl;
+        a.download = `svg-export-${outW}x${outH}.${ext(format)}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } finally {
+        URL.revokeObjectURL(outUrl);
+      }
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -211,7 +260,9 @@ export function SvgToImageTool() {
 
   const sizeLabel = parsedSvg
     ? (() => {
-        const factor = resolveScale(scale);
+        // SVG output keeps the source intact — scale is a raster knob
+        // and applying it would lie about what lands on disk.
+        const factor = format === 'svg' ? 1 : resolveScale(scale);
         const w = Math.round(parsedSvg.width * factor);
         const h = Math.round(parsedSvg.height * factor);
         return `${w} × ${h}`;
@@ -287,18 +338,20 @@ export function SvgToImageTool() {
             ariaLabel="Output format"
           />
         </div>
-        <div className="flex flex-col gap-1.5">
-          <span className="text-meta t-tertiary uppercase tracking-wider">
-            Scale
-          </span>
-          <SegmentedControl
-            options={SCALE_OPTIONS}
-            value={scale}
-            onChange={setScale}
-            size="sm"
-            ariaLabel="Output scale"
-          />
-        </div>
+        {format !== 'svg' && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-meta t-tertiary uppercase tracking-wider">
+              Scale
+            </span>
+            <SegmentedControl
+              options={SCALE_OPTIONS}
+              value={scale}
+              onChange={setScale}
+              size="sm"
+              ariaLabel="Output scale"
+            />
+          </div>
+        )}
         <div className="flex items-center justify-between mt-auto pt-2">
           <span className="t-tertiary text-meta">
             Output: <span className="t-secondary tabular-nums">{sizeLabel}</span>

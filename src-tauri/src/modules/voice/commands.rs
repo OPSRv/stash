@@ -347,10 +347,10 @@ fn default_quick_commands() -> Vec<QuickCommand> {
             prompt: "Translate this to English: ".into(),
         },
         QuickCommand {
-            id: "claude".into(),
+            id: "claude_code".into(),
             label: "Claude Code".into(),
             icon: "🤖".into(),
-            prompt: "/claude".into(),
+            prompt: "/claude_code".into(),
         },
         QuickCommand {
             id: "memory".into(),
@@ -367,8 +367,23 @@ pub fn voice_get_quick_commands(
 ) -> Result<Vec<QuickCommand>, String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     match repo.kv_get(KEY_QUICK_COMMANDS).map_err(|e| e.to_string())? {
-        Some(raw) if !raw.trim().is_empty() => serde_json::from_str::<Vec<QuickCommand>>(&raw)
-            .map_err(|e| format!("decode quick_commands: {e}")),
+        Some(raw) if !raw.trim().is_empty() => {
+            let mut commands: Vec<QuickCommand> = serde_json::from_str(&raw)
+                .map_err(|e| format!("decode quick_commands: {e}"))?;
+            // Migration: earlier defaults shipped `/claude` which has no
+            // matching handler — the real one is `/claude_code`. Rewrite
+            // in-place when we spot the stale prompt so existing users
+            // get a working Claude pill without having to edit it.
+            for c in &mut commands {
+                if c.prompt.trim() == "/claude" {
+                    c.prompt = "/claude_code".into();
+                    if c.id == "claude" {
+                        c.id = "claude_code".into();
+                    }
+                }
+            }
+            Ok(commands)
+        }
         // First run — seed with a sensible starter set so the popup
         // isn't empty. The user can edit / delete any of these from
         // the popup's quick-commands tray.

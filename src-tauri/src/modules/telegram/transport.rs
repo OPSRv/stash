@@ -535,10 +535,27 @@ async fn handle_media(
         Err(e) => {
             tracing::warn!(error = %e, "inbox: download failed");
             let _ = std::fs::remove_file(&abs); // partial file, best-effort cleanup
-            state.sender.enqueue(
-                chat_id,
-                "⚠️ Завантаження з Telegram не вдалося — переглянь лог Stash.",
-            );
+            // The Bot API caps file downloads at 20 MB regardless of how
+            // big the file actually is on Telegram's servers — that's a
+            // server-side limit, not something we can lift here. Most
+            // failures on forwarded videos are exactly this, so detect
+            // the signature and explain instead of just dumping the
+            // raw error.
+            let lower = e.to_lowercase();
+            let is_too_big = lower.contains("file is too big")
+                || lower.contains("400")
+                    && (lower.contains("too big") || lower.contains("too large"));
+            let detail = if is_too_big {
+                "файл >20 MB — Bot API не дозволяє завантажувати такі. \
+                 Використай повний клієнт у Stash → Downloader (yt-dlp) \
+                 або перешли як «video file» (не «video»), щоб обійти ліміт"
+                    .to_string()
+            } else {
+                e
+            };
+            state
+                .sender
+                .enqueue(chat_id, format!("⚠️ Завантаження з Telegram не вдалося: {detail}"));
             return;
         }
     };

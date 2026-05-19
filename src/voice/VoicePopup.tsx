@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 
 import { Button } from '../shared/ui/Button';
@@ -16,6 +17,7 @@ import { Input } from '../shared/ui/Input';
 import { Modal } from '../shared/ui/Modal';
 import { PinIcon } from '../shared/ui/icons';
 import { Markdown } from '../shared/ui/Markdown';
+import type { Components } from 'react-markdown';
 import { Spinner } from '../shared/ui/Spinner';
 import { Textarea } from '../shared/ui/Textarea';
 import { useToast } from '../shared/ui/Toast';
@@ -27,9 +29,10 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import * as api from './api';
 import type { QuickCommand, VoiceCommand } from './api';
+import { useDictation } from './useDictation';
 import { useRecorder } from './useRecorder';
 
-type Status = 'idle' | 'recording' | 'transcribing' | 'thinking';
+type Status = 'idle' | 'dictating' | 'recording' | 'transcribing' | 'thinking';
 
 type Turn = {
   id: string;
@@ -218,6 +221,22 @@ export const VoicePopup = () => {
 
   const recorder = useRecorder({ silenceMs });
 
+  // Native dictation via WebKit's SpeechRecognition. Streams partial
+  // transcripts straight into the composer textarea so the user can
+  // see (and edit) what's been heard before they hit send — no Whisper
+  // roundtrip. The Whisper pipeline stays alive as a fallback when the
+  // engine is unavailable (non-Apple webviews, headless tests).
+  const dictation = useDictation({
+    onInterim: (text) => setInput(text),
+    onFinal: (text) => setInput(text),
+    onError: (msg) =>
+      toast({
+        title: 'Помилка диктовки',
+        description: msg,
+        variant: 'error',
+      }),
+  });
+
   // Auto-scroll the thread to the newest turn whenever it grows or the
   // streaming placeholder swaps for a final reply.
   useEffect(() => {
@@ -318,13 +337,40 @@ export const VoicePopup = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitPrompt]);
 
+  // Mic-button dispatch. Native dictation is the fast path — it
+  // streams into the textarea so the user can correct typos before
+  // sending. Whisper-via-recorder stays as a fallback when the webview
+  // doesn't expose `webkitSpeechRecognition` (older Chromium builds,
+  // headless test runners). The dictating state owns its own start /
+  // stop pair so it doesn't entangle with the existing recording flow.
   const onMicClick = () => {
+    if (status === 'dictating') {
+      dictation.stop();
+      return;
+    }
     if (status === 'recording') {
       recorder.stop();
-    } else if (status === 'idle') {
+      return;
+    }
+    if (status !== 'idle') return;
+    if (dictation.supported) {
+      setStatus('dictating');
+      dictation.start();
+    } else {
       void runVoiceTurn();
     }
   };
+
+  // SpeechRecognition has no event for "engine handed us a final
+  // transcript" beyond `onend`, so we watch the hook's phase and snap
+  // the popup status back when the engine releases the mic. Without
+  // this the UI would stay stuck on "dictating" after the user stops.
+  useEffect(() => {
+    if (dictation.phase === 'idle' && status === 'dictating') {
+      setStatus('idle');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dictation.phase]);
 
   const onSend = () => {
     if (status !== 'idle') return;
@@ -358,8 +404,9 @@ export const VoicePopup = () => {
 
   const dismiss = useCallback(() => {
     if (recorder.phase !== 'idle') recorder.cancel();
+    if (dictation.phase === 'listening') dictation.cancel();
     void api.hidePopup();
-  }, [recorder]);
+  }, [recorder, dictation]);
 
   // Esc dismisses the popup — covers click-outside too because the
   // backend hides on blur.
@@ -404,7 +451,14 @@ export const VoicePopup = () => {
         }
         onAdd={() => setEditingQuick('new')}
       />
-      <Thread ref={threadRef} turns={turns} status={status} />
+      <Thread
+        ref={threadRef}
+        turns={turns}
+        status={status}
+        onCommand={(cmd) => {
+          if (status === 'idle') void submitPrompt(cmd);
+        }}
+      />
       {pendingAttachments.length > 0 && (
         <PendingAttachmentStrip
           paths={pendingAttachments}
@@ -532,10 +586,11 @@ const Header = ({
 type ThreadProps = {
   turns: Turn[];
   status: Status;
+  onCommand: (cmd: string) => void;
 };
 
 const Thread = forwardRef<HTMLDivElement, ThreadProps>(
-  ({ turns, status }, ref) => {
+  ({ turns, status, onCommand }, ref) => {
     const empty = turns.length === 0 && status === 'idle';
     return (
       <div
@@ -552,6 +607,7 @@ const Thread = forwardRef<HTMLDivElement, ThreadProps>(
                 role={t.role}
                 content={t.content}
                 documents={t.documents}
+                onCommand={onCommand}
               />
             ))}
             {status === 'transcribing' && (
@@ -572,9 +628,10 @@ const EmptyHero = () => (
   <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-6">
     <div className="t-primary text-title">Ask Stash anything</div>
     <div className="t-tertiary text-meta max-w-[400px]">
-      Натисни мікрофон щоб говорити, або введи запит. Слеш-команди (
-      <code>/help</code>, <code>/timer 25</code>, <code>/note</code>…) працюють
-      як у Telegram-боті.
+      Натисни мікрофон щоб надиктувати запит (нативна macOS-диктовка, без
+      Whisper), або введи /команду — слеш-команди (<code>/help</code>,
+      {' '}<code>/timer 25</code>, <code>/note</code>…) працюють як у
+      Telegram-боті.
     </div>
   </div>
 );
@@ -592,14 +649,121 @@ const InlineStatus = ({
   </div>
 );
 
+/// Matches the lead `/command` token inside any text-ish markdown node.
+/// We treat `_` as a continuation char so `/claude_code` survives the
+/// regex; trailing punctuation (period, comma, paren) is excluded so a
+/// sentence-final `/help.` doesn't bleed into the button label.
+const SLASH_CMD_RE = /\/([a-zA-Z][a-zA-Z0-9_]*)/;
+
+/// Build a Markdown `components` map that intercepts inline `code` and
+/// plain text nodes, rewriting any `/command` substring into a clickable
+/// pill. Mirrors how Telegram renders commands — tapping the pill
+/// re-submits the prompt through the same `voice_ask` pipeline.
+const slashCommandComponents = (onCommand: (cmd: string) => void): Components => {
+  const renderText = (text: string): ReactNode[] => {
+    const out: ReactNode[] = [];
+    let cursor = 0;
+    // Iterate with `exec` so we capture every occurrence without going
+    // global on the literal (a stateful regex would skip alternating
+    // matches inside React's render cycle).
+    const re = new RegExp(SLASH_CMD_RE, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > cursor) {
+        out.push(text.slice(cursor, m.index));
+      }
+      const full = m[0];
+      out.push(
+        <SlashChip
+          key={`${m.index}-${full}`}
+          command={full}
+          onClick={() => onCommand(full)}
+        />,
+      );
+      cursor = m.index + full.length;
+    }
+    if (cursor < text.length) out.push(text.slice(cursor));
+    return out;
+  };
+
+  return {
+    // Inline `code` is the most common shape — assistants quote commands
+    // as `` `/foo` `` so they don't get auto-linkified. If the content
+    // is a clean `/command`, return only the chip; otherwise leave the
+    // `<code>` mark intact for anything else (filenames, ids, …).
+    code: ({ children, className }: { children?: ReactNode; className?: string }) => {
+      // Fenced code blocks come through with a language class; we only
+      // want to rewrite inline backticks. Pass those through unchanged.
+      if (className) {
+        return <code className={className}>{children}</code>;
+      }
+      const text = typeof children === 'string' ? children : Array.isArray(children) ? children.join('') : '';
+      const trimmed = text.trim();
+      if (SLASH_CMD_RE.test(trimmed) && /^\/[a-zA-Z][a-zA-Z0-9_]*$/.test(trimmed)) {
+        return <SlashChip command={trimmed} onClick={() => onCommand(trimmed)} />;
+      }
+      return <code className={className}>{children}</code>;
+    },
+    // Paragraph text — split on `/command` so unquoted commands still
+    // become tappable. `react-markdown` only passes text via string
+    // children here, but we defensively handle arrays too.
+    p: ({ children }: { children?: ReactNode }) => (
+      <p>{rewriteChildren(children, renderText)}</p>
+    ),
+    li: ({ children }: { children?: ReactNode }) => (
+      <li>{rewriteChildren(children, renderText)}</li>
+    ),
+  };
+};
+
+const rewriteChildren = (
+  children: ReactNode,
+  renderText: (text: string) => ReactNode[],
+): ReactNode => {
+  if (typeof children === 'string') return renderText(children);
+  if (Array.isArray(children)) {
+    return children.map((c, i) =>
+      typeof c === 'string' ? (
+        <span key={i}>{renderText(c)}</span>
+      ) : (
+        c
+      ),
+    );
+  }
+  return children;
+};
+
+const SlashChip = ({
+  command,
+  onClick,
+}: {
+  command: string;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={`Send ${command}`}
+    className="inline-flex items-center align-baseline font-mono text-meta rounded-md px-1.5 py-0 mx-0.5 hover:opacity-80 transition-opacity"
+    style={{
+      background: accent(0.18),
+      color: 'rgb(var(--stash-accent-rgb))',
+    }}
+  >
+    {command}
+  </button>
+);
+
 const Bubble = ({
   role,
   content,
   documents,
+  onCommand,
 }: {
   role: 'user' | 'assistant';
   content: string;
   documents?: string[];
+  onCommand?: (cmd: string) => void;
 }) => {
   if (role === 'user') {
     return (
@@ -615,9 +779,15 @@ const Bubble = ({
     );
   }
   const docs = documents ?? [];
+  const components = useMemo(
+    () => (onCommand ? slashCommandComponents(onCommand) : undefined),
+    [onCommand],
+  );
   return (
     <div className="self-start max-w-[92%] rounded-2xl px-3.5 py-2 text-body pane-elev shadow-sm flex flex-col gap-2">
-      {content ? <Markdown source={content} className="t-primary" /> : null}
+      {content ? (
+        <Markdown source={content} className="t-primary" components={components} />
+      ) : null}
       {docs.length > 0 && <AttachmentGrid paths={docs} />}
     </div>
   );
@@ -868,6 +1038,10 @@ const Composer = ({
 
   const canSend = status === 'idle' && value.trim().length > 0;
   const recording = status === 'recording';
+  const dictating = status === 'dictating';
+  // The "stop me" affordance is shared between Whisper recording and
+  // native dictation — both put the engine in an active-mic state.
+  const liveCapture = recording || dictating;
   const busy = status === 'transcribing' || status === 'thinking';
   const micDisabled = busy;
   const ringScale = 1 + Math.min(recorderLevel * 1.6, 0.35);
@@ -916,35 +1090,40 @@ const Composer = ({
           type="button"
           onClick={onMic}
           disabled={micDisabled}
-          aria-label={recording ? 'Stop recording' : 'Record voice'}
-          aria-pressed={recording}
+          aria-label={liveCapture ? 'Stop listening' : 'Start dictation'}
+          aria-pressed={liveCapture}
           title={
-            recording
-              ? 'Stop recording'
-              : busy
-                ? 'Working…'
-                : 'Tap to talk (⌘⇧A)'
+            dictating
+              ? 'Stop dictation'
+              : recording
+                ? 'Stop recording'
+                : busy
+                  ? 'Working…'
+                  : 'Tap to dictate (⌘⇧A)'
           }
           className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-50 transition-transform"
           style={{
-            backgroundColor: recording ? accent(0.55) : accent(0.2),
+            backgroundColor: liveCapture ? accent(0.55) : accent(0.2),
             color: 'rgb(var(--stash-accent-rgb))',
           }}
         >
-          {recording && (
+          {liveCapture && (
             <span
               aria-hidden
-              className="absolute inset-0 rounded-full"
+              className={`absolute inset-0 rounded-full ${dictating ? 'animate-pulse' : ''}`}
               style={{
                 boxShadow: `0 0 0 3px ${accent(0.3)}`,
-                transform: `scale(${ringScale})`,
+                // Whisper recording drives the ring scale from the mic
+                // RMS; native dictation has no level data so it falls
+                // back to a Tailwind `animate-pulse` instead.
+                transform: recording ? `scale(${ringScale})` : undefined,
                 transition: 'transform 80ms linear',
               }}
             />
           )}
           {busy && status === 'transcribing' ? (
             <Spinner size={14} />
-          ) : recording ? (
+          ) : liveCapture ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
@@ -957,7 +1136,11 @@ const Composer = ({
           value={value}
           onChange={(e) => onChange(e.currentTarget.value)}
           onKeyDown={handleKey}
-          placeholder="Запитай Stash або введи /команду…"
+          placeholder={
+            dictating
+              ? 'Слухаю… (натисни мікрофон щоб зупинити)'
+              : 'Запитай Stash або введи /команду…'
+          }
           rows={MIN_ROWS}
           maxLength={8000}
           className="flex-1 resize-none nice-scroll"
@@ -1084,6 +1267,47 @@ const QuickCommandTray = ({
     y: number;
     cmd: QuickCommand;
   } | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // Tracks which edge has hidden content so we can fade-out the matching
+  // side and surface that there's more to scroll. Both default to false
+  // (no fade) until measured — avoids a spurious gradient on first paint
+  // when the tray fits without overflow.
+  const [overflow, setOverflow] = useState<{ left: boolean; right: boolean }>({
+    left: false,
+    right: false,
+  });
+
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      const left = el.scrollLeft > 4;
+      const right = el.scrollLeft < max - 4;
+      setOverflow((prev) =>
+        prev.left === left && prev.right === right ? prev : { left, right },
+      );
+    };
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', measure);
+      ro.disconnect();
+    };
+  }, [commands.length]);
+
+  // Translate vertical wheel intent into horizontal scroll so a trackpad
+  // swipe across the tray feels native — the row is barely tall enough
+  // for a native vertical wheel to register otherwise.
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      el.scrollLeft += e.deltaY;
+    }
+  };
 
   const items: ContextMenuItem[] = useMemo(() => {
     if (!menu) return [];
@@ -1099,41 +1323,62 @@ const QuickCommandTray = ({
     ];
   }, [menu, onEdit, onDelete]);
 
+  // Edge-fade mask. CSS mask-image lets us softly clip the row at either
+  // end so users see "there's more this way" without needing scrollbars.
+  const fadeMask = useMemo(() => {
+    const fadeL = overflow.left ? '0px, transparent 0px, black 20px' : '0px';
+    const fadeR = overflow.right
+      ? 'calc(100% - 20px), transparent 100%'
+      : '100%';
+    return `linear-gradient(to right, transparent ${fadeL}, black ${fadeR})`;
+  }, [overflow]);
+
   return (
     <div className="shrink-0 px-3 py-2 border-b hair">
-      <div className="flex items-center gap-1.5 overflow-x-auto nice-scroll">
-        {commands.map((cmd) => (
-          <button
-            key={cmd.id}
-            type="button"
-            onClick={() => onRun(cmd)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setMenu({ x: e.clientX, y: e.clientY, cmd });
-            }}
-            title={cmd.prompt}
-            className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full border hair text-meta t-primary hover:bg-[var(--bg-hover)] transition-colors"
-          >
-            <span aria-hidden>{cmd.icon}</span>
-            <span className="whitespace-nowrap">{cmd.label}</span>
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={onAdd}
-          title="Add quick command"
-          aria-label="Add quick command"
-          className="shrink-0 w-7 h-7 rounded-full border hair flex items-center justify-center text-meta t-secondary hover:t-primary hover:bg-[var(--bg-hover)] transition-colors"
+      <div className="relative">
+        <div
+          ref={scrollerRef}
+          onWheel={onWheel}
+          className="flex items-center gap-1.5 overflow-x-auto py-0.5 [&::-webkit-scrollbar]:hidden"
+          style={{
+            WebkitMaskImage: fadeMask,
+            maskImage: fadeMask,
+            scrollbarWidth: 'none',
+          }}
         >
-          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-            <path
-              d="M5 1v8M1 5h8"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+          {commands.map((cmd) => (
+            <button
+              key={cmd.id}
+              type="button"
+              onClick={() => onRun(cmd)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMenu({ x: e.clientX, y: e.clientY, cmd });
+              }}
+              title={cmd.prompt}
+              className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full border hair text-meta t-primary hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              <span aria-hidden>{cmd.icon}</span>
+              <span className="whitespace-nowrap">{cmd.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={onAdd}
+            title="Add quick command"
+            aria-label="Add quick command"
+            className="shrink-0 w-7 h-7 rounded-full border hair flex items-center justify-center text-meta t-secondary hover:t-primary hover:bg-[var(--bg-hover)] transition-colors"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+              <path
+                d="M5 1v8M1 5h8"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
       <ContextMenu
         open={menu !== null}

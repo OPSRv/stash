@@ -89,13 +89,15 @@ const DEFAULT_LANE: LaneState = { volume: 1, muted: false, solo: false };
 /// Snapshot persisted to localStorage keyed by jobId. Versioned with
 /// `v` so a future schema change can ignore stale blobs instead of
 /// throwing. Loop+beat-grid toggles live here too — they're UI
-/// concerns, not pipeline state, so the renderer owns them.
+/// concerns, not pipeline state, so the renderer owns them. `mono`
+/// added later as optional so older v1 blobs still round-trip.
 type PersistedMixerState = {
   v: 1;
   master: number;
   showBeats: boolean;
   loop: { a: number; b: number } | null;
   lanes: Record<string, LaneState>;
+  mono?: boolean;
 };
 
 const persistKey = (jobId: string) => `stash:separator:mixer:${jobId}`;
@@ -207,6 +209,12 @@ export function StemMixer({
   // paused.
   const ctxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
+  /// Optional summing node between master and destination. Created
+  /// once on init; whether it sits in-line depends on `mono` state.
+  /// `channelCount = 1` + `channelCountMode = 'explicit'` forces a
+  /// proper L+R sum so the user can confirm mono compatibility (no
+  /// phantom stereo cues, no panning surprises) before bouncing.
+  const monoNodeRef = useRef<GainNode | null>(null);
   const laneGainRef = useRef<Map<string, GainNode>>(new Map());
   const buffersRef = useRef<Map<string, AudioBuffer>>(new Map());
   const sourcesRef = useRef<Map<string, AudioBufferSourceNode>>(new Map());
@@ -244,6 +252,10 @@ export function StemMixer({
     return init;
   });
   const [masterVolume, setMasterVolume] = useState(persisted?.master ?? 1);
+  /// Mono output mode. Wires `monoNode` between master and destination,
+  /// forcing a hard L+R sum (see `monoNodeRef`). Persisted per job so
+  /// users re-checking a mix re-enter mono with one click.
+  const [mono, setMono] = useState(persisted?.mono ?? false);
   const [mixing, setMixing] = useState(false);
   // Playback rate (0.5..2.0). Applied to every AudioBufferSourceNode
   // so the user can slow a song down for practice. Note: this
@@ -331,6 +343,7 @@ export function StemMixer({
         showBeats,
         loop,
         lanes,
+        mono,
       };
       try {
         localStorage.setItem(persistKey(jobId), JSON.stringify(snapshot));
@@ -340,10 +353,17 @@ export function StemMixer({
       }
     }, 300);
     return () => window.clearTimeout(id);
-  }, [jobId, masterVolume, showBeats, loop, lanes]);
+  }, [jobId, masterVolume, showBeats, loop, lanes, mono]);
 
   const anySolo = useMemo(
     () => Object.values(lanes).some((l) => l.solo),
+    [lanes],
+  );
+  // `anyMuted` mirrors `anySolo`: drives the master M chip's active
+  // glow and decides whether the batch toggle clears or sets all
+  // mutes (smart toggle, à la Logic / Ableton).
+  const anyMuted = useMemo(
+    () => Object.values(lanes).some((l) => l.muted),
     [lanes],
   );
 
@@ -371,8 +391,24 @@ export function StemMixer({
     ctxRef.current = ctx;
     const master = ctx.createGain();
     master.gain.value = masterVolume;
-    master.connect(ctx.destination);
     masterGainRef.current = master;
+    // Mono summing node: `channelCount=1` + `explicit` mode collapses
+    // the stereo bus into one channel; the destination then up-mixes
+    // it back to L+R (identical samples). Always created, only spliced
+    // into the chain when the `mono` toggle is on — see the dedicated
+    // effect below which keeps wiring in sync.
+    const monoNode = ctx.createGain();
+    monoNode.gain.value = 1;
+    monoNode.channelCount = 1;
+    monoNode.channelCountMode = 'explicit';
+    monoNode.channelInterpretation = 'speakers';
+    monoNodeRef.current = monoNode;
+    if (mono) {
+      master.connect(monoNode);
+      monoNode.connect(ctx.destination);
+    } else {
+      master.connect(ctx.destination);
+    }
 
     const failed: string[] = [];
     let longest = 0;
@@ -442,6 +478,7 @@ export function StemMixer({
       ctxRef.current?.close().catch(() => {});
       ctxRef.current = null;
       masterGainRef.current = null;
+      monoNodeRef.current = null;
       laneGainRef.current.clear();
       buffersRef.current.clear();
     };
@@ -454,6 +491,34 @@ export function StemMixer({
       masterGainRef.current.gain.value = masterVolume;
     }
   }, [masterVolume]);
+
+  // Mono toggle → rewire master → (monoNode →) destination. Doing it
+  // here (instead of inside init) means flipping the switch mid-
+  // playback doesn't tear down the AudioContext; the disconnect /
+  // reconnect happens between buffer ticks and is inaudible in
+  // practice on a GainNode → GainNode boundary.
+  useEffect(() => {
+    const ctx = ctxRef.current;
+    const master = masterGainRef.current;
+    const monoNode = monoNodeRef.current;
+    if (!ctx || !master || !monoNode) return;
+    try {
+      master.disconnect();
+    } catch {
+      // already disconnected
+    }
+    try {
+      monoNode.disconnect();
+    } catch {
+      // already disconnected
+    }
+    if (mono) {
+      master.connect(monoNode);
+      monoNode.connect(ctx.destination);
+    } else {
+      master.connect(ctx.destination);
+    }
+  }, [mono]);
 
   // 4Hz clock publisher — the scrubber + time readout don't need 60
   // updates per second, so we cut React work by an order of magnitude.
@@ -853,6 +918,33 @@ export function StemMixer({
   const toggleSolo = (name: string) =>
     setLane(name, { solo: !(lanes[name]?.solo ?? false) });
 
+  // Master M / S: smart-toggle every lane at once. If any lane is in
+  // the target state the click clears it across the board (most
+  // common: "clear my accidental solos and play everything"); if
+  // none is, the click sets the state on every lane. Mirrors the
+  // master-strip behaviour in Logic Pro / Ableton.
+  const toggleAllMute = useCallback(() => {
+    const target = !anyMuted;
+    setLanes((prev) => {
+      const next: Record<string, LaneState> = { ...prev };
+      for (const s of stems) {
+        next[s.name] = { ...(next[s.name] ?? DEFAULT_LANE), muted: target };
+      }
+      return next;
+    });
+  }, [stems, anyMuted]);
+  const toggleAllSolo = useCallback(() => {
+    const target = !anySolo;
+    setLanes((prev) => {
+      const next: Record<string, LaneState> = { ...prev };
+      for (const s of stems) {
+        next[s.name] = { ...(next[s.name] ?? DEFAULT_LANE), solo: target };
+      }
+      return next;
+    });
+  }, [stems, anySolo]);
+  const toggleMono = useCallback(() => setMono((v) => !v), []);
+
   // ── mixdown ──────────────────────────────────────────────────────
   const handleMixdown = async () => {
     const active = stems
@@ -928,6 +1020,12 @@ export function StemMixer({
         playbackRate={playbackRate}
         onPlaybackRate={setPlaybackRate}
         bpm={bpm}
+        anyMuted={anyMuted}
+        anySolo={anySolo}
+        mono={mono}
+        onToggleAllMute={toggleAllMute}
+        onToggleAllSolo={toggleAllSolo}
+        onToggleMono={toggleMono}
       />
       {loadError && (
         <div className="px-3 py-2 text-meta" style={{ color: '#f87171' }}>
@@ -1024,6 +1122,16 @@ interface TransportProps {
   playbackRate: number;
   onPlaybackRate: (v: number) => void;
   bpm?: number;
+  /// At least one lane is currently muted. Drives the master M chip's
+  /// "on" glow + flips its smart-toggle to "clear" instead of "set".
+  anyMuted: boolean;
+  /// At least one lane is currently solo'd. Same role for the S chip.
+  anySolo: boolean;
+  /// Stereo bus is collapsed to mono. Drives the MONO chip's glow.
+  mono: boolean;
+  onToggleAllMute: () => void;
+  onToggleAllSolo: () => void;
+  onToggleMono: () => void;
 }
 
 function Transport({
@@ -1047,6 +1155,12 @@ function Transport({
   playbackRate,
   onPlaybackRate,
   bpm,
+  anyMuted,
+  anySolo,
+  mono,
+  onToggleAllMute,
+  onToggleAllSolo,
+  onToggleMono,
 }: TransportProps) {
   return (
     <div className="stash-stem-transport">
@@ -1121,6 +1235,44 @@ function Transport({
             label="Master volume"
           />
         </div>
+      </div>
+      {/* Master-strip toggles: same TrackToggle primitive as the per-
+          lane M/S so the affordance reads identically across the
+          mixer. Click semantics: smart-toggle (clears the state on
+          every lane if any has it, else sets it on every lane). MONO
+          summing sits in the same cluster because it's the other
+          all-tracks output mode worth surfacing next to VOL. */}
+      <div className="flex items-center gap-1 shrink-0" data-testid="mixer-master-bus">
+        <TrackToggle
+          tone="mute"
+          active={anyMuted}
+          onClick={onToggleAllMute}
+          title={anyMuted ? 'Unmute every stem' : 'Mute every stem'}
+          disabled={loading}
+          data-testid="mixer-master-mute-all"
+        >
+          M
+        </TrackToggle>
+        <TrackToggle
+          tone="solo"
+          active={anySolo}
+          onClick={onToggleAllSolo}
+          title={anySolo ? 'Clear solo on every stem' : 'Solo every stem'}
+          disabled={loading}
+          data-testid="mixer-master-solo-all"
+        >
+          S
+        </TrackToggle>
+        <TrackToggle
+          tone="neutral"
+          active={mono}
+          onClick={onToggleMono}
+          title={mono ? 'Mono — click for stereo' : 'Collapse output to mono (L+R sum)'}
+          disabled={loading}
+          data-testid="mixer-master-mono"
+        >
+          MONO
+        </TrackToggle>
       </div>
       <button
         type="button"

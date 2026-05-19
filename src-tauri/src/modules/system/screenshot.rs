@@ -90,17 +90,34 @@ fn run_screencapture(files: &[PathBuf], display: Option<u32>) -> Result<(), Stri
     for f in files {
         cmd.arg(f);
     }
-    let status = cmd
-        .status()
+    // Capture stderr — `screencapture` writes a useful diagnostic line
+    // there ("permission denied", "no such file", …) and discarding it
+    // turned every failure into a useless `exit 1` on the caller side.
+    let output = cmd
+        .output()
         .map_err(|e| format!("spawn screencapture: {e}"))?;
-    if !status.success() {
-        return Err(format!(
-            "screencapture exited with {}",
-            status
-                .code()
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| "signal".into())
-        ));
+    if !output.status.success() {
+        let code = output
+            .status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "signal".into());
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+            // Empty stderr + exit 1 is the macOS TCC denial signature
+            // — `screencapture` declines silently when Screen Recording
+            // hasn't been granted to the running binary. Steer the user
+            // toward the System Settings pane rather than leaving them
+            // staring at a bare exit code.
+            "no stderr output — most likely Screen Recording permission \
+             is missing for this build of Stash. Open System Settings → \
+             Privacy & Security → Screen Recording and toggle Stash off \
+             then back on (rebuilt binaries need a fresh grant)."
+                .to_string()
+        } else {
+            stderr
+        };
+        return Err(format!("screencapture exit {code}: {detail}"));
     }
     Ok(())
 }
