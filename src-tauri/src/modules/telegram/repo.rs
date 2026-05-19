@@ -389,6 +389,25 @@ impl TelegramRepo {
         rows.collect()
     }
 
+    /// All reminders whose `due_at` falls within [start, end) — used by
+    /// the calendar view, which colours days that have reminders and
+    /// dims past / fired ones. Includes cancelled + sent rows so the
+    /// calendar can render history; callers filter as needed.
+    pub fn list_reminders_in_range(
+        &self,
+        start_sec: i64,
+        end_sec: i64,
+    ) -> Result<Vec<super::reminders::Reminder>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, text, due_at, sent, cancelled
+             FROM reminders
+             WHERE due_at >= ?1 AND due_at < ?2
+             ORDER BY due_at ASC",
+        )?;
+        let rows = stmt.query_map(params![start_sec, end_sec], map_reminder_row)?;
+        rows.collect()
+    }
+
     pub fn due_reminders(&self, now: i64, limit: usize) -> Result<Vec<super::reminders::Reminder>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, text, due_at, sent, cancelled

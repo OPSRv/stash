@@ -255,6 +255,9 @@ use modules::telegram::commands::{
     telegram_set_inbox_transcript, telegram_set_notification_settings, telegram_set_token,
     telegram_start_pairing, telegram_status, telegram_sweep_inbox, telegram_unpair,
 };
+use modules::telegram::reminders::{
+    reminders_cancel, reminders_create, reminders_list, reminders_list_range,
+};
 use modules::terminal::commands::{
     pty_close, pty_get_cwd, pty_open, pty_resize, pty_set_cwd, pty_write, terminal_save_paste_blob,
 };
@@ -734,6 +737,10 @@ pub fn run() {
             telegram_sweep_inbox,
             telegram_list_memory,
             telegram_delete_memory,
+            reminders_list,
+            reminders_list_range,
+            reminders_create,
+            reminders_cancel,
             diarization_status,
             diarization_download,
             diarization_delete,

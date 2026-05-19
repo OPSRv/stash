@@ -8,6 +8,7 @@ import { metronomeModule } from './metronome';
 import { musicModule } from './music';
 import { notesModule } from './notes';
 import { pomodoroModule } from './pomodoro';
+import { remindersModule } from './reminders';
 import { separatorModule } from './separator';
 import { systemModule } from './system';
 import { telegramModule } from './telegram';
@@ -29,6 +30,7 @@ export const modules: ModuleDefinition[] = [
   converterModule,
   metronomeModule,
   pomodoroModule,
+  remindersModule,
   terminalModule,
   devModule,
   systemModule,

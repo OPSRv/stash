@@ -274,7 +274,27 @@ fn current_time_prompt(now_override: Option<i64>) -> String {
     let off_m = (offset.abs() % 3600) / 60;
     format!(
         "Current local time: {date} {hh:02}:{mm:02} ({weekday}, UTC{sign}{off_h:02}:{off_m:02}). \
-         Use this when the user asks about today, tomorrow, current date, weekday, etc."
+         Use this for any 'today / tomorrow / what day is it' question.\n\
+         \n\
+         Time arithmetic rule for scheduling reminders:\n\
+         - A bare clock time HH:MM is STILL AHEAD TODAY when HH*60+MM > {hh}*60+{mm}. \
+         Compare the digits — do not reason about 'just past midnight' or 'AM/PM'. \
+         Example at the current time: '01:00' vs '{hh:02}:{mm:02}' → \
+         {bare_ahead_hint}\n\
+         - When the user gives a bare HH:MM, pass that exact string to `create_reminder` as `when`. \
+         The parser picks today (if still ahead) or tomorrow (if past) on its own. \
+         Never refuse, never ask the user 'today чи завтра?' — let the tool decide.",
+        bare_ahead_hint = {
+            let cur = hh * 60 + mm;
+            // Two probe examples (06:00 and 22:00) help anchor the rule
+            // for the LLM without a per-call computation it has to do
+            // itself. We compute the result of the rule for each probe
+            // so the prompt carries a worked example with concrete
+            // numbers, not abstractions.
+            let cmp_0100 = if 60 > cur { "01:00 is still ahead today" } else { "01:00 was earlier today, schedule it for tomorrow" };
+            let cmp_0900 = if 9 * 60 > cur { "09:00 is still ahead today" } else { "09:00 was earlier today, schedule it for tomorrow" };
+            format!("{cmp_0100}. Similarly, {cmp_0900}.")
+        },
     )
 }
 

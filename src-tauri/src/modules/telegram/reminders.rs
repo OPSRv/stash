@@ -60,6 +60,7 @@ fn flush_due(app: &tauri::AppHandle, state: &TelegramState, now: i64) -> Result<
         repo.due_reminders(now, 20).map_err(|e| e.to_string())?
     };
 
+    let mut any_fired = false;
     for r in due {
         let late = now - r.due_at >= LATE_THRESHOLD_SEC;
         let prefix = if late {
@@ -72,6 +73,12 @@ fn flush_due(app: &tauri::AppHandle, state: &TelegramState, now: i64) -> Result<
             let _ = repo.mark_reminder_sent(r.id);
         }
         let _ = app.emit("telegram:reminder_fired", r.id);
+        any_fired = true;
+    }
+    // Surface the state change to the Reminders tab so a fired row
+    // disappears from the active list without manually pressing refresh.
+    if any_fired {
+        let _ = app.emit("reminders:changed", ());
     }
     Ok(())
 }
@@ -258,6 +265,122 @@ fn ymd_from_days(days: i64) -> (i64, u32, u32) {
     let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
     let y = y + if m <= 2 { 1 } else { 0 };
     (y, m, d)
+}
+
+// -------------------- Tauri commands --------------------
+//
+// Surface the reminder repo to the frontend so the Reminders tab can
+// share the same SQLite table the Telegram `/remind` flow + LLM tools
+// already use. Every mutation emits `reminders:changed` so any open
+// tab refreshes immediately. Google Calendar sync would plug in here
+// as an extra sink that listens to the same event.
+
+/// Wire-format row exposed to the frontend. We send unix seconds and
+/// the bare flags; the React layer does the calendar maths from the
+/// user's local tz, which sidesteps a Mac-clock-skew vs. server-time
+/// round trip every render.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReminderDto {
+    pub id: i64,
+    pub text: String,
+    pub due_at: i64,
+    pub sent: bool,
+    pub cancelled: bool,
+}
+
+impl From<Reminder> for ReminderDto {
+    fn from(r: Reminder) -> Self {
+        Self {
+            id: r.id,
+            text: r.text,
+            due_at: r.due_at,
+            sent: r.sent,
+            cancelled: r.cancelled,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn reminders_list(
+    state: tauri::State<'_, std::sync::Arc<super::state::TelegramState>>,
+) -> Result<Vec<ReminderDto>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let rows = repo.list_active_reminders().map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(ReminderDto::from).collect())
+}
+
+#[tauri::command]
+pub fn reminders_list_range(
+    state: tauri::State<'_, std::sync::Arc<super::state::TelegramState>>,
+    start_sec: i64,
+    end_sec: i64,
+) -> Result<Vec<ReminderDto>, String> {
+    if end_sec <= start_sec {
+        return Err("end_sec must be strictly greater than start_sec".into());
+    }
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let rows = repo
+        .list_reminders_in_range(start_sec, end_sec)
+        .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(ReminderDto::from).collect())
+}
+
+#[tauri::command]
+pub fn reminders_create(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<super::state::TelegramState>>,
+    text: String,
+    when: String,
+) -> Result<ReminderDto, String> {
+    use tauri::Emitter;
+    let text = text.trim();
+    let when = when.trim();
+    if text.is_empty() {
+        return Err("text must not be empty".into());
+    }
+    if when.is_empty() {
+        return Err("when must not be empty".into());
+    }
+    // Same parser path the Telegram /remind handler and the LLM tool
+    // hit — one source of truth for what "tomorrow 9:00" means.
+    let combined = format!("{when} {text}");
+    let now = now_secs();
+    let (due_at, parsed_text) = parse_when(&combined, now).ok_or_else(|| {
+        format!(
+            "could not parse `when`: '{when}'. Try '10m', '14:30', \
+             'tomorrow 9:00', or 'YYYY-MM-DD HH:MM'."
+        )
+    })?;
+    let id = {
+        let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.insert_reminder(&parsed_text, due_at, now)
+            .map_err(|e| e.to_string())?
+    };
+    let _ = app.emit("reminders:changed", ());
+    Ok(ReminderDto {
+        id,
+        text: parsed_text,
+        due_at,
+        sent: false,
+        cancelled: false,
+    })
+}
+
+#[tauri::command]
+pub fn reminders_cancel(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<super::state::TelegramState>>,
+    id: i64,
+) -> Result<bool, String> {
+    use tauri::Emitter;
+    let removed = {
+        let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.cancel_reminder(id).map_err(|e| e.to_string())?
+    };
+    if removed {
+        let _ = app.emit("reminders:changed", ());
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]
