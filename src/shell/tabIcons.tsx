@@ -38,6 +38,7 @@ export const TAB_ICON_COLORS: Record<string, string> = {
   converter: '#facc15',
   metronome: '#fb923c',
   pomodoro: '#ef4444',
+  reminders: '#fde047',
   terminal: '#84cc16',
   dev: '#10b981',
   system: '#94a3b8',
@@ -200,6 +201,24 @@ export const TAB_ICONS: Record<string, ReactNode> = {
     >
       <circle cx="12" cy="13" r="8" />
       <path d="M12 13V8M9 3h6" />
+    </svg>
+  ),
+  reminders: (
+    /* Classic bell glyph — universal "reminder / notification" affordance.
+       Sized to match the other tab-bar icons (13×13). */
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2H4.5z" />
+      <path d="M10 20a2 2 0 0 0 4 0" />
     </svg>
   ),
   terminal: (

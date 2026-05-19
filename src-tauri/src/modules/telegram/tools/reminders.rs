@@ -69,6 +69,12 @@ impl Tool for CreateReminder {
             repo.insert_reminder(&parsed_text, due_at, now_sec)
                 .map_err(|e| e.to_string())?
         };
+        // Nudge the Reminders tab so a row added by the assistant shows
+        // up live instead of after the next remount.
+        if let Some(app) = ctx.app.as_ref() {
+            use tauri::Emitter;
+            let _ = app.emit("reminders:changed", ());
+        }
         Ok(json!({ "id": id, "due_at": due_at, "text": parsed_text }))
     }
 }
@@ -130,6 +136,12 @@ impl Tool for CancelReminder {
             let mut repo = ctx.state.repo.lock().map_err(|e| e.to_string())?;
             repo.cancel_reminder(id).map_err(|e| e.to_string())?
         };
+        if removed {
+            if let Some(app) = ctx.app.as_ref() {
+                use tauri::Emitter;
+                let _ = app.emit("reminders:changed", ());
+            }
+        }
         Ok(json!({ "ok": removed }))
     }
 }

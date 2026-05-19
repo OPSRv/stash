@@ -367,7 +367,7 @@ impl CommandHandler for RemindCmd {
     fn usage(&self) -> &'static str {
         "/remind <коли> <текст>"
     }
-    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let now = now_secs();
         let Some((due, text)) = reminders::parse_when(args, now) else {
             return Reply::text(
@@ -393,6 +393,12 @@ impl CommandHandler for RemindCmd {
         };
         match insert_result {
             Ok(id) => {
+                // Live-refresh the Reminders tab so a row created from
+                // Telegram appears without remounting the popup.
+                {
+                    use tauri::Emitter;
+                    let _ = ctx.app.emit("reminders:changed", ());
+                }
                 let mins = ((due - now) as f64 / 60.0).round() as i64;
                 let when = if mins < 60 {
                     format!("через ~{mins} хв")
@@ -526,16 +532,23 @@ impl CommandHandler for ForgetCmd {
     fn usage(&self) -> &'static str {
         "/forget <id>"
     }
-    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let Ok(id): Result<i64, _> = args.trim().parse() else {
             return Reply::text("✍️ Використання: /forget <id> (дивись /reminders)");
         };
-        let mut repo = match self.state.repo.lock() {
-            Ok(r) => r,
-            Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
+        let result = {
+            let mut repo = match self.state.repo.lock() {
+                Ok(r) => r,
+                Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
+            };
+            repo.cancel_reminder(id)
         };
-        match repo.cancel_reminder(id) {
-            Ok(true) => Reply::text(format!("🗑️ Скасовано нагадування №{id}.")),
+        match result {
+            Ok(true) => {
+                use tauri::Emitter;
+                let _ = ctx.app.emit("reminders:changed", ());
+                Reply::text(format!("🗑️ Скасовано нагадування №{id}."))
+            }
             Ok(false) => Reply::text(format!("❓ Немає активного нагадування №{id}.")),
             Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
         }
