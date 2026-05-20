@@ -105,6 +105,11 @@ pub fn parse_when(args: &str, now: i64) -> Option<(i64, String)> {
     if args.is_empty() {
         return None;
     }
+    // Accept Ukrainian time-unit suffixes ("5 хв", "1 год 30 хв", "45 сек",
+    // "2 дні") by folding them into the ASCII compact form the rest of
+    // the parser already understands.
+    let normalized = normalize_cyrillic_units(args);
+    let args = normalized.as_str();
 
     // Relative offset: e.g. "10m rest", "1h30m lunch".
     if let Some((abs, rest)) = parse_relative(args, now) {
@@ -151,6 +156,88 @@ pub fn parse_when(args: &str, now: i64) -> Option<(i64, String)> {
     }
 
     None
+}
+
+/// Rewrite a leading time-spec that uses Ukrainian unit words into the
+/// compact ASCII form (`5 хв` → `5m`). Only the prefix that looks like
+/// digits + unit pairs is touched — the reminder body (which may
+/// legitimately contain Cyrillic words and digits) is left untouched.
+fn normalize_cyrillic_units(s: &str) -> String {
+    // Order matters: longer prefixes first so "хвилин" wins over "хв".
+    const MAP: &[(&str, char)] = &[
+        ("хвилин", 'm'),
+        ("хв", 'm'),
+        ("годин", 'h'),
+        ("год", 'h'),
+        ("секунд", 's'),
+        ("сек", 's'),
+        ("днів", 'd'),
+        ("дні", 'd'),
+        ("день", 'd'),
+        ("дн", 'd'),
+    ];
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut idx = 0;
+    loop {
+        // Pass through ASCII whitespace.
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            out.push(bytes[idx] as char);
+            idx += 1;
+        }
+        // Require a digit run to consider this a unit.
+        let dig_start = idx;
+        while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+            idx += 1;
+        }
+        if idx == dig_start {
+            break;
+        }
+        out.push_str(&s[dig_start..idx]);
+        // Optional space between the number and the unit.
+        while idx < bytes.len() && bytes[idx] == b' ' {
+            idx += 1;
+        }
+        let tail = &s[idx..];
+        let tail_lower = tail.to_lowercase();
+        let mut matched = None;
+        for (kw, ch) in MAP {
+            if tail_lower.starts_with(kw) {
+                // Cyrillic A-Я / Ї-ї / Є-є / І-і / Ґ-ґ all preserve UTF-8
+                // byte length across upper/lower-case, so `kw.len()` in the
+                // lowercased tail maps 1:1 onto the original.
+                let mut consume = kw.len();
+                let after = &tail_lower[consume..];
+                for c in after.chars() {
+                    if matches!(c, '\u{0400}'..='\u{04FF}') {
+                        consume += c.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                matched = Some((*ch, consume));
+                break;
+            }
+        }
+        if let Some((ch, consume)) = matched {
+            out.push(ch);
+            idx += consume;
+        } else if idx < bytes.len()
+            && matches!(
+                bytes[idx],
+                b's' | b'S' | b'm' | b'M' | b'h' | b'H' | b'd' | b'D'
+            )
+        {
+            // ASCII unit — leave it as-is, keep walking so "1h 30хв" still
+            // gets its Cyrillic tail normalised.
+            out.push(bytes[idx] as char);
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+    out.push_str(&s[idx..]);
+    out
 }
 
 fn parse_relative(s: &str, now: i64) -> Option<(i64, String)> {
@@ -437,6 +524,51 @@ mod tests {
     fn malformed_rejected() {
         assert!(parse_when("zzz", 0).is_none());
         assert!(parse_when("9999-99-99 25:99 x", 0).is_none());
+    }
+
+    #[test]
+    fn cyrillic_minutes_with_space() {
+        let (stamp, text) = parse_when("5 хв call mom", 1_000).unwrap();
+        assert_eq!(stamp, 1_000 + 5 * 60);
+        assert_eq!(text, "call mom");
+    }
+
+    #[test]
+    fn cyrillic_minutes_no_space() {
+        let (stamp, text) = parse_when("5хв тест", 1_000).unwrap();
+        assert_eq!(stamp, 1_000 + 5 * 60);
+        assert_eq!(text, "тест");
+    }
+
+    #[test]
+    fn cyrillic_compound_hours_minutes() {
+        let (stamp, text) = parse_when("1 год 30 хв обід", 0).unwrap();
+        assert_eq!(stamp, 90 * 60);
+        assert_eq!(text, "обід");
+    }
+
+    #[test]
+    fn cyrillic_seconds_and_days() {
+        let (stamp, _) = parse_when("45 сек тест", 0).unwrap();
+        assert_eq!(stamp, 45);
+        let (stamp, _) = parse_when("2 дні тест", 0).unwrap();
+        assert_eq!(stamp, 2 * 86_400);
+    }
+
+    #[test]
+    fn cyrillic_longer_suffix_consumed() {
+        // "хвилини" (plural) should still resolve to minutes.
+        let (stamp, text) = parse_when("10 хвилин call", 0).unwrap();
+        assert_eq!(stamp, 600);
+        assert_eq!(text, "call");
+    }
+
+    #[test]
+    fn cyrillic_body_with_digits_preserved() {
+        // Body contains a number that must NOT be misread as a second unit.
+        let (stamp, text) = parse_when("5 хв call 3 друзів", 0).unwrap();
+        assert_eq!(stamp, 300);
+        assert_eq!(text, "call 3 друзів");
     }
 
     #[test]

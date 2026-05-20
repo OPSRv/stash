@@ -283,7 +283,14 @@ fn current_time_prompt(now_override: Option<i64>) -> String {
          {bare_ahead_hint}\n\
          - When the user gives a bare HH:MM, pass that exact string to `create_reminder` as `when`. \
          The parser picks today (if still ahead) or tomorrow (if past) on its own. \
-         Never refuse, never ask the user 'today чи завтра?' — let the tool decide.",
+         Never refuse, never ask the user 'today чи завтра?' — let the tool decide.\n\
+         - When the user asks for a series spaced from NOW without naming a start time \
+         (e.g. 'кожні 5 хв', 'every 5 minutes', 'через 10, 20, 30 хвилин'), \
+         pass RELATIVE offsets to `create_reminder`: `5m`, `10m`, `15m`, … — never \
+         invent a bare HH:MM. Bare clock times you choose yourself will silently roll \
+         to tomorrow when they happen to be earlier than the current {hh:02}:{mm:02}, \
+         which is almost never what the user wanted. Relative offsets are anchored to \
+         the moment the tool runs, so the first reminder always lands today.",
         bare_ahead_hint = {
             let cur = hh * 60 + mm;
             // Two probe examples (06:00 and 22:00) help anchor the rule

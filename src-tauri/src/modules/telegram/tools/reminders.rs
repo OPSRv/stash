@@ -19,7 +19,13 @@ impl Tool for CreateReminder {
     fn description(&self) -> &'static str {
         "Schedule a reminder. `when` follows the same syntax as the /remind \
          slash command: `10m`, `1h30m`, `14:30`, `tomorrow 9:00`, or \
-         `YYYY-MM-DD HH:MM`. Returns the reminder id + due_at unix seconds."
+         `YYYY-MM-DD HH:MM`. Returns the reminder id + due_at unix seconds. \
+         \n\nWhen the user wants a series spaced from NOW (e.g. \"every 5 \
+         minutes\", \"in 10, 20, 30 min\") and gives no anchor time, use \
+         RELATIVE offsets (`5m`, `10m`, `15m`, …). Do NOT compute bare \
+         clock times yourself — a bare HH:MM that happens to be earlier \
+         than the current wall-clock will roll to tomorrow, which is \
+         almost never what the user meant."
     }
     fn schema(&self) -> Value {
         json!({
