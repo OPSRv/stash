@@ -66,9 +66,6 @@ const Section = ({ label, value, rawCopy, emptyHint }: SectionProps) => {
   );
 };
 
-const DEFAULT_TOKEN =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c';
-
 /// Pull a `token` field out of the pending-dev-tool slot, if it's
 /// addressed to us. Defensive: the slot is shared across tools and
 /// could carry any shape — we only honour ours.
@@ -80,12 +77,12 @@ const tokenFromPending = (): string | null => {
 };
 
 export function JwtTool() {
-  // Initial seed: if the shell handed us a clipboard JWT just before
-  // we mounted, prefer that over the demo token. Otherwise show the
-  // demo so the tile isn't empty on first visit.
-  const [token, setToken] = useState<string>(
-    () => tokenFromPending() ?? DEFAULT_TOKEN,
-  );
+  // Initial seed: pick up a clipboard JWT the shell parked for us, if
+  // any. We deliberately don't ship a demo token — secret scanners
+  // (GitGuardian) flag the RFC 7519 example as a JWT incident on
+  // every commit, and the textarea placeholder already explains the
+  // expected format.
+  const [token, setToken] = useState<string>(() => tokenFromPending() ?? '');
 
   // Live updates: when the tool is *already* mounted and the user
   // copies another JWT, the shell fires `stash:dev-open-tool` with the
