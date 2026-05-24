@@ -14,7 +14,7 @@ const globalShortcuts: ShortcutGroup = {
     { keys: ['⌘⇧J'], label: 'Quick-open Notes' },
     { keys: ['⌘⇧F'], label: 'Global search' },
     { keys: ['⌘⌥1', '⌘⌥2', '⌘⌥3'], label: 'Switch tab' },
-    { keys: ['Esc'], label: 'Hide popup' },
+    { keys: ['Esc', '⌘W'], label: 'Hide popup' },
     { keys: ['?'], label: 'Open this cheatsheet' },
   ],
 };

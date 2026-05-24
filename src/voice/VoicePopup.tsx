@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 
+
 import { Button } from '../shared/ui/Button';
 import { ContextMenu, type ContextMenuItem } from '../shared/ui/ContextMenu';
 import { IconButton } from '../shared/ui/IconButton';
@@ -29,10 +30,9 @@ import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import * as api from './api';
 import type { QuickCommand, VoiceCommand } from './api';
-import { useDictation } from './useDictation';
 import { useRecorder } from './useRecorder';
 
-type Status = 'idle' | 'dictating' | 'recording' | 'transcribing' | 'thinking';
+type Status = 'idle' | 'recording' | 'transcribing' | 'thinking';
 
 type Turn = {
   id: string;
@@ -221,22 +221,6 @@ export const VoicePopup = () => {
 
   const recorder = useRecorder({ silenceMs });
 
-  // Native dictation via WebKit's SpeechRecognition. Streams partial
-  // transcripts straight into the composer textarea so the user can
-  // see (and edit) what's been heard before they hit send — no Whisper
-  // roundtrip. The Whisper pipeline stays alive as a fallback when the
-  // engine is unavailable (non-Apple webviews, headless tests).
-  const dictation = useDictation({
-    onInterim: (text) => setInput(text),
-    onFinal: (text) => setInput(text),
-    onError: (msg) =>
-      toast({
-        title: 'Помилка диктовки',
-        description: msg,
-        variant: 'error',
-      }),
-  });
-
   // Auto-scroll the thread to the newest turn whenever it grows or the
   // streaming placeholder swaps for a final reply.
   useEffect(() => {
@@ -337,40 +321,14 @@ export const VoicePopup = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitPrompt]);
 
-  // Mic-button dispatch. Native dictation is the fast path — it
-  // streams into the textarea so the user can correct typos before
-  // sending. Whisper-via-recorder stays as a fallback when the webview
-  // doesn't expose `webkitSpeechRecognition` (older Chromium builds,
-  // headless test runners). The dictating state owns its own start /
-  // stop pair so it doesn't entangle with the existing recording flow.
   const onMicClick = () => {
-    if (status === 'dictating') {
-      dictation.stop();
-      return;
-    }
     if (status === 'recording') {
       recorder.stop();
       return;
     }
     if (status !== 'idle') return;
-    if (dictation.supported) {
-      setStatus('dictating');
-      dictation.start();
-    } else {
-      void runVoiceTurn();
-    }
+    void runVoiceTurn();
   };
-
-  // SpeechRecognition has no event for "engine handed us a final
-  // transcript" beyond `onend`, so we watch the hook's phase and snap
-  // the popup status back when the engine releases the mic. Without
-  // this the UI would stay stuck on "dictating" after the user stops.
-  useEffect(() => {
-    if (dictation.phase === 'idle' && status === 'dictating') {
-      setStatus('idle');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dictation.phase]);
 
   const onSend = () => {
     if (status !== 'idle') return;
@@ -404,15 +362,27 @@ export const VoicePopup = () => {
 
   const dismiss = useCallback(() => {
     if (recorder.phase !== 'idle') recorder.cancel();
-    if (dictation.phase === 'listening') dictation.cancel();
     void api.hidePopup();
-  }, [recorder, dictation]);
+  }, [recorder]);
 
   // Esc dismisses the popup — covers click-outside too because the
-  // backend hides on blur.
+  // backend hides on blur. ⌘W also dismisses; `e.code === 'KeyW'` is
+  // layout-independent so Ukrainian/Cyrillic keyboards (where Cmd+W
+  // produces `ц`) still work.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
+        dismiss();
+        return;
+      }
+      if (
+        e.metaKey &&
+        !e.shiftKey &&
+        !e.altKey &&
+        !e.ctrlKey &&
+        e.code === 'KeyW'
+      ) {
         e.preventDefault();
         dismiss();
       }
@@ -628,10 +598,9 @@ const EmptyHero = () => (
   <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center px-6">
     <div className="t-primary text-title">Ask Stash anything</div>
     <div className="t-tertiary text-meta max-w-[400px]">
-      Натисни мікрофон щоб надиктувати запит (нативна macOS-диктовка, без
-      Whisper), або введи /команду — слеш-команди (<code>/help</code>,
-      {' '}<code>/timer 25</code>, <code>/note</code>…) працюють як у
-      Telegram-боті.
+      Натисни мікрофон щоб записати запит, або введи /команду — слеш-команди
+      ({' '}<code>/help</code>, <code>/timer 25</code>, <code>/note</code>…)
+      працюють як у Telegram-боті.
     </div>
   </div>
 );
@@ -1038,10 +1007,6 @@ const Composer = ({
 
   const canSend = status === 'idle' && value.trim().length > 0;
   const recording = status === 'recording';
-  const dictating = status === 'dictating';
-  // The "stop me" affordance is shared between Whisper recording and
-  // native dictation — both put the engine in an active-mic state.
-  const liveCapture = recording || dictating;
   const busy = status === 'transcribing' || status === 'thinking';
   const micDisabled = busy;
   const ringScale = 1 + Math.min(recorderLevel * 1.6, 0.35);
@@ -1090,40 +1055,35 @@ const Composer = ({
           type="button"
           onClick={onMic}
           disabled={micDisabled}
-          aria-label={liveCapture ? 'Stop listening' : 'Start dictation'}
-          aria-pressed={liveCapture}
+          aria-label={recording ? 'Stop recording' : 'Start recording'}
+          aria-pressed={recording}
           title={
-            dictating
-              ? 'Stop dictation'
-              : recording
-                ? 'Stop recording'
-                : busy
-                  ? 'Working…'
-                  : 'Tap to dictate (⌘⇧A)'
+            recording
+              ? 'Stop recording'
+              : busy
+                ? 'Working…'
+                : 'Tap to record (⌘⇧A)'
           }
           className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0 disabled:opacity-50 transition-transform"
           style={{
-            backgroundColor: liveCapture ? accent(0.55) : accent(0.2),
+            backgroundColor: recording ? accent(0.55) : accent(0.2),
             color: 'rgb(var(--stash-accent-rgb))',
           }}
         >
-          {liveCapture && (
+          {recording && (
             <span
               aria-hidden
-              className={`absolute inset-0 rounded-full ${dictating ? 'animate-pulse' : ''}`}
+              className="absolute inset-0 rounded-full"
               style={{
                 boxShadow: `0 0 0 3px ${accent(0.3)}`,
-                // Whisper recording drives the ring scale from the mic
-                // RMS; native dictation has no level data so it falls
-                // back to a Tailwind `animate-pulse` instead.
-                transform: recording ? `scale(${ringScale})` : undefined,
+                transform: `scale(${ringScale})`,
                 transition: 'transform 80ms linear',
               }}
             />
           )}
           {busy && status === 'transcribing' ? (
             <Spinner size={14} />
-          ) : liveCapture ? (
+          ) : recording ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
@@ -1137,7 +1097,7 @@ const Composer = ({
           onChange={(e) => onChange(e.currentTarget.value)}
           onKeyDown={handleKey}
           placeholder={
-            dictating
+            recording
               ? 'Слухаю… (натисни мікрофон щоб зупинити)'
               : 'Запитай Stash або введи /команду…'
           }

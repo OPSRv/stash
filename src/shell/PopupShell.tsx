@@ -317,6 +317,18 @@ export const PopupShell = () => {
         invoke('hide_popup').catch(() => {});
         return;
       }
+      // ⌘W also hides the popup. `e.code === 'KeyW'` is layout-independent
+      // so Ukrainian/Cyrillic keyboards (where Cmd+W produces `ц`) still
+      // work. Module-local handlers (Web/Terminal close-tab) may want to
+      // keep ⌘W for themselves; defer the dismiss to a microtask so their
+      // sync listeners get a chance to preventDefault first.
+      if (e.metaKey && !e.shiftKey && !e.altKey && !e.ctrlKey && e.code === 'KeyW') {
+        queueMicrotask(() => {
+          if (e.defaultPrevented) return;
+          invoke('hide_popup').catch(() => {});
+        });
+        return;
+      }
       // ⌘⌥1/2/3 switch modules. Each module declares a stable
       // `tabShortcutDigit` so inserting/reordering modules in registry.ts
       // never shifts muscle memory for existing users. Falls back to the
