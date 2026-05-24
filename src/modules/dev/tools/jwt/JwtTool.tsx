@@ -13,7 +13,7 @@ import {
   DEV_OPEN_TOOL_EVENT,
   takePendingDevTool,
 } from '../../pendingTool';
-import { decodeJwt } from './jwt';
+import { decodeJwt, stripBearer } from './jwt';
 import { JsonTree } from './JsonTree';
 
 interface SectionProps {
@@ -27,9 +27,12 @@ interface SectionProps {
   /// Optional empty-state hint when `value` is null but we still
   /// render the section (signature with `alg: none` etc.).
   emptyHint?: string;
+  /// Algorithm pulled from the header — rendered as a small badge next
+  /// to the label. Only meaningful for the Header card.
+  alg?: string | null;
 }
 
-const Section = ({ label, value, rawCopy, emptyHint }: SectionProps) => {
+const Section = ({ label, value, rawCopy, emptyHint, alg }: SectionProps) => {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
     const ok = await copyText(rawCopy);
@@ -38,20 +41,30 @@ const Section = ({ label, value, rawCopy, emptyHint }: SectionProps) => {
     window.setTimeout(() => setCopied(false), 1200);
   };
   return (
-    <section className="flex flex-col gap-2 min-h-0">
-      <div className="flex items-center justify-between">
-        <span className="text-meta t-tertiary uppercase tracking-wider">
-          {label}
-        </span>
+    <section className="rounded-xl border hair bg-[color:var(--bg-elev)] overflow-hidden">
+      <header className="flex items-center justify-between px-3 py-2 border-b hair bg-[color:var(--bg-hover)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-meta t-tertiary uppercase tracking-wider">
+            {label}
+          </span>
+          {alg && (
+            <span
+              className="text-meta px-1.5 py-0.5 rounded border hair t-secondary tabular-nums"
+              title="Signing algorithm (header.alg)"
+            >
+              {alg}
+            </span>
+          )}
+        </div>
         <IconButton
           onClick={onCopy}
-          title={copied ? 'Copied' : `Copy ${label.toLowerCase()}`}
+          title={copied ? 'Copied' : `Copy raw ${label.toLowerCase()}`}
           tooltipSide="left"
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </IconButton>
-      </div>
-      <div className="rounded-lg border hair p-2 bg-[color:var(--bg-elev)]">
+      </header>
+      <div className="p-3">
         {value !== null ? (
           <JsonTree value={value} />
         ) : (
@@ -74,6 +87,17 @@ const tokenFromPending = (): string | null => {
   if (!pending || pending.toolId !== 'jwt') return null;
   const payload = pending.payload as { token?: unknown } | undefined;
   return typeof payload?.token === 'string' ? payload.token : null;
+};
+
+/// Surface the signing algorithm (`alg`) on the Header card when it's
+/// a plain string. Defensive against tokens that put weird types
+/// there — we just hide the badge in that case.
+const algFromHeader = (header: unknown): string | null => {
+  if (header && typeof header === 'object' && 'alg' in header) {
+    const v = (header as { alg?: unknown }).alg;
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return null;
 };
 
 export function JwtTool() {
@@ -106,67 +130,101 @@ export function JwtTool() {
     setToken(e.target.value);
   };
 
+  // One-click clean-up: dedupe whitespace + strip a Bearer/Token
+  // prefix the user may have pasted along with the token. Cheap to
+  // expose; matches what the clipboard auto-open does for them
+  // implicitly.
+  const onClean = () => {
+    const next = stripBearer(token);
+    if (next !== token) setToken(next);
+  };
+
+  const tokenIsClean = stripBearer(token) === token.trim();
+  const headerAlg = result.ok ? algFromHeader(result.decoded.header) : null;
+
   return (
-    // Single scroll surface: DevShell wraps us in `overflow-auto`.
-    // We do NOT add our own scroll container — that produced nested
-    // scrollbars at the right edge. The JWT input section uses
-    // `position: sticky` so it stays pinned to the bottom of the
-    // viewport when the decoded panes grow taller than the popup.
-    <div className="flex flex-col gap-4 p-4 pb-0 min-h-full">
-      {result.ok ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    // Single scroll surface: the page below uses DevShell's outer
+    // `overflow-auto`. We deliberately do NOT add our own scroll
+    // container — nested scrollbars at the right edge looked awful.
+    // The token textarea lives at the bottom in normal flow so it
+    // never overlaps the decoded panes.
+    <div className="flex flex-col gap-4 p-4 min-h-full">
+      {result.ok && (
+        <div className="flex flex-col gap-4">
           <Section
             label="Header"
             value={result.decoded.header}
             rawCopy={result.decoded.raw.header}
+            alg={headerAlg}
           />
           <Section
             label="Payload"
             value={result.decoded.payload}
             rawCopy={result.decoded.raw.payload}
           />
-          <div className="md:col-span-2">
-            <Section
-              label="Signature"
-              value={null}
-              rawCopy={result.decoded.signature}
-              emptyHint="No signature (alg: none)"
-            />
-          </div>
-        </div>
-      ) : (
-        <div className="text-meta t-tertiary text-center py-8 flex-1">
-          {token.trim().length === 0
-            ? 'Paste a JWT below to decode it.'
-            : result.error}
+          <Section
+            label="Signature"
+            value={null}
+            rawCopy={result.decoded.signature}
+            emptyHint="No signature (alg: none)"
+          />
         </div>
       )}
-      <section
-        className="sticky bottom-0 -mx-4 px-4 py-3 mt-auto border-t hair flex flex-col gap-2 bg-[color:var(--bg-window)]"
-      >
-        <div className="flex items-center justify-between">
+
+      {!result.ok && token.trim().length > 0 && (
+        <div
+          role="alert"
+          className="rounded-xl border hair p-3 text-meta text-[color:var(--color-danger-fg)]"
+        >
+          {result.error}
+        </div>
+      )}
+
+      {!result.ok && token.trim().length === 0 && (
+        <div className="rounded-xl border hair p-6 t-tertiary text-meta text-center">
+          Paste a JWT below to decode it. <br />
+          A <code className="font-mono">Bearer …</code> prefix is fine — we strip it for you.
+        </div>
+      )}
+
+      <section className="rounded-xl border hair bg-[color:var(--bg-elev)] overflow-hidden">
+        <header className="flex items-center justify-between px-3 py-2 border-b hair bg-[color:var(--bg-hover)]">
           <span className="text-meta t-tertiary uppercase tracking-wider">
             JWT token
           </span>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => setToken('')}
-            disabled={!token}
-          >
-            Clear
-          </Button>
+          <div className="flex items-center gap-1">
+            {!tokenIsClean && token && (
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={onClean}
+                title="Trim whitespace and strip a leading `Bearer ` / `Token ` prefix"
+              >
+                Clean
+              </Button>
+            )}
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => setToken('')}
+              disabled={!token}
+            >
+              Clear
+            </Button>
+          </div>
+        </header>
+        <div className="p-3">
+          <Textarea
+            value={token}
+            onChange={handleChange}
+            spellCheck={false}
+            rows={4}
+            className="font-mono text-meta"
+            placeholder="Paste header.payload.signature here"
+            invalid={!result.ok && token.trim().length > 0}
+            aria-label="JWT token"
+          />
         </div>
-        <Textarea
-          value={token}
-          onChange={handleChange}
-          spellCheck={false}
-          rows={3}
-          className="font-mono text-meta"
-          placeholder="Paste header.payload.signature here"
-          invalid={!result.ok && token.trim().length > 0}
-          aria-label="JWT token"
-        />
       </section>
     </div>
   );

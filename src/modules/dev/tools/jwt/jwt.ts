@@ -9,12 +9,32 @@
 /// pasted-with-quotes nonsense out of the auto-open path.
 export const JWT_RE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*$/;
 
-/// Strip a leading `Bearer ` / `Token ` prefix (case-insensitive) so a
-/// copy-paste from "Authorization: Bearer eyJ…" still parses. We don't
-/// touch trailing junk — the regex below already anchors on the
-/// 3-segment shape.
-export const stripBearer = (text: string): string =>
-  text.trim().replace(/^(?:Bearer|Token)\s+/i, '').trim();
+/// Normalise the token the user pasted. We strip the noise that
+/// surrounds a JWT in the wild — quotes, the `Authorization:` header
+/// prefix, the `Bearer ` / `Token ` scheme — so the regex + decoder
+/// downstream see just the `header.payload.signature` string.
+///
+/// Examples of input that should parse cleanly after this pass:
+///   - `Bearer eyJ…`
+///   - `Authorization: Bearer eyJ…`
+///   - `"eyJ…"` (curl/Postman copy)
+///   - `'eyJ…'`
+export const stripBearer = (text: string): string => {
+  let t = text.trim();
+  // `Authorization:` (curl -H or DevTools "Copy as fetch") often
+  // arrives before the scheme; chop it off before we look for Bearer.
+  t = t.replace(/^Authorization\s*:\s*/i, '');
+  t = t.replace(/^(?:Bearer|Token)\s+/i, '');
+  // Drop a single layer of wrapping quotes — Postman / IDE copy
+  // routinely wraps strings.
+  if (
+    (t.startsWith('"') && t.endsWith('"')) ||
+    (t.startsWith("'") && t.endsWith("'"))
+  ) {
+    t = t.slice(1, -1);
+  }
+  return t.trim();
+};
 
 export const looksLikeJwt = (text: string): boolean => {
   const t = stripBearer(text);

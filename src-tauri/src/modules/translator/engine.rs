@@ -68,14 +68,27 @@ pub fn parse_google_response(body: &str) -> Result<String, String> {
 /// test but translating them produces garbage and burns a Google
 /// API quota on a base64 blob.
 pub fn looks_like_jwt(text: &str) -> bool {
-    let stripped = text
-        .trim()
-        .strip_prefix("Bearer ")
-        .or_else(|| text.trim().strip_prefix("bearer "))
-        .or_else(|| text.trim().strip_prefix("Token "))
-        .or_else(|| text.trim().strip_prefix("token "))
-        .unwrap_or(text.trim())
-        .trim();
+    let mut t = text.trim();
+    // `Authorization: Bearer …` from curl / DevTools copy.
+    for prefix in ["Authorization:", "authorization:"] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            t = rest.trim_start();
+            break;
+        }
+    }
+    for prefix in ["Bearer ", "bearer ", "Token ", "token "] {
+        if let Some(rest) = t.strip_prefix(prefix) {
+            t = rest.trim_start();
+            break;
+        }
+    }
+    // One layer of wrapping quotes.
+    if (t.starts_with('"') && t.ends_with('"') && t.len() >= 2)
+        || (t.starts_with('\'') && t.ends_with('\'') && t.len() >= 2)
+    {
+        t = &t[1..t.len() - 1];
+    }
+    let stripped = t.trim();
     if stripped.len() < 20 {
         return false;
     }
