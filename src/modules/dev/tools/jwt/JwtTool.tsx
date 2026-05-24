@@ -51,7 +51,7 @@ const Section = ({ label, value, rawCopy, emptyHint }: SectionProps) => {
           {copied ? <CheckIcon /> : <CopyIcon />}
         </IconButton>
       </div>
-      <div className="rounded-lg border hair p-2 bg-[color:var(--bg-elev)] overflow-auto nice-scroll max-h-[260px]">
+      <div className="rounded-lg border hair p-2 bg-[color:var(--bg-elev)]">
         {value !== null ? (
           <JsonTree value={value} />
         ) : (
@@ -107,8 +107,45 @@ export function JwtTool() {
   };
 
   return (
-    <div className="flex flex-col gap-4 p-4 min-h-full">
-      <section className="flex flex-col gap-2">
+    // Layout intent: decoded output at the top, JWT input pinned to
+    // the bottom. The decoded panes are where the user spends time
+    // hunting for claims; the textarea is reference / paste-here and
+    // belongs out of the way. Single scroll region in the middle —
+    // DevShell's outer scroll stays inert because we fill its height.
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex-1 min-h-0 overflow-auto nice-scroll p-4">
+        {result.ok ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Section
+              label="Header"
+              value={result.decoded.header}
+              rawCopy={result.decoded.raw.header}
+            />
+            <Section
+              label="Payload"
+              value={result.decoded.payload}
+              rawCopy={result.decoded.raw.payload}
+            />
+            <div className="md:col-span-2">
+              <Section
+                label="Signature"
+                value={null}
+                rawCopy={result.decoded.signature}
+                emptyHint="No signature (alg: none)"
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="text-meta t-tertiary text-center py-8">
+            {token.trim().length === 0
+              ? 'Paste a JWT below to decode it.'
+              : result.error}
+          </div>
+        )}
+      </div>
+      <section
+        className="shrink-0 border-t hair p-3 flex flex-col gap-2 bg-[color:var(--bg-elev)]"
+      >
         <div className="flex items-center justify-between">
           <span className="text-meta t-tertiary uppercase tracking-wider">
             JWT token
@@ -126,44 +163,13 @@ export function JwtTool() {
           value={token}
           onChange={handleChange}
           spellCheck={false}
-          rows={4}
+          rows={3}
           className="font-mono text-meta"
           placeholder="Paste header.payload.signature here"
           invalid={!result.ok && token.trim().length > 0}
           aria-label="JWT token"
         />
-        {!result.ok && token.trim().length > 0 && (
-          <p
-            role="alert"
-            className="text-meta text-[color:var(--color-danger-fg)]"
-          >
-            {result.error}
-          </p>
-        )}
       </section>
-
-      {result.ok && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0">
-          <Section
-            label="Header"
-            value={result.decoded.header}
-            rawCopy={result.decoded.raw.header}
-          />
-          <Section
-            label="Payload"
-            value={result.decoded.payload}
-            rawCopy={result.decoded.raw.payload}
-          />
-          <div className="md:col-span-2">
-            <Section
-              label="Signature"
-              value={null}
-              rawCopy={result.decoded.signature}
-              emptyHint="No signature (alg: none)"
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

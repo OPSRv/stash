@@ -110,9 +110,34 @@ const Chevron = ({ open }: { open: boolean }) => (
   </svg>
 );
 
+/// Some JWT producers stash whole objects as a stringified JSON value
+/// (Slottica's `AuthInfo`, AWS Cognito's `cognito:groups` quirks, …).
+/// Try to parse strings that look like JSON so the tree can drill in.
+/// We only re-parse strings that start with `{` or `[` to avoid
+/// surprising "12" → 12 conversions on numeric-looking ids.
+const tryParseJsonString = (s: string): unknown | null => {
+  const t = s.trim();
+  if (!t) return null;
+  const first = t[0];
+  if (first !== '{' && first !== '[') return null;
+  try {
+    const parsed = JSON.parse(t);
+    // Only treat as nested if it actually decoded into a container —
+    // a bare `"null"` or `"42"` shouldn't replace the string view.
+    if (parsed !== null && typeof parsed === 'object') return parsed;
+  } catch {
+    // Not JSON after all — fall through to the plain string render.
+  }
+  return null;
+};
+
 const TreeNode = ({ k, v, depth, inArray = false }: NodeProps) => {
-  const isObject = v !== null && typeof v === 'object';
-  const isArray = Array.isArray(v);
+  // Auto-detect strings that carry an embedded JSON object/array and
+  // promote them so the user can expand + copy each inner value.
+  const embedded = typeof v === 'string' ? tryParseJsonString(v) : null;
+  const effectiveValue = embedded ?? v;
+  const isObject = effectiveValue !== null && typeof effectiveValue === 'object';
+  const isArray = Array.isArray(effectiveValue);
   // Default open for the first two depths so the user sees the whole
   // payload without clicking. Deeper nesting starts collapsed to keep
   // wall-of-text Cognito tokens scannable.
@@ -148,11 +173,15 @@ const TreeNode = ({ k, v, depth, inArray = false }: NodeProps) => {
   }
 
   const entries = isArray
-    ? (v as unknown[]).map((item, i) => [i, item] as const)
-    : Object.entries(v as Record<string, unknown>);
+    ? (effectiveValue as unknown[]).map((item, i) => [i, item] as const)
+    : Object.entries(effectiveValue as Record<string, unknown>);
   const summary = isArray
     ? `[${entries.length}]`
     : `{${entries.length}}`;
+  // For embedded-JSON strings the copy button hands back the *original*
+  // string (so the user can paste it back into the token), but each
+  // child still copies its natural decoded value.
+  const copyTarget = embedded !== null ? v : effectiveValue;
 
   return (
     <div>
@@ -173,12 +202,20 @@ const TreeNode = ({ k, v, depth, inArray = false }: NodeProps) => {
           </span>
         )}
         <span className="t-tertiary text-meta shrink-0">{summary}</span>
+        {embedded !== null && (
+          <span
+            className="text-meta t-tertiary px-1.5 rounded shrink-0 border hair"
+            title="String value containing embedded JSON"
+          >
+            json
+          </span>
+        )}
         <span className="flex-1" />
         <span
           className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
-          <CopyValueButton value={v} />
+          <CopyValueButton value={copyTarget} />
         </span>
       </div>
       {open && (
