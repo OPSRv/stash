@@ -8,6 +8,11 @@ import { modules } from '../modules/registry';
 import { resolveVisibleModules } from '../modules/visibility';
 import { SUPPORTED_VIDEO_URL } from '../modules/downloader/downloads.constants';
 import { setPendingDownloaderUrl } from '../modules/downloader/pendingUrl';
+import {
+  DEV_OPEN_TOOL_EVENT,
+  setPendingDevTool,
+} from '../modules/dev/pendingTool';
+import { looksLikeJwt, stripBearer } from '../modules/dev/tools/jwt/jwt';
 import { TabButton } from '../shared/ui/TabButton';
 import { Button } from '../shared/ui/Button';
 import { accent } from '../shared/theme/accent';
@@ -434,12 +439,32 @@ export const PopupShell = () => {
         pending = null;
         try {
           const text = (await readText())?.trim();
-          if (!text || !SUPPORTED_VIDEO_URL.test(text)) return;
-          setPendingDownloaderUrl(text);
-          openTab('downloads');
-          window.dispatchEvent(
-            new CustomEvent('stash:downloader-prefill', { detail: text }),
-          );
+          if (!text) return;
+          if (SUPPORTED_VIDEO_URL.test(text)) {
+            setPendingDownloaderUrl(text);
+            openTab('downloads');
+            window.dispatchEvent(
+              new CustomEvent('stash:downloader-prefill', { detail: text }),
+            );
+            return;
+          }
+          // JWTs in the clipboard auto-open the Dev tab → JWT decoder,
+          // same handoff pattern as the Downloader URL prefill above.
+          // `looksLikeJwt` verifies the segments actually parse so we
+          // don't trip on random `a.b.c` strings.
+          if (looksLikeJwt(text)) {
+            // Drop any leading `Bearer ` so the textarea shows just
+            // the token — looksLikeJwt already verified the stripped
+            // form parses, so this is safe.
+            const token = stripBearer(text);
+            const payload = { toolId: 'jwt', payload: { token } };
+            setPendingDevTool(payload);
+            openTab('dev');
+            window.dispatchEvent(
+              new CustomEvent(DEV_OPEN_TOOL_EVENT, { detail: payload }),
+            );
+            return;
+          }
         } catch {
           // ignore clipboard read failures — this is a nice-to-have.
         }

@@ -1,7 +1,11 @@
-import { Suspense, useCallback, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { Button } from '../../shared/ui/Button';
 import { CenterSpinner } from '../../shared/ui/CenterSpinner';
 import { EmptyState } from '../../shared/ui/EmptyState';
+import {
+  DEV_OPEN_TOOL_EVENT,
+  peekPendingDevTool,
+} from './pendingTool';
 import { DEV_TOOLS, DEV_TOOLS_BY_ID } from './registry';
 import { TileGrid } from './TileGrid';
 
@@ -45,11 +49,34 @@ const WrenchGlyph = () => (
 /// components are React.lazy so opening a tile only pays for that
 /// chunk on first visit.
 export function DevShell() {
-  const [activeToolId, setActiveToolId] = useState<string | null>(null);
+  // On first mount, honour any pending tool the shell parked for us
+  // (e.g. JWT auto-open). `peek` rather than `take` so the tool view
+  // itself can still consume the payload after it lazy-mounts.
+  const [activeToolId, setActiveToolId] = useState<string | null>(() => {
+    const pending = peekPendingDevTool();
+    if (pending && DEV_TOOLS_BY_ID[pending.toolId]) return pending.toolId;
+    return null;
+  });
   const activeTool = activeToolId ? DEV_TOOLS_BY_ID[activeToolId] : null;
 
   const openTool = useCallback((id: string) => setActiveToolId(id), []);
   const back = useCallback(() => setActiveToolId(null), []);
+
+  // Live-update path: if the Dev tab is already mounted when the
+  // shell decides a tool should open, jump to it without waiting for
+  // a remount. Tools also subscribe to the same event so an already-
+  // active view can refresh its inputs.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { toolId?: string }
+        | undefined;
+      if (!detail?.toolId || !DEV_TOOLS_BY_ID[detail.toolId]) return;
+      setActiveToolId(detail.toolId);
+    };
+    window.addEventListener(DEV_OPEN_TOOL_EVENT, handler);
+    return () => window.removeEventListener(DEV_OPEN_TOOL_EVENT, handler);
+  }, []);
 
   if (activeTool) {
     const ToolView = activeTool.View;
