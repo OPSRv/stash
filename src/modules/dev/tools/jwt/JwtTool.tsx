@@ -107,44 +107,42 @@ export function JwtTool() {
   };
 
   return (
-    // Layout intent: decoded output at the top, JWT input pinned to
-    // the bottom. The decoded panes are where the user spends time
-    // hunting for claims; the textarea is reference / paste-here and
-    // belongs out of the way. Single scroll region in the middle —
-    // DevShell's outer scroll stays inert because we fill its height.
-    <div className="flex flex-col h-full min-h-0">
-      <div className="flex-1 min-h-0 overflow-auto nice-scroll p-4">
-        {result.ok ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    // Single scroll surface: DevShell wraps us in `overflow-auto`.
+    // We do NOT add our own scroll container — that produced nested
+    // scrollbars at the right edge. The JWT input section uses
+    // `position: sticky` so it stays pinned to the bottom of the
+    // viewport when the decoded panes grow taller than the popup.
+    <div className="flex flex-col gap-4 p-4 pb-0 min-h-full">
+      {result.ok ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Section
+            label="Header"
+            value={result.decoded.header}
+            rawCopy={result.decoded.raw.header}
+          />
+          <Section
+            label="Payload"
+            value={result.decoded.payload}
+            rawCopy={result.decoded.raw.payload}
+          />
+          <div className="md:col-span-2">
             <Section
-              label="Header"
-              value={result.decoded.header}
-              rawCopy={result.decoded.raw.header}
+              label="Signature"
+              value={null}
+              rawCopy={result.decoded.signature}
+              emptyHint="No signature (alg: none)"
             />
-            <Section
-              label="Payload"
-              value={result.decoded.payload}
-              rawCopy={result.decoded.raw.payload}
-            />
-            <div className="md:col-span-2">
-              <Section
-                label="Signature"
-                value={null}
-                rawCopy={result.decoded.signature}
-                emptyHint="No signature (alg: none)"
-              />
-            </div>
           </div>
-        ) : (
-          <div className="text-meta t-tertiary text-center py-8">
-            {token.trim().length === 0
-              ? 'Paste a JWT below to decode it.'
-              : result.error}
-          </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="text-meta t-tertiary text-center py-8 flex-1">
+          {token.trim().length === 0
+            ? 'Paste a JWT below to decode it.'
+            : result.error}
+        </div>
+      )}
       <section
-        className="shrink-0 border-t hair p-3 flex flex-col gap-2 bg-[color:var(--bg-elev)]"
+        className="sticky bottom-0 -mx-4 px-4 py-3 mt-auto border-t hair flex flex-col gap-2 bg-[color:var(--bg-window)]"
       >
         <div className="flex items-center justify-between">
           <span className="text-meta t-tertiary uppercase tracking-wider">

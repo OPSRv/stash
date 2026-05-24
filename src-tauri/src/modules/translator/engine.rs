@@ -62,6 +62,39 @@ pub fn parse_google_response(body: &str) -> Result<String, String> {
     Ok(out)
 }
 
+/// True when `text` looks like a JWT (`header.payload.signature`,
+/// optionally with a `Bearer ` / `Token ` prefix). Auto-translate
+/// uses this to skip tokens — they pass the "mostly ASCII letters"
+/// test but translating them produces garbage and burns a Google
+/// API quota on a base64 blob.
+pub fn looks_like_jwt(text: &str) -> bool {
+    let stripped = text
+        .trim()
+        .strip_prefix("Bearer ")
+        .or_else(|| text.trim().strip_prefix("bearer "))
+        .or_else(|| text.trim().strip_prefix("Token "))
+        .or_else(|| text.trim().strip_prefix("token "))
+        .unwrap_or(text.trim())
+        .trim();
+    if stripped.len() < 20 {
+        return false;
+    }
+    let parts: Vec<&str> = stripped.split('.').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let is_b64url = |s: &str| {
+        !s.is_empty()
+            && s.bytes().all(|b| {
+                matches!(b,
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'
+                )
+            })
+    };
+    // Signature segment is allowed to be empty (`alg: none`).
+    is_b64url(parts[0]) && is_b64url(parts[1]) && (parts[2].is_empty() || is_b64url(parts[2]))
+}
+
 /// Cheap language-detection heuristic used to decide whether to auto-translate:
 /// returns true when at least 85% of the input's letters are ASCII. Good
 /// enough to catch plain English (and other Latin-script text) while skipping

@@ -151,27 +151,117 @@ const TreeNode = ({ k, v, depth, inArray = false }: NodeProps) => {
 
   if (!isObject) {
     return (
-      <div
-        className="group flex items-start gap-2 py-0.5 pr-1 rounded hover:bg-[color:var(--bg-hover)]"
-        style={{ paddingLeft: depth * 14 }}
-      >
-        <span className="w-[10px] inline-block shrink-0" />
-        {keyLabel !== null && (
-          <span className="t-secondary shrink-0">
-            {keyLabel}
-            <span className="t-tertiary">:</span>
-          </span>
-        )}
-        <span className="min-w-0 flex-1 break-all font-mono text-meta">
-          <PrimitivePreview v={v} claim={inArray ? null : keyLabel} />
-        </span>
-        <span className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity shrink-0">
-          <CopyValueButton value={v} />
-        </span>
-      </div>
+      <PrimitiveRow
+        v={v}
+        depth={depth}
+        keyLabel={keyLabel}
+        inArray={inArray}
+      />
     );
   }
 
+  return (
+    <ContainerRow
+      v={v}
+      effectiveValue={effectiveValue}
+      embedded={embedded}
+      isArray={isArray}
+      keyLabel={keyLabel}
+      depth={depth}
+      open={open}
+      setOpen={setOpen}
+    />
+  );
+};
+
+interface PrimitiveRowProps {
+  v: unknown;
+  depth: number;
+  keyLabel: string | null;
+  inArray: boolean;
+}
+
+/// Primitive (leaf) row. Whole row is clickable → copies the value;
+/// the trailing IconButton repeats the action for keyboard users and
+/// renders the "Copied" tick. A brief background flash gives visual
+/// confirmation when the user clicks the row body.
+const PrimitiveRow = ({ v, depth, keyLabel, inArray }: PrimitiveRowProps) => {
+  const [flash, setFlash] = useState(false);
+  const doCopy = async () => {
+    const ok = await copyText(valueForCopy(v));
+    if (!ok) return;
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 600);
+  };
+  // Click-to-copy must not block native text selection. If the user
+  // has dragged a selection over part of the row, we skip the
+  // auto-copy so Cmd-C still works on exactly that selection.
+  const onClickRow = () => {
+    const sel = window.getSelection?.()?.toString() ?? '';
+    if (sel.trim().length > 0) return;
+    doCopy();
+  };
+  return (
+    <div
+      className="group flex items-start gap-2 py-0.5 pr-1 rounded transition-colors cursor-pointer"
+      style={{
+        paddingLeft: depth * 14,
+        background: flash ? 'var(--accent-fog, var(--bg-hover))' : undefined,
+      }}
+      onClick={onClickRow}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          doCopy();
+        }
+      }}
+      title="Click to copy · drag to select"
+    >
+      <span className="w-[10px] inline-block shrink-0" />
+      {keyLabel !== null && (
+        <span className="t-secondary shrink-0">
+          {keyLabel}
+          <span className="t-tertiary">:</span>
+        </span>
+      )}
+      <span className="min-w-0 flex-1 break-all font-mono text-meta">
+        <PrimitivePreview v={v} claim={inArray ? null : keyLabel} />
+      </span>
+      <span
+        className={`shrink-0 transition-opacity ${
+          flash ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <CopyValueButton value={v} />
+      </span>
+    </div>
+  );
+};
+
+interface ContainerRowProps {
+  v: unknown;
+  effectiveValue: unknown;
+  embedded: unknown | null;
+  isArray: boolean;
+  keyLabel: string | null;
+  depth: number;
+  open: boolean;
+  setOpen: (cb: (o: boolean) => boolean) => void;
+}
+
+const ContainerRow = ({
+  v,
+  effectiveValue,
+  embedded,
+  isArray,
+  keyLabel,
+  depth,
+  open,
+  setOpen,
+}: ContainerRowProps) => {
   const entries = isArray
     ? (effectiveValue as unknown[]).map((item, i) => [i, item] as const)
     : Object.entries(effectiveValue as Record<string, unknown>);

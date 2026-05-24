@@ -74,6 +74,14 @@ impl TranslatorState {
             tracing::debug!("translator skip: not ASCII-heavy");
             return None;
         }
+        // JWTs are ASCII-heavy and easily clear `min_chars`, but feeding
+        // them to Google yields nonsense ("token salad") and pollutes the
+        // banner over the Dev → JWT view that auto-opens on the same
+        // clipboard event. Bail before we spend a network round-trip.
+        if engine::looks_like_jwt(trimmed) {
+            tracing::debug!("translator skip: looks like JWT");
+            return None;
+        }
         if target == "en" {
             return None;
         }
