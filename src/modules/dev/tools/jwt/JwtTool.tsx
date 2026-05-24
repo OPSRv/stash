@@ -1,12 +1,14 @@
 import {
   type ChangeEvent,
+  type UIEvent,
+  Fragment,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { Button } from '../../../../shared/ui/Button';
 import { IconButton } from '../../../../shared/ui/IconButton';
-import { Textarea } from '../../../../shared/ui/Textarea';
 import { CopyIcon, CheckIcon } from '../../../../shared/ui/icons';
 import { copyText } from '../../../../shared/util/clipboard';
 import {
@@ -16,23 +18,148 @@ import {
 import { decodeJwt, stripBearer } from './jwt';
 import { JsonTree } from './JsonTree';
 
-interface SectionProps {
-  label: string;
-  /// Decoded value to render in the tree. `null` means "section not
-  /// applicable" (e.g. signature isn't JSON).
-  value: unknown | null;
-  /// Raw segment text used for the "Copy raw" button — JSON for
-  /// header/payload, the base64url signature itself for the third.
-  rawCopy: string;
-  /// Optional empty-state hint when `value` is null but we still
-  /// render the section (signature with `alg: none` etc.).
-  emptyHint?: string;
-  /// Algorithm pulled from the header — rendered as a small badge next
-  /// to the label. Only meaningful for the Header card.
-  alg?: string | null;
+/// jwt.io-style palette, hand-picked for our dark surface and light
+/// theme alike. The same hue plays the role of "header segment colour"
+/// in the encoded token *and* the small dot next to the decoded card,
+/// so the eye can follow a segment across the two panes.
+const SEGMENT_COLOR = {
+  header: '#f87171',    // soft red — matches Tailwind red-400
+  payload: '#c084fc',   // soft purple — Tailwind purple-400
+  signature: '#22d3ee', // cyan — Tailwind cyan-400
+} as const;
+
+type SegmentKey = keyof typeof SEGMENT_COLOR;
+
+/// A coloured, read-only mirror of the token sitting under a
+/// transparent textarea. Together they form a single editable surface
+/// where each base64url segment glows in its own colour — same trick
+/// jwt.io uses. The mirror has no pointer events and gets its
+/// scrollTop synced from the textarea so the rendering stays aligned
+/// as the user scrolls a long token.
+function HighlightedTokenInput({
+  value,
+  onChange,
+  invalid,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  invalid: boolean;
+}) {
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const parts = value.split('.');
+  const has3 = parts.length === 3;
+
+  const onScroll = (e: UIEvent<HTMLTextAreaElement>) => {
+    const m = mirrorRef.current;
+    if (!m) return;
+    m.scrollTop = (e.target as HTMLTextAreaElement).scrollTop;
+    m.scrollLeft = (e.target as HTMLTextAreaElement).scrollLeft;
+  };
+
+  // Shared style ensures the mirror's wrapping matches the textarea's
+  // exactly — same font metrics, same padding, same break rules.
+  // Without this the caret position drifts as the user types.
+  const sharedStyle = {
+    fontFamily:
+      'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+    fontSize: '12px',
+    lineHeight: '1.55',
+    padding: '12px 14px',
+    whiteSpace: 'pre-wrap' as const,
+    wordBreak: 'break-all' as const,
+  };
+
+  return (
+    <div
+      className="relative flex-1 min-h-0 rounded-lg border bg-[color:var(--bg-pane)]"
+      style={{
+        borderColor: invalid
+          ? 'var(--color-danger-fg)'
+          : 'var(--hairline)',
+      }}
+    >
+      <div
+        ref={mirrorRef}
+        aria-hidden
+        className="absolute inset-0 overflow-hidden pointer-events-none select-none"
+        style={sharedStyle}
+      >
+        {value === '' ? (
+          <span style={{ color: 'var(--fg-mute)' }}>
+            Paste a JWT here…
+          </span>
+        ) : has3 ? (
+          <Fragment>
+            <span style={{ color: SEGMENT_COLOR.header }}>{parts[0]}</span>
+            <span style={{ color: 'var(--fg-mute)' }}>.</span>
+            <span style={{ color: SEGMENT_COLOR.payload }}>{parts[1]}</span>
+            <span style={{ color: 'var(--fg-mute)' }}>.</span>
+            <span style={{ color: SEGMENT_COLOR.signature }}>{parts[2]}</span>
+          </Fragment>
+        ) : (
+          <span style={{ color: 'var(--fg)' }}>{value}</span>
+        )}
+        {/* Trailing newline keeps the mirror's last line height in sync
+            with the textarea when the user types a Return at the end. */}
+        {'\n'}
+      </div>
+      <textarea
+        ref={textareaRef}
+        value={value}
+        onChange={(e: ChangeEvent<HTMLTextAreaElement>) => onChange(e.target.value)}
+        onScroll={onScroll}
+        spellCheck={false}
+        autoCorrect="off"
+        autoCapitalize="off"
+        className="relative w-full h-full bg-transparent outline-none resize-none caret-[color:var(--fg)]"
+        style={{
+          ...sharedStyle,
+          color: 'transparent',
+        }}
+        aria-label="JWT token"
+      />
+    </div>
+  );
 }
 
-const Section = ({ label, value, rawCopy, emptyHint, alg }: SectionProps) => {
+/// Pretty-print a decoded segment for the "Copy raw" button. Header
+/// and payload come in as JSON strings; we re-indent so paste-targets
+/// (Slack, code editor) get a readable blob instead of the original
+/// jammed-onto-one-line form.
+const prettyJson = (raw: string): string => {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+};
+
+interface DecodedSectionProps {
+  /// One of `header` / `payload` / `signature` — drives the colour dot
+  /// and copy-label.
+  kind: SegmentKey;
+  label: string;
+  /// Decoded value to render in the tree. `null` falls back to the
+  /// raw text block (used for the signature).
+  value: unknown | null;
+  /// Text handed to the clipboard when the user hits Copy raw.
+  rawCopy: string;
+  /// Tone the section as "minor" so the header card sits visually
+  /// below the payload card.
+  emphasis?: 'primary' | 'compact';
+  emptyHint?: string;
+}
+
+const DecodedSection = ({
+  kind,
+  label,
+  value,
+  rawCopy,
+  emphasis = 'primary',
+  emptyHint,
+}: DecodedSectionProps) => {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
     const ok = await copyText(rawCopy);
@@ -41,36 +168,52 @@ const Section = ({ label, value, rawCopy, emptyHint, alg }: SectionProps) => {
     window.setTimeout(() => setCopied(false), 1200);
   };
   return (
-    <section className="rounded-xl border hair bg-[color:var(--bg-elev)] overflow-hidden">
-      <header className="flex items-center justify-between px-3 py-2 border-b hair bg-[color:var(--bg-hover)]">
+    <section
+      className={`rounded-xl border bg-[color:var(--bg-elev)] flex flex-col min-h-0 ${
+        emphasis === 'primary' ? 'flex-1' : ''
+      }`}
+      style={{ borderColor: 'var(--hairline)' }}
+    >
+      <header
+        className="flex items-center justify-between px-3 py-2 border-b shrink-0"
+        style={{ borderColor: 'var(--hairline)' }}
+      >
         <div className="flex items-center gap-2 min-w-0">
+          <span
+            className="w-2 h-2 rounded-full shrink-0"
+            style={{ background: SEGMENT_COLOR[kind] }}
+            aria-hidden
+          />
           <span className="text-meta t-tertiary uppercase tracking-wider">
             {label}
           </span>
-          {alg && (
-            <span
-              className="text-meta px-1.5 py-0.5 rounded border hair t-secondary tabular-nums"
-              title="Signing algorithm (header.alg)"
-            >
-              {alg}
-            </span>
-          )}
         </div>
         <IconButton
           onClick={onCopy}
-          title={copied ? 'Copied' : `Copy raw ${label.toLowerCase()}`}
+          title={copied ? 'Copied' : `Copy ${label.toLowerCase()}`}
           tooltipSide="left"
         >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </IconButton>
       </header>
-      <div className="p-3">
+      <div
+        className={`${
+          emphasis === 'primary'
+            ? 'flex-1 min-h-0 overflow-auto nice-scroll'
+            : ''
+        } px-3 py-2`}
+      >
         {value !== null ? (
           <JsonTree value={value} />
         ) : (
-          <div className="font-mono text-meta t-secondary break-all whitespace-pre-wrap">
+          <div
+            className="font-mono text-meta break-all whitespace-pre-wrap"
+            style={{ color: SEGMENT_COLOR[kind] }}
+          >
             {rawCopy || (
-              <span className="t-tertiary italic">{emptyHint ?? '—'}</span>
+              <span className="t-tertiary italic" style={{ color: 'var(--fg-mute)' }}>
+                {emptyHint ?? '—'}
+              </span>
             )}
           </div>
         )}
@@ -89,28 +232,9 @@ const tokenFromPending = (): string | null => {
   return typeof payload?.token === 'string' ? payload.token : null;
 };
 
-/// Surface the signing algorithm (`alg`) on the Header card when it's
-/// a plain string. Defensive against tokens that put weird types
-/// there — we just hide the badge in that case.
-const algFromHeader = (header: unknown): string | null => {
-  if (header && typeof header === 'object' && 'alg' in header) {
-    const v = (header as { alg?: unknown }).alg;
-    if (typeof v === 'string' && v.length > 0) return v;
-  }
-  return null;
-};
-
 export function JwtTool() {
-  // Initial seed: pick up a clipboard JWT the shell parked for us, if
-  // any. We deliberately don't ship a demo token — secret scanners
-  // (GitGuardian) flag the RFC 7519 example as a JWT incident on
-  // every commit, and the textarea placeholder already explains the
-  // expected format.
   const [token, setToken] = useState<string>(() => tokenFromPending() ?? '');
 
-  // Live updates: when the tool is *already* mounted and the user
-  // copies another JWT, the shell fires `stash:dev-open-tool` with the
-  // new token. Pick it up and refresh the textarea.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as
@@ -125,80 +249,35 @@ export function JwtTool() {
   }, []);
 
   const result = useMemo(() => decodeJwt(token), [token]);
-
-  const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setToken(e.target.value);
-  };
-
-  // One-click clean-up: dedupe whitespace + strip a Bearer/Token
-  // prefix the user may have pasted along with the token. Cheap to
-  // expose; matches what the clipboard auto-open does for them
-  // implicitly.
-  const onClean = () => {
-    const next = stripBearer(token);
-    if (next !== token) setToken(next);
-  };
-
-  const tokenIsClean = stripBearer(token) === token.trim();
-  const headerAlg = result.ok ? algFromHeader(result.decoded.header) : null;
+  const cleanable = token !== '' && stripBearer(token) !== token.trim();
 
   return (
-    // Single scroll surface: the page below uses DevShell's outer
-    // `overflow-auto`. We deliberately do NOT add our own scroll
-    // container — nested scrollbars at the right edge looked awful.
-    // The token textarea lives at the bottom in normal flow so it
-    // never overlaps the decoded panes.
-    <div className="flex flex-col gap-4 p-4 min-h-full">
-      {result.ok && (
-        <div className="flex flex-col gap-4">
-          <Section
-            label="Header"
-            value={result.decoded.header}
-            rawCopy={result.decoded.raw.header}
-            alg={headerAlg}
-          />
-          <Section
-            label="Payload"
-            value={result.decoded.payload}
-            rawCopy={result.decoded.raw.payload}
-          />
-          <Section
-            label="Signature"
-            value={null}
-            rawCopy={result.decoded.signature}
-            emptyHint="No signature (alg: none)"
-          />
-        </div>
-      )}
-
-      {!result.ok && token.trim().length > 0 && (
-        <div
-          role="alert"
-          className="rounded-xl border hair p-3 text-meta text-[color:var(--color-danger-fg)]"
+    <div
+      className="h-full grid gap-4 p-4"
+      style={{
+        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+        gridTemplateRows: 'minmax(0, 1fr)',
+      }}
+    >
+      {/* LEFT — encoded token, jwt.io-style 3-colour highlight */}
+      <section
+        className="rounded-xl border bg-[color:var(--bg-elev)] flex flex-col min-h-0"
+        style={{ borderColor: 'var(--hairline)' }}
+      >
+        <header
+          className="flex items-center justify-between px-3 py-2 border-b shrink-0"
+          style={{ borderColor: 'var(--hairline)' }}
         >
-          {result.error}
-        </div>
-      )}
-
-      {!result.ok && token.trim().length === 0 && (
-        <div className="rounded-xl border hair p-6 t-tertiary text-meta text-center">
-          Paste a JWT below to decode it. <br />
-          A <code className="font-mono">Bearer …</code> prefix is fine — we strip it for you.
-        </div>
-      )}
-
-      <section className="rounded-xl border hair bg-[color:var(--bg-elev)] overflow-hidden">
-        <header className="flex items-center justify-between px-3 py-2 border-b hair bg-[color:var(--bg-hover)]">
           <span className="text-meta t-tertiary uppercase tracking-wider">
-            JWT token
+            Encoded
           </span>
           <div className="flex items-center gap-1">
-            {!tokenIsClean && token && (
+            {cleanable && (
               <Button
                 size="xs"
                 variant="ghost"
-                onClick={onClean}
-                title="Trim whitespace and strip a leading `Bearer ` / `Token ` prefix"
+                onClick={() => setToken(stripBearer(token))}
+                title="Strip Bearer / Authorization prefix and wrapping quotes"
               >
                 Clean
               </Button>
@@ -213,21 +292,91 @@ export function JwtTool() {
             </Button>
           </div>
         </header>
-        <div className="p-3">
-          <Textarea
+        <div className="flex-1 min-h-0 p-3 flex flex-col">
+          <HighlightedTokenInput
             value={token}
-            onChange={handleChange}
-            spellCheck={false}
-            rows={4}
-            className="font-mono text-meta"
-            placeholder="Paste header.payload.signature here"
+            onChange={setToken}
             invalid={!result.ok && token.trim().length > 0}
-            aria-label="JWT token"
           />
+          {!result.ok && token.trim().length > 0 && (
+            <p
+              role="alert"
+              className="mt-2 text-meta shrink-0"
+              style={{ color: 'var(--color-danger-fg)' }}
+            >
+              {result.error}
+            </p>
+          )}
+          {/* Legend that pairs the segment colour with its name. Kept
+              compact so it doesn't compete with the token itself. */}
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-meta t-tertiary shrink-0">
+            <LegendDot color={SEGMENT_COLOR.header} label="header" />
+            <LegendDot color={SEGMENT_COLOR.payload} label="payload" />
+            <LegendDot color={SEGMENT_COLOR.signature} label="signature" />
+          </div>
         </div>
       </section>
+
+      {/* RIGHT — decoded panes. Payload dominates; signature follows;
+          header is parked at the bottom because the user almost never
+          needs the alg/typ pair while reading claims. */}
+      <div className="flex flex-col gap-3 min-h-0">
+        {result.ok ? (
+          <>
+            <DecodedSection
+              kind="payload"
+              label="Payload"
+              value={result.decoded.payload}
+              rawCopy={prettyJson(result.decoded.raw.payload)}
+              emphasis="primary"
+            />
+            <DecodedSection
+              kind="signature"
+              label="Signature"
+              value={null}
+              rawCopy={result.decoded.signature}
+              emphasis="compact"
+              emptyHint="No signature (alg: none)"
+            />
+            <DecodedSection
+              kind="header"
+              label="Header"
+              value={result.decoded.header}
+              rawCopy={prettyJson(result.decoded.raw.header)}
+              emphasis="compact"
+            />
+          </>
+        ) : (
+          <div
+            className="rounded-xl border p-6 text-center t-tertiary text-meta flex-1 flex items-center justify-center"
+            style={{ borderColor: 'var(--hairline)' }}
+          >
+            {token.trim().length === 0 ? (
+              <span>
+                Paste a JWT on the left to decode it. <br />
+                <span className="block mt-2 t-secondary">
+                  Click any value to copy it. Drag to select.
+                </span>
+              </span>
+            ) : (
+              <span>{result.error}</span>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+
+const LegendDot = ({ color, label }: { color: string; label: string }) => (
+  <span className="inline-flex items-center gap-1.5">
+    <span
+      className="inline-block w-1.5 h-1.5 rounded-full"
+      style={{ background: color }}
+      aria-hidden
+    />
+    {label}
+  </span>
+);
 
 export default JwtTool;
