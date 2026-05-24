@@ -1,5 +1,6 @@
 import {
   type ChangeEvent,
+  type MouseEvent as ReactMouseEvent,
   type UIEvent,
   Fragment,
   useEffect,
@@ -146,9 +147,10 @@ interface DecodedSectionProps {
   value: unknown | null;
   /// Text handed to the clipboard when the user hits Copy raw.
   rawCopy: string;
-  /// Tone the section as "minor" so the header card sits visually
-  /// below the payload card.
-  emphasis?: 'primary' | 'compact';
+  /// `primary` always-expanded card that grows (Payload). `collapsible`
+  /// renders a slim disclosure row that expands inline on click — used
+  /// for Header / Signature so Payload keeps maximum vertical space.
+  emphasis?: 'primary' | 'collapsible';
   emptyHint?: string;
 }
 
@@ -161,24 +163,63 @@ const DecodedSection = ({
   emptyHint,
 }: DecodedSectionProps) => {
   const [copied, setCopied] = useState(false);
-  const onCopy = async () => {
+  const [open, setOpen] = useState(emphasis === 'primary');
+  const onCopy = async (e?: ReactMouseEvent) => {
+    e?.stopPropagation();
     const ok = await copyText(rawCopy);
     if (!ok) return;
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   };
+  const isCollapsible = emphasis === 'collapsible';
+  const showBody = !isCollapsible || open;
   return (
     <section
       className={`rounded-xl border bg-[color:var(--bg-elev)] flex flex-col min-h-0 ${
-        emphasis === 'primary' ? 'flex-1' : ''
+        emphasis === 'primary' ? 'flex-1' : 'shrink-0'
       }`}
       style={{ borderColor: 'var(--hairline)' }}
     >
       <header
-        className="flex items-center justify-between px-3 py-2 border-b shrink-0"
+        className={`flex items-center justify-between px-3 py-1.5 shrink-0 ${
+          showBody ? 'border-b' : ''
+        } ${isCollapsible ? 'cursor-pointer select-none' : ''}`}
         style={{ borderColor: 'var(--hairline)' }}
+        onClick={isCollapsible ? () => setOpen((v) => !v) : undefined}
+        role={isCollapsible ? 'button' : undefined}
+        aria-expanded={isCollapsible ? open : undefined}
+        tabIndex={isCollapsible ? 0 : undefined}
+        onKeyDown={
+          isCollapsible
+            ? (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setOpen((v) => !v);
+                }
+              }
+            : undefined
+        }
       >
         <div className="flex items-center gap-2 min-w-0">
+          {isCollapsible && (
+            <svg
+              width="9"
+              height="9"
+              viewBox="0 0 9 9"
+              aria-hidden
+              className="shrink-0 t-tertiary transition-transform"
+              style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            >
+              <path
+                d="M2 1.5 L6 4.5 L2 7.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
           <span
             className="w-2 h-2 rounded-full shrink-0"
             style={{ background: SEGMENT_COLOR[kind] }}
@@ -196,28 +237,33 @@ const DecodedSection = ({
           {copied ? <CheckIcon /> : <CopyIcon />}
         </IconButton>
       </header>
-      <div
-        className={`${
-          emphasis === 'primary'
-            ? 'flex-1 min-h-0 overflow-auto nice-scroll'
-            : ''
-        } px-3 py-2`}
-      >
-        {value !== null ? (
-          <JsonTree value={value} />
-        ) : (
-          <div
-            className="font-mono text-meta break-all whitespace-pre-wrap"
-            style={{ color: SEGMENT_COLOR[kind] }}
-          >
-            {rawCopy || (
-              <span className="t-tertiary italic" style={{ color: 'var(--fg-mute)' }}>
-                {emptyHint ?? '—'}
-              </span>
-            )}
-          </div>
-        )}
-      </div>
+      {showBody && (
+        <div
+          className={`${
+            emphasis === 'primary'
+              ? 'flex-1 min-h-0 overflow-auto nice-scroll'
+              : 'max-h-[40%] overflow-auto nice-scroll'
+          } px-3 py-2`}
+        >
+          {value !== null ? (
+            <JsonTree value={value} />
+          ) : (
+            <div
+              className="font-mono text-meta break-all whitespace-pre-wrap"
+              style={{ color: SEGMENT_COLOR[kind] }}
+            >
+              {rawCopy || (
+                <span
+                  className="t-tertiary italic"
+                  style={{ color: 'var(--fg-mute)' }}
+                >
+                  {emptyHint ?? '—'}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 };
@@ -331,19 +377,19 @@ export function JwtTool() {
               emphasis="primary"
             />
             <DecodedSection
-              kind="signature"
-              label="Signature"
-              value={null}
-              rawCopy={result.decoded.signature}
-              emphasis="compact"
-              emptyHint="No signature (alg: none)"
-            />
-            <DecodedSection
               kind="header"
               label="Header"
               value={result.decoded.header}
               rawCopy={prettyJson(result.decoded.raw.header)}
-              emphasis="compact"
+              emphasis="collapsible"
+            />
+            <DecodedSection
+              kind="signature"
+              label="Signature"
+              value={null}
+              rawCopy={result.decoded.signature}
+              emphasis="collapsible"
+              emptyHint="No signature (alg: none)"
             />
           </>
         ) : (
