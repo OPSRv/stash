@@ -190,10 +190,10 @@
     --color-surface-muted: rgba(255, 255, 255, 0.12);
     --color-surface-raised: rgba(255, 255, 255, 0.06);
 
-    /* Scrollbar (dark). Thumb sits on translucent panes, so keep it visible
-       but quiet; hover raises contrast. Track is intentionally transparent. */
-    --scrollbar-thumb: rgba(255, 255, 255, 0.22);
-    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
+    /* Scrollbar (dark). Thin pill, sits on translucent panes — quiet at
+       rest, brighter on hover. Track is intentionally transparent. */
+    --scrollbar-thumb: rgba(0, 0, 0, 0.55);
+    --scrollbar-thumb-hover: rgba(0, 0, 0, 0.75);
 
     /* ─── Refresh-2026-04 tokens (additive; legacy vars above keep working). ─
      *
@@ -255,8 +255,8 @@
     --color-surface-muted: rgba(20, 22, 28, 0.1);
     --color-surface-raised: rgba(20, 22, 28, 0.05);
 
-    --scrollbar-thumb: rgba(20, 22, 28, 0.28);
-    --scrollbar-thumb-hover: rgba(20, 22, 28, 0.45);
+    --scrollbar-thumb: rgba(20, 22, 28, 0.45);
+    --scrollbar-thumb-hover: rgba(20, 22, 28, 0.7);
 
     /* Refresh-2026-04 light overrides. */
     --bg-window: #f6f6f4;
@@ -1194,19 +1194,15 @@
   }
 }
 
-/* Scrollbars — overlay-style, theme-tinted, unlayered so they beat any
-   lingering UA or layered rule. `html` prefix gives them non-zero
-   specificity. `-webkit-appearance: none` disables macOS overlay-scrollbar
-   default sizing so our width/height take effect even when "Show scroll
-   bars: Always" is on.
-
-   The thumb uses background-clip + a transparent border to render as a
-   pill that's narrower than its track — gives the bar room to "fatten"
-   on hover without resizing the layout. */
+/* Scrollbars — thin dark pill, unlayered so they beat any lingering UA
+   or layered rule. `html` prefix gives them non-zero specificity.
+   `-webkit-appearance: none` disables macOS overlay-scrollbar default
+   sizing so our width/height take effect even when "Show scroll bars:
+   Always" is on. Track stays transparent. */
 html ::-webkit-scrollbar,
 html::-webkit-scrollbar {
-  width: 10px !important;
-  height: 10px !important;
+  width: 6px !important;
+  height: 6px !important;
   background: transparent !important;
   -webkit-appearance: none !important;
 }
@@ -1219,21 +1215,15 @@ html::-webkit-scrollbar-track {
 html ::-webkit-scrollbar-thumb,
 html::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb) !important;
-  background-clip: padding-box !important;
-  border: 3px solid transparent !important;
+  border: 0 !important;
   border-radius: 99px !important;
-  min-height: 32px !important;
-  transition: background-color 120ms ease, border-width 120ms ease;
+  min-height: 24px !important;
 }
 html ::-webkit-scrollbar-thumb:hover,
-html::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-hover) !important;
-  border-width: 2px !important;
-}
 html ::-webkit-scrollbar-thumb:active,
+html::-webkit-scrollbar-thumb:hover,
 html::-webkit-scrollbar-thumb:active {
   background-color: var(--scrollbar-thumb-hover) !important;
-  border-width: 2px !important;
 }
 html ::-webkit-scrollbar-corner,
 html::-webkit-scrollbar-corner {
@@ -1248,18 +1238,6 @@ html::-webkit-scrollbar-button {
 html, body, * {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-/* `.nice-scroll` is the legacy escape hatch sprinkled across modules that
-   want a definitely-styled scrollbar. The global rules above already cover
-   every element, but this keeps the contract: same overlay pill, slightly
-   firmer idle thumb so important scrollable areas (chat, transcripts,
-   payload panes) read as scrollable at a glance. */
-.nice-scroll::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb) !important;
-}
-.nice-scroll:hover::-webkit-scrollbar-thumb {
-  background-color: var(--scrollbar-thumb-hover) !important;
 }
 
 /* Native-like UX: за замовчуванням UI-хром не виділяється — як у macOS-застосунках.

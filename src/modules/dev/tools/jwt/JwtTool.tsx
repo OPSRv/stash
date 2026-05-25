@@ -150,8 +150,13 @@ interface DecodedSectionProps {
   /// `primary` always-expanded card that grows (Payload). `collapsible`
   /// renders a slim disclosure row that expands inline on click — used
   /// for Header / Signature so Payload keeps maximum vertical space.
+  /// Collapsible-section open state is owned by the parent so it can
+  /// decide whether the bottom block claims its 30 % of the right
+  /// column.
   emphasis?: 'primary' | 'collapsible';
   emptyHint?: string;
+  open?: boolean;
+  onToggle?: () => void;
 }
 
 const DecodedSection = ({
@@ -161,9 +166,12 @@ const DecodedSection = ({
   rawCopy,
   emphasis = 'primary',
   emptyHint,
+  open: openProp,
+  onToggle,
 }: DecodedSectionProps) => {
   const [copied, setCopied] = useState(false);
-  const [open, setOpen] = useState(emphasis === 'primary');
+  const isCollapsible = emphasis === 'collapsible';
+  const open = isCollapsible ? Boolean(openProp) : true;
   const onCopy = async (e?: ReactMouseEvent) => {
     e?.stopPropagation();
     const ok = await copyText(rawCopy);
@@ -171,12 +179,15 @@ const DecodedSection = ({
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
   };
-  const isCollapsible = emphasis === 'collapsible';
   const showBody = !isCollapsible || open;
   return (
     <section
       className={`rounded-xl border bg-[color:var(--bg-elev)] flex flex-col min-h-0 ${
-        emphasis === 'primary' ? 'flex-1' : 'shrink-0'
+        emphasis === 'primary'
+          ? 'flex-1'
+          : open
+            ? 'flex-1 min-h-0'
+            : 'shrink-0'
       }`}
       style={{ borderColor: 'var(--hairline)' }}
     >
@@ -185,7 +196,7 @@ const DecodedSection = ({
           showBody ? 'border-b' : ''
         } ${isCollapsible ? 'cursor-pointer select-none' : ''}`}
         style={{ borderColor: 'var(--hairline)' }}
-        onClick={isCollapsible ? () => setOpen((v) => !v) : undefined}
+        onClick={isCollapsible ? onToggle : undefined}
         role={isCollapsible ? 'button' : undefined}
         aria-expanded={isCollapsible ? open : undefined}
         tabIndex={isCollapsible ? 0 : undefined}
@@ -194,7 +205,7 @@ const DecodedSection = ({
             ? (e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  setOpen((v) => !v);
+                  onToggle?.();
                 }
               }
             : undefined
@@ -239,11 +250,7 @@ const DecodedSection = ({
       </header>
       {showBody && (
         <div
-          className={`${
-            emphasis === 'primary'
-              ? 'flex-1 min-h-0 overflow-auto nice-scroll'
-              : 'max-h-[40%] overflow-auto nice-scroll'
-          } px-3 py-2`}
+          className="flex-1 min-h-0 overflow-auto nice-scroll px-3 py-2"
         >
           {value !== null ? (
             <JsonTree value={value} />
@@ -280,6 +287,9 @@ const tokenFromPending = (): string | null => {
 
 export function JwtTool() {
   const [token, setToken] = useState<string>(() => tokenFromPending() ?? '');
+  const [headerOpen, setHeaderOpen] = useState(false);
+  const [signatureOpen, setSignatureOpen] = useState(false);
+  const anyMetaOpen = headerOpen || signatureOpen;
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -301,7 +311,7 @@ export function JwtTool() {
     <div
       className="h-full grid gap-4 p-4"
       style={{
-        gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+        gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 7fr)',
         gridTemplateRows: 'minmax(0, 1fr)',
       }}
     >
@@ -363,34 +373,50 @@ export function JwtTool() {
         </div>
       </section>
 
-      {/* RIGHT — decoded panes. Payload dominates; signature follows;
-          header is parked at the bottom because the user almost never
-          needs the alg/typ pair while reading claims. */}
+      {/* RIGHT — decoded panes. Payload takes 70 % of the column, the
+          Header + Signature drawer claims the remaining 30 % once
+          either of them is expanded; while both are closed the
+          drawer shrinks to its two title rows and gives the extra
+          space back to Payload. */}
       <div className="flex flex-col gap-3 min-h-0">
         {result.ok ? (
           <>
-            <DecodedSection
-              kind="payload"
-              label="Payload"
-              value={result.decoded.payload}
-              rawCopy={prettyJson(result.decoded.raw.payload)}
-              emphasis="primary"
-            />
-            <DecodedSection
-              kind="header"
-              label="Header"
-              value={result.decoded.header}
-              rawCopy={prettyJson(result.decoded.raw.header)}
-              emphasis="collapsible"
-            />
-            <DecodedSection
-              kind="signature"
-              label="Signature"
-              value={null}
-              rawCopy={result.decoded.signature}
-              emphasis="collapsible"
-              emptyHint="No signature (alg: none)"
-            />
+            <div
+              className="flex flex-col min-h-0"
+              style={{ flex: '7 1 0%' }}
+            >
+              <DecodedSection
+                kind="payload"
+                label="Payload"
+                value={result.decoded.payload}
+                rawCopy={prettyJson(result.decoded.raw.payload)}
+                emphasis="primary"
+              />
+            </div>
+            <div
+              className="flex flex-col gap-2 min-h-0"
+              style={anyMetaOpen ? { flex: '3 1 0%' } : { flex: '0 0 auto' }}
+            >
+              <DecodedSection
+                kind="header"
+                label="Header"
+                value={result.decoded.header}
+                rawCopy={prettyJson(result.decoded.raw.header)}
+                emphasis="collapsible"
+                open={headerOpen}
+                onToggle={() => setHeaderOpen((v) => !v)}
+              />
+              <DecodedSection
+                kind="signature"
+                label="Signature"
+                value={null}
+                rawCopy={result.decoded.signature}
+                emphasis="collapsible"
+                emptyHint="No signature (alg: none)"
+                open={signatureOpen}
+                onToggle={() => setSignatureOpen((v) => !v)}
+              />
+            </div>
           </>
         ) : (
           <div

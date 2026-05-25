@@ -203,7 +203,9 @@ const PrimitiveRow = ({ v, depth, keyLabel, inArray }: PrimitiveRowProps) => {
   };
   return (
     <div
-      className="group flex items-start gap-2 py-0.5 pr-1 rounded transition-colors cursor-pointer"
+      className={`group flex items-start gap-2 py-0.5 pr-1 rounded transition-colors cursor-pointer ${
+        flash ? '' : 'hover:bg-[color:var(--bg-hover)]'
+      }`}
       style={{
         paddingLeft: depth * 14,
         background: flash ? 'var(--accent-fog, var(--bg-hover))' : undefined,
@@ -217,7 +219,7 @@ const PrimitiveRow = ({ v, depth, keyLabel, inArray }: PrimitiveRowProps) => {
           doCopy();
         }
       }}
-      title="Click to copy · drag to select"
+      aria-label="Click to copy value"
     >
       <span className="w-[10px] inline-block shrink-0" />
       {keyLabel !== null && (

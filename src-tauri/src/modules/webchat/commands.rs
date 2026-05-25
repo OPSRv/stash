@@ -20,6 +20,30 @@ use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
 /// `{SERVICE_ID}` and `{INITIAL_ZOOM}` are substituted at embed time.
 const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
 (function(){
+  // Thin dark scrollbar override — matches the host app shell. Beats site
+  // CSS via !important; appended again on DOMContentLoaded because some
+  // hosts wipe <head> styles during hydration.
+  function __stashInstallScrollbar(){
+    try {
+      if (document.getElementById('__stash-scrollbar-style')) return;
+      var s = document.createElement('style');
+      s.id = '__stash-scrollbar-style';
+      s.textContent = '\
+        ::-webkit-scrollbar{width:6px !important;height:6px !important;background:transparent !important;-webkit-appearance:none !important;}\
+        ::-webkit-scrollbar-track{background:transparent !important;border:0 !important;box-shadow:none !important;}\
+        ::-webkit-scrollbar-thumb{background-color:rgba(0,0,0,0.55) !important;border:0 !important;border-radius:99px !important;min-height:24px !important;}\
+        ::-webkit-scrollbar-thumb:hover,::-webkit-scrollbar-thumb:active{background-color:rgba(0,0,0,0.75) !important;}\
+        ::-webkit-scrollbar-corner{background:transparent !important;}\
+        ::-webkit-scrollbar-button{display:none !important;width:0 !important;height:0 !important;}\
+        *{scrollbar-width:thin !important;scrollbar-color:rgba(0,0,0,0.55) transparent !important;}\
+      ';
+      (document.head || document.documentElement).appendChild(s);
+    } catch(_) {}
+  }
+  __stashInstallScrollbar();
+  document.addEventListener('DOMContentLoaded', __stashInstallScrollbar, { once: true });
+  window.addEventListener('load', __stashInstallScrollbar);
+
   try {
     if (typeof window.webkit === 'object' && window.webkit && 'messageHandlers' in window.webkit) {
       try { delete window.webkit; } catch(_) { window.webkit = undefined; }
