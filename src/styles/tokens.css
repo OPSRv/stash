@@ -1240,6 +1240,39 @@ html, body, * {
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/* WKWebView quirk: `<textarea>` and `<input>` scrollbars live in
+   their internal shadow scroller and ignore the cascading
+   `html ::-webkit-scrollbar` rule above. Without direct selectors
+   the production app (Tauri/WKWebView) renders chunky default
+   macOS scrollbars inside textareas while `npm run dev` (Chrome)
+   shows our thin ones. These rules duplicate the look so both
+   environments match. */
+textarea::-webkit-scrollbar,
+input::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+  background: transparent !important;
+  -webkit-appearance: none !important;
+}
+textarea::-webkit-scrollbar-track,
+input::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+textarea::-webkit-scrollbar-thumb,
+input::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb) !important;
+  border-radius: 99px !important;
+  min-height: 24px !important;
+}
+textarea::-webkit-scrollbar-thumb:hover,
+input::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover) !important;
+}
+textarea::-webkit-scrollbar-corner,
+input::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
 /* Native-like UX: за замовчуванням UI-хром не виділяється — як у macOS-застосунках.
  * Виділення лишаємо в полях вводу та текстовому контенті (markdown, code, терміналу),
  * а також на будь-якому елементі з класом `.stash-selectable` як escape hatch. */
