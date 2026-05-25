@@ -55,6 +55,12 @@ impl Assistant {
     /// Process one user message. Writes every row (user, assistant,
     /// any intermediate tool rows) to the `chat` table in the same
     /// sequence the LLM saw them.
+    ///
+    /// Production callers go through `handle_at` so they can pipe the
+    /// server-stamped timestamp through; this wrapper exists for the
+    /// test suite, where there is no transport to provide one. Gated
+    /// on `cfg(test)` so non-test builds don't trip dead-code warnings.
+    #[cfg(test)]
     pub async fn handle(&self, user_text: &str) -> Result<AssistantReply, LlmError> {
         self.handle_at(user_text, None).await
     }
