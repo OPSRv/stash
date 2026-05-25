@@ -187,11 +187,12 @@ interface PrimitiveRowProps {
 /// confirmation when the user clicks the row body.
 const PrimitiveRow = ({ v, depth, keyLabel, inArray }: PrimitiveRowProps) => {
   const [flash, setFlash] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const doCopy = async () => {
     const ok = await copyText(valueForCopy(v));
     if (!ok) return;
     setFlash(true);
-    window.setTimeout(() => setFlash(false), 600);
+    window.setTimeout(() => setFlash(false), 900);
   };
   // Click-to-copy must not block native text selection. If the user
   // has dragged a selection over part of the row, we skip the
@@ -203,14 +204,29 @@ const PrimitiveRow = ({ v, depth, keyLabel, inArray }: PrimitiveRowProps) => {
   };
   return (
     <div
-      className={`group flex items-start gap-2 py-0.5 pr-1 rounded transition-colors cursor-pointer ${
-        flash ? '' : 'hover:bg-[color:var(--bg-hover)]'
-      }`}
+      // Visual states layer on top of each other:
+      //   - hover: faint bg
+      //   - press (active): scale 0.99 + faint accent ring
+      //   - flash (post-copy): saturated accent bg + inline "Copied"
+      //     pill so the user gets unambiguous confirmation that the
+      //     value just landed in the clipboard
+      className="group relative flex items-center gap-2 py-0.5 pr-2 rounded transition-all duration-150 cursor-pointer hover:bg-[color:var(--bg-hover)]"
       style={{
         paddingLeft: depth * 14,
-        background: flash ? 'var(--accent-fog, var(--bg-hover))' : undefined,
+        // `--accent-soft` is the standard 18 % accent fill — bright
+        // enough to be obvious but still on-brand.
+        background: flash ? 'var(--accent-soft)' : undefined,
+        boxShadow: flash
+          ? 'inset 0 0 0 1px var(--accent-soft)'
+          : pressed
+            ? 'inset 0 0 0 1px var(--accent-soft)'
+            : undefined,
+        transform: pressed ? 'scale(0.99)' : undefined,
       }}
       onClick={onClickRow}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      onMouseLeave={() => setPressed(false)}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
@@ -230,6 +246,20 @@ const PrimitiveRow = ({ v, depth, keyLabel, inArray }: PrimitiveRowProps) => {
       )}
       <span className="min-w-0 flex-1 break-all font-mono text-meta">
         <PrimitivePreview v={v} claim={inArray ? null : keyLabel} />
+      </span>
+      {/* Inline confirmation pill — slides in when flash fires. Sits
+          before the copy icon so the eye lands on it instantly. */}
+      <span
+        className={`shrink-0 text-meta px-1.5 py-0.5 rounded-md font-medium pointer-events-none transition-opacity duration-150 ${
+          flash ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{
+          background: 'var(--accent-soft)',
+          color: 'rgb(var(--stash-accent-rgb))',
+        }}
+        aria-live="polite"
+      >
+        Copied
       </span>
       <span
         className={`shrink-0 transition-opacity ${
