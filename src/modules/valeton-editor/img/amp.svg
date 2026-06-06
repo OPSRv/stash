@@ -1,0 +1,42 @@
+<svg viewBox="0 0 192 250" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#565656"/><stop offset=".5" stop-color="#2c2c2c"/><stop offset="1" stop-color="#0e0e0e"/>
+</linearGradient>
+<linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#fff" stop-opacity=".34"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+</linearGradient>
+<linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#23272d"/><stop offset="1" stop-color="#0b0d10"/>
+</linearGradient>
+<radialGradient id="kn" cx=".36" cy=".30" r=".85">
+  <stop offset="0" stop-color="#454b54"/><stop offset=".55" stop-color="#22262c"/><stop offset="1" stop-color="#090b0e"/>
+</radialGradient>
+<radialGradient id="metal" cx=".38" cy=".30" r=".9">
+  <stop offset="0" stop-color="#f2f5f8"/><stop offset=".5" stop-color="#aab1b8"/><stop offset="1" stop-color="#4d535a"/>
+</radialGradient>
+<radialGradient id="scr" cx=".35" cy=".3" r=".9">
+  <stop offset="0" stop-color="#cfd5db"/><stop offset="1" stop-color="#5a6068"/>
+</radialGradient>
+<radialGradient id="led" cx=".4" cy=".35" r=".75">
+  <stop offset="0" stop-color="#ffffff"/><stop offset=".35" stop-color="#e0b878"/><stop offset="1" stop-color="#0e0e0e"/>
+</radialGradient>
+</defs>
+<linearGradient id="grl" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#3a3327"/><stop offset="1" stop-color="#181410"/>
+</linearGradient>
+<rect x="17" y="11" width="158" height="235" rx="18" fill="#000" opacity=".35"/>
+<rect x="14" y="6" width="164" height="236" rx="18" fill="url(#body)" stroke="#000" stroke-width="1.5"/>
+<rect x="16.5" y="8.5" width="159" height="231" rx="16" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="1.4"/>
+<circle cx="26" cy="22" r="5" fill="#0a0c0f"/><circle cx="26" cy="22" r="3.3" fill="url(#scr)"/><rect x="23" y="21.3" width="6" height="1.4" rx=".7" fill="#000" opacity=".55" transform="rotate(35 26 22)"/><circle cx="166" cy="22" r="5" fill="#0a0c0f"/><circle cx="166" cy="22" r="3.3" fill="url(#scr)"/><rect x="163" y="21.3" width="6" height="1.4" rx=".7" fill="#000" opacity=".55" transform="rotate(35 166 22)"/><circle cx="26" cy="226" r="5" fill="#0a0c0f"/><circle cx="26" cy="226" r="3.3" fill="url(#scr)"/><rect x="23" y="225.3" width="6" height="1.4" rx=".7" fill="#000" opacity=".55" transform="rotate(35 26 226)"/><circle cx="166" cy="226" r="5" fill="#0a0c0f"/><circle cx="166" cy="226" r="3.3" fill="url(#scr)"/><rect x="163" y="225.3" width="6" height="1.4" rx=".7" fill="#000" opacity=".55" transform="rotate(35 166 226)"/>
+<rect x="28" y="26" width="136" height="58" rx="9" fill="url(#plate)" stroke="#000" stroke-opacity=".6"/>
+<rect x="28.8" y="26.8" width="134.4" height="56.4" rx="8.2" fill="none" stroke="#fff" stroke-opacity=".06"/>
+<circle cx="40" cy="38" r="9" fill="#ff3b30" opacity=".25"/><circle cx="40" cy="38" r="4.5" fill="#ff5145"/><circle cx="38" cy="36" r="1.4" fill="#fff" opacity=".8"/>
+<g transform="rotate(-40 58 56)"><circle cx="58" cy="56" r="14" fill="#05070a"/><circle cx="58" cy="56" r="12" fill="url(#kn)"/><circle cx="58" cy="56" r="12" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="1.4"/><ellipse cx="54.2" cy="51.9" rx="6.0" ry="4.8" fill="#fff" opacity=".10"/><rect x="56.4" y="47.0" width="3.2" height="6.6" rx="1.6" fill="#e0b878"/></g><g transform="rotate(-10 86 56)"><circle cx="86" cy="56" r="14" fill="#05070a"/><circle cx="86" cy="56" r="12" fill="url(#kn)"/><circle cx="86" cy="56" r="12" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="1.4"/><ellipse cx="82.2" cy="51.9" rx="6.0" ry="4.8" fill="#fff" opacity=".10"/><rect x="84.4" y="47.0" width="3.2" height="6.6" rx="1.6" fill="#e0b878"/></g><g transform="rotate(20 114 56)"><circle cx="114" cy="56" r="14" fill="#05070a"/><circle cx="114" cy="56" r="12" fill="url(#kn)"/><circle cx="114" cy="56" r="12" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="1.4"/><ellipse cx="110.2" cy="51.9" rx="6.0" ry="4.8" fill="#fff" opacity=".10"/><rect x="112.4" y="47.0" width="3.2" height="6.6" rx="1.6" fill="#e0b878"/></g><g transform="rotate(45 142 56)"><circle cx="142" cy="56" r="14" fill="#05070a"/><circle cx="142" cy="56" r="12" fill="url(#kn)"/><circle cx="142" cy="56" r="12" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="1.4"/><ellipse cx="138.2" cy="51.9" rx="6.0" ry="4.8" fill="#fff" opacity=".10"/><rect x="140.4" y="47.0" width="3.2" height="6.6" rx="1.6" fill="#e0b878"/></g>
+<rect x="28" y="94" width="136" height="124" rx="10" fill="url(#grl)" stroke="#000" stroke-opacity=".6"/>
+<g clip-path="url(#agc)"><line x1="34" y1="98" x2="34" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="41" y1="98" x2="41" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="48" y1="98" x2="48" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="55" y1="98" x2="55" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="62" y1="98" x2="62" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="69" y1="98" x2="69" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="76" y1="98" x2="76" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="83" y1="98" x2="83" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="90" y1="98" x2="90" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="97" y1="98" x2="97" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="104" y1="98" x2="104" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="111" y1="98" x2="111" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="118" y1="98" x2="118" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="125" y1="98" x2="125" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="132" y1="98" x2="132" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="139" y1="98" x2="139" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="146" y1="98" x2="146" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/><line x1="153" y1="98" x2="153" y2="214" stroke="#000" stroke-opacity=".55" stroke-width="2"/></g>
+<clipPath id="agc"><rect x="30" y="96" width="132" height="120" rx="9"/></clipPath>
+<rect x="28" y="94" width="136" height="124" rx="10" fill="none" stroke="#e0b878" stroke-opacity=".35" stroke-width="1.5"/>
+<rect x="66" y="176" width="60" height="26" rx="6" fill="#0c0e11" stroke="#e0b878" stroke-opacity=".55"/>
+<text x="96" y="194" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="16" letter-spacing="2" fill="#e0b878">AMP</text>
+</svg>

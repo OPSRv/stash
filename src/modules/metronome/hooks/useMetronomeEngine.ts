@@ -125,6 +125,20 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   const scheduler = useCallback(() => {
     const ctx = ctxRef.current;
     if (!ctx) return;
+    // Self-heal a stalled audio graph. macOS / WKWebView suspends (or marks
+    // 'interrupted') the AudioContext for reasons beyond tab visibility —
+    // app deactivation, window occlusion, an audio-session grab by another
+    // app, device sleep/wake, or a headphone swap — and none of those fire
+    // `visibilitychange`. The worker keeps ticking regardless, so every tick
+    // we make sure the context is actually running; otherwise the strip
+    // keeps pulsing while the speaker stays silent ("sound disappears").
+    // While suspended `currentTime` is frozen, so we re-pin the next note a
+    // hair ahead to avoid flooding a burst of past-due clicks on resume.
+    if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+      nextNoteTimeRef.current = ctx.currentTime + 0.05;
+      return;
+    }
     const { bpm, subdivision } = cfgRef.current;
     const interval = tickInterval(bpm, subdivision);
     while (nextNoteTimeRef.current < ctx.currentTime + SCHEDULE_AHEAD_S) {

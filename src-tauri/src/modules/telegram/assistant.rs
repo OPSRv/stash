@@ -117,8 +117,14 @@ impl Assistant {
         }
         // Inject a terse recap of the most recent inbox items so the
         // assistant can reference them ("що я надсилав учора?",
-        // "summarise those voice notes").
-        let inbox_text = recent_inbox_for_prompt(&self.state);
+        // "summarise those voice notes") and — crucially — feed their
+        // on-disk paths to file tools like `convert_media` /
+        // `transcribe_to_file` without making the user paste a path.
+        let data_dir = self.app.as_ref().and_then(|app| {
+            use tauri::Manager;
+            app.path().app_data_dir().ok()
+        });
+        let inbox_text = recent_inbox_for_prompt(&self.state, data_dir.as_deref());
         if !inbox_text.is_empty() {
             messages.push(ChatMessage::system(inbox_text));
         }
@@ -356,7 +362,14 @@ fn list_commands_for_prompt(state: &TelegramState) -> String {
 /// assistant answer "what did I send yesterday?" or summarise without
 /// forcing the user to re-paste the content. Limited to six rows to
 /// keep the context footprint small.
-fn recent_inbox_for_prompt(state: &TelegramState) -> String {
+///
+/// When `data_dir` is supplied, attachment rows also carry the file's
+/// absolute on-disk path. That's what lets "конвертуй це відео в аудіо"
+/// work without the user pasting a path: the model reads the path from
+/// here and feeds it straight to `convert_media` / `transcribe_to_file`.
+/// The stored `file_path` is relative to the app data dir (see
+/// `inbox::target_paths`), so we join it back on here.
+fn recent_inbox_for_prompt(state: &TelegramState, data_dir: Option<&std::path::Path>) -> String {
     let repo = match state.repo.lock() {
         Ok(r) => r,
         Err(_) => return String::new(),
@@ -368,7 +381,9 @@ fn recent_inbox_for_prompt(state: &TelegramState) -> String {
         return String::new();
     }
     let mut out = String::from(
-        "Recent Telegram inbox (newest first — may help ground follow-up questions):\n",
+        "Recent Telegram inbox (newest first — may help ground follow-up questions). \
+         Lines with `file:` carry the attachment's absolute path — pass it directly to \
+         file tools such as `convert_media` or `transcribe_to_file`:\n",
     );
     for it in items {
         let summary = it
@@ -385,7 +400,15 @@ fn recent_inbox_for_prompt(state: &TelegramState) -> String {
         } else {
             ""
         };
-        out.push_str(&format!("- [{}] {short}{ellipsis}\n", it.kind));
+        // Resolve the relative `file_path` against the app data dir so
+        // the model gets an absolute path it can hand to file tools.
+        let path_tag = it
+            .file_path
+            .as_deref()
+            .and_then(|rel| data_dir.map(|d| d.join(rel)))
+            .map(|abs| format!(" · file: {}", abs.display()))
+            .unwrap_or_default();
+        out.push_str(&format!("- [{}] {short}{ellipsis}{path_tag}\n", it.kind));
     }
     out.trim_end().to_string()
 }
@@ -934,5 +957,71 @@ mod tests {
             created_at: 1,
         };
         assert!(history_to_message(&row).is_none());
+    }
+
+    #[test]
+    fn recent_inbox_surfaces_absolute_path_for_attachments() {
+        let state = fresh_state();
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_media_inbox(
+                42,
+                "video",
+                Some("telegram/inbox/2026-06-07/clip.mp4"),
+                Some("video/mp4"),
+                Some(75),
+                None,
+                1_000,
+            )
+            .unwrap();
+
+        let data_dir = std::path::Path::new("/data");
+        let out = recent_inbox_for_prompt(&state, Some(data_dir));
+
+        // The absolute path is what lets the model feed the clip to
+        // `convert_media` without the user pasting a path by hand.
+        assert!(
+            out.contains("file: /data/telegram/inbox/2026-06-07/clip.mp4"),
+            "expected absolute path in prompt, got:\n{out}"
+        );
+        assert!(out.contains("[video]"));
+    }
+
+    #[test]
+    fn recent_inbox_omits_path_when_data_dir_unknown() {
+        let state = fresh_state();
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_media_inbox(
+                42,
+                "video",
+                Some("telegram/inbox/2026-06-07/clip.mp4"),
+                None,
+                None,
+                None,
+                1_000,
+            )
+            .unwrap();
+
+        // No app handle (unit-test mode) → no data dir → no path tag,
+        // but the recap line still renders so summaries keep working.
+        let out = recent_inbox_for_prompt(&state, None);
+        assert!(out.contains("[video]"));
+        // The header mentions `file:` as guidance; what must be absent
+        // is the per-row path tag (" · file: …").
+        assert!(
+            !out.contains("· file:"),
+            "should not emit a path tag, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn recent_inbox_empty_without_items() {
+        let state = fresh_state();
+        assert!(recent_inbox_for_prompt(&state, Some(std::path::Path::new("/data"))).is_empty());
     }
 }

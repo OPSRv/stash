@@ -25,6 +25,25 @@
   --color-bg-pane: #1c1c20;
   --color-bg-elev: #2a2a30;
 
+  /* Valeton GP-5 editor palette (module `valeton-editor`). Namespaced `ve-`
+   * so its bright studio-dark swatches generate Tailwind utilities
+   * (`bg-ve-bg-2`, `text-ve-dim`, …) without colliding with the Stash
+   * accent/surface tokens above. Component classes for that module live in
+   * `src/modules/valeton-editor/valeton.css`, scoped under `.valeton-root`. */
+  --color-ve-bg-0: #0b0d10;
+  --color-ve-bg-1: #14171c;
+  --color-ve-bg-2: #1c2128;
+  --color-ve-bg-3: #232a33;
+  --color-ve-stroke: #2a313b;
+  --color-ve-stroke-soft: #20262e;
+  --color-ve-text: #e6eaf0;
+  --color-ve-dim: #8b94a3;
+  --color-ve-faint: #5b6470;
+  --color-ve-accent: #4aa3ff;
+  --color-ve-accent-700: #2f7fd6;
+  --color-ve-danger: #ff5c5c;
+  --color-ve-on: #3ddc97;
+
   --text-meta: 11px;
   --text-meta--line-height: 14px;
   --text-meta--letter-spacing: 0.01em;

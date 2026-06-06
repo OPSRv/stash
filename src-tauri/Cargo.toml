@@ -88,7 +88,7 @@ expect_fun_call = "allow"
 
 [package]
 name = "stash-app"
-version = "0.1.70"
+version = "0.1.71"
 description = "Stash — macOS menubar multitool"
 authors = ["OPSRv"]
 edition = "2021"
@@ -195,6 +195,12 @@ tiny_http = "0.12"
 # `{`, `}` and required focus stealing from Finder; the native call has
 # neither problem.
 trash = "5"
+# Valeton GP-5 editor transport bridge (module `valeton`). WKWebView has no
+# Web MIDI / Web Bluetooth, so USB-MIDI (`midir` → CoreMIDI) and BLE-MIDI
+# (`btleplug` → CoreBluetooth) device I/O lives in Rust and is piped to the
+# frontend over `valeton:rx` events.
+midir = "0.10"
+btleplug = "0.11"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.1"
@@ -229,3 +235,13 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+
+# `coremidi` 0.9.0 (pulled in by `midir` for the Valeton USB-MIDI bridge) reads
+# `MIDIPacket` fields through an unaligned pointer in its `PacketList` iterator.
+# Rust's dev profile enables the misaligned-pointer debug-assert, which aborts
+# the process the moment a MIDI packet arrives. Release builds don't run that
+# check (and Apple Silicon tolerates these scalar unaligned reads), so we turn
+# debug-assertions off for this one crate to make `tauri dev` behave like
+# release. Scoped to `coremidi` only — the rest of the app keeps its dev checks.
+[profile.dev.package.coremidi]
+debug-assertions = false

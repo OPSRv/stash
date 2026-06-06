@@ -14,6 +14,7 @@ import { systemModule } from './system';
 import { telegramModule } from './telegram';
 import { terminalModule } from './terminal';
 import { translatorModule } from './translator';
+import { valetonEditorModule } from './valeton-editor';
 import { webModule } from './web';
 import { settingsModule } from '../settings';
 
@@ -29,6 +30,7 @@ export const modules: ModuleDefinition[] = [
   separatorModule,
   converterModule,
   metronomeModule,
+  valetonEditorModule,
   pomodoroModule,
   remindersModule,
   terminalModule,

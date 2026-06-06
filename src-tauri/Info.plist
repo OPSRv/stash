@@ -4,5 +4,7 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Stash records voice notes so you can capture ideas by speaking.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Stash connects to your Valeton GP-5 over Bluetooth to edit patches and effects.</string>
 </dict>
 </plist>

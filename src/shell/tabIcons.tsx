@@ -37,6 +37,7 @@ export const TAB_ICON_COLORS: Record<string, string> = {
   separator: '#22d3ee',
   converter: '#facc15',
   metronome: '#fb923c',
+  'valeton-editor': '#5b9dff',
   pomodoro: '#ef4444',
   reminders: '#fde047',
   terminal: '#84cc16',
@@ -185,6 +186,27 @@ export const TAB_ICONS: Record<string, ReactNode> = {
       <path d="M8 2h8l3 20H5z" />
       <path d="M9 18h6" />
       <path d="M12 14 7 4" />
+    </svg>
+  ),
+  'valeton-editor': (
+    /* Guitar stompbox / multi-FX pedal — rounded chassis with two control
+       knobs up top and a round footswitch below. Reads as a Valeton GP-5
+       processor at 13×13 without merging into a featureless box. */
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="6" y="2.5" width="12" height="19" rx="2" />
+      <circle cx="9.5" cy="7" r="1.2" />
+      <circle cx="14.5" cy="7" r="1.2" />
+      <circle cx="12" cy="16" r="2.6" />
     </svg>
   ),
   pomodoro: (

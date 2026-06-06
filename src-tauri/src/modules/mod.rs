@@ -18,6 +18,7 @@ pub mod system;
 pub mod telegram;
 pub mod terminal;
 pub mod translator;
+pub mod valeton;
 pub mod voice;
 pub mod webchat;
 pub mod whisper;

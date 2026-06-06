@@ -19,8 +19,8 @@ import { accent } from '../shared/theme/accent';
 import { PinIcon } from '../shared/ui/icons';
 import { loadSettings, saveSetting } from '../settings/store';
 
-const MIN_WIDTH = 920;
-const MIN_HEIGHT = 640;
+const MIN_WIDTH = 1240;
+const MIN_HEIGHT = 840;
 
 import { TAB_ICONS, TAB_ICON_COLORS } from './tabIcons';
 import { pushPlayerArtwork, pushPlayerIcons, pushTrayMenu } from './trayMenu';

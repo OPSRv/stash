@@ -1,0 +1,37 @@
+<svg viewBox="0 0 192 250" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#3a3a3a"/><stop offset=".5" stop-color="#222222"/><stop offset="1" stop-color="#0d0d0d"/>
+</linearGradient>
+<linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#fff" stop-opacity=".34"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+</linearGradient>
+<linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#23272d"/><stop offset="1" stop-color="#0b0d10"/>
+</linearGradient>
+<radialGradient id="kn" cx=".36" cy=".30" r=".85">
+  <stop offset="0" stop-color="#454b54"/><stop offset=".55" stop-color="#22262c"/><stop offset="1" stop-color="#090b0e"/>
+</radialGradient>
+<radialGradient id="metal" cx=".38" cy=".30" r=".9">
+  <stop offset="0" stop-color="#f2f5f8"/><stop offset=".5" stop-color="#aab1b8"/><stop offset="1" stop-color="#4d535a"/>
+</radialGradient>
+<radialGradient id="scr" cx=".35" cy=".3" r=".9">
+  <stop offset="0" stop-color="#cfd5db"/><stop offset="1" stop-color="#5a6068"/>
+</radialGradient>
+<radialGradient id="led" cx=".4" cy=".35" r=".75">
+  <stop offset="0" stop-color="#ffffff"/><stop offset=".35" stop-color="#c9a978"/><stop offset="1" stop-color="#0d0d0d"/>
+</radialGradient>
+</defs>
+<radialGradient id="cone" cx=".5" cy=".5" r=".5">
+  <stop offset="0" stop-color="#4a4a4a"/><stop offset=".7" stop-color="#1a1a1a"/><stop offset="1" stop-color="#050505"/>
+</radialGradient>
+<rect x="17" y="11" width="158" height="235" rx="16" fill="#000" opacity=".35"/>
+<rect x="14" y="6" width="164" height="236" rx="16" fill="url(#body)" stroke="#000" stroke-width="1.5"/>
+<rect x="16.5" y="8.5" width="159" height="231" rx="14" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1.4"/>
+<rect x="24" y="22" width="144" height="174" rx="10" fill="#0a0a0a" stroke="#000"/>
+<rect x="24" y="22" width="144" height="174" rx="10" fill="none" stroke="#c9a978" stroke-opacity=".25" stroke-width="1.5"/>
+<circle cx="64" cy="72" r="30" fill="#070707" stroke="#000"/><circle cx="64" cy="72" r="27" fill="url(#cone)"/><circle cx="64" cy="72" r="27" fill="none" stroke="#000" stroke-opacity=".5"/><circle cx="64" cy="72" r="10.2" fill="url(#kn)"/><ellipse cx="55" cy="63" rx="12" ry="8" fill="#fff" opacity=".06"/><circle cx="128" cy="72" r="30" fill="#070707" stroke="#000"/><circle cx="128" cy="72" r="27" fill="url(#cone)"/><circle cx="128" cy="72" r="27" fill="none" stroke="#000" stroke-opacity=".5"/><circle cx="128" cy="72" r="10.2" fill="url(#kn)"/><ellipse cx="119" cy="63" rx="12" ry="8" fill="#fff" opacity=".06"/><circle cx="64" cy="140" r="30" fill="#070707" stroke="#000"/><circle cx="64" cy="140" r="27" fill="url(#cone)"/><circle cx="64" cy="140" r="27" fill="none" stroke="#000" stroke-opacity=".5"/><circle cx="64" cy="140" r="10.2" fill="url(#kn)"/><ellipse cx="55" cy="131" rx="12" ry="8" fill="#fff" opacity=".06"/><circle cx="128" cy="140" r="30" fill="#070707" stroke="#000"/><circle cx="128" cy="140" r="27" fill="url(#cone)"/><circle cx="128" cy="140" r="27" fill="none" stroke="#000" stroke-opacity=".5"/><circle cx="128" cy="140" r="10.2" fill="url(#kn)"/><ellipse cx="119" cy="131" rx="12" ry="8" fill="#fff" opacity=".06"/>
+<g transform="translate(24 22) rotate(0)"><path d="M0 0 H22 A22 22 0 0 0 0 22 Z" fill="url(#metal)" stroke="#000" stroke-opacity=".4"/><circle cx="9" cy="9" r="2.2" fill="#2a2e33"/></g><g transform="translate(168 22) rotate(90)"><path d="M0 0 H22 A22 22 0 0 0 0 22 Z" fill="url(#metal)" stroke="#000" stroke-opacity=".4"/><circle cx="9" cy="9" r="2.2" fill="#2a2e33"/></g><g transform="translate(168 194) rotate(180)"><path d="M0 0 H22 A22 22 0 0 0 0 22 Z" fill="url(#metal)" stroke="#000" stroke-opacity=".4"/><circle cx="9" cy="9" r="2.2" fill="#2a2e33"/></g><g transform="translate(24 194) rotate(270)"><path d="M0 0 H22 A22 22 0 0 0 0 22 Z" fill="url(#metal)" stroke="#000" stroke-opacity=".4"/><circle cx="9" cy="9" r="2.2" fill="#2a2e33"/></g>
+<rect x="62" y="206" width="68" height="28" rx="6" fill="url(#plate)" stroke="#c9a978" stroke-opacity=".5"/>
+<text x="96" y="225" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="16" letter-spacing="2" fill="#c9a978">CAB</text>
+</svg>

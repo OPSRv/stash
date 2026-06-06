@@ -201,6 +201,10 @@ use modules::media_server::{media_stream_url, MediaKind, MediaServerState};
 use modules::metronome::commands::{
     metronome_get_state, metronome_save_state, MetronomeStateHandle,
 };
+use modules::valeton::commands::{
+    valeton_connect_ble, valeton_connect_usb, valeton_disconnect, valeton_save_file, valeton_send,
+    ValetonState,
+};
 use modules::music::commands::{
     music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
     music_show, music_status,
@@ -693,6 +697,11 @@ pub fn run() {
             translator_clear,
             metronome_get_state,
             metronome_save_state,
+            valeton_connect_usb,
+            valeton_connect_ble,
+            valeton_send,
+            valeton_disconnect,
+            valeton_save_file,
             pty_open,
             pty_write,
             pty_resize,
@@ -937,6 +946,9 @@ pub fn run() {
             // Metronome — single JSON blob in app data dir.
             let metronome_path = data_dir.join("metronome.json");
             app.manage(MetronomeStateHandle::new(metronome_path));
+
+            // Valeton GP-5 editor — USB-MIDI / BLE transport bridge state.
+            app.manage(ValetonState::new());
 
             // Whisper — model files live in appData/whisper, config blob
             // tracks the active model id.
