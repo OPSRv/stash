@@ -62,7 +62,7 @@ export const Modal = ({
             )}
           </div>
         )}
-        <div className="px-4 py-4">{children}</div>
+        <div className="max-h-[72vh] overflow-y-auto px-4 py-4">{children}</div>
         {footer && (
           <div className="flex justify-end gap-2 border-t border-ve-stroke px-4 py-3">
             {footer}

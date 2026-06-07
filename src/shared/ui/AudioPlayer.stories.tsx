@@ -14,6 +14,7 @@ const meta = {
   argTypes: {
     display: { control: 'inline-radio', options: ['compact', 'waveform'] },
     loader: { control: 'inline-radio', options: ['url', 'bytes'] },
+    abLoop: { control: 'boolean' },
   },
 } satisfies Meta<typeof AudioPlayer>;
 
@@ -44,6 +45,14 @@ export const LongClip: Story = {
   render: (args) => (
     <Stage>
       <AudioPlayer {...args} display="waveform" durationHint={274} caption="Запис лекції" />
+    </Stage>
+  ),
+};
+
+export const AbLoop: Story = {
+  render: (args) => (
+    <Stage>
+      <AudioPlayer {...args} display="waveform" abLoop durationHint={30} caption="A–B loop" />
     </Stage>
   ),
 };

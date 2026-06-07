@@ -33,11 +33,6 @@ describe('Controls', () => {
     expect(onPatch).toHaveBeenCalledWith({ subdivision: 3 });
   });
 
-  it('emits a click_volume patch when the click slider moves', () => {
-    const onPatch = vi.fn();
-    render(<Controls state={DEFAULT_STATE} onPatch={onPatch} />);
-    const slider = screen.getByTestId('vol-click') as HTMLInputElement;
-    fireEvent.change(slider, { target: { value: '50' } });
-    expect(onPatch).toHaveBeenCalledWith({ click_volume: 0.5 });
-  });
+  // The Click / Accent level knobs moved into the metronome's slide-over setup
+  // bay (see MetronomeShell), so they are no longer part of <Controls>.
 });

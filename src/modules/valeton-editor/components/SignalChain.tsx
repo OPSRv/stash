@@ -44,7 +44,7 @@ export const SignalChain = () => {
   };
 
   return (
-    <div id="btn_list" className="grid grid-cols-5 gap-3 p-1.5">
+    <div id="btn_list" className="grid grid-cols-5 gap-3 -mx-1.5 px-1.5 py-1.5">
       {order.map((b) => {
         const block = BLOCKS[b];
         const on = enabled[b];
@@ -52,14 +52,16 @@ export const SignalChain = () => {
         const isOpen = openCard === block.key;
 
         const base =
-          'relative flex min-h-[180px] items-center justify-center rounded-[10px] border p-1.5 transition disabled:opacity-40';
+          'relative flex min-h-[180px] items-center justify-center overflow-hidden rounded-[10px] border p-1.5 transition disabled:opacity-40';
+        // Active blocks now carry a coloured top bar + a brighter border, not
+        // just the corner LED — the bare dot read as "off" at a glance.
         const tone = danger
-          ? 'border-ve-danger/50 bg-ve-danger/10'
+          ? 'border-ve-danger/60 bg-ve-danger/10'
           : on
-            ? 'border-ve-on/35 bg-ve-bg-2 text-ve-text shadow-[0_0_16px_rgba(61,220,151,0.16)]'
+            ? 'border-ve-on/55 bg-ve-bg-2 text-ve-text shadow-[0_0_12px_rgba(61,220,151,0.11)]'
             : 'border-ve-stroke bg-ve-bg-1 text-ve-faint';
         const ring = isOpen
-          ? 'ring-1 ring-ve-accent shadow-[0_0_18px_rgba(74,163,255,0.35)]'
+          ? 'ring-1 ring-ve-accent shadow-[0_0_12px_rgba(74,163,255,0.24)]'
           : '';
         const dropRing =
           dropOn?.block === b && dropOn.pos === 'before'
@@ -100,6 +102,14 @@ export const SignalChain = () => {
               onClick={() => setState({ openCard: block.key })}
               onDoubleClick={() => !locked && toggleBlock(block.key, !on)}
             >
+              {(on || danger) && (
+                <span
+                  aria-hidden
+                  className={`pointer-events-none absolute inset-x-0 top-0 h-[3px] rounded-t-[9px] ${
+                    danger ? 'bg-ve-danger' : 'bg-ve-on'
+                  }`}
+                />
+              )}
               <span
                 className={`led${on ? ' on' : ''}${danger ? ' danger' : ''}`}
               />

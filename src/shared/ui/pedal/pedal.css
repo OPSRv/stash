@@ -1,0 +1,157 @@
+/* Shared guitar-pedal chrome — a cast-aluminium stompbox used by the tools that
+ * live inside the Valeton editor (Metronome, Tuner, …). The metal body, bevel,
+ * sand-cast grain and corner bolts are now a single generated SVG plate (see
+ * `PedalEnclosure.tsx`); the footswitch metal is likewise SVG (`Footswitch.tsx`)
+ * and the indicators are SVG LEDs (`Led.tsx`). What stays here is the layout
+ * scaffolding, the recessed glass display window, engraved silkscreen labels,
+ * and the footswitch button's press/focus behaviour.
+ *
+ * Everything is namespaced under `pedal-*` and leans on the Valeton palette
+ * (`--color-ve-*`) so every unit belongs to the same device as the editor. */
+
+/* ============================ Enclosure ============================ */
+.pedal-enclosure {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  min-height: 100%;
+  /* Clip the slide-over setup bay while it sits off-screen below the face —
+     otherwise its translated box adds phantom scroll height to the host. */
+  overflow: hidden;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+}
+/* The generated metal plate sits behind everything. */
+.pedal-enclosure-plate {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.pedal-enclosure-content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Engraved silkscreen labels — pressed-in look (dark top edge, faint base). */
+.pedal-enclosure .field-label {
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.65),
+    0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ====================== Display window (LCD) ====================== */
+.pedal-window {
+  position: relative;
+  overflow: hidden;
+  border-radius: 9px;
+  /* Smoked-glass panel recessed into the metal. */
+  background: linear-gradient(180deg, #0a141f 0%, #070b11 55%, #05070b 100%);
+  box-shadow:
+    inset 0 2px 7px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 1px rgba(74, 163, 255, 0.14),
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+}
+/* Glass glare across the top third + faint horizontal scanlines. */
+.pedal-window::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(150, 197, 255, 0.08) 0%, transparent 38%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
+}
+.pedal-window[data-playing='true'] {
+  box-shadow:
+    inset 0 2px 7px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 1px rgba(74, 163, 255, 0.28),
+    inset 0 0 18px rgba(74, 163, 255, 0.12),
+    0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+/* LCD readout — etched in glowing blue. */
+.pedal-readout {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #9fd0ff;
+  text-shadow: 0 0 8px rgba(74, 163, 255, 0.5);
+}
+.pedal-readout .pedal-readout-dim {
+  color: #4f7196;
+}
+
+/* ===================== Footswitches (transport) ===================== */
+/* The button is the hit target; the brushed metal is an SVG plate that fills
+ * it, and the press "dent" is the button transform. */
+.pedal-stomp {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  padding: 0;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.55));
+  transition: transform 60ms ease, filter 120ms ease;
+}
+.pedal-stomp-metal {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.pedal-stomp:hover {
+  filter: drop-shadow(0 4px 9px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 6px rgba(74, 163, 255, 0.3));
+}
+.pedal-stomp:active {
+  transform: translateY(2px);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+.pedal-stomp:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 0 3px rgba(74, 163, 255, 0.5));
+}
+/* Glyph engraved on the cap. */
+.pedal-stomp-glyph {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #c4d2e3;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.8);
+}
+.pedal-stomp[data-on='true'] .pedal-stomp-glyph {
+  color: #eaf4ff;
+  text-shadow: 0 0 10px rgba(74, 163, 255, 0.8);
+}
+/* Status LED riding above the switch breathes while lit. */
+.pedal-stomp-led-on {
+  animation: pedal-led-breath 2.4s ease-in-out infinite;
+}
+@keyframes pedal-led-breath {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+.pedal-stomp-cap {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ve-dim);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pedal-stomp-led-on {
+    animation: none;
+  }
+}

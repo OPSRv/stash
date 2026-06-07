@@ -6,16 +6,17 @@ import { TabButton } from './TabButton';
 const ICON = <span data-testid="icon" />;
 
 describe('TabButton', () => {
-  it('surfaces the label via the custom Tooltip when collapsed to icon-only', () => {
-    // Inactive tabs with an icon render collapsed — the label lives in the
-    // hidden Tooltip bubble so hover still reveals the tab name.
+  it('always renders the label, even with an icon and inactive', () => {
+    // Labels never collapse to icon-only any more — the rail scrolls with
+    // arrows instead, so every tab shows its text at all times.
     render(<TabButton label="Clipboard" icon={ICON} active={false} onClick={() => {}} />);
-    expect(screen.getByRole('tooltip', { hidden: true })).toHaveTextContent('Clipboard');
+    expect(screen.getByText('Clipboard')).toBeVisible();
+    expect(screen.getByTestId('icon')).toBeInTheDocument();
   });
 
-  it('does not render a Tooltip when the label is already visible (active tab)', () => {
+  it('renders the label for an active tab', () => {
     render(<TabButton label="Clipboard" icon={ICON} active onClick={() => {}} />);
-    expect(screen.queryByRole('tooltip', { hidden: true })).not.toBeInTheDocument();
+    expect(screen.getByText('Clipboard')).toBeVisible();
   });
 
   it('calls onClick when clicked', async () => {

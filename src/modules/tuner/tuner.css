@@ -1,0 +1,145 @@
+/* Tuner — module-specific styling on top of the shared pedal chrome
+ * (`shared/ui/pedal/pedal.css`). The unit is styled after a compact chromatic
+ * stompbox tuner (Boss TU-3 family): an engraved brand strip, a smoked display
+ * window with a big note readout + LED cents meter, flat/sharp direction
+ * arrows, and a row of string LED cells. Everything leans on the Valeton
+ * palette so the tuner reads as the same device as the editor it opens from. */
+
+/* ---------- Engraved brand strip ---------- */
+.tuner-brand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 2px 1px;
+}
+.tuner-brand-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: #6f8197;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7), 0 -1px 0 rgba(255, 255, 255, 0.03);
+}
+.tuner-brand-model {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--color-ve-accent);
+  opacity: 0.7;
+}
+
+/* ---------- Big note readout (inside the display window) ---------- */
+.tuner-note {
+  font-family: var(--font-mono);
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #f2f7ff;
+  text-shadow: 0 0 16px rgba(74, 163, 255, 0.35);
+}
+.tuner-note[data-tuned] {
+  color: #aef7d5;
+  text-shadow: 0 0 18px rgba(61, 220, 151, 0.65);
+}
+.tuner-note-oct {
+  font-size: 20px;
+  color: #4f7196;
+  margin-left: 1px;
+}
+
+/* ---------- Cents badge ---------- */
+.tuner-cents {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: #4f7196;
+  min-height: 1em;
+}
+.tuner-cents[data-off] {
+  color: #f5a623;
+}
+.tuner-cents[data-tuned] {
+  color: #3ddc97;
+  text-shadow: 0 0 8px rgba(61, 220, 151, 0.5);
+}
+
+/* ---------- Flat / sharp direction arrows ---------- */
+.tuner-dir {
+  font-size: 16px;
+  line-height: 1;
+  color: #2b3744;
+  transition: color 120ms var(--easing-standard), text-shadow 120ms var(--easing-standard);
+}
+.tuner-dir[data-on] {
+  color: #f5a623;
+  text-shadow: 0 0 10px rgba(245, 166, 35, 0.7);
+}
+
+/* ---------- Cents meter ---------- */
+.tuner-meter {
+  display: block;
+  margin: 1px 0 2px;
+}
+
+.tuner-error {
+  color: var(--color-ve-danger, #ff6b6b);
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+/* ---------- String LED cells ---------- */
+.tuner-string {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  height: 42px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #161b22 0%, #0e1218 100%);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.6),
+    inset 0 0 0 1px var(--color-ve-stroke);
+  transition: box-shadow 140ms var(--easing-standard), background 140ms var(--easing-standard);
+}
+.tuner-string-note {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-ve-dim);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+.tuner-string-oct {
+  font-size: 9px;
+  color: #41506280;
+  margin-left: 1px;
+}
+
+/* Matched but not yet in tune — amber. */
+.tuner-string[data-state='off'] {
+  box-shadow:
+    inset 0 0 0 1px rgba(245, 166, 35, 0.55),
+    inset 0 0 10px rgba(245, 166, 35, 0.18);
+}
+.tuner-string[data-state='off'] .tuner-string-note {
+  color: #f5c074;
+  text-shadow: 0 0 8px rgba(245, 166, 35, 0.6);
+}
+/* Matched and in tune — emerald. */
+.tuner-string[data-state='tuned'] {
+  background: radial-gradient(circle at 50% 30%, #15402f 0%, #0e1218 70%);
+  box-shadow:
+    inset 0 0 0 1px rgba(61, 220, 151, 0.7),
+    inset 0 0 12px rgba(61, 220, 151, 0.25),
+    0 0 8px rgba(61, 220, 151, 0.3);
+}
+.tuner-string[data-state='tuned'] .tuner-string-note {
+  color: #aef7d5;
+  text-shadow: 0 0 8px rgba(61, 220, 151, 0.7);
+}

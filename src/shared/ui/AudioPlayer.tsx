@@ -3,7 +3,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 
 import { accent } from '../theme/accent';
 import { IconButton } from './IconButton';
-import { PauseIcon, PlayIcon, WaveformIcon } from './icons';
+import { PauseIcon, PlayIcon, RepeatIcon, WaveformIcon } from './icons';
 
 /// Load strategy.
 ///  - `url`    : hand `src` directly to `<audio>`. Absolute paths get
@@ -39,7 +39,16 @@ type AudioPlayerProps = {
   durationHint?: number | null;
   caption?: string;
   className?: string;
+  /// Enable the A–B loop control (waveform variant only). Renders a
+  /// repeat toggle plus two draggable region handles on the waveform;
+  /// while looping is on, playback wraps from B back to A. Opt-in so
+  /// notes / inbox players stay unchanged.
+  abLoop?: boolean;
 };
+
+/// Minimum loop-region width as a fraction of the track, so the two
+/// handles can never cross or collapse onto each other.
+const MIN_LOOP_GAP = 0.02;
 
 const fmt = (s: number): string => {
   if (!Number.isFinite(s) || s < 0) return '0:00';
@@ -124,11 +133,21 @@ export const AudioPlayer = ({
   durationHint,
   caption,
   className,
+  abLoop = false,
 }: AudioPlayerProps) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(durationHint ?? 0);
+  // A–B loop state. Region bounds are kept as fractions (0..1) so they
+  // survive the duration arriving late from `loadedmetadata`.
+  const [loopOn, setLoopOn] = useState(false);
+  const [loopStart, setLoopStart] = useState(0);
+  const [loopEnd, setLoopEnd] = useState(1);
+  // Read latest loop state inside the imperative `<audio>` callbacks
+  // without re-binding them every render.
+  const loopRef = useRef({ on: false, start: 0, end: 1 });
+  loopRef.current = { on: loopOn, start: loopStart, end: loopEnd };
   // For `bytes` loader: holds the Blob URL currently rendered.
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -222,7 +241,15 @@ export const AudioPlayer = ({
 
   const onTimeUpdate = () => {
     const a = audioRef.current;
-    if (a) setCurrent(a.currentTime);
+    if (!a) return;
+    const { on, start, end } = loopRef.current;
+    // Wrap B→A a touch early: `timeupdate` fires every ~250ms, so the
+    // exact `currentTime >= b` moment is usually overshot — clamp on the
+    // approach instead of waiting for `ended`.
+    if (on && a.duration > 0 && a.currentTime >= end * a.duration - 0.05) {
+      a.currentTime = start * a.duration;
+    }
+    setCurrent(a.currentTime);
   };
   const onLoadedMeta = () => {
     const a = audioRef.current;
@@ -233,8 +260,36 @@ export const AudioPlayer = ({
     }
   };
   const onEnded = () => {
+    const a = audioRef.current;
+    const { on, start } = loopRef.current;
+    // Region ending exactly at the track end (B = 1) reaches `ended`
+    // before `timeupdate` can wrap it — restart from A and keep going.
+    if (a && on && a.duration > 0) {
+      a.currentTime = start * a.duration;
+      void a.play().catch(() => {});
+      return;
+    }
     setPlaying(false);
     setCurrent(0);
+  };
+
+  const toggleLoop = () => {
+    const a = audioRef.current;
+    setLoopOn((on) => {
+      const next = !on;
+      // Turning the loop on while parked outside the region would play
+      // dead air until B; jump the playhead to A so it starts in-region.
+      if (next && a && a.duration > 0) {
+        const t = a.currentTime / a.duration;
+        if (t < loopStart || t > loopEnd) a.currentTime = loopStart * a.duration;
+      }
+      return next;
+    });
+  };
+
+  const changeLoop = (start: number, end: number) => {
+    setLoopStart(start);
+    setLoopEnd(end);
   };
 
   /// Surface the underlying `MediaError` code so a generic "Decode
@@ -284,6 +339,12 @@ export const AudioPlayer = ({
         onToggle={toggle}
         onSeek={seekFromPointer}
         className={className}
+        abLoop={abLoop}
+        loopOn={loopOn}
+        loopStart={loopStart}
+        loopEnd={loopEnd}
+        onToggleLoop={toggleLoop}
+        onChangeLoop={changeLoop}
       >
         {audioUrl && (
           <audio
@@ -385,6 +446,12 @@ type WaveformProps = {
   onToggle: () => void;
   onSeek: (clientX: number, rect: DOMRect) => void;
   className?: string;
+  abLoop: boolean;
+  loopOn: boolean;
+  loopStart: number;
+  loopEnd: number;
+  onToggleLoop: () => void;
+  onChangeLoop: (start: number, end: number) => void;
   children: React.ReactNode;
 };
 
@@ -399,8 +466,72 @@ const WaveformDisplay = ({
   onToggle,
   onSeek,
   className,
+  abLoop,
+  loopOn,
+  loopStart,
+  loopEnd,
+  onToggleLoop,
+  onChangeLoop,
   children,
 }: WaveformProps) => {
+  // Single pointer surface for the whole strip: a press near a loop
+  // marker grabs it, anywhere else scrubs. One capture target removes
+  // the seek-vs-drag races the old split handlers suffered from.
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const drag = useRef<'A' | 'B' | 'seek' | null>(null);
+  // A–B handles are meaningful only once we know the duration and the
+  // caller opted in.
+  const showRegion = abLoop && loopOn && ready && duration > 0;
+  // Press within this many px of a marker grabs it instead of seeking.
+  const GRAB_PX = 14;
+
+  const fracAt = (clientX: number): number => {
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return 0;
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  };
+  // Clamp each marker so the region keeps a minimum width and stays in
+  // [0,1]; works for both pointer drags and keyboard nudges.
+  const setA = (frac: number) =>
+    onChangeLoop(Math.max(0, Math.min(frac, loopEnd - MIN_LOOP_GAP)), loopEnd);
+  const setB = (frac: number) =>
+    onChangeLoop(loopStart, Math.min(1, Math.max(frac, loopStart + MIN_LOOP_GAP)));
+
+  const onSurfaceDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!ready || duration <= 0) return;
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    surfaceRef.current?.setPointerCapture(e.pointerId);
+    const frac = fracAt(e.clientX);
+    if (showRegion) {
+      const dA = Math.abs(frac - loopStart) * rect.width;
+      const dB = Math.abs(frac - loopEnd) * rect.width;
+      if (Math.min(dA, dB) <= GRAB_PX) {
+        // Bias to A only on a genuine tie so the two markers stay
+        // independently grabbable even when sitting close together.
+        drag.current = dA <= dB ? 'A' : 'B';
+        drag.current === 'A' ? setA(frac) : setB(frac);
+        return;
+      }
+    }
+    drag.current = 'seek';
+    onSeek(e.clientX, rect);
+  };
+  const onSurfaceMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return;
+    if (drag.current === 'seek') {
+      const rect = surfaceRef.current?.getBoundingClientRect();
+      if (rect) onSeek(e.clientX, rect);
+    } else {
+      const frac = fracAt(e.clientX);
+      drag.current === 'A' ? setA(frac) : setB(frac);
+    }
+  };
+  const onSurfaceUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (drag.current) surfaceRef.current?.releasePointerCapture(e.pointerId);
+    drag.current = null;
+  };
+
   const bars = useMemo(() => {
     const seed = hashSrc(src);
     return Array.from({ length: 48 }, (_, i) => {
@@ -409,15 +540,6 @@ const WaveformDisplay = ({
     });
   }, [src]);
   const progress = duration > 0 ? Math.min(1, current / duration) : 0;
-
-  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    onSeek(e.clientX, e.currentTarget.getBoundingClientRect());
-  };
-  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.buttons !== 1) return;
-    onSeek(e.clientX, e.currentTarget.getBoundingClientRect());
-  };
 
   return (
     <div
@@ -452,28 +574,73 @@ const WaveformDisplay = ({
           {playing ? <PauseIcon size={14} /> : <PlayIcon size={14} />}
         </IconButton>
         <div
-          className="flex-1 min-w-0 flex items-end gap-[2px] h-10 cursor-pointer select-none overflow-hidden"
-          aria-hidden
-          onPointerDown={onDown}
-          onPointerMove={onMove}
+          ref={surfaceRef}
+          data-testid="waveform-surface"
+          className="relative flex-1 min-w-0 h-10 cursor-pointer select-none touch-none"
+          onPointerDown={onSurfaceDown}
+          onPointerMove={onSurfaceMove}
+          onPointerUp={onSurfaceUp}
+          onPointerCancel={onSurfaceUp}
         >
-          {bars.map((h, i) => {
-            const lit = i / bars.length <= progress;
-            return (
-              <span
-                key={i}
-                style={{
-                  flex: 1,
-                  minWidth: 1,
-                  height: `${h * 100}%`,
-                  background: lit ? accent(0.9) : 'rgba(255,255,255,0.18)',
-                  borderRadius: 1,
-                  transition: 'background 120ms linear',
-                }}
-              />
-            );
-          })}
+          <div
+            className="flex items-end gap-[2px] h-full overflow-hidden pointer-events-none"
+            aria-hidden
+          >
+            {bars.map((h, i) => {
+              const lit = i / bars.length <= progress;
+              const frac = i / bars.length;
+              const outside = showRegion && (frac < loopStart || frac > loopEnd);
+              return (
+                <span
+                  key={i}
+                  style={{
+                    flex: 1,
+                    minWidth: 1,
+                    height: `${h * 100}%`,
+                    background: lit ? accent(0.9) : 'rgba(255,255,255,0.18)',
+                    opacity: outside ? 0.3 : 1,
+                    borderRadius: 1,
+                  }}
+                />
+              );
+            })}
+          </div>
+          {showRegion && (
+            <div
+              className="absolute inset-y-0 pointer-events-none rounded-[2px]"
+              style={{
+                left: `${loopStart * 100}%`,
+                width: `${(loopEnd - loopStart) * 100}%`,
+                background: accent(0.14),
+              }}
+            />
+          )}
+          {/* Continuous playhead — carries the smooth motion the coarse
+              48-bar fill can't, so scrubbing reads as precise. */}
+          {ready && duration > 0 && (
+            <div
+              className="absolute inset-y-0 w-[2px] -translate-x-1/2 pointer-events-none rounded-full"
+              style={{ left: `${progress * 100}%`, background: '#fff' }}
+            />
+          )}
+          {showRegion && (
+            <>
+              <LoopHandle label="A" left={loopStart} onNudge={(d) => setA(loopStart + d)} />
+              <LoopHandle label="B" left={loopEnd} onNudge={(d) => setB(loopEnd + d)} />
+            </>
+          )}
         </div>
+        {abLoop && (
+          <IconButton
+            onClick={onToggleLoop}
+            title={loopOn ? 'Loop region: on (drag A/B to adjust)' : 'Loop region'}
+            active={loopOn}
+            disabled={!ready}
+            stopPropagation={false}
+          >
+            <RepeatIcon size={14} />
+          </IconButton>
+        )}
         <span className="tabular-nums shrink-0 t-secondary text-meta">
           {fmt(current)} / {duration > 0 ? fmt(duration) : '…'}
         </span>
@@ -494,3 +661,45 @@ const WaveformDisplay = ({
     </div>
   );
 };
+
+type LoopHandleProps = {
+  label: 'A' | 'B';
+  left: number;
+  /// Keyboard step (fraction of the track, sign = direction). Pointer
+  /// dragging is owned by the parent surface; this only handles arrows.
+  onNudge: (delta: number) => void;
+};
+
+/// A/B marker: a thin accent line with a labelled knob. Pointer events
+/// fall through to the parent surface (which decides grab-vs-seek), so
+/// this only adds the `ew-resize` affordance and keyboard nudging.
+const LoopHandle = ({ label, left, onNudge }: LoopHandleProps) => (
+  <div
+    role="slider"
+    tabIndex={0}
+    aria-label={`Loop ${label} marker`}
+    aria-valuemin={0}
+    aria-valuemax={100}
+    aria-valuenow={Math.round(left * 100)}
+    className="absolute inset-y-0 w-3 -translate-x-1/2 cursor-ew-resize touch-none flex justify-center outline-none"
+    style={{ left: `${left * 100}%` }}
+    onKeyDown={(e) => {
+      const step = e.shiftKey ? 0.05 : 0.01;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        onNudge(-step);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        onNudge(step);
+      }
+    }}
+  >
+    <span className="w-[2px] h-full" style={{ background: accent(0.9) }} />
+    <span
+      className="absolute -top-1 text-[9px] font-semibold leading-none px-1 py-px rounded-[3px] tabular-nums"
+      style={{ background: accent(0.9), color: '#000' }}
+    >
+      {label}
+    </span>
+  </div>
+);

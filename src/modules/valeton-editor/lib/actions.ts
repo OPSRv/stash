@@ -1,8 +1,10 @@
 /* Високорівневі дії UI (порт обробників подій із app.js).
    Компоненти викликають їх; вони оновлюють стор і шлють команди на пристрій. */
+import { setPopupAutoHide } from '../api';
 import { getState, setState } from '../store/store';
 import type { BlockKey } from '../store/types';
 import { BLOCK_BY_KEY } from './blocks';
+import type { ParsedPreset } from './presetIO';
 import {
   paramDefs,
   sendBlockChange,
@@ -27,6 +29,9 @@ function debounce(key: string, fn: () => void, ms = 50): void {
   clearTimeout(timers[key]);
   timers[key] = setTimeout(fn, ms);
 }
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
 
 const replace = <T>(arr: T[], i: number, v: T): T[] => {
   const next = arr.slice();
@@ -179,16 +184,104 @@ export function toggleGlobalBPM(checked: boolean): void {
   setState({ globalBPMOn: checked });
 }
 
-/* ---------- збереження ---------- */
-export function savePatchToDevice(): void {
-  if (
-    confirm(
-      'The patch has been modified, do you want to save your changes? This will overwrite the current patch.',
-    )
-  ) {
-    sendSavePatch();
-    setState({ saveEnabled: false });
+/* ---------- імпорт пресета (JSON → live-стан + пристрій) ---------- */
+/** Застосовує розібраний пресет на поточний патч: оновлює стор і шле всі
+    команди на пристрій. Повертає false (синхронно) якщо офлайн, інакше
+    Promise, що завершується коли вся пачка відправлена.
+
+    Чому розріджено (а не пачкою): зміна моделі (`sendBlockChange`) на пристрої
+    АСИНХРОННО скидає параметри блока в дефолти. Якщо одразу слати param-значення,
+    скид прилітає пізніше і затирає їх → у збереженому патчі параметри = дефолти.
+    Тому: спершу всі моделі, пауза на скид, далі значення/статуси з паузами, щоб
+    USB-MIDI sysex не переповнювався (звичайне редагування шле по одній команді —
+    тут їх десятки поспіль). */
+export function importPreset(preset: ParsedPreset): false | Promise<true> {
+  const s = getState();
+  if (s.locked) return false;
+
+  const enabled = s.enabled.slice();
+  const selected = s.selected.slice();
+  const params = s.params.map((p) => p.slice());
+  const ctl = s.ctl.slice();
+
+  for (const b of preset.blocks) {
+    enabled[b.index] = b.on;
+    selected[b.index] = b.model;
+    params[b.index] = b.params.slice();
+    if (b.ctl !== undefined) ctl[b.index] = b.ctl;
   }
+
+  const order = preset.order ?? s.order;
+  const patchNames =
+    preset.name !== undefined
+      ? replace(s.patchNames, s.currentPatchNumber, preset.name)
+      : s.patchNames;
+
+  setState({
+    enabled,
+    selected,
+    params,
+    ctl,
+    order,
+    patchNames,
+    currentPatchName: patchNames[s.currentPatchNumber] ?? s.currentPatchName,
+    ...(preset.patchVOL !== undefined ? { patchVOL: preset.patchVOL } : {}),
+    ...(preset.bpm !== undefined ? { bpm: preset.bpm } : {}),
+  });
+
+  const STEP = 14; // пауза між sysex-командами (USB-MIDI throttle)
+  const RESET = 60; // довша пауза після зміни моделі (поки пристрій скине параметри)
+
+  return (async () => {
+    // 1) Спершу всі моделі — кожна скидає параметри блока на пристрої.
+    for (const b of preset.blocks) {
+      sendBlockChange(b.index, b.model);
+      await sleep(STEP);
+    }
+    await sleep(RESET);
+    // 2) Тепер значення параметрів (скиди вже відбулися), статуси й CTL.
+    for (const b of preset.blocks) {
+      for (let pi = 0; pi < b.params.length; pi++) {
+        sendParamChange(b.index, pi, b.params[pi]);
+        await sleep(STEP);
+      }
+      sendBlockStatus(b.index, b.on ? '1' : '0');
+      await sleep(STEP);
+      if (b.ctl !== undefined) {
+        sendCTL(b.index, b.ctl ? '1' : '0');
+        await sleep(STEP);
+      }
+    }
+    sendEffectOrder(order);
+    await sleep(STEP);
+    if (preset.patchVOL !== undefined) {
+      sendPatchVol(preset.patchVOL);
+      await sleep(STEP);
+    }
+    return true as const;
+  })();
+}
+
+/* ---------- збереження ---------- */
+/** Записати поточний edit-buffer у патч на пристрої.
+    `skipConfirm` — коли намір уже явний (кнопка «Apply & Save» в модалці),
+    щоб не показувати зайвий нативний діалог.
+    Інакше показуємо `confirm`, але спершу пінимо попап (`set_popup_auto_hide`),
+    бо нативний діалог краде фокус → blur ховає попап і скасовує підтвердження,
+    через що `sendSavePatch` ніколи не виконувався. Див. CLAUDE.md. */
+export async function savePatchToDevice(opts?: {
+  skipConfirm?: boolean;
+}): Promise<void> {
+  if (!opts?.skipConfirm) {
+    await setPopupAutoHide(false);
+    const ok = confirm(
+      'The patch has been modified, do you want to save your changes? This will overwrite the current patch.',
+    );
+    await setPopupAutoHide(true);
+    if (!ok) return;
+  }
+  sendSavePatch();
+  setState({ saveEnabled: false });
 }
 
 export function saveFile(kind: 'gp5' | 'gp50'): void {

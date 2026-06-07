@@ -1,3 +1,5 @@
+import { Led } from '../../../shared/ui/pedal/Led';
+
 type Props = {
   numerator: number;
   accents: boolean[];
@@ -7,7 +9,7 @@ type Props = {
 
 export const BeatStrip = ({ numerator, accents, activeBeat, onToggleAccent }: Props) => {
   return (
-    <div className="flex items-center justify-center gap-3" data-testid="beat-strip">
+    <div className="flex flex-wrap items-center justify-center gap-2" data-testid="beat-strip">
       {Array.from({ length: numerator }, (_, i) => {
         const isAccent = accents[i] ?? false;
         const active = i === activeBeat;
@@ -19,13 +21,14 @@ export const BeatStrip = ({ numerator, accents, activeBeat, onToggleAccent }: Pr
             aria-checked={isAccent}
             aria-label={`Beat ${i + 1}${isAccent ? ' (accent)' : ''}`}
             onClick={() => onToggleAccent(i)}
-            className="p-1.5 hover:scale-110 transition-transform"
+            className="rounded-full p-0.5 transition-transform hover:scale-110"
             data-testid={`beat-dot-${i}`}
           >
-            <span
-              className="metro-beat-dot block"
-              data-accent={isAccent}
-              data-active={active}
+            <Led
+              size={14}
+              on={active}
+              ring={isAccent}
+              color={isAccent ? 'blue' : 'green'}
             />
           </button>
         );

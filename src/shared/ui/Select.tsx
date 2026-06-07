@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { ChevronIcon, SelectCheckIcon } from './Select.icons';
+import { Tooltip } from './Tooltip';
 
 export type SelectOption<T extends string> = { value: T; label: string };
 
@@ -14,6 +16,15 @@ type SelectProps<T extends string> = {
   placement?: 'bottom' | 'top' | 'auto';
   /** Trigger size. `sm` matches inline header controls (text-meta, h-7). */
   size?: 'sm' | 'md';
+  /** When set, the trigger renders as an icon-only button (no label text /
+   *  chevron) styled like `IconButton`. The current selection is surfaced via
+   *  a tooltip. Used where space is tight (e.g. the recorder source picker). */
+  icon?: ReactNode;
+  /** Auxiliary content pinned below the options list, inside the same popup
+   *  but *outside* the `role="listbox"` (so it doesn't interfere with option
+   *  navigation). Use for a related control that belongs with the choice —
+   *  e.g. the recorder's input-gain slider sits under its mic list. */
+  footer?: ReactNode;
 };
 
 export const Select = <T extends string>({
@@ -25,10 +36,17 @@ export const Select = <T extends string>({
   disabled,
   placement = 'bottom',
   size = 'md',
+  icon,
+  footer,
 }: SelectProps<T>) => {
   const listId = useId();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const popupRef = useRef<HTMLUListElement | null>(null);
+  // `popupRef` is the popup *container* (used for outside-click + placement
+  // measurement); `listRef` is the inner `<ul role="listbox">` (focus + scroll
+  // bookkeeping). They split so an optional footer can live in the container
+  // without being part of the listbox.
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [resolvedPlacement, setResolvedPlacement] = useState<'bottom' | 'top'>(
@@ -98,10 +116,10 @@ export const Select = <T extends string>({
   // keep the highlighted option in view inside the popup only.
   useLayoutEffect(() => {
     if (!open) return;
-    popupRef.current?.focus({ preventScroll: true });
+    listRef.current?.focus({ preventScroll: true });
   }, [open]);
   useLayoutEffect(() => {
-    const ul = popupRef.current;
+    const ul = listRef.current;
     if (!open || !ul) return;
     const li = ul.querySelector<HTMLLIElement>(`[data-idx="${highlight}"]`);
     if (!li) return;
@@ -144,68 +162,93 @@ export const Select = <T extends string>({
     }
   };
 
+  const sharedTriggerProps = {
+    ref: triggerRef,
+    type: 'button' as const,
+    role: 'combobox' as const,
+    'aria-haspopup': 'listbox' as const,
+    'aria-expanded': open,
+    'aria-controls': open ? listId : undefined,
+    'aria-disabled': disabled || undefined,
+    disabled,
+    onClick: () => (open ? setOpen(false) : openMenu()),
+    onKeyDown: onTriggerKey,
+  };
+
   return (
     <div className="relative inline-block">
-      <button
-        ref={triggerRef}
-        type="button"
-        role="combobox"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={open ? listId : undefined}
-        aria-label={label}
-        aria-disabled={disabled || undefined}
-        disabled={disabled}
-        onClick={() => (open ? setOpen(false) : openMenu())}
-        onKeyDown={onTriggerKey}
-        className={`input-field ring-focus rounded-md inline-flex items-center gap-2 text-left disabled:opacity-40 disabled:cursor-not-allowed ${
-          size === 'sm'
-            ? 'h-7 pl-2 pr-1.5 text-meta min-w-[88px]'
-            : 'h-9 pl-2.5 pr-2 text-body min-w-[120px]'
-        }`}
-      >
-        <span className="truncate flex-1">{selected?.label ?? placeholder ?? ''}</span>
-        <ChevronIcon open={open} />
-      </button>
+      {icon ? (
+        <Tooltip
+          label={label ? `${label}: ${selected?.label ?? ''}` : selected?.label}
+          side="top"
+        >
+          <button
+            {...sharedTriggerProps}
+            aria-label={label ? `${label}: ${selected?.label ?? ''}` : selected?.label}
+            className="icon-btn ring-focus icon-btn-default"
+          >
+            {icon}
+          </button>
+        </Tooltip>
+      ) : (
+        <button
+          {...sharedTriggerProps}
+          aria-label={label}
+          className={`input-field ring-focus rounded-md inline-flex items-center gap-2 text-left disabled:opacity-40 disabled:cursor-not-allowed ${
+            size === 'sm'
+              ? 'h-7 pl-2 pr-1.5 text-meta min-w-[88px]'
+              : 'h-9 pl-2.5 pr-2 text-body min-w-[120px]'
+          }`}
+        >
+          <span className="truncate flex-1">{selected?.label ?? placeholder ?? ''}</span>
+          <ChevronIcon open={open} />
+        </button>
+      )}
       {open && (
-        <ul
+        <div
           ref={popupRef}
-          id={listId}
-          role="listbox"
-          tabIndex={-1}
-          onKeyDown={onListKey}
-          className={`select-popup absolute z-50 left-0 min-w-full max-h-60 overflow-y-auto nice-scroll rounded-md py-1 outline-none ${
+          className={`select-popup absolute z-50 left-0 min-w-full rounded-md overflow-hidden outline-none ${
             size === 'sm' ? 'text-meta' : 'text-body'
           } ${resolvedPlacement === 'top' ? 'bottom-full mb-1' : 'mt-1'}`}
-          style={{ minWidth: triggerRef.current?.offsetWidth }}
+          style={{ minWidth: icon ? 180 : triggerRef.current?.offsetWidth }}
         >
-          {options.map((o, idx) => {
-            const isSelected = o.value === value;
-            const isActive = idx === highlight;
-            return (
-              <li
-                key={o.value || `__empty_${idx}`}
-                role="option"
-                aria-selected={isSelected}
-                data-idx={idx}
-                onMouseEnter={() => setHighlight(idx)}
-                onMouseDown={(e) => {
-                  e.preventDefault(); // keep focus on list
-                  commit(idx);
-                }}
-                className={`cursor-pointer flex items-center gap-2 ${
-                  size === 'sm' ? 'px-2 py-0.5' : 'px-2.5 py-1'
-                }`}
-                style={{
-                  background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
-                }}
-              >
-                <span className="truncate flex-1">{o.label}</span>
-                {isSelected && <SelectCheckIcon />}
-              </li>
-            );
-          })}
-        </ul>
+          <ul
+            ref={listRef}
+            id={listId}
+            role="listbox"
+            tabIndex={-1}
+            onKeyDown={onListKey}
+            className="max-h-60 overflow-y-auto nice-scroll py-1 outline-none"
+          >
+            {options.map((o, idx) => {
+              const isSelected = o.value === value;
+              const isActive = idx === highlight;
+              return (
+                <li
+                  key={o.value || `__empty_${idx}`}
+                  role="option"
+                  aria-selected={isSelected}
+                  data-idx={idx}
+                  onMouseEnter={() => setHighlight(idx)}
+                  onMouseDown={(e) => {
+                    e.preventDefault(); // keep focus on list
+                    commit(idx);
+                  }}
+                  className={`cursor-pointer flex items-center gap-2 ${
+                    size === 'sm' ? 'px-2 py-0.5' : 'px-2.5 py-1'
+                  }`}
+                  style={{
+                    background: isActive ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  }}
+                >
+                  <span className="truncate flex-1">{o.label}</span>
+                  {isSelected && <SelectCheckIcon />}
+                </li>
+              );
+            })}
+          </ul>
+          {footer != null && <div className="select-popup-footer">{footer}</div>}
+        </div>
       )}
     </div>
   );

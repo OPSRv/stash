@@ -82,7 +82,7 @@ export const IconPicker = ({ block, models, selected, disabled }: Props) => {
 
       <div
         ref={gridRef}
-        className="scroll-area grid auto-rows-min content-start max-h-[296px] gap-2.5 pr-1 pb-2 [grid-template-columns:repeat(auto-fill,minmax(88px,1fr))] lg:max-h-none lg:min-h-0 lg:flex-1"
+        className="grid auto-rows-min content-start max-h-[360px] gap-2.5 overflow-y-auto pb-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))] lg:max-h-none lg:min-h-0 lg:flex-1"
         data-id={`${block.key}_icon_strip`}
         role="listbox"
         aria-label={`${block.label} model`}

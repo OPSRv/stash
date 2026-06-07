@@ -33,6 +33,16 @@ export const disconnectDevice = (): Promise<void> =>
 export const saveFileBytes = (path: string, bytes: number[]): Promise<void> =>
   invoke('valeton_save_file', { path, bytes });
 
+/** Згенерувати пресет через AI-асистента (Rust шле спеку + запит у LLM).
+    Повертає сирий текст відповіді — JSON парситься на фронтенді. */
+export const generatePreset = (prompt: string): Promise<string> =>
+  invoke<string>('valeton_generate_preset', { prompt });
+
+/** Пін/анпін авто-сховання попапа навколо нативних діалогів (`confirm`,
+    file-picker): без цього blur ховає попап і скасовує діалог. Див. CLAUDE.md. */
+export const setPopupAutoHide = (enabled: boolean): Promise<void> =>
+  invoke<void>('set_popup_auto_hide', { enabled }).catch(() => {});
+
 /** Підписка на вхідні байти. */
 export const onRx = (cb: (e: ValetonRxEvent) => void): Promise<UnlistenFn> =>
   listen<ValetonRxEvent>('valeton:rx', (e) => cb(e.payload));

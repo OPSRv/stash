@@ -36,17 +36,6 @@ const clipboardShortcuts: ShortcutGroup = {
   ],
 };
 
-const metronomeShortcuts: ShortcutGroup = {
-  title: 'Metronome',
-  items: [
-    { keys: ['Space'], label: 'Play / pause' },
-    { keys: ['↑', '↓'], label: '±1 BPM (Shift = ±5)' },
-    { keys: ['T'], label: 'Tap tempo' },
-    { keys: ['1', '2', '3', '4'], label: 'Subdivision' },
-    { keys: ['[', ']'], label: 'Cycle time signature' },
-  ],
-};
-
 const webShortcuts: ShortcutGroup = {
   title: 'Web',
   items: [
@@ -118,7 +107,6 @@ export const Cheatsheet = ({
   if (!tab || tab === 'clipboard') groups.push(clipboardShortcuts);
   if (!tab || tab === 'web') groups.push(webShortcuts);
   if (!tab || tab === 'downloads') groups.push(downloadsShortcuts);
-  if (!tab || tab === 'metronome') groups.push(metronomeShortcuts);
   if (!tab || tab === 'terminal') groups.push(terminalShortcuts);
 
   return (

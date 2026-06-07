@@ -38,19 +38,19 @@ describe('ModulesTab', () => {
   });
 
   it('moves disabled modules into the Hidden section', () => {
-    renderTab({ hiddenModules: ['metronome'] });
+    renderTab({ hiddenModules: ['pomodoro'] });
     const hidden = screen.getByRole('list', { name: /hidden tabs/i });
-    expect(hidden.textContent).toContain('Metronome');
+    expect(hidden.textContent).toContain('Pomodoro');
     const visible = screen.getByRole('list', { name: /visible tabs/i });
-    expect(visible.textContent).not.toContain('Metronome');
+    expect(visible.textContent).not.toContain('Pomodoro');
   });
 
   it('toggling a hidden module back on removes it from hiddenModules', async () => {
     const user = userEvent.setup();
-    const { onChange } = renderTab({ hiddenModules: ['separator', 'metronome'] });
+    const { onChange } = renderTab({ hiddenModules: ['separator', 'pomodoro'] });
     await user.click(screen.getByRole('switch', { name: /show stems/i }));
     expect(onChange).toHaveBeenCalledWith('hiddenModules', expect.not.arrayContaining(['separator']));
-    expect(onChange.mock.calls[0][1]).toContain('metronome');
+    expect(onChange.mock.calls[0][1]).toContain('pomodoro');
   });
 
   it('Settings switch is labelled as not hidable', () => {
@@ -69,7 +69,7 @@ describe('ModulesTab', () => {
   it('Reset clears hiddenModules and moduleOrder', async () => {
     const user = userEvent.setup();
     const { onChange } = renderTab({
-      hiddenModules: ['metronome'],
+      hiddenModules: ['pomodoro'],
       moduleOrder: ['notes', 'clipboard'],
     });
     await user.click(screen.getByRole('button', { name: /^Reset$/ }));

@@ -39,10 +39,11 @@ export const Row: Story = {
   },
 };
 
-// With an icon present, inactive tabs collapse to icon-only and the active
-// tab expands to show its label. This is the mode used by the popup header
-// so 10+ modules fit across the width without truncation.
-export const IconOnlyInactive: Story = {
+// With icons present, every tab shows icon + label at all times (active or
+// not). This is the mode used by the popup header; when the tabs overflow,
+// the header pans horizontally via flanking arrow buttons rather than
+// collapsing labels or showing a scrollbar.
+export const WithIcons: Story = {
   render: () => {
     const Demo = () => {
       const [active, setActive] = useState('search');
@@ -69,8 +70,7 @@ export const IconOnlyInactive: Story = {
   },
 };
 
-// Without an icon, the label is always visible — the collapse only kicks in
-// when there's something (the icon) to represent the tab in its stead.
+// Text-only tabs — no icon, just the label.
 export const LabelOnly: Story = {
   render: () => {
     const Demo = () => {

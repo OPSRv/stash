@@ -100,7 +100,6 @@ export const DEFAULT_STATE = {
   sound: 'click' as SoundId,
   click_volume: 0.7,
   accent_volume: 0.9,
-  track_volume: 0.8,
   beat_accents: [true, false, false, false] as boolean[],
   trainer: DEFAULT_TRAINER,
   presets: [] as Preset[],

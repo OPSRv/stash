@@ -1,6 +1,6 @@
-/// Canonical duration formatter. Replaces four near-duplicates that lived in
-/// `modules/downloader/api.ts`, `modules/notes/NotesShell.tsx`,
-/// `modules/notes/AudioRecorder.tsx`, and `modules/metronome/components/BackingTrack.tsx`.
+/// Canonical duration formatter. Replaces near-duplicates that lived in
+/// `modules/downloader/api.ts`, `modules/notes/NotesShell.tsx`, and
+/// `modules/notes/AudioRecorder.tsx`.
 ///
 /// Handles both seconds (most APIs) and milliseconds (recording timers).
 /// Default format is `M:SS`; if the input reaches an hour and `includeHours`

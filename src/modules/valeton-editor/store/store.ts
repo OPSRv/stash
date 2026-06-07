@@ -15,6 +15,7 @@ const DEFAULT_ORDER = [0, 1, 2, 9, 3, 4, 5, 6, 7, 8];
 export const initialState: AppState = {
   transport: null,
   connected: false,
+  connecting: false,
   deviceName: '',
   statusText: 'Not connected. Connect your GP-5 via USB or Bluetooth.',
   loadStatusText: 'Syncing with GP-5 …',

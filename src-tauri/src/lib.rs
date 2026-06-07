@@ -201,9 +201,15 @@ use modules::media_server::{media_stream_url, MediaKind, MediaServerState};
 use modules::metronome::commands::{
     metronome_get_state, metronome_save_state, MetronomeStateHandle,
 };
+use modules::tuner::commands::{tuner_get_state, tuner_save_state, TunerStateHandle};
+use modules::recorder::commands::{
+    recorder_delete, recorder_list, recorder_rename, recorder_save, recorder_set_favorite,
+    RecorderState,
+};
+use modules::recorder::repo::RecorderRepo;
 use modules::valeton::commands::{
-    valeton_connect_ble, valeton_connect_usb, valeton_disconnect, valeton_save_file, valeton_send,
-    ValetonState,
+    valeton_connect_ble, valeton_connect_usb, valeton_disconnect, valeton_generate_preset,
+    valeton_save_file, valeton_send, ValetonState,
 };
 use modules::music::commands::{
     music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
@@ -697,11 +703,19 @@ pub fn run() {
             translator_clear,
             metronome_get_state,
             metronome_save_state,
+            tuner_get_state,
+            tuner_save_state,
+            recorder_list,
+            recorder_save,
+            recorder_rename,
+            recorder_set_favorite,
+            recorder_delete,
             valeton_connect_usb,
             valeton_connect_ble,
             valeton_send,
             valeton_disconnect,
             valeton_save_file,
+            valeton_generate_preset,
             pty_open,
             pty_write,
             pty_resize,
@@ -947,6 +961,27 @@ pub fn run() {
             let metronome_path = data_dir.join("metronome.json");
             app.manage(MetronomeStateHandle::new(metronome_path));
 
+            // Tuner — single JSON blob in app data dir.
+            let tuner_path = data_dir.join("tuner.json");
+            app.manage(TunerStateHandle::new(tuner_path));
+
+            // Recorder — embedded in the Valeton editor. Metadata in its own
+            // SQLite store, the encoded takes on disk under `recorder/`. That
+            // dir is registered as an Audio root so playback rides the shared
+            // media server via the generic `media_stream_url` command.
+            let recorder_dir = data_dir.join("recorder");
+            std::fs::create_dir_all(&recorder_dir).ok();
+            media_server.register(MediaKind::Audio, recorder_dir.clone());
+            match Connection::open(data_dir.join("recorder.sqlite"))
+                .map_err(|e| e.to_string())
+                .and_then(|c| RecorderRepo::new(c).map_err(|e| e.to_string()))
+            {
+                Ok(repo) => {
+                    app.manage(RecorderState::new(repo, recorder_dir));
+                }
+                Err(e) => tracing::error!("recorder repo init failed: {e}"),
+            }
+
             // Valeton GP-5 editor — USB-MIDI / BLE transport bridge state.
             app.manage(ValetonState::new());
 
@@ -1110,6 +1145,8 @@ pub fn run() {
             );
             telegram_state.register_command(modules::telegram::module_cmds::NavigateCmd);
             telegram_state.register_command(modules::telegram::module_cmds::MetronomeCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::TunerCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::RecordCmd);
             telegram_state.register_command(
                 modules::telegram::module_cmds::PomodoroCmd::new(Arc::clone(&pomodoro_state)),
             );

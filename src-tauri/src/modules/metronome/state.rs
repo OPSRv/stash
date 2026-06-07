@@ -41,7 +41,6 @@ pub struct MetronomeState {
     pub sound: String,
     pub click_volume: f32,
     pub accent_volume: f32,
-    pub track_volume: f32,
     pub beat_accents: Vec<bool>,
     #[serde(default)]
     pub trainer: TrainerConfig,
@@ -59,7 +58,6 @@ impl Default for MetronomeState {
             sound: "click".into(),
             click_volume: 0.7,
             accent_volume: 0.9,
-            track_volume: 0.8,
             beat_accents: vec![true, false, false, false],
             trainer: TrainerConfig::default(),
             presets: Vec::new(),
@@ -98,7 +96,6 @@ impl MetronomeState {
         self.subdivision = self.subdivision.clamp(1, 4);
         self.click_volume = self.click_volume.clamp(0.0, 1.0);
         self.accent_volume = self.accent_volume.clamp(0.0, 1.0);
-        self.track_volume = self.track_volume.clamp(0.0, 1.0);
         let n = self.numerator as usize;
         if self.beat_accents.len() != n {
             let mut next = vec![false; n];

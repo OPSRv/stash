@@ -433,10 +433,11 @@ impl Tool for MetronomeControl {
         "metronome_control"
     }
     fn description(&self) -> &'static str {
-        "Start / stop / adjust the Metronome tab with a fully typed payload \
+        "Start / stop / adjust the metronome with a fully typed payload \
          — BPM, time signature, subdivision, sound. Any field you omit is \
          left untouched. Use `action:\"start\"` to begin playback; \
-         `action:\"stop\"` to halt. The tab is revealed automatically."
+         `action:\"stop\"` to halt. The metronome lives in the Valeton \
+         editor tab, which is revealed automatically."
     }
     fn schema(&self) -> Value {
         json!({
@@ -508,6 +509,104 @@ impl Tool for MetronomeControl {
             );
         }
         run_slash(ctx, "metronome", &parts.join(" ")).await
+    }
+}
+
+// ---- Tuner ----
+
+pub struct TunerControl;
+
+#[async_trait]
+impl Tool for TunerControl {
+    fn name(&self) -> &'static str {
+        "tuner_control"
+    }
+    fn description(&self) -> &'static str {
+        "Open the guitar tuner (a mic-based chromatic tuner inside the Valeton \
+         editor) and optionally select a tuning. Standard-shape tunings run from \
+         E down to A; drop-shape tunings from Drop D down to Drop A. Omit `tuning` \
+         to just open the tuner with whatever tuning is saved. Map the user's \
+         words (\"drop D\", \"half-step down / Eb\", \"D standard\") to the closest id."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "tuning": {
+                    "type": "string",
+                    "description": "Canonical tuning id to switch to.",
+                    "enum": [
+                        "standard-e", "standard-dsharp", "standard-d", "standard-csharp",
+                        "standard-c", "standard-b", "standard-asharp", "standard-a",
+                        "drop-d", "drop-csharp", "drop-c", "drop-b", "drop-asharp", "drop-a"
+                    ]
+                }
+            },
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let tuning = args
+            .get("tuning")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        run_slash(ctx, "tuner", &tuning).await
+    }
+}
+
+// ---- Recorder ----
+
+pub struct RecordControl;
+
+#[async_trait]
+impl Tool for RecordControl {
+    fn name(&self) -> &'static str {
+        "record_control"
+    }
+    fn description(&self) -> &'static str {
+        "Start or stop the audio recorder, or set its input gain. \
+         `action:\"start\"` begins capturing a take from the user's selected \
+         input; `action:\"stop\"` ends it and saves the take. `gain` sets the \
+         input level as a linear multiplier (1.0 = unity, range 0..2) — it \
+         applies live to an in-flight take and persists for the next one. \
+         Provide `action`, `gain`, or both. The recorder lives in the Valeton \
+         editor tab, which is revealed automatically. Capture runs on the \
+         user's machine — it only takes effect while the app window is open."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["start", "stop", "toggle"]
+                },
+                "gain": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2,
+                    "description": "Input gain multiplier; 1.0 = unity."
+                }
+            },
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let action = args.get("action").and_then(|v| v.as_str());
+        let gain = args.get("gain").and_then(|v| v.as_f64());
+        if action.is_none() && gain.is_none() {
+            return Err("provide `action`, `gain`, or both".to_string());
+        }
+        // Gain first so a combined "boost then record" request captures hot.
+        let mut out = Value::Null;
+        if let Some(g) = gain {
+            out = run_slash(ctx, "record", &format!("gain {g}")).await?;
+        }
+        if let Some(action) = action {
+            out = run_slash(ctx, "record", action).await?;
+        }
+        Ok(out)
     }
 }
 

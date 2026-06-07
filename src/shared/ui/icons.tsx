@@ -117,6 +117,32 @@ export const PinIcon = ({
   </svg>
 );
 
+export const StarIcon = ({
+  size = 14,
+  className,
+  filled = false,
+}: IconProps & { filled?: boolean }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    className={className}
+    fill={filled ? 'currentColor' : 'none'}
+    stroke="currentColor"
+    strokeWidth={1.5}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M12 3.5 14.6 9l5.9.5-4.5 3.9 1.4 5.8L12 16.9 6.6 19.2 8 13.4 3.5 9.5 9.4 9z" />
+  </svg>
+);
+
+export const FolderIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+  </svg>
+);
+
 export const CodeIcon = ({ size = 14, className }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
     <path d="m8 6-6 6 6 6" />
@@ -275,6 +301,15 @@ export const RefreshIcon = ({ size = 14, className }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
     <path d="M20 12a8 8 0 1 1-2.34-5.66" />
     <path d="M20 4v4h-4" />
+  </svg>
+);
+
+export const RepeatIcon = ({ size = 14, className }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" className={className} {...baseProps}>
+    <path d="M17 2l4 4-4 4" />
+    <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+    <path d="M7 22l-4-4 4-4" />
+    <path d="M21 13v2a4 4 0 0 1-4 4H3" />
   </svg>
 );
 

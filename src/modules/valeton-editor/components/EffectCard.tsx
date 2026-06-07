@@ -1,12 +1,12 @@
-import { changeModel, changeParam, toggleBlock } from '../lib/actions';
+import { changeParam, toggleBlock } from '../lib/actions';
 import { type BlockConfig, modelsFor } from '../lib/blocks';
 import type { ParamDef } from '../lib/constants';
 import { paramDefs } from '../lib/protocol';
 import { useStore } from '../store/store';
 import { IconPicker } from './IconPicker';
+import { TempoBar } from './TempoBar';
 import { Knob } from './ui/Knob';
 import { ParamToggle } from './ui/ParamToggle';
-import { Select } from './ui/Select';
 import { ToggleSwitch } from './ui/ToggleSwitch';
 
 const isBinary = (def: ParamDef) =>
@@ -60,30 +60,20 @@ export const EffectCard = ({ block }: { block: BlockConfig }) => {
 
       {block.hasPicker && (
         <div className="mt-3 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
-          {block.defaultIcon ? (
-            // динамічні текстові списки з однаковими іконками (N>S) → компактний select
-            <Select
-              value={selected}
-              options={models.map((m) => ({ value: m.value, label: m.text }))}
-              disabled={locked || models.length === 0}
-              dataId={`${key}_effects_list`}
-              placeholder={models.length ? '—' : 'No models'}
-              onChange={(v) => changeModel(key, v)}
-            />
-          ) : (
-            <IconPicker
-              block={block}
-              models={models}
-              selected={selected}
-              disabled={locked}
-            />
-          )}
+          {/* всі блоки (включно з N>S / NAM-профілями) — сітка плиток + prev/next.
+             Для defaultIcon-блоків кожна плитка ділить один арт (ns.svg = NAM-кубик),
+             а підписом служить назва профілю. */}
+          <IconPicker
+            block={block}
+            models={models}
+            selected={selected}
+            disabled={locked}
+          />
         </div>
       )}
 
       {hasParams && (
-        <div className="mt-4 rounded-xl border border-ve-stroke bg-ve-bg-1/60 p-4 lg:mt-auto">
-          <span className="field-label mb-3 block text-center">Parameters</span>
+        <div className="mt-4 rounded-xl border border-ve-stroke bg-ve-bg-1/60 p-4">
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-5">
             {defs.map((def, i) => {
               if (!def[0]) return null;
@@ -132,6 +122,9 @@ export const EffectCard = ({ block }: { block: BlockConfig }) => {
           </div>
         </div>
       )}
+
+      {/* Темпо delay-блока: division/BPM керують часом затримки */}
+      {key === 'dly' && <TempoBar />}
     </div>
   );
 };

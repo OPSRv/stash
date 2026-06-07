@@ -1,97 +1,26 @@
-/* Metronome — «космічний» шар поверх базових токенів. Усе namespace-нуто
- * під `metro-*`, щоб не втручатися в інші модулі. Тут лише візуальні
- * деталі: тло хіро-зони, слайдери, keyframes для пульсації/орбіт. */
+/* Metronome — module-specific styling on top of the shared pedal chrome
+ * (`shared/ui/pedal/pedal.css`). The cast-metal enclosure, corner bolts,
+ * footswitches, display window and beat LEDs all come from the shared pedal
+ * primitives now; what lives here is the control deck, the tempo-wheel chrome,
+ * the steppers, and the slide-over setup bay (levels / trainer / presets).
+ *
+ * Everything is namespaced under `metro-*` and leans on the Valeton palette
+ * (`--color-ve-*`). The shell renders inside `.valeton-root`, so the editor's
+ * scoped controls (`.seg-group`, `.seg-btn`, `.switch`, `.btn`, `.field-label`,
+ * `.field-value`) style our reused controls natively. */
 
-/* Hero background: глибокий градієнт + ледь помітний «star field» через
- * два шари radial-gradient. Достатньо легкий, щоб не тягнути perf. */
-.metro-hero {
-  position: relative;
-  background:
-    radial-gradient(
-      140% 90% at 50% 0%,
-      rgba(var(--stash-accent-rgb), 0.14) 0%,
-      rgba(var(--stash-accent-rgb), 0.04) 35%,
-      transparent 70%
-    ),
-    radial-gradient(
-      90% 60% at 50% 100%,
-      rgba(var(--stash-accent-rgb), 0.08) 0%,
-      transparent 60%
-    );
-  overflow: hidden;
-  isolation: isolate;
-}
-.metro-hero::before,
-.metro-hero::after {
-  content: '';
-  position: absolute;
-  inset: -20%;
-  pointer-events: none;
-  z-index: 0;
-}
-.metro-hero::before {
-  background:
-    radial-gradient(1px 1px at 12% 22%, rgba(255, 255, 255, 0.55) 50%, transparent 52%),
-    radial-gradient(1px 1px at 78% 16%, rgba(255, 255, 255, 0.45) 50%, transparent 52%),
-    radial-gradient(1.5px 1.5px at 30% 70%, rgba(255, 255, 255, 0.5) 50%, transparent 55%),
-    radial-gradient(1px 1px at 88% 78%, rgba(255, 255, 255, 0.45) 50%, transparent 52%),
-    radial-gradient(1px 1px at 55% 40%, rgba(255, 255, 255, 0.4) 50%, transparent 52%),
-    radial-gradient(1.5px 1.5px at 20% 88%, rgba(255, 255, 255, 0.45) 50%, transparent 55%),
-    radial-gradient(1px 1px at 66% 92%, rgba(255, 255, 255, 0.35) 50%, transparent 52%);
-  opacity: 0.35;
-  animation: metro-drift 28s linear infinite;
-}
-.light .metro-hero::before {
-  background:
-    radial-gradient(1px 1px at 12% 22%, rgba(20, 22, 28, 0.4) 50%, transparent 52%),
-    radial-gradient(1px 1px at 78% 16%, rgba(20, 22, 28, 0.35) 50%, transparent 52%),
-    radial-gradient(1.5px 1.5px at 30% 70%, rgba(20, 22, 28, 0.35) 50%, transparent 55%),
-    radial-gradient(1px 1px at 88% 78%, rgba(20, 22, 28, 0.3) 50%, transparent 52%),
-    radial-gradient(1px 1px at 55% 40%, rgba(20, 22, 28, 0.25) 50%, transparent 52%);
-  opacity: 0.4;
-}
-.metro-hero::after {
-  /* Слабка «аура» позаду дайала — підсилюється, коли грає. */
-  width: 640px;
-  height: 640px;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(
-    circle,
-    rgba(var(--stash-accent-rgb), 0.12) 0%,
-    rgba(var(--stash-accent-rgb), 0.04) 35%,
-    transparent 70%
-  );
-  filter: blur(20px);
-}
-.metro-hero[data-playing='true']::after {
-  animation: metro-breath 3.6s ease-in-out infinite;
-}
-
-@keyframes metro-drift {
-  0%   { transform: translate3d(0, 0, 0); }
-  50%  { transform: translate3d(-8px, -6px, 0); }
-  100% { transform: translate3d(0, 0, 0); }
-}
-@keyframes metro-breath {
-  0%, 100% { opacity: 0.7; transform: translate(-50%, -50%) scale(0.96); }
-  50%      { opacity: 1;   transform: translate(-50%, -50%) scale(1.04); }
-}
-
-/* Дайал: зовнішнє коло тіків + інша типографіка для BPM. */
+/* ====================== Tempo wheel (hero) ====================== */
 .metro-dial-wrap {
   position: relative;
-  z-index: 1;
 }
 .metro-dial-glow {
   position: absolute;
-  inset: -24px;
+  inset: -18px;
   border-radius: 999px;
   background: radial-gradient(
     circle,
-    rgba(var(--stash-accent-rgb), 0.28) 0%,
-    rgba(var(--stash-accent-rgb), 0.08) 40%,
+    rgba(74, 163, 255, 0.21) 0%,
+    rgba(74, 163, 255, 0.055) 42%,
     transparent 68%
   );
   filter: blur(16px);
@@ -103,229 +32,332 @@
   opacity: 1;
   animation: metro-breath 2.8s ease-in-out infinite;
 }
-.metro-ticks {
-  animation: metro-ticks-spin 60s linear infinite;
-  transform-origin: 50% 50%;
-}
-.metro-ticks-paused { animation-play-state: paused; }
-@keyframes metro-ticks-spin {
-  to { transform: rotate(360deg); }
+@keyframes metro-breath {
+  0%, 100% {
+    opacity: 0.7;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
 }
 .metro-bpm-num {
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.05em;
-  background: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.98) 0%,
-    rgba(255, 255, 255, 0.82) 55%,
-    rgba(255, 255, 255, 0.62) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  text-shadow: 0 2px 24px rgba(var(--stash-accent-rgb), 0.12);
-}
-.light .metro-bpm-num {
-  background: linear-gradient(
-    180deg,
-    rgba(20, 22, 28, 0.95) 0%,
-    rgba(20, 22, 28, 0.78) 55%,
-    rgba(20, 22, 28, 0.55) 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.04em;
+  color: #f2f7ff;
+  text-shadow:
+    0 1px 1px rgba(0, 0, 0, 0.6),
+    0 0 12px rgba(74, 163, 255, 0.24);
 }
 .metro-tempo-label {
-  color: rgba(var(--stash-accent-rgb), 0.82);
-  font-size: 10px;
+  color: var(--color-ve-accent);
   letter-spacing: 0.3em;
   text-transform: uppercase;
-  font-weight: 500;
+  font-weight: 600;
 }
 
-@keyframes metro-play-breath {
-  0%, 100% {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.22),
-      0 0 0 1px rgba(var(--stash-accent-rgb), 0.6),
-      0 12px 30px -10px rgba(var(--stash-accent-rgb), 0.7),
-      0 0 24px -4px rgba(var(--stash-accent-rgb), 0.45);
-  }
-  50% {
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.25),
-      0 0 0 1px rgba(var(--stash-accent-rgb), 0.72),
-      0 18px 40px -10px rgba(var(--stash-accent-rgb), 0.85),
-      0 0 42px -4px rgba(var(--stash-accent-rgb), 0.65);
-  }
+/* ============= Flat setup sheet — rows + steppers ============= */
+/* The setup bay is a calm settings sheet now: a vertical stack of hair-lined
+   rows, each "CAPTION  …control" — no engraved metal, just the flat Stash
+   surface that the rest of the app uses. */
+.metro-setup-list {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.metro-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 11px 2px;
+}
+.metro-row[data-align='start'] {
+  align-items: start;
+}
+.metro-row + .metro-row {
+  border-top: 1px solid var(--color-ve-stroke);
+}
+.metro-row-label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-ve-dim);
+}
+.metro-row[data-align='start'] .metro-row-label {
+  padding-top: 4px;
+}
+.metro-row-body {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
 }
 
-/* Beat-strip: горизонтальний ряд. Активний beat — розширюване кільце. */
-.metro-beat-dot {
-  position: relative;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  transition:
-    background-color 140ms var(--easing-standard),
-    transform 120ms var(--easing-standard),
-    box-shadow 160ms var(--easing-standard);
-}
-.light .metro-beat-dot { background: rgba(20, 22, 28, 0.18); }
-.metro-beat-dot[data-accent='true'] {
-  width: 18px;
-  height: 18px;
-  border-radius: 5px;
-  transform: rotate(45deg);
-  background: rgba(var(--stash-accent-rgb), 0.45);
-  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.75);
-}
-.metro-beat-dot[data-active='true'] {
-  background: var(--stash-accent);
-  box-shadow:
-    0 0 0 2px rgba(var(--stash-accent-rgb), 0.3),
-    0 0 18px rgba(var(--stash-accent-rgb), 0.85);
-}
-.metro-beat-dot[data-accent='true'][data-active='true'] {
-  box-shadow:
-    0 0 0 2px rgba(var(--stash-accent-rgb), 0.35),
-    0 0 22px rgba(var(--stash-accent-rgb), 0.95),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+/* Signature numerator / denominator divider. */
+.metro-sig-slash {
+  font-size: 0.95rem;
+  color: var(--color-ve-faint);
+  user-select: none;
 }
 
-/* Play-pill (варіант metro-tap) — коли грає, світиться accent-ом. */
-.metro-tap-play {
-  color: var(--stash-accent);
-  background: rgba(var(--stash-accent-rgb), 0.1);
-  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.35);
-}
-.metro-tap-play:hover {
-  color: #fff;
-  background: rgba(var(--stash-accent-rgb), 0.22);
-  box-shadow:
-    inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.55),
-    0 6px 20px -8px rgba(var(--stash-accent-rgb), 0.7);
-}
-.metro-tap-play[data-playing='true'] {
-  color: #fff;
-  background: var(--stash-accent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.2),
-    0 0 0 1px rgba(var(--stash-accent-rgb), 0.65),
-    0 10px 28px -8px rgba(var(--stash-accent-rgb), 0.85),
-    0 0 24px -2px rgba(var(--stash-accent-rgb), 0.6);
-  animation: metro-play-breath 2.4s ease-in-out infinite;
-}
-
-/* TAP-кнопка — капсула зі світлинням. */
-.metro-tap {
-  position: relative;
-  height: 28px;
-  padding: 0 18px;
-  border-radius: 999px;
+/* ---------- Flat ± stepper ---------- */
+.metro-stepper {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 11px;
+  gap: 3px;
+}
+.metro-stepper-val {
+  text-align: center;
+  font-size: 0.9rem;
   font-weight: 600;
-  letter-spacing: 0.22em;
+  color: var(--color-ve-text);
+  font-variant-numeric: tabular-nums;
+}
+.metro-stepper-unit {
+  margin-left: 3px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.68);
-  background: rgba(255, 255, 255, 0.04);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-  transition: color 120ms, background-color 140ms, box-shadow 160ms;
+  color: var(--color-ve-dim);
 }
-.light .metro-tap {
-  color: rgba(20, 22, 28, 0.68);
-  background: rgba(20, 22, 28, 0.04);
-  box-shadow: inset 0 0 0 1px rgba(20, 22, 28, 0.08);
+.metro-nudge {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 6px;
+  color: var(--color-ve-dim);
+  background: var(--color-ve-bg-2);
+  box-shadow: inset 0 0 0 1px var(--color-ve-stroke);
+  transition:
+    color 140ms var(--easing-standard),
+    background 140ms var(--easing-standard),
+    box-shadow 140ms var(--easing-standard);
 }
-.metro-tap:hover {
-  color: #fff;
-  background: rgba(var(--stash-accent-rgb), 0.16);
-  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.4);
+.metro-nudge:hover:not(:disabled) {
+  color: var(--color-ve-text);
+  background: var(--color-ve-bg-3);
+  box-shadow: inset 0 0 0 1px var(--color-ve-accent-700);
 }
-.light .metro-tap:hover { color: rgba(20, 22, 28, 0.95); }
+.metro-nudge:active:not(:disabled) {
+  background: var(--color-ve-bg-1);
+}
+.metro-nudge:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74, 163, 255, 0.55);
+}
+.metro-nudge:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
 
-/* Субдивіжн іконки — зменшена сіра, активна — біла з підсвіткою. */
-.metro-sub-btn {
-  min-width: 30px;
-  height: 28px;
-  border-radius: 8px;
-  color: rgba(255, 255, 255, 0.55);
-  transition: color 120ms, background-color 140ms;
+/* ============ Bottom status strip (beat LEDs · readout · setup) ============ */
+/* A thin LCD ribbon pinned under the footswitches. Three columns — an empty
+   cell the width of the setup IconButton, the centred main group, then the
+   setup key itself — so the readout sits dead-centre regardless of the icon. */
+.metro-strip {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 4px 6px;
 }
-.light .metro-sub-btn { color: rgba(20, 22, 28, 0.55); }
-.metro-sub-btn:hover { color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.04); }
-.light .metro-sub-btn:hover { color: rgba(20, 22, 28, 0.95); background: rgba(20, 22, 28, 0.04); }
-.metro-sub-btn[aria-checked='true'] {
-  color: #fff;
-  background: rgba(var(--stash-accent-rgb), 0.18);
-  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.45);
+.metro-strip-main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
 }
-.light .metro-sub-btn[aria-checked='true'] { color: rgba(20, 22, 28, 0.98); }
 
-/* Save-current — світний accent-pill. */
-.metro-save-preset {
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 999px;
-  font-size: 11px;
+/* ====================== Slide-over setup bay ====================== */
+/* Levels / trainer / presets live here so the deck never needs to scroll.
+   Slides up over the whole pedal face; only this bay scrolls internally when
+   its content is taller than the panel. */
+.metro-setup {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(13, 17, 22, 0.96), rgba(8, 10, 14, 0.98));
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 0 1px rgba(74, 163, 255, 0.18);
+  transform: translateY(100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 260ms var(--easing-standard), opacity 200ms var(--easing-standard);
+}
+.metro-setup[data-open] {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+.metro-setup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--color-ve-stroke);
+}
+.metro-setup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 12px 14px;
+}
+/* ---------- Levels (Click / Accent sliders) ---------- */
+.metro-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+}
+.metro-level {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+}
+.metro-level-name {
+  font-size: 0.72rem;
+  color: var(--color-ve-dim);
+}
+.metro-level-pct {
+  font-size: 0.72rem;
+  text-align: right;
+  color: var(--color-ve-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Trainer ---------- */
+.metro-trainer-body {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.metro-trainer-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.metro-trainer-hint {
+  font-size: 0.72rem;
+  color: var(--color-ve-dim);
+}
+.metro-trainer-fields {
+  display: flex;
+  gap: 16px;
+  padding-top: 12px;
+}
+.metro-trainer-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.metro-field-cap {
+  font-size: 0.6rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--stash-accent);
-  background: rgba(var(--stash-accent-rgb), 0.14);
-  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.42);
-  transition: transform 120ms, background-color 140ms, box-shadow 160ms;
-}
-.metro-save-preset:hover {
-  transform: translateY(-1px);
-  background: rgba(var(--stash-accent-rgb), 0.22);
-  box-shadow:
-    inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.55),
-    0 6px 18px -6px rgba(var(--stash-accent-rgb), 0.6);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-ve-dim);
 }
 
-/* Preset chip */
+/* ---------- Trainer bay (collapsible reveal under the toggle) ---------- */
+.metro-trainer-bay {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms var(--easing-standard);
+}
+.metro-trainer-bay[data-open] {
+  grid-template-rows: 1fr;
+}
+.metro-trainer-bay-inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 200ms var(--easing-standard);
+}
+.metro-trainer-bay[data-open] .metro-trainer-bay-inner {
+  opacity: 1;
+}
+
+/* ---------- Presets ---------- */
+.metro-presets {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+}
+.metro-preset-list {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+}
+.metro-presets-empty {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--color-ve-faint);
+}
+
+/* ---------- Preset chips ---------- */
 .metro-preset-chip {
   display: inline-flex;
   align-items: center;
-  height: 24px;
+  height: 26px;
+  flex-shrink: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  transition: background-color 140ms, box-shadow 160ms, transform 120ms;
-}
-.light .metro-preset-chip {
-  background: rgba(20, 22, 28, 0.04);
-  box-shadow: inset 0 0 0 1px rgba(20, 22, 28, 0.08);
+  background: var(--color-ve-bg-2);
+  box-shadow: inset 0 0 0 1px var(--color-ve-stroke);
+  padding-right: 2px;
+  transition: box-shadow 160ms var(--easing-standard), transform 120ms var(--easing-standard);
 }
 .metro-preset-chip:hover {
-  background: rgba(var(--stash-accent-rgb), 0.12);
-  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.35);
+  box-shadow: inset 0 0 0 1px var(--color-ve-accent-700);
   transform: translateY(-1px);
 }
-
-/* Stepper cell (trainer) */
-.metro-step-cell {
-  background: rgba(255, 255, 255, 0.04);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-  transition: background-color 140ms, box-shadow 160ms;
-}
-.light .metro-step-cell {
-  background: rgba(20, 22, 28, 0.03);
-  box-shadow: inset 0 0 0 1px rgba(20, 22, 28, 0.08);
-}
-.metro-step-cell:hover {
-  background: rgba(var(--stash-accent-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.3);
+.metro-chip-apply {
+  padding: 0 4px 0 11px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--color-ve-text);
 }
 
-/* BPM-pulse ring (всередині SVG) — залишаю сумісність з існуючим кейфреймом. */
+/* ---------- BPM-pulse ring (inside the dial SVG) ---------- */
 @keyframes metronome-pulse {
-  from { opacity: 0.85; transform: scale(1); }
-  to   { opacity: 0;    transform: scale(1.1); }
+  from {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metro-dial-wrap[data-playing='true'] .metro-dial-glow {
+    animation: none;
+  }
+  .metro-trainer-bay,
+  .metro-trainer-bay-inner,
+  .metro-setup {
+    transition: none;
+  }
 }

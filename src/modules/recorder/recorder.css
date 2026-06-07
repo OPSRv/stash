@@ -1,0 +1,160 @@
+/* Recorder widget — embedded in the Valeton editor's tools bay. Visuals lean
+   on the app's global design tokens so it stays theme-correct without
+   depending on valeton.css. */
+
+.recorder-rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--color-danger-fg);
+  animation: recorder-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recorder-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recorder-rec-dot {
+    animation: none;
+  }
+}
+
+.recorder-meter-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 9999px;
+  background: rgb(var(--stash-accent-rgb));
+  transition: width 60ms linear;
+}
+
+/* The divider does double duty: a hairline rule when idle, a level-meter track
+   while recording (its `.recorder-meter-fill` child grows with input level).
+   Kept 2px so the accent fill reads without adding a dedicated meter row. */
+.recorder-divider {
+  position: relative;
+  height: 2px;
+  width: 100%;
+  border-radius: 9999px;
+  background: var(--hairline);
+  overflow: hidden;
+}
+
+/* Slim transport strip — keep its bare-icon controls (mic source picker) in
+   scale with the compact record button rather than the global 28px. */
+.recorder-transport .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+/* One-shot entrance for a freshly captured take — the row expands its height
+   (0fr → 1fr) while fading in, so the rows below slide down smoothly instead
+   of snapping to make room. The wrapper grid is what makes the collapsible
+   height animatable; the inner row clips its overflow while collapsed. */
+@keyframes recorder-row-enter {
+  from {
+    opacity: 0;
+    grid-template-rows: 0fr;
+  }
+  to {
+    opacity: 1;
+    grid-template-rows: 1fr;
+  }
+}
+
+.recorder-row-enter {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: recorder-row-enter 320ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.recorder-row-enter > .recorder-row-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recorder-meter-fill {
+    transition: none;
+  }
+  .recorder-row-enter {
+    animation: none;
+  }
+}
+
+/* Round record button — a classic transport control. Idle shows a red
+   disc (record); recording morphs it to a red square (stop) with a
+   pulsing halo. Colours come from the danger token so it stays red
+   regardless of the (blue) accent theme. */
+.recorder-record-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-hover);
+  border: 1px solid var(--hairline);
+  transition:
+    transform 120ms ease,
+    background 120ms ease,
+    box-shadow 160ms ease;
+}
+
+.recorder-record-btn:hover {
+  background: var(--bg-row-active);
+}
+
+.recorder-record-btn:active {
+  transform: scale(0.93);
+}
+
+.recorder-record-glyph {
+  width: 11px;
+  height: 11px;
+  border-radius: 9999px;
+  background: rgb(var(--color-danger-rgb));
+  transition:
+    width 160ms ease,
+    height 160ms ease,
+    border-radius 160ms ease;
+}
+
+.recorder-record-btn.is-recording {
+  border-color: var(--color-danger-border);
+  animation: recorder-record-halo 1.4s ease-in-out infinite;
+}
+
+/* Square glyph = stop. */
+.recorder-record-btn.is-recording .recorder-record-glyph {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+@keyframes recorder-record-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px rgba(var(--color-danger-rgb), 0.16);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(var(--color-danger-rgb), 0.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recorder-record-btn,
+  .recorder-record-glyph {
+    transition: none;
+  }
+  .recorder-record-btn.is-recording {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(var(--color-danger-rgb), 0.16);
+  }
+}

@@ -4,6 +4,7 @@
    sync.ts. Сире байтове I/O делегується Rust (api.ts), бо WKWebView не має
    Web Bluetooth. */
 import { connectBle, disconnectDevice, sendBytes } from '../api';
+import { awaitHandshake, cancelHandshake } from './connection';
 import { getState, log, setState } from '../store/store';
 import { sendParamChange, sendPatchSelect } from './protocol';
 import { runtime } from './runtime';
@@ -48,12 +49,14 @@ const bleTransport: TransportDriver = {
 };
 
 function onDisconnected(): void {
+  cancelHandshake();
   log('Device disconnected.');
   runtime.initialSync = true;
   setActiveTransport(null);
   setState({
     transport: null,
     connected: false,
+    connecting: false,
     deviceName: '',
     locked: true,
     saveEnabled: false,
@@ -69,11 +72,11 @@ export async function connectBluetooth(): Promise<void> {
     log('Syncing: Patch list');
     setState({
       transport: 'ble',
-      connected: true,
       deviceName: name || 'GP5',
       locked: false,
       loadModalOpen: true,
     });
+    awaitHandshake(); // «connected» лише після першої відповіді пристрою
     sendSysex('8080F0000E00010000000201020400F7');
   } catch (err) {
     log(`Error: ${err}`);

@@ -507,6 +507,8 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::reminders::CancelReminder);
     tools.register(super::tools::stash::GetBattery);
     tools.register(super::tools::stash::MetronomeControl);
+    tools.register(super::tools::stash::TunerControl);
+    tools.register(super::tools::stash::RecordControl);
     tools.register(super::tools::stash::MusicControl);
     tools.register(super::tools::stash::VolumeControl);
     tools.register(super::tools::stash::SaveNote);

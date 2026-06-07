@@ -36,7 +36,6 @@ export const TAB_ICON_COLORS: Record<string, string> = {
   music: '#fb7185',
   separator: '#22d3ee',
   converter: '#facc15',
-  metronome: '#fb923c',
   'valeton-editor': '#5b9dff',
   pomodoro: '#ef4444',
   reminders: '#fde047',
@@ -169,23 +168,6 @@ export const TAB_ICONS: Record<string, ReactNode> = {
     >
       <path d="M4 8h14m0 0-3-3m3 3-3 3" />
       <path d="M20 16H6m0 0 3-3m-3 3 3 3" />
-    </svg>
-  ),
-  metronome: (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M8 2h8l3 20H5z" />
-      <path d="M9 18h6" />
-      <path d="M12 14 7 4" />
     </svg>
   ),
   'valeton-editor': (

@@ -4,7 +4,6 @@ import { clipboardModule } from './clipboard';
 import { converterModule } from './converter';
 import { devModule } from './dev';
 import { downloaderModule } from './downloader';
-import { metronomeModule } from './metronome';
 import { musicModule } from './music';
 import { notesModule } from './notes';
 import { pomodoroModule } from './pomodoro';
@@ -29,7 +28,6 @@ export const modules: ModuleDefinition[] = [
   musicModule,
   separatorModule,
   converterModule,
-  metronomeModule,
   valetonEditorModule,
   pomodoroModule,
   remindersModule,

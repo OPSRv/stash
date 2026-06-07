@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { readText } from '@tauri-apps/plugin-clipboard-manager';
@@ -15,11 +15,12 @@ import {
 import { looksLikeJwt, stripBearer } from '../modules/dev/tools/jwt/jwt';
 import { TabButton } from '../shared/ui/TabButton';
 import { Button } from '../shared/ui/Button';
+import { IconButton } from '../shared/ui/IconButton';
 import { accent } from '../shared/theme/accent';
 import { PinIcon } from '../shared/ui/icons';
 import { loadSettings, saveSetting } from '../settings/store';
 
-const MIN_WIDTH = 1240;
+const MIN_WIDTH = 1500;
 const MIN_HEIGHT = 840;
 
 import { TAB_ICONS, TAB_ICON_COLORS } from './tabIcons';
@@ -43,6 +44,20 @@ import { webchatCloseAll, type WebchatNowPlaying } from '../modules/web/webchatA
 import { applyTheme, subscribeTheme } from '../settings/theme';
 import { UpdateAvailableModal } from './UpdateAvailableModal';
 
+// Chevron glyph for the tab-rail scroll arrows. Kept local — it's the only
+// place in the app that needs a bare directional chevron at this size.
+const TabChevron = ({ dir }: { dir: 'left' | 'right' }) => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path
+      d={dir === 'left' ? 'M10 4l-4 4 4 4' : 'M6 4l4 4-4 4'}
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 export const PopupShell = () => {
   // Module visibility & order live in `settings.json` via the cached
   // `loadSettings()` — read once on cold-start, kept in memory across every
@@ -63,10 +78,32 @@ export const PopupShell = () => {
   );
   const [activeId, setActiveId] = useState(modules[0]?.id ?? '');
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const stripRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState<{ left: number; width: number }>({
     left: 0,
     width: 0,
   });
+  // Whether the tab rail can scroll further in each direction. Drives the
+  // flanking arrow buttons (shown only when the rail overflows, each disabled
+  // once that edge is reached). The rail itself never shows a scrollbar.
+  const [railScroll, setRailScroll] = useState({ left: false, right: false });
+  const updateRailScroll = useCallback(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    setRailScroll({
+      left: el.scrollLeft > 1,
+      right: el.scrollLeft + el.clientWidth < el.scrollWidth - 1,
+    });
+  }, []);
+  const scrollRail = (dir: -1 | 1) => {
+    const el = stripRef.current;
+    if (!el) return;
+    el.scrollBy({
+      left: dir * Math.max(120, el.clientWidth * 0.6),
+      behavior: 'smooth',
+    });
+  };
+  const railOverflows = railScroll.left || railScroll.right;
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
@@ -112,25 +149,39 @@ export const PopupShell = () => {
   }, [visibleModules, activeId]);
 
   // Position the active-tab pill. Uses layout effect so the indicator moves
-  // on the same paint as the highlight changes — no flash on switch. We
-  // measure twice: once synchronously to seize the new tab's current
-  // offsetLeft (collapsed width is fine — the pill then sweeps there via
-  // CSS transform), and once after the label-expansion transition settles
-  // so the final width matches the expanded tab. Using two point
-  // measurements + CSS transitions instead of a 60fps rAF loop keeps the
-  // animation smooth on slow machines, where rAF re-layout thrash was the
-  // source of the jitter.
+  // on the same paint as the highlight changes — no flash on switch. Labels
+  // are always visible now, so a single measurement matches the tab's final
+  // width (no expansion transition to wait out). `offsetLeft` is relative to
+  // the scroll strip, so the pill scrolls with the rail for free. We also
+  // nudge the active tab into the viewport when a ⌘⌥n switch lands on a tab
+  // that's currently scrolled off-screen, and refresh the arrow state.
   useLayoutEffect(() => {
     const el = tabRefs.current.get(activeId);
     if (!el) return;
     setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
-    const t = window.setTimeout(() => {
-      const now = tabRefs.current.get(activeId);
-      if (!now) return;
-      setIndicator({ left: now.offsetLeft, width: now.offsetWidth });
-    }, 280);
-    return () => window.clearTimeout(t);
-  }, [activeId]);
+    const strip = stripRef.current;
+    if (strip) {
+      const start = el.offsetLeft;
+      const end = start + el.offsetWidth;
+      if (start < strip.scrollLeft) {
+        strip.scrollTo({ left: Math.max(0, start - 8), behavior: 'smooth' });
+      } else if (end > strip.scrollLeft + strip.clientWidth) {
+        strip.scrollTo({
+          left: end - strip.clientWidth + 8,
+          behavior: 'smooth',
+        });
+      }
+    }
+    updateRailScroll();
+  }, [activeId, visibleModules, updateRailScroll]);
+
+  // Keep the arrow state in sync when the window resizes — a wider popup may
+  // fit every tab (arrows vanish), a narrower one re-introduces overflow.
+  useLayoutEffect(() => {
+    updateRailScroll();
+    window.addEventListener('resize', updateRailScroll);
+    return () => window.removeEventListener('resize', updateRailScroll);
+  }, [visibleModules, updateRailScroll]);
 
   // Restore persisted popup size on first mount. Tauri's window defaults to
   // the size declared in tauri.conf.json; if the user stretched it in a
@@ -578,7 +629,10 @@ export const PopupShell = () => {
         onMouseDown={(e) => {
           // Only suppress auto-hide for actual drag-region mousedowns, not
           // clicks on the buttons inside (TabButton, IconButton, etc.).
-          if ((e.target as HTMLElement).closest('[data-tauri-drag-region]') !== e.currentTarget) return;
+          // Tauri starts a window drag only when the exact mousedown target
+          // carries the attribute, so we mirror that test — this also covers
+          // the tab rail strip below, which is its own drag region.
+          if (!(e.target as HTMLElement).hasAttribute('data-tauri-drag-region')) return;
           invoke('set_popup_auto_hide', { enabled: false }).catch(() => {});
           const restore = () => {
             invoke('set_popup_auto_hide', { enabled: true }).catch(() => {});
@@ -590,14 +644,46 @@ export const PopupShell = () => {
         }}
         className="relative flex items-center gap-1 px-2 py-1.5 border-b hair cursor-grab active:cursor-grabbing"
         style={{
-          // Scope reflow caused by per-frame grid-template-columns on each
-          // TabButton (label expand/collapse) to the header itself. Without
-          // this, every animation frame re-lays out the rest of the popup
-          // (tab content + native overlays) — which is what made tab
-          // switches feel sticky on slow machines.
+          // Scope reflow caused by the active-tab pill sweep and rail
+          // scrolling to the header itself, so panning the tabs never
+          // re-lays out the tab content or native overlays below.
           contain: 'layout style',
         }}
       >
+        {/*
+          Left scroll arrow — shown only when the rail overflows, disabled
+          once scrolled to the start. Navigation is via these arrows (and
+          ⌘⌥n / hover), never a horizontal scrollbar.
+        */}
+        {railOverflows && (
+          <IconButton
+            title="Scroll tabs left"
+            disabled={!railScroll.left}
+            stopPropagation={false}
+            onClick={() => scrollRail(-1)}
+          >
+            <TabChevron dir="left" />
+          </IconButton>
+        )}
+        {/*
+          Scrollable tab rail. `overflow-x-auto` + `.no-scrollbar` gives a
+          horizontally-pannable strip with no visible scrollbar; `min-w-0`
+          lets the flex child actually shrink so it can scroll instead of
+          pushing the arrows/actions off the header.
+
+          It's also a `data-tauri-drag-region`: since the strip is `flex-1`
+          it eats all the slack between the last tab and the right-hand
+          actions, so without this the only draggable surface left was the
+          header's thin padding — the window became hard to move. Mousedowns
+          land on the buttons (not the strip) as their exact target, so tab
+          clicks still select instead of dragging.
+        */}
+        <div
+          ref={stripRef}
+          data-tauri-drag-region
+          onScroll={updateRailScroll}
+          className="no-scrollbar relative flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
+        >
         {/*
           Active-tab pill. Sits BEHIND the buttons (earlier in DOM →
           lower paint order for absolute siblings) and echoes each
@@ -609,7 +695,7 @@ export const PopupShell = () => {
         */}
         <span
           aria-hidden
-          className="pointer-events-none absolute top-1.5 h-7 rounded-md motion-reduce:!transition-none"
+          className="pointer-events-none absolute top-0 h-7 rounded-md motion-reduce:!transition-none"
           style={{
             background: accent(0.14),
             boxShadow: `inset 0 0 0 1px ${accent(0.22)}`,
@@ -621,11 +707,10 @@ export const PopupShell = () => {
             transform: `translate3d(${indicator.left}px, 0, 0)`,
             width: indicator.width,
             willChange: 'transform, width',
-            // Both transform (position) and width use CSS transitions so
-            // the pill sweeps and grows in sync with the tab's own label
-            // expansion (same 260ms / emphasized easing in TabButton).
-            // Avoiding a rAF-driven width means no per-frame layout reads
-            // on slow machines.
+            // Both transform (position) and width use CSS transitions so the
+            // pill sweeps and resizes smoothly between tabs of different
+            // widths. Avoiding a rAF-driven width means no per-frame layout
+            // reads on slow machines.
             transition:
               'transform 260ms var(--easing-emphasized), width 260ms var(--easing-emphasized), opacity 150ms ease',
             opacity: indicator.width > 0 ? 1 : 0,
@@ -655,7 +740,19 @@ export const PopupShell = () => {
             onHover={() => m.preloadPopup?.().catch(() => {})}
           />
         ))}
-        <div className="ml-auto flex items-center gap-1">
+        </div>
+        {/* Right scroll arrow — mirror of the left one. */}
+        {railOverflows && (
+          <IconButton
+            title="Scroll tabs right"
+            disabled={!railScroll.right}
+            stopPropagation={false}
+            onClick={() => scrollRail(1)}
+          >
+            <TabChevron dir="right" />
+          </IconButton>
+        )}
+        <div className="flex items-center gap-1 pl-1">
           <Button
             size="sm"
             variant="ghost"

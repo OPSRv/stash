@@ -19,6 +19,7 @@ export interface AppState {
   // зʼєднання / статус
   transport: Transport;
   connected: boolean;
+  connecting: boolean; // порт відкрито, чекаємо першу відповідь пристрою
   deviceName: string;
   statusText: string;
   loadStatusText: string;

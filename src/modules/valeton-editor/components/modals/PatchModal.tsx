@@ -1,11 +1,9 @@
-import { changePatchVol, toggleCTL } from '../../lib/actions';
+import { toggleCTL } from '../../lib/actions';
 import { BLOCKS } from '../../lib/blocks';
 import { useStore } from '../../store/store';
 import { Modal } from '../ui/Modal';
 
 const CTL_ORDER = [0, 1, 2, 9, 3, 4, 5, 6, 7, 8];
-const fill = (v: number, min: number, max: number) =>
-  `${((v - min) / (max - min || 1)) * 100}%`;
 
 export const PatchModal = ({
   open,
@@ -14,7 +12,6 @@ export const PatchModal = ({
   open: boolean;
   onClose: () => void;
 }) => {
-  const patchVOL = useStore((s) => s.patchVOL);
   const ctl = useStore((s) => s.ctl);
 
   return (
@@ -29,26 +26,6 @@ export const PatchModal = ({
         </button>
       }
     >
-      <div className="py-2">
-        <input
-          type="range"
-          className="range"
-          data-id="patch_vol_value"
-          min={0}
-          max={100}
-          value={patchVOL}
-          style={{ ['--_fill' as string]: fill(patchVOL, 0, 100) }}
-          onChange={(e) => changePatchVol(Number(e.target.value))}
-        />
-        <div className="mt-0.5 flex items-center justify-between">
-          <span className="field-label">Patch Vol</span>
-          <span className="field-value" data-id="patch_vol_output">
-            {patchVOL}
-          </span>
-        </div>
-      </div>
-
-      <hr className="my-3 border-ve-stroke" />
       <p className="mb-2 text-sm text-ve-dim">CTL</p>
       <div className="grid grid-cols-5 gap-2">
         {CTL_ORDER.map((b) => {

@@ -13,6 +13,8 @@
 //! may split a long dump across packets. BLE notifications are forwarded as-is
 //! (each notification already carries one logical BLE-MIDI message).
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
 use btleplug::api::{
@@ -30,6 +32,60 @@ use uuid::Uuid;
 const SERVICE_UUID: Uuid = Uuid::from_u128(0x03b80e5a_ede8_4b33_a751_6ce34ec4c700);
 const CHARACTERISTIC_UUID: Uuid = Uuid::from_u128(0x7772e5db_3868_4112_a1a9_f2669d106bf3);
 
+/// Substring identifying a GP-5 CoreMIDI endpoint (USB or the persistent
+/// Bluetooth-MIDI port macOS keeps around).
+const GP5_PORT_MARKER: &str = "GP-5";
+
+/// How often the USB watcher re-enumerates CoreMIDI ports.
+const USB_WATCH_INTERVAL_MS: u64 = 2000;
+/// Consecutive misses before declaring the USB device gone (tolerates a
+/// transient enumeration hiccup — ~`MISSES × INTERVAL` of grace).
+const USB_WATCH_MISSES: u8 = 2;
+
+fn is_gp5_port_name(name: &str) -> bool {
+    name.contains(GP5_PORT_MARKER)
+}
+
+/// Is a GP-5 input port currently present in CoreMIDI? Used by the watcher to
+/// detect unplug. Errors enumerating are treated as "still present" so a
+/// momentary failure never triggers a false disconnect.
+fn gp5_usb_port_present() -> bool {
+    let Ok(midi_in) = MidiInput::new("stash-valeton-probe") else {
+        return true;
+    };
+    midi_in.ports().iter().any(|p| {
+        midi_in
+            .port_name(p)
+            .map(|n| is_gp5_port_name(&n))
+            .unwrap_or(false)
+    })
+}
+
+/// Poll CoreMIDI on a background thread; emit `valeton:disconnected` once the
+/// GP-5 port disappears. `midir` exposes no unplug callback, so this is how a
+/// mid-session USB unplug is noticed. Exits when `running` is cleared (on
+/// disconnect) or after it has fired.
+fn spawn_usb_watcher(app: AppHandle, running: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        let mut misses: u8 = 0;
+        while running.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(USB_WATCH_INTERVAL_MS));
+            if !running.load(Ordering::Relaxed) {
+                break;
+            }
+            if gp5_usb_port_present() {
+                misses = 0;
+                continue;
+            }
+            misses += 1;
+            if misses >= USB_WATCH_MISSES {
+                let _ = app.emit("valeton:disconnected", ());
+                break;
+            }
+        }
+    });
+}
+
 #[derive(Clone, serde::Serialize)]
 struct RxEvent {
     transport: String,
@@ -40,6 +96,8 @@ struct UsbConn {
     /// Kept alive so the input callback keeps firing; never read directly.
     _input: MidiInputConnection<Vec<u8>>,
     output: MidiOutputConnection,
+    /// Cleared on disconnect to stop the unplug watcher thread.
+    watcher_running: Arc<AtomicBool>,
 }
 
 struct BleConn {
@@ -87,6 +145,9 @@ fn feed_usb(app: &AppHandle, buf: &mut Vec<u8>, msg: &[u8]) {
 /// Tear down whichever transport is currently open. Safe to call when idle.
 async fn disconnect_all(state: &ValetonState) {
     let usb = { state.usb.lock().unwrap().take() };
+    if let Some(conn) = &usb {
+        conn.watcher_running.store(false, Ordering::Relaxed); // stop the unplug watcher
+    }
     drop(usb); // dropping the midir connections closes the ports
 
     let ble = state.ble.lock().await.take();
@@ -110,7 +171,7 @@ pub async fn valeton_connect_usb(
         .find(|p| {
             midi_in
                 .port_name(p)
-                .map(|n| n.contains("GP-5"))
+                .map(|n| is_gp5_port_name(&n))
                 .unwrap_or(false)
         })
         .ok_or_else(|| "No GP-5 detected over USB.".to_string())?;
@@ -125,7 +186,7 @@ pub async fn valeton_connect_usb(
         .find(|p| {
             midi_out
                 .port_name(p)
-                .map(|n| n.contains("GP-5"))
+                .map(|n| is_gp5_port_name(&n))
                 .unwrap_or(false)
         })
         .ok_or_else(|| "No GP-5 MIDI output found.".to_string())?;
@@ -143,9 +204,13 @@ pub async fn valeton_connect_usb(
         )
         .map_err(|e| e.to_string())?;
 
+    let watcher_running = Arc::new(AtomicBool::new(true));
+    spawn_usb_watcher(app.clone(), watcher_running.clone());
+
     *state.usb.lock().unwrap() = Some(UsbConn {
         _input: input,
         output,
+        watcher_running,
     });
     Ok(name)
 }
@@ -281,4 +346,57 @@ pub async fn valeton_disconnect(state: State<'_, ValetonState>) -> Result<(), St
 #[tauri::command]
 pub fn valeton_save_file(path: String, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())
+}
+
+use super::preset_prompt::PRESET_SPEC;
+
+/// Ask the configured AI assistant to design a Valeton preset from a
+/// natural-language request and return the raw JSON (the frontend parses +
+/// applies it). A focused one-shot completion — no tool loop, no chat history,
+/// reusing the AI module's provider/key from Settings. The model is told to
+/// emit ONLY the JSON object; the frontend still tolerates a stray code fence.
+#[tauri::command]
+pub async fn valeton_generate_preset(app: AppHandle, prompt: String) -> Result<String, String> {
+    use crate::modules::ai::state::AiState;
+    use crate::modules::telegram::llm::{self, ChatMessage, LlmRequest};
+    use tauri::Manager;
+
+    let prompt = prompt.trim();
+    if prompt.is_empty() {
+        return Err("Describe the tone you want first.".into());
+    }
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    let cfg =
+        llm::factory::read_config(&data_dir.join("settings.json")).map_err(|e| e.to_string())?;
+    let ai_state = app
+        .try_state::<AiState>()
+        .ok_or_else(|| "AI module is not initialised — open the AI tab once.".to_string())?;
+    let client = llm::factory::build_client(&cfg, &ai_state.secrets).map_err(|e| e.to_string())?;
+
+    let system = format!(
+        "{PRESET_SPEC}\n\n=== OUTPUT OVERRIDE FOR THIS INTERFACE ===\n\
+         Respond with ONLY a single JSON object matching the schema — no prose, no \
+         explanation, no markdown code fence. Put any caveat or approximation in the \
+         JSON `note` field, never as text outside the object. The first character must \
+         be '{{' and the last must be '}}'."
+    );
+
+    let req = LlmRequest {
+        messages: vec![ChatMessage::system(system), ChatMessage::user(prompt)],
+        tools: Vec::new(),
+        // Low temperature: preset design wants consistent, in-spec numbers, not
+        // creative variance (which tends to drift params toward generic 50s).
+        temperature: 0.35,
+        max_tokens: 4096,
+    };
+    let resp = client.chat(req).await.map_err(|e| e.to_string())?;
+    let text = resp.text.trim().to_string();
+    if text.is_empty() {
+        return Err("The model returned no preset. Try rephrasing the request.".into());
+    }
+    Ok(text)
 }

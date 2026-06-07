@@ -4,6 +4,7 @@
    Сире байтове I/O делегується Rust (api.ts), бо WKWebView не має Web MIDI. */
 import { connectUsb, disconnectDevice, sendBytes } from '../api';
 import { getState, log, setState } from '../store/store';
+import { awaitHandshake, cancelHandshake } from './connection';
 import { sendParamChange } from './protocol';
 import { runtime } from './runtime';
 import { applyPatch, buildPatchList } from './sync';
@@ -35,11 +36,13 @@ const midiTransport: TransportDriver = {
 };
 
 function disconnectGUI(): void {
+  cancelHandshake();
   log('Connection closed.');
   setActiveTransport(null);
   setState({
     transport: null,
     connected: false,
+    connecting: false,
     deviceName: '',
     locked: true,
     saveEnabled: false,
@@ -61,10 +64,10 @@ export async function connectMidi(): Promise<void> {
     log('Syncing: Patch list');
     setState({
       transport: 'usb',
-      connected: true,
       deviceName: name || 'GP-5',
       locked: false,
     });
+    awaitHandshake(); // «connected» лише після першої відповіді пристрою
     sendSysex('F0000E00010000000201020400F7');
   } catch (err) {
     log(`Error: ${err}`);

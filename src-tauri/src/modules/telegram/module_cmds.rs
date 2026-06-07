@@ -1205,6 +1205,37 @@ mod tests {
     }
 
     #[test]
+    fn resolve_tuning_accepts_canonical_ids() {
+        assert_eq!(resolve_tuning("standard-e").as_deref(), Some("standard-e"));
+        assert_eq!(resolve_tuning("drop-a").as_deref(), Some("drop-a"));
+        // spaces/underscores stand in for dashes
+        assert_eq!(resolve_tuning("drop a").as_deref(), Some("drop-a"));
+    }
+
+    #[test]
+    fn resolve_tuning_parses_free_text() {
+        assert_eq!(resolve_tuning("drop d").as_deref(), Some("drop-d"));
+        assert_eq!(resolve_tuning("Drop D").as_deref(), Some("drop-d"));
+        assert_eq!(resolve_tuning("e standard").as_deref(), Some("standard-e"));
+        assert_eq!(resolve_tuning("standard e").as_deref(), Some("standard-e"));
+        // flats map onto the sharp-based slugs
+        assert_eq!(resolve_tuning("eb standard").as_deref(), Some("standard-dsharp"));
+        assert_eq!(resolve_tuning("drop c#").as_deref(), Some("drop-csharp"));
+        // tuning= prefix is stripped
+        assert_eq!(resolve_tuning("tuning=drop b").as_deref(), Some("drop-b"));
+    }
+
+    #[test]
+    fn resolve_tuning_defaults_and_rejects() {
+        // bare category words fall back to the canonical default of that shape
+        assert_eq!(resolve_tuning("drop").as_deref(), Some("drop-d"));
+        assert_eq!(resolve_tuning("standard").as_deref(), Some("standard-e"));
+        // nothing recognisable
+        assert_eq!(resolve_tuning("half step down"), None);
+        assert_eq!(resolve_tuning(""), None);
+    }
+
+    #[test]
     fn parse_pomodoro_blocks_accepts_bare_minutes() {
         let blocks = parse_pomodoro_blocks("25/sit 5/walk", 1000).unwrap();
         assert_eq!(blocks.len(), 2);
@@ -1253,9 +1284,12 @@ mod tests {
     }
 
     #[test]
-    fn known_tabs_include_metronome_and_pomodoro() {
-        assert!(KNOWN_TABS.contains(&"metronome"));
+    fn known_tabs_include_valeton_and_pomodoro() {
+        // The metronome no longer has its own tab — it lives inside the
+        // Valeton editor — so `/metronome` reveals `valeton-editor`.
+        assert!(KNOWN_TABS.contains(&"valeton-editor"));
         assert!(KNOWN_TABS.contains(&"pomodoro"));
+        assert!(!KNOWN_TABS.contains(&"metronome"));
     }
 
     #[test]
@@ -1846,7 +1880,7 @@ pub const KNOWN_TABS: &[&str] = &[
     "notes",
     "ai",
     "telegram",
-    "metronome",
+    "valeton-editor",
     "music",
     "downloads",
     "pomodoro",
@@ -1930,11 +1964,12 @@ impl CommandHandler for MetronomeCmd {
             Ok(p) => p,
             Err(e) => return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage())),
         };
-        // Reveal + mount the metronome tab so the shell's listener is
-        // attached by the time we emit the remote payload. Two pieces of
-        // async work but both are best-effort — `nav:activate` handled by
-        // shell; sleep gives Suspense a moment to resolve the lazy chunk.
-        reveal_tab(&ctx.app, "metronome");
+        // Reveal + mount the Valeton editor tab (which now hosts the
+        // metronome shell) so its `metronome:remote` listener is attached by
+        // the time we emit the remote payload. Two pieces of async work but
+        // both are best-effort — `nav:activate` handled by shell; sleep gives
+        // Suspense a moment to resolve the lazy chunk.
+        reveal_tab(&ctx.app, "valeton-editor");
         tokio::time::sleep(std::time::Duration::from_millis(350)).await;
         let _ = ctx.app.emit("metronome:remote", &parsed);
         Reply::text(format_metronome_reply(&parsed))
@@ -2033,6 +2068,214 @@ fn format_metronome_reply(r: &MetronomeRemote) -> String {
         "🥁 Метроном без змін.".to_string()
     } else {
         format!("🥁 Метроном: {}", parts.join(", "))
+    }
+}
+
+// -------------------- /record --------------------
+
+/// Payload for the `recorder:remote` event. The embedded Recorder shell starts
+/// or stops capture in response. Capture is inherently UI-bound, so this only
+/// takes effect once the Valeton tab (which hosts the recorder) is mounted.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct RecorderRemote {
+    pub action: Option<String>,
+    /// Input gain as a linear multiplier (`1.0` = unity). When present the
+    /// shell applies and persists it; clamped to the supported range there.
+    pub gain: Option<f32>,
+}
+
+pub struct RecordCmd;
+
+#[async_trait]
+impl CommandHandler for RecordCmd {
+    fn name(&self) -> &'static str {
+        "record"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати рекордером у Valeton. Приклади: `start`, `stop`, `toggle`, `gain 1.5`."
+    }
+    fn usage(&self) -> &'static str {
+        "/record [start|stop|toggle|gain <0..2>]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let mut toks = args.split_whitespace();
+        let first = toks.next();
+
+        // `gain <n>` sets the input level (linear multiplier) without touching
+        // capture — applies live to an in-flight take and persists for the next.
+        if first.is_some_and(|t| t.eq_ignore_ascii_case("gain")) {
+            let raw = toks.next();
+            let gain = match raw.and_then(|v| v.parse::<f32>().ok()) {
+                Some(g) if g.is_finite() => g.clamp(0.0, 2.0),
+                _ => {
+                    return Reply::text(format!(
+                        "⚠️ потрібне число для gain (наприклад `1.5`)\nВикористання: {}",
+                        self.usage()
+                    ))
+                }
+            };
+            reveal_tab(&ctx.app, "valeton-editor");
+            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+            let _ = ctx.app.emit(
+                "recorder:remote",
+                &RecorderRemote {
+                    gain: Some(gain),
+                    ..Default::default()
+                },
+            );
+            return Reply::text(format!("🎚 Підсилення → {}%.", (gain * 100.0).round() as i64));
+        }
+
+        let action = match first {
+            // Bare `/record` toggles — the most common quick action.
+            None => "toggle".to_string(),
+            Some(tok) => match tok.to_ascii_lowercase().as_str() {
+                "start" | "rec" | "record" => "start".to_string(),
+                "stop" | "save" => "stop".to_string(),
+                "toggle" => "toggle".to_string(),
+                other => {
+                    return Reply::text(format!(
+                        "⚠️ невідома дія `{other}`\nВикористання: {}",
+                        self.usage()
+                    ))
+                }
+            },
+        };
+        // Reveal + mount the Valeton editor (which hosts the recorder shell)
+        // so its `recorder:remote` listener is attached before we emit.
+        reveal_tab(&ctx.app, "valeton-editor");
+        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+        let payload = RecorderRemote {
+            action: Some(action.clone()),
+            ..Default::default()
+        };
+        let _ = ctx.app.emit("recorder:remote", &payload);
+        Reply::text(match action.as_str() {
+            "start" => "🔴 Запис почато.".to_string(),
+            "stop" => "⏹ Запис зупинено й збережено.".to_string(),
+            _ => "⏯ Рекордер перемкнуто.".to_string(),
+        })
+    }
+}
+
+// -------------------- /tuner --------------------
+
+use crate::modules::tuner::commands::TunerStateHandle;
+use crate::modules::tuner::state::{is_valid_tuning, TunerState};
+
+/// Payload for the `tuner:remote` event. The Valeton editor opens the tuner
+/// modal in response, and the tuner shell switches to the requested tuning.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct TunerRemote {
+    pub tuning_id: Option<String>,
+}
+
+/// A single note token (with flats/sharps) → the pitch-class slug used in
+/// tuning ids (all sharp-based, e.g. `eb` and `d#` both map to `dsharp`).
+fn note_to_slug(tok: &str) -> Option<&'static str> {
+    match tok {
+        "e" => Some("e"),
+        "eb" | "d#" | "ds" | "dsharp" => Some("dsharp"),
+        "d" => Some("d"),
+        "db" | "c#" | "cs" | "csharp" => Some("csharp"),
+        "c" => Some("c"),
+        "b" => Some("b"),
+        "bb" | "a#" | "as" | "asharp" => Some("asharp"),
+        "a" => Some("a"),
+        _ => None,
+    }
+}
+
+/// Resolve free-form input ("drop d", "eb standard", a raw id) to a canonical
+/// tuning id, or None when nothing recognisable is present.
+fn resolve_tuning(raw: &str) -> Option<String> {
+    let s = raw.trim().to_ascii_lowercase();
+    let s = s.strip_prefix("tuning=").unwrap_or(&s).trim();
+    if s.is_empty() {
+        return None;
+    }
+    // Already a canonical id (allow spaces/underscores in place of dashes).
+    let dashed = s.replace([' ', '_'], "-");
+    if is_valid_tuning(&dashed) {
+        return Some(dashed);
+    }
+    let is_drop = s.contains("drop");
+    let prefix = if is_drop { "drop" } else { "standard" };
+    // First note-like token wins (skips words like "drop"/"standard").
+    let root = s.split([' ', '-', '_']).find_map(note_to_slug);
+    let id = match root {
+        Some(r) => format!("{prefix}-{r}"),
+        // "drop" / "standard" with no explicit root → the canonical default.
+        None if is_drop => "drop-d".to_string(),
+        None if s.contains("standard") || s.contains("std") => "standard-e".to_string(),
+        None => return None,
+    };
+    is_valid_tuning(&id).then_some(id)
+}
+
+/// Persist the chosen tuning so it survives even when the modal is closed
+/// (the live `tuner:remote` event only reaches an open modal).
+fn persist_tuner_tuning(app: &tauri::AppHandle, tuning_id: &str) {
+    if let Some(handle) = app.try_state::<TunerStateHandle>() {
+        let fallback = handle.path.lock().unwrap().clone();
+        let path = app
+            .path()
+            .app_data_dir()
+            .map(|d| d.join("tuner.json"))
+            .unwrap_or(fallback);
+        let mut st = TunerState::load(&path);
+        st.tuning_id = tuning_id.to_string();
+        st.normalize();
+        let _ = st.save(&path);
+    }
+}
+
+pub struct TunerCmd;
+
+#[async_trait]
+impl CommandHandler for TunerCmd {
+    fn name(&self) -> &'static str {
+        "tuner"
+    }
+    fn description(&self) -> &'static str {
+        "Відкрити тюнер у Valeton і обрати стрій. Приклади: `drop d`, `eb standard`, `standard-a`."
+    }
+    fn usage(&self) -> &'static str {
+        "/tuner [<tuning>]  напр. `e standard`, `drop d`, `drop a`, `standard-csharp`"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        // Bare `/tuner` just opens the tuner with whatever's saved.
+        let tuning_id = if args.trim().is_empty() {
+            None
+        } else {
+            match resolve_tuning(args) {
+                Some(id) => Some(id),
+                None => {
+                    return Reply::text(format!(
+                        "⚠️ невідомий стрій `{}`\nВикористання: {}",
+                        args.trim(),
+                        self.usage()
+                    ))
+                }
+            }
+        };
+        if let Some(id) = &tuning_id {
+            persist_tuner_tuning(&ctx.app, id);
+        }
+        // Reveal the Valeton editor and give its `tuner:remote` listener a
+        // moment to mount before we emit (it opens the modal + applies tuning).
+        reveal_tab(&ctx.app, "valeton-editor");
+        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+        let _ = ctx.app.emit(
+            "tuner:remote",
+            &TunerRemote {
+                tuning_id: tuning_id.clone(),
+            },
+        );
+        Reply::text(match &tuning_id {
+            Some(id) => format!("🎸 Тюнер відкрито · стрій {id}"),
+            None => "🎸 Тюнер відкрито.".to_string(),
+        })
     }
 }
 
@@ -2502,7 +2745,7 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
             vec![
                 InlineButton::new("🤖 AI", "navigate:ai"),
                 InlineButton::new("✉️ Telegram", "navigate:telegram"),
-                InlineButton::new("🥁 Metronome", "navigate:metronome"),
+                InlineButton::new("🎸 Valeton", "navigate:valeton-editor"),
             ],
             vec![
                 InlineButton::new("🎵 Music", "navigate:music"),

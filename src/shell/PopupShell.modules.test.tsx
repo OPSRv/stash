@@ -40,11 +40,11 @@ describe('PopupShell — module visibility & order', () => {
   });
 
   it('hides tabs listed in hiddenModules', async () => {
-    storeMocks.stored.set('hiddenModules', ['metronome', 'separator']);
+    storeMocks.stored.set('hiddenModules', ['pomodoro', 'separator']);
     render(<PopupShell />);
     await screen.findByRole('searchbox', undefined, { timeout: 8000 });
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /^Metronome/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Pomodoro/ })).toBeNull();
     });
     expect(screen.queryByRole('button', { name: /^Separator/ })).toBeNull();
     expect(screen.getByRole('button', { name: /^Clipboard/ })).toBeInTheDocument();
@@ -92,17 +92,17 @@ describe('PopupShell — module visibility & order', () => {
     const user = userEvent.setup();
     render(<PopupShell />);
     await screen.findByRole('searchbox', undefined, { timeout: 8000 });
-    expect(screen.getByRole('button', { name: /^Metronome/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Pomodoro/ })).toBeInTheDocument();
 
     // Simulate the Modules tab persisting a new value and broadcasting.
-    storeMocks.stored.set('hiddenModules', ['metronome']);
+    storeMocks.stored.set('hiddenModules', ['pomodoro']);
     invalidateSettingsCache();
     await user.click(document.body); // realistic event ordering before dispatch
     window.dispatchEvent(
       new CustomEvent('stash:settings-changed', { detail: 'hiddenModules' }),
     );
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /^Metronome/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Pomodoro/ })).toBeNull();
     });
   });
 });

@@ -1,6 +1,6 @@
 import { useStore } from '../store/store';
 
-export const StatusBar = ({ onOpenHelp }: { onOpenHelp: () => void }) => {
+export const StatusBar = () => {
   const statusText = useStore((s) => s.statusText);
   const connected = useStore((s) => s.connected);
   return (
@@ -17,13 +17,6 @@ export const StatusBar = ({ onOpenHelp }: { onOpenHelp: () => void }) => {
         <span className="font-semibold tracking-wide text-ve-dim">
           GP-5 Editor
         </span>
-        <button
-          type="button"
-          className="rounded-md border border-ve-stroke bg-ve-bg-1 px-3 py-1.5 font-medium text-ve-dim transition hover:border-[#3a434f] hover:text-ve-accent"
-          onClick={onOpenHelp}
-        >
-          Help
-        </button>
       </div>
     </div>
   );

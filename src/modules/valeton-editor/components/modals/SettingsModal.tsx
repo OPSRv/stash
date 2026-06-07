@@ -1,7 +1,7 @@
 import { changeFoot, changeGlobal } from '../../lib/actions';
 import { useStore } from '../../store/store';
 import { Modal } from '../ui/Modal';
-import { Select } from '../ui/Select';
+import { PedalSelect } from '../../../../shared/ui/PedalSelect';
 
 const fill = (v: number, min: number, max: number) =>
   `${((v - min) / (max - min || 1)) * 100}%`;
@@ -123,7 +123,7 @@ export const SettingsModal = ({
 
       <hr className="my-3 border-ve-stroke" />
       <p className="mb-1 text-sm text-ve-dim">Footswitch Settings</p>
-      <Select
+      <PedalSelect
         dataId="global_foot_list"
         value={globalFoot}
         onChange={(v) => changeFoot(v)}

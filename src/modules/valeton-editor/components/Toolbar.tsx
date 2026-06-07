@@ -10,28 +10,49 @@ import {
   IconDisconnect,
   IconDownload,
   IconGear,
+  IconMagic,
   IconSave,
   IconSliders,
+  IconTuningFork,
 } from './ui/icons';
-import { Select } from './ui/Select';
+import { PedalSelect } from '../../../shared/ui/PedalSelect';
 import {MasterBar} from "./MasterBar.tsx";
 
 interface ToolbarProps {
   onOpenPatch: () => void;
   onOpenSettings: () => void;
+  onOpenTuner: () => void;
+  onOpenPresetAi: () => void;
 }
 
-// логотип-пляшка: ручка + зелений LED на синій плитці бренду
+// бренд-гліф: медіатор (guitar pick) — упізнаваний знак гітарного процесора.
+// LED стану зʼєднання живе окремо як `.status-led` поверх плитки.
 const BrandGlyph = () => (
-  <svg width="19" height="19" viewBox="0 0 32 32" aria-hidden="true">
-    <circle cx="16" cy="16" r="8" fill="#0b0d10" />
-    <rect x="15" y="8.5" width="2" height="7" rx="1" fill="#e6eaf0" />
-    <circle cx="25" cy="7" r="2.6" fill="#3ddc97" />
+  <svg width="18" height="18" viewBox="0 0 32 32" aria-hidden="true">
+    <path
+      d="M16 5.5C20 5.5 26 7 26 13C26 18 20 26.5 16 26.5C12 26.5 6 18 6 13C6 7 12 5.5 16 5.5Z"
+      fill="#f3f7fb"
+    />
+    {/* симетричний блик угорі для обʼєму */}
+    <path
+      d="M16 8C19 8 22.5 9 22.5 12.5"
+      fill="none"
+      stroke="#ffffff"
+      strokeOpacity="0.7"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    />
   </svg>
 );
 
-export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
+export const Toolbar = ({
+  onOpenPatch,
+  onOpenSettings,
+  onOpenTuner,
+  onOpenPresetAi,
+}: ToolbarProps) => {
   const connected = useStore((s) => s.connected);
+  const connecting = useStore((s) => s.connecting);
   const transport = useStore((s) => s.transport);
   const deviceName = useStore((s) => s.deviceName);
   const locked = useStore((s) => s.locked);
@@ -44,28 +65,25 @@ export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
     ? transport === 'ble'
       ? deviceName
       : 'GP-5 · USB'
-    : 'Offline';
+    : connecting
+      ? 'Connecting…'
+      : 'Offline';
 
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-      {/* ── Бренд-плитка + LED стану (повна назва — у футері StatusBar) ── */}
-      <span
-        className="brand-tile relative h-8 w-8 shrink-0"
-        title={deviceLabel}
-      >
-        <BrandGlyph />
-        <span
-          className={`status-led absolute -right-0.5 -bottom-0.5 ${connected ? 'on' : ''}`}
-        />
-      </span>
-
-      {/* ── Підключення (лише коли офлайн) ── */}
-      {!connected && (
+      {/* ── Бренд-плитка = кнопка конекту: офлайн → дропдаун USB/BLE,
+             підключено / в процесі → статичний індикатор стану ── */}
+      {!connected && !connecting ? (
         <Dropdown
-          label="Connect GP-5"
-          buttonClass="btn btn-primary"
+          label={
+            <>
+              <BrandGlyph />
+              <span className="status-led absolute -right-0.5 -bottom-0.5" />
+            </>
+          }
+          buttonClass="brand-tile relative h-8 w-8 shrink-0 cursor-pointer transition hover:brightness-110"
           dataId="btn_connect"
-          title="Choose Bluetooth or USB (MIDI). Use Chrome / a Web Bluetooth + Web MIDI enabled browser."
+          title="Connect GP-5 — choose Bluetooth or USB (MIDI). Use a Web Bluetooth + Web MIDI enabled browser."
         >
           {(close) => (
             <>
@@ -90,13 +108,33 @@ export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
             </>
           )}
         </Dropdown>
+      ) : (
+        <span
+          className="brand-tile relative h-8 w-8 shrink-0"
+          title={deviceLabel}
+        >
+          <BrandGlyph />
+          <span
+            className={`status-led absolute -right-0.5 -bottom-0.5 ${connected ? 'on' : 'connecting'}`}
+          />
+        </span>
+      )}
+
+      {/* ── Індикатор спроби підключення ── */}
+      {connecting && (
+        <span
+          className="text-meta font-medium text-ve-dim"
+          data-id="connecting_label"
+        >
+          Connecting…
+        </span>
       )}
 
       {/* ── Навігація по пресетах ── */}
       <div className="flex min-w-[140px] flex-1 items-stretch gap-1 sm:max-w-[320px]">
         <button
           data-id="btn_previous"
-          className="btn btn-ghost px-2.5"
+          className="btn btn-chrome px-2.5"
           disabled={locked}
           type="button"
           title="Previous patch"
@@ -104,7 +142,7 @@ export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
         >
           <IconChevronLeft />
         </button>
-        <Select
+        <PedalSelect
           dataId="listPatches"
           className="min-w-0 flex-1"
           disabled={locked}
@@ -118,7 +156,7 @@ export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
         />
         <button
           data-id="btn_next"
-          className="btn btn-ghost px-2.5"
+          className="btn btn-chrome px-2.5"
           disabled={locked}
           type="button"
           title="Next patch"
@@ -128,7 +166,7 @@ export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
         </button>
         <Dropdown
           label={<IconDownload />}
-          buttonClass="btn btn-ghost px-2.5"
+          buttonClass="btn btn-chrome h-full px-2.5"
           disabled={locked}
           title="Save preset to file"
           align="right"
@@ -163,6 +201,24 @@ export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
         <div className="seg-group">
           <button
             type="button"
+            data-id="btn_preset_ai"
+            className="seg-btn px-2"
+            title="AI preset generator"
+            onClick={onOpenPresetAi}
+          >
+            <IconMagic />
+          </button>
+          <button
+            type="button"
+            data-id="btn_show_tuner"
+            className="seg-btn px-2"
+            title="Guitar tuner"
+            onClick={onOpenTuner}
+          >
+            <IconTuningFork />
+          </button>
+          <button
+            type="button"
             data-id="btn_save_patch"
             className={`seg-btn px-2 ${saveEnabled ? 'accent' : ''}`}
             disabled={!saveEnabled}
@@ -176,7 +232,7 @@ export const Toolbar = ({ onOpenPatch, onOpenSettings }: ToolbarProps) => {
             data-id="btn_show_patch"
             className="seg-btn px-2"
             disabled={locked}
-            title="Patch settings (CTL, patch volume)"
+            title="Patch settings (CTL)"
             onClick={onOpenPatch}
           >
             <IconSliders />
