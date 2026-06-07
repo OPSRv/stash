@@ -249,20 +249,19 @@ export const Toolbar = ({
           </button>
         </div>
 
-        <label
-          className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-ve-stroke bg-ve-bg-1 px-2.5 py-1.5 whitespace-nowrap"
-          title="Live performance view"
-        >
-          <input
-            className="switch switch-ve-accent"
-            type="checkbox"
+        <div className="seg-group">
+          <button
+            type="button"
             data-id="live_switch"
+            className={`seg-btn px-3 ${liveView ? 'active' : ''}`}
             disabled={locked}
-            checked={liveView}
-            onChange={(e) => setState({ liveView: e.target.checked })}
-          />
-          <span className="text-sm font-medium text-ve-text">Live</span>
-        </label>
+            aria-pressed={liveView}
+            title="Live performance view"
+            onClick={() => setState({ liveView: !liveView })}
+          >
+            Live
+          </button>
+        </div>
 
         {connected && (
           <button

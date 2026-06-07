@@ -191,7 +191,7 @@ export const PedalSelect = ({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 rounded-lg border border-ve-stroke bg-ve-bg-2 px-3 py-2 text-left text-sm text-ve-text transition hover:border-[#3a434f] focus-visible:border-ve-accent focus-visible:ring-2 focus-visible:ring-ve-accent/40 focus-visible:outline-none disabled:opacity-40"
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-transparent bg-transparent px-3 py-2 text-left text-sm text-ve-text transition hover:bg-white/[0.085] focus-visible:border-ve-accent focus-visible:ring-2 focus-visible:ring-ve-accent/40 focus-visible:outline-none disabled:opacity-40"
         onClick={() => !disabled && setOpen((v) => !v)}
         onKeyDown={onKeyDown}
       >

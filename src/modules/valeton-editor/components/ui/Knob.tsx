@@ -127,8 +127,8 @@ export const Knob = ({
           <defs>
             {/* неоновий градієнт дуги */}
             <linearGradient id={gArc} x1="0" y1="1" x2="1" y2="0">
-              <stop offset="0%" stopColor="#2f7fd6" />
-              <stop offset="100%" stopColor="#86c5ff" />
+              <stop offset="0%" stopColor="var(--color-ve-accent-700)" />
+              <stop offset="100%" stopColor="var(--color-ve-accent)" />
             </linearGradient>
             {/* металевий корпус, підсвічений згори */}
             <radialGradient id={gBody} cx="50%" cy="34%" r="68%">

@@ -11,11 +11,12 @@ export const MasterBar = () => {
   const patchVOL = useStore((s) => s.patchVOL);
 
   return (
-    <div className="flex h-10 items-center gap-2 px-2.5">
+    <div className="flex items-center gap-3 px-2.5">
       {/* Volume */}
       <Fader
         label="VOL"
-        width={56}
+        inline
+        width={132}
         dataId="global_vol_value"
         disabled={locked}
         min={0}
@@ -25,12 +26,13 @@ export const MasterBar = () => {
         onChange={(v) => changeGlobalVol(v)}
       />
 
-      <span className="h-4 w-px bg-ve-stroke" />
+      <span className="h-4 w-px bg-white/15" />
 
       {/* Patch volume */}
       <Fader
         label="PATCH"
-        width={56}
+        inline
+        width={132}
         dataId="patch_vol_value"
         disabled={locked}
         min={0}

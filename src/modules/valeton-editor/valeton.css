@@ -5,9 +5,45 @@
  * бо модульні стилі Stash не проганяються через Tailwind. */
 
 .valeton-root {
+  position: relative;
+  isolation: isolate;
   height: 100%;
   color: var(--color-ve-text);
   --ve-pedal: 10px;
+
+  /* ---- Glass design tokens ---------------------------------------------
+   * Frosted surfaces read as light translucent panes floating over the dark
+   * ambient backdrop painted by `::before`. Only the big layers carry an
+   * actual `backdrop-filter` (panels, cards, pedals, modals); inner wells use
+   * the translucent fills alone to avoid stacking a blur per nested element
+   * (perf — see CLAUDE.md "three elephants"). */
+  --ve-glass: rgba(255, 255, 255, 0.055);
+  --ve-glass-2: rgba(255, 255, 255, 0.085);
+  --ve-glass-strong: rgba(255, 255, 255, 0.12);
+  --ve-glass-sunken: rgba(8, 12, 18, 0.42);
+  --ve-glass-border: rgba(255, 255, 255, 0.08);
+  --ve-glass-border-2: rgba(255, 255, 255, 0.16);
+  --ve-glass-blur: blur(22px) saturate(140%);
+  --ve-glass-blur-soft: blur(14px) saturate(130%);
+  --ve-glass-hi: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --ve-glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.42);
+  --ve-accent-glass: rgba(74, 163, 255, 0.18);
+}
+
+/* Ambient backdrop: a dark base washed with drifting accent blooms. The
+ * frosted panes above blur THIS layer, so the glass picks up colour even when
+ * the surrounding popup pane is opaque. Sits at z-0; content is z-1+. */
+.valeton-root::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 55% at 18% 8%, rgba(74, 163, 255, 0.22), transparent 60%),
+    radial-gradient(55% 60% at 88% 22%, rgba(61, 220, 151, 0.16), transparent 58%),
+    radial-gradient(70% 65% at 70% 100%, rgba(47, 127, 214, 0.2), transparent 62%),
+    linear-gradient(180deg, #0c0f15 0%, #090b10 100%);
 }
 
 /* ---------- Кнопки ---------- */
@@ -37,51 +73,99 @@
   opacity: 0.4;
 }
 .valeton-root .btn-primary {
-  border-color: var(--color-ve-accent-700);
+  border-color: rgba(120, 190, 255, 0.55);
   color: #fff;
-  background: linear-gradient(180deg, #57abff 0%, var(--color-ve-accent-700) 100%);
+  background: linear-gradient(180deg, rgba(99, 178, 255, 0.92) 0%, rgba(47, 127, 214, 0.92) 100%);
+  backdrop-filter: var(--ve-glass-blur-soft);
+  -webkit-backdrop-filter: var(--ve-glass-blur-soft);
   box-shadow:
-    0 0 0 1px rgba(74, 163, 255, 0.1),
-    0 6px 18px rgba(47, 127, 214, 0.24);
+    var(--ve-glass-hi),
+    0 6px 20px rgba(47, 127, 214, 0.32);
 }
 .valeton-root .btn-soft {
-  border-color: var(--color-ve-stroke);
   color: var(--color-ve-text);
-  background: linear-gradient(180deg, var(--color-ve-bg-3) 0%, var(--color-ve-bg-2) 100%);
+  background: var(--ve-glass-2);
+  backdrop-filter: var(--ve-glass-blur-soft);
+  -webkit-backdrop-filter: var(--ve-glass-blur-soft);
+  box-shadow: var(--ve-glass-hi);
 }
 .valeton-root .btn-soft:hover:not(:disabled) {
-  border-color: #3a434f;
+  background: var(--ve-glass-strong);
   color: #fff;
 }
 .valeton-root .btn-ghost {
-  border-color: var(--color-ve-stroke);
-  background: var(--color-ve-bg-1);
+  background: transparent;
   color: var(--color-ve-dim);
 }
 .valeton-root .btn-ghost:hover:not(:disabled) {
-  border-color: #3a434f;
-  background: var(--color-ve-bg-2);
+  background: var(--ve-glass-2);
   color: var(--color-ve-text);
 }
 /* Узгоджує бічні кнопки групи пресетів із тригером PedalSelect
- * (однаковий радіус / фон / бордер / hover), щоб уся стрічка
+ * (однаковий радіус / фон / hover), щоб уся стрічка
  * «< · селект · > · download» читалась як один контрол. */
 .valeton-root .btn-chrome {
   border-radius: 0.5rem;
-  border-color: var(--color-ve-stroke);
-  background: var(--color-ve-bg-2);
+  background: transparent;
   color: var(--color-ve-text);
 }
 .valeton-root .btn-chrome:hover:not(:disabled) {
-  border-color: #3a434f;
+  background: var(--ve-glass-2);
 }
 
 /* ---------- Картка ---------- */
 .valeton-root .card {
   border-radius: 1rem;
-  border: 1px solid var(--color-ve-stroke);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
-  background: linear-gradient(180deg, var(--color-ve-bg-1) 0%, #11141a 100%);
+  border: 1px solid var(--ve-glass-border);
+  background: linear-gradient(
+    160deg,
+    var(--ve-glass-2) 0%,
+    var(--ve-glass) 100%
+  );
+  backdrop-filter: var(--ve-glass-blur);
+  -webkit-backdrop-filter: var(--ve-glass-blur);
+  box-shadow:
+    var(--ve-glass-hi),
+    var(--ve-glass-shadow);
+}
+
+/* ---------- Скляні helpers (для інлайн-поверхонь компонентів) ---------- */
+/* Внутрішній «колодязь» параметрів усередині картки — лише напівпрозора
+ * заливка без власного backdrop-filter (картка вже фростить тло під ним). */
+.valeton-root .ve-well {
+  border: 1px solid var(--ve-glass-border);
+  background: var(--ve-glass-sunken);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+/* Базова скляна педаль сигнального ланцюга / live-режиму. Стани (on / danger /
+ * open) накладаються інлайн-класами поверх. */
+.valeton-root .ve-pedal {
+  border: 1px solid var(--ve-glass-border);
+  background: var(--ve-glass);
+  backdrop-filter: var(--ve-glass-blur-soft);
+  -webkit-backdrop-filter: var(--ve-glass-blur-soft);
+  box-shadow: var(--ve-glass-hi);
+}
+/* Напівпрозора скляна панель (recorder-слот, модалка). */
+.valeton-root .ve-panel {
+  border: 1px solid var(--ve-glass-border);
+  background: linear-gradient(160deg, var(--ve-glass-2) 0%, var(--ve-glass) 100%);
+  backdrop-filter: var(--ve-glass-blur);
+  -webkit-backdrop-filter: var(--ve-glass-blur);
+  box-shadow:
+    var(--ve-glass-hi),
+    var(--ve-glass-shadow);
+}
+/* Попап-меню (Dropdown / select). Темніша, майже непрозора підкладка — текст
+ * читається навіть над строкатим тлом (LED, педалі), blur лишає скляність. */
+.valeton-root .ve-menu {
+  border: 1px solid var(--ve-glass-border-2);
+  background: rgba(16, 20, 28, 0.86);
+  backdrop-filter: var(--ve-glass-blur);
+  -webkit-backdrop-filter: var(--ve-glass-blur);
+  box-shadow:
+    var(--ve-glass-hi),
+    var(--ve-glass-shadow);
 }
 
 /* ---------- Підписи полів ---------- */
@@ -105,8 +189,8 @@
   width: 2.5em;
   height: 1.3em;
   border-radius: 999px;
-  background-color: #0e1116;
-  border: 1px solid var(--color-ve-stroke);
+  background-color: var(--ve-glass-sunken);
+  border: 1px solid var(--ve-glass-border);
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%238b94a3'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
   background-position: 8% center;
@@ -162,11 +246,13 @@
   border-radius: 6px;
   background:
     linear-gradient(90deg, var(--color-ve-accent-700), var(--color-ve-accent)) no-repeat,
-    var(--color-ve-stroke);
+    var(--ve-glass-sunken);
   background-size:
     var(--_fill, 0%) 100%,
     100% 100%;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px var(--ve-glass-border);
 }
 .valeton-root .range::-webkit-slider-thumb {
   appearance: none;
@@ -187,9 +273,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 0.375rem;
-  border: 1px solid var(--color-ve-stroke);
-  background: var(--color-ve-bg-2);
-  color: var(--color-ve-dim);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-ve-accent);
   transition:
     background-color 0.15s ease,
     border-color 0.15s ease,
@@ -197,9 +283,8 @@
     transform 0.05s ease;
 }
 .valeton-root .icon-nav:hover:not(:disabled) {
-  border-color: var(--color-ve-accent-700);
-  background: var(--color-ve-bg-3);
-  color: var(--color-ve-text);
+  background: rgba(var(--stash-accent-rgb), 0.16);
+  color: var(--color-ve-accent);
 }
 .valeton-root .icon-nav:active:not(:disabled) {
   transform: scale(0.95);
@@ -218,9 +303,10 @@
   align-items: center;
   gap: 0.25rem;
   overflow: hidden;
-  border-radius: 0.375rem;
-  border: 1px solid var(--color-ve-stroke);
-  background: var(--color-ve-bg-2);
+  border-radius: 0.5rem;
+  border: 1px solid var(--ve-glass-border);
+  background: var(--ve-glass);
+  box-shadow: var(--ve-glass-hi);
   padding: 0.375rem 0.25rem;
   transition:
     background-color 0.15s ease,
@@ -228,26 +314,19 @@
     transform 0.05s ease;
 }
 .valeton-root .icon-tile:hover:not(:disabled) {
-  border-color: var(--color-ve-accent-700);
-  background: var(--color-ve-bg-3);
+  border-color: var(--ve-glass-border-2);
+  background: var(--ve-glass-2);
 }
 .valeton-root .icon-tile:active:not(:disabled) {
   transform: scale(0.95);
 }
 .valeton-root .icon-tile.selected {
-  border-color: var(--color-ve-accent);
-  background: linear-gradient(180deg, #1d3650 0%, var(--color-ve-bg-3) 100%);
+  border-color: rgba(74, 163, 255, 0.65);
+  background: linear-gradient(165deg, var(--ve-accent-glass) 0%, var(--ve-glass-2) 100%);
   box-shadow:
-    0 0 0 1.5px var(--color-ve-accent),
-    0 0 12px rgba(74, 163, 255, 0.35);
-}
-.valeton-root .icon-tile.selected::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  border-radius: 6px 6px 0 0;
-  background: linear-gradient(90deg, var(--color-ve-accent-700), var(--color-ve-accent));
+    var(--ve-glass-hi),
+    0 0 0 1px rgba(74, 163, 255, 0.55),
+    0 0 16px rgba(74, 163, 255, 0.3);
 }
 .valeton-root .icon-tile.selected span {
   font-weight: 600;
@@ -275,15 +354,23 @@
 
 /* ---------- Великий live-дисплей ---------- */
 .valeton-root .fondo-b1 {
-  background: linear-gradient(180deg, #1f6fb8 0%, #15538c 100%);
+  background: linear-gradient(180deg, rgba(74, 163, 255, 0.42) 0%, rgba(21, 83, 140, 0.34) 100%);
+  backdrop-filter: var(--ve-glass-blur);
+  -webkit-backdrop-filter: var(--ve-glass-blur);
   border-radius: var(--ve-pedal) var(--ve-pedal) 0 0;
+  box-shadow:
+    var(--ve-glass-hi),
+    inset 0 0 0 1px var(--ve-glass-border);
   color: #eaf4ff;
-  text-shadow: 0 0 14px rgba(120, 190, 255, 0.42);
+  text-shadow: 0 0 18px rgba(120, 190, 255, 0.55);
 }
 .valeton-root .fondo-b2 {
-  background: #0c1330;
+  background: rgba(10, 18, 38, 0.5);
+  backdrop-filter: var(--ve-glass-blur);
+  -webkit-backdrop-filter: var(--ve-glass-blur);
   border-radius: 0 0 var(--ve-pedal) var(--ve-pedal);
-  color: #aaccff;
+  box-shadow: inset 0 0 0 1px var(--ve-glass-border);
+  color: #bcd8ff;
 }
 
 /* ---------- LED-індикатор блока ---------- */
@@ -319,11 +406,13 @@
 /* ---------- Панелі приладу (хедер / футер) ---------- */
 .valeton-root .panel-bar {
   position: relative;
-  background: linear-gradient(180deg, #1c222b 0%, #141a21 42%, #0c0f14 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
+  backdrop-filter: var(--ve-glass-blur);
+  -webkit-backdrop-filter: var(--ve-glass-blur);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
-    0 8px 26px rgba(0, 0, 0, 0.45);
+    var(--ve-glass-hi),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 8px 26px rgba(0, 0, 0, 0.35);
 }
 .valeton-root .panel-bar::before {
   content: "";
@@ -331,20 +420,21 @@
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(150% 130% at 50% -35%, rgba(90, 150, 255, 0.06), transparent 55%),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.014) 0 1px, transparent 1px 3px);
+    radial-gradient(150% 130% at 50% -35%, rgba(120, 180, 255, 0.1), transparent 55%);
 }
 /* ---------- Плитка бренду ---------- */
 .valeton-root .brand-tile {
   display: grid;
   place-items: center;
   border-radius: 0.5rem;
-  border: 1px solid var(--color-ve-accent-700);
+  border: 1px solid transparent;
   color: #fff;
-  background: linear-gradient(180deg, #2f7fd6 0%, #154f87 100%);
+  background: linear-gradient(180deg, rgba(74, 163, 255, 0.5) 0%, rgba(21, 79, 135, 0.45) 100%);
+  backdrop-filter: var(--ve-glass-blur-soft);
+  -webkit-backdrop-filter: var(--ve-glass-blur-soft);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.25),
-    0 4px 14px rgba(47, 127, 214, 0.32);
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 4px 16px rgba(47, 127, 214, 0.3);
 }
 
 /* ---------- LED стану зʼєднання ---------- */
@@ -404,10 +494,10 @@
   align-items: center;
   gap: 0.125rem;
   border-radius: 0.5rem;
-  border: 1px solid var(--color-ve-stroke);
-  padding: 0.25rem;
-  background: linear-gradient(180deg, var(--color-ve-bg-1) 0%, #0f1318 100%);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+  border: none;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .valeton-root .seg-btn {
   display: inline-flex;
@@ -427,7 +517,7 @@
     transform 0.05s ease;
 }
 .valeton-root .seg-btn:hover:not(:disabled) {
-  background: var(--color-ve-bg-3);
+  background: var(--ve-glass-strong);
   color: #fff;
 }
 .valeton-root .seg-btn:active:not(:disabled) {
@@ -438,9 +528,13 @@
   cursor: default;
 }
 .valeton-root .seg-btn.active {
-  color: #fff;
-  background: linear-gradient(180deg, #57abff 0%, var(--color-ve-accent-700) 100%);
-  box-shadow: 0 0 8px rgba(74, 163, 255, 0.24);
+  color: var(--color-ve-accent);
+  background: rgba(var(--stash-accent-rgb), 0.16);
+  box-shadow: inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.42);
+}
+.valeton-root .seg-btn.active:hover:not(:disabled) {
+  background: rgba(var(--stash-accent-rgb), 0.22);
+  color: var(--color-ve-accent);
 }
 .valeton-root .seg-btn.accent {
   color: var(--color-ve-accent);
@@ -452,7 +546,7 @@
   height: 1.5rem;
   width: 1px;
   flex-shrink: 0;
-  background: var(--color-ve-stroke);
+  background: var(--ve-glass-border);
 }
 
 /* ---------- Спалах LED на TAP ---------- */

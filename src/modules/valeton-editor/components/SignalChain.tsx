@@ -52,17 +52,15 @@ export const SignalChain = () => {
         const isOpen = openCard === block.key;
 
         const base =
-          'relative flex min-h-[180px] items-center justify-center overflow-hidden rounded-[10px] border p-1.5 transition disabled:opacity-40';
-        // Active blocks now carry a coloured top bar + a brighter border, not
-        // just the corner LED — the bare dot read as "off" at a glance.
+          've-pedal relative flex min-h-[180px] cursor-pointer items-center justify-center overflow-hidden rounded-[10px] p-1.5 transition disabled:cursor-default disabled:opacity-40';
+        // Active blocks are shown by a brighter coloured border + soft glow and
+        // the corner LED — no top bar (it read as an unwanted lip on the glass).
         const tone = danger
-          ? 'border-ve-danger/60 bg-ve-danger/10'
+          ? '!border-ve-danger/60 !bg-ve-danger/12 shadow-[0_0_18px_rgba(255,92,92,0.18)]'
           : on
-            ? 'border-ve-on/55 bg-ve-bg-2 text-ve-text shadow-[0_0_12px_rgba(61,220,151,0.11)]'
-            : 'border-ve-stroke bg-ve-bg-1 text-ve-faint';
-        const ring = isOpen
-          ? 'ring-1 ring-ve-accent shadow-[0_0_12px_rgba(74,163,255,0.24)]'
-          : '';
+            ? '!border-ve-on/55 text-ve-text shadow-[0_0_18px_rgba(61,220,151,0.18)]'
+            : 'text-ve-faint';
+        const ring = isOpen ? 'ring-2 ring-ve-accent' : '';
         const dropRing =
           dropOn?.block === b && dropOn.pos === 'before'
             ? 'shadow-[-4px_0_0_0_var(--color-ve-on)]'
@@ -102,12 +100,15 @@ export const SignalChain = () => {
               onClick={() => setState({ openCard: block.key })}
               onDoubleClick={() => !locked && toggleBlock(block.key, !on)}
             >
-              {(on || danger) && (
+              {isOpen && (
                 <span
                   aria-hidden
-                  className={`pointer-events-none absolute inset-x-0 top-0 h-[3px] rounded-t-[9px] ${
-                    danger ? 'bg-ve-danger' : 'bg-ve-on'
-                  }`}
+                  className="pointer-events-none absolute inset-0 rounded-[9px]"
+                  style={{
+                    background: 'rgba(var(--stash-accent-rgb), 0.12)',
+                    boxShadow:
+                      'inset 0 0 0 1px rgba(var(--stash-accent-rgb), 0.55)',
+                  }}
                 />
               )}
               <span

@@ -49,7 +49,7 @@ export const Dropdown = ({
       </button>
       {open && (
         <ul
-          className={`absolute z-40 mt-1 min-w-44 rounded-lg border border-ve-stroke bg-ve-bg-1 p-1 shadow-2xl ${
+          className={`ve-menu absolute z-40 mt-1 w-max min-w-[13rem] rounded-lg p-1 ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
         >
@@ -71,7 +71,7 @@ export const DropdownItem = ({ onClick, dataId, children }: ItemProps) => (
     <button
       type="button"
       data-id={dataId}
-      className="block w-full cursor-pointer rounded-md px-3 py-1.5 text-left text-sm text-ve-text hover:bg-ve-bg-3 hover:text-white"
+      className="block w-full cursor-pointer rounded-md px-3 py-1.5 text-left text-sm whitespace-nowrap text-ve-text hover:bg-white/10 hover:text-white"
       onClick={onClick}
     >
       {children}

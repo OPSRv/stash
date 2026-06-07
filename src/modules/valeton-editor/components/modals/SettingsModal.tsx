@@ -91,7 +91,7 @@ export const SettingsModal = ({
         onChange={(v) => changeGlobal('globalCab', 3, 3, v)}
       />
 
-      <hr className="my-3 border-ve-stroke" />
+      <hr className="my-3 border-white/10" />
       <p className="mb-1 text-sm text-ve-dim">USB Settings</p>
       <GlobalSlider
         dataId="global_rec_value"
@@ -121,7 +121,7 @@ export const SettingsModal = ({
         onChange={(v) => changeGlobal('globalMon', 2, 4, v)}
       />
 
-      <hr className="my-3 border-ve-stroke" />
+      <hr className="my-3 border-white/10" />
       <p className="mb-1 text-sm text-ve-dim">Footswitch Settings</p>
       <PedalSelect
         dataId="global_foot_list"

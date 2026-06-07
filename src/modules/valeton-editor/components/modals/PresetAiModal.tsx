@@ -147,7 +147,7 @@ export const PresetAiModal = ({
       <p className="mb-1 text-sm text-ve-dim">Describe the tone</p>
       <textarea
         data-id="preset_ai_request"
-        className="h-16 w-full resize-y rounded-md border border-ve-stroke bg-ve-bg-2 p-2 text-sm text-ve-text placeholder:text-ve-dim/60 focus:border-ve-accent focus:outline-none disabled:opacity-50"
+        className="h-16 w-full resize-y rounded-md border border-white/10 bg-[var(--ve-glass-sunken)] p-2 text-sm text-ve-text placeholder:text-ve-dim/60 focus:border-ve-accent focus:outline-none disabled:opacity-50"
         placeholder="e.g. tight modern djent rhythm, drop-C — or: Carlos Santana lead tone"
         spellCheck={false}
         value={request}
@@ -169,12 +169,12 @@ export const PresetAiModal = ({
         </button>
       </div>
 
-      <hr className="my-3 border-ve-stroke" />
+      <hr className="my-3 border-white/10" />
 
       <p className="mb-1 text-sm text-ve-dim">Preset JSON</p>
       <textarea
         data-id="preset_ai_json"
-        className="h-40 w-full resize-y rounded-md border border-ve-stroke bg-ve-bg-2 p-2 font-mono text-xs text-ve-text placeholder:text-ve-dim/60 focus:border-ve-accent focus:outline-none"
+        className="h-40 w-full resize-y rounded-md border border-white/10 bg-[var(--ve-glass-sunken)] p-2 font-mono text-xs text-ve-text placeholder:text-ve-dim/60 focus:border-ve-accent focus:outline-none"
         placeholder="The generated preset JSON appears here — editable before you apply."
         spellCheck={false}
         value={json}

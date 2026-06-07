@@ -12,6 +12,9 @@ interface Props {
   dataId?: string;
   /** Ширина фейдера в px. */
   width?: number;
+  /** Інлайн-розкладка: підпис · доріжка · значення в один рядок (нижча по
+   *  висоті, доріжка тягнеться на всю ширину). За замовч. — вертикальний стек. */
+  inline?: boolean;
   onChange: (value: number) => void;
 }
 
@@ -33,6 +36,7 @@ export const Fader = ({
   disabled,
   dataId,
   width = 88,
+  inline = false,
   onChange,
 }: Props) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -89,46 +93,39 @@ export const Fader = ({
     }
   };
 
-  return (
+  const track = (
     <div
-      className="flex select-none flex-col items-center gap-0.5"
-      style={{ width }}
+      ref={ref}
+      role="slider"
+      aria-label={label}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={shown}
+      aria-disabled={disabled}
+      aria-orientation="horizontal"
+      tabIndex={disabled ? -1 : 0}
+      data-id={dataId}
+      className={`w-full touch-none rounded outline-none ${
+        disabled
+          ? 'opacity-40'
+          : 'cursor-ew-resize focus-visible:ring-2 focus-visible:ring-ve-accent'
+      }`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onKeyDown={onKeyDown}
+      onWheel={(e) => !disabled && set(shown + (e.deltaY < 0 ? step : -step))}
     >
-      <span className="font-mono text-[11px] font-bold text-ve-text tabular-nums leading-none">
-        {shown}
-      </span>
-      <div
-        ref={ref}
-        role="slider"
-        aria-label={label}
-        aria-valuemin={min}
-        aria-valuemax={max}
-        aria-valuenow={shown}
-        aria-disabled={disabled}
-        aria-orientation="horizontal"
-        tabIndex={disabled ? -1 : 0}
-        data-id={dataId}
-        className={`w-full touch-none rounded outline-none ${
-          disabled
-            ? 'opacity-40'
-            : 'cursor-ew-resize focus-visible:ring-2 focus-visible:ring-ve-accent'
-        }`}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onKeyDown={onKeyDown}
-        onWheel={(e) => !disabled && set(shown + (e.deltaY < 0 ? step : -step))}
+      <svg
+        viewBox="0 0 100 18"
+        className="h-[14px] w-full"
+        preserveAspectRatio="none"
+        aria-hidden="true"
       >
-        <svg
-          viewBox="0 0 100 18"
-          className="h-[14px] w-full"
-          preserveAspectRatio="none"
-          aria-hidden="true"
-        >
           <defs>
             <linearGradient id={gFill} x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="#2f7fd6" />
-              <stop offset="100%" stopColor="#86c5ff" />
+              <stop offset="0%" stopColor="var(--color-ve-accent-700)" />
+              <stop offset="100%" stopColor="var(--color-ve-accent)" />
             </linearGradient>
             <linearGradient id={gCap} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="#fafcff" />
@@ -186,7 +183,37 @@ export const Fader = ({
           </g>
         </svg>
       </div>
-      <span className="field-label leading-none">{label}</span>
+  );
+
+  const valueText = (
+    <span className="font-mono text-[11px] font-bold text-ve-text tabular-nums leading-none">
+      {shown}
+    </span>
+  );
+  const labelText = <span className="field-label leading-none">{label}</span>;
+
+  if (inline) {
+    // Один рядок: підпис · доріжка (тягнеться) · значення — нижчий за стек.
+    return (
+      <div
+        className="flex select-none items-center gap-2"
+        style={{ width }}
+      >
+        {labelText}
+        <div className="min-w-0 flex-1">{track}</div>
+        {valueText}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex select-none flex-col items-center gap-0.5"
+      style={{ width }}
+    >
+      {valueText}
+      {track}
+      {labelText}
     </div>
   );
 };

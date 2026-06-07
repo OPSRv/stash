@@ -39,7 +39,7 @@ export const PatchModal = ({
               className={`rounded-md border px-2 py-2 text-sm transition ${
                 on
                   ? 'border-ve-accent text-white shadow-[0_0_12px_rgba(74,163,255,0.35)]'
-                  : 'border-ve-stroke bg-ve-bg-2 text-ve-dim'
+                  : 've-pedal text-ve-dim'
               }`}
               style={
                 on

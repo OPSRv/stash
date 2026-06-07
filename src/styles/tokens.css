@@ -39,8 +39,12 @@
   --color-ve-text: #e6eaf0;
   --color-ve-dim: #8b94a3;
   --color-ve-faint: #5b6470;
-  --color-ve-accent: #4aa3ff;
-  --color-ve-accent-700: #2f7fd6;
+  /* Accent follows the app-wide theme accent (`--stash-accent-rgb`, set at
+   * runtime by applyTheme) so the Valeton glass UI — gradients, rings, LEDs,
+   * active states — matches whatever accent the user picked in Settings,
+   * instead of a fixed blue. `-700` is a darkened shade for gradient bases. */
+  --color-ve-accent: rgb(var(--stash-accent-rgb));
+  --color-ve-accent-700: color-mix(in srgb, rgb(var(--stash-accent-rgb)) 78%, #04070b);
   --color-ve-danger: #ff5c5c;
   --color-ve-on: #3ddc97;
 

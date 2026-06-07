@@ -166,7 +166,7 @@ export const ValetonShell = () => {
       ref={rootRef}
       className="valeton-root flex h-full flex-col overflow-hidden px-3"
     >
-      <header className="panel-bar relative -mx-3 shrink-0 border-b border-ve-stroke px-4 py-2.5">
+      <header className="panel-bar relative -mx-3 shrink-0 border-b border-white/10 px-4 py-1.5">
         <span className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-linear-to-r from-transparent via-ve-accent/45 to-transparent" />
         <Toolbar
           onOpenPatch={() => setShowPatch(true)}
@@ -206,7 +206,7 @@ export const ValetonShell = () => {
                 </section>
                 <section
                   aria-label="Recorder"
-                  className="flex-1 basis-0 overflow-hidden rounded-[10px] border border-ve-stroke bg-ve-bg-1"
+                  className="ve-panel flex-1 basis-0 overflow-hidden rounded-[10px]"
                 >
                   <RecorderShell embedded />
                 </section>
@@ -223,7 +223,7 @@ export const ValetonShell = () => {
         )}
       </main>
 
-      <footer className="panel-bar relative -mx-3 shrink-0 border-t border-ve-stroke backdrop-blur">
+      <footer className="panel-bar relative -mx-3 shrink-0 border-t border-white/10">
         <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-linear-to-r from-transparent via-ve-accent/45 to-transparent" />
         <StatusBar />
       </footer>

@@ -1,4 +1,4 @@
-import { changeParam, toggleBlock } from '../lib/actions';
+import { changeModel, changeParam, toggleBlock } from '../lib/actions';
 import { type BlockConfig, modelsFor } from '../lib/blocks';
 import type { ParamDef } from '../lib/constants';
 import { paramDefs } from '../lib/protocol';
@@ -11,6 +11,18 @@ import { ToggleSwitch } from './ui/ToggleSwitch';
 
 const isBinary = (def: ParamDef) =>
   def[3] === 0 && def[4] === 1 && def[5] === 1;
+
+const Arrow = ({ dir }: { dir: 'prev' | 'next' }) => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <path
+      d={dir === 'prev' ? 'M10 4l-4 4 4 4' : 'M6 4l4 4-4 4'}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 /** Параметр-перелік: у підписі список варіантів через " / " (напр.
    "MidFreq 220Hz / 450Hz / …"). Перший токен — назва + перший варіант. */
@@ -36,26 +48,62 @@ export const EffectCard = ({ block }: { block: BlockConfig }) => {
   const defs = paramDefs(index, selected);
   const models = modelsFor(block, cabModels, nsModels);
   const hasParams = defs.some((def) => def[0]);
+  const hasNav = block.hasPicker && models.length > 1;
+
+  // Циклічний крок по моделях (за краєм → інший кінець). Раніше жив у
+  // IconPicker; піднятий сюди, щоб стрілки стояли в рядку з назвою блока.
+  const stepModel = (dir: 1 | -1) => {
+    if (models.length <= 1) return;
+    const i = models.findIndex((m) => m.value === selected);
+    const base = i < 0 ? 0 : i;
+    const next = (base + dir + models.length) % models.length;
+    changeModel(key, models[next].value);
+  };
 
   return (
     <div
       className="card relative overflow-hidden p-4 lg:flex lg:h-full lg:flex-col"
       data-id={`${key}_card`}
     >
-      <span className="absolute inset-x-0 top-0 h-0.5 bg-linear-to-r from-ve-accent to-transparent opacity-50" />
-      <div className="flex items-center gap-2.5">
-        <ToggleSwitch
-          checked={enabled}
-          disabled={locked}
-          dataId={`${key}_switch`}
-          label={`${block.label} on/off`}
-          tone="on"
-          size={34}
-          onChange={(on) => toggleBlock(key, on)}
-        />
-        <span className="text-sm font-semibold tracking-wide text-ve-text">
-          {block.label}
-        </span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <ToggleSwitch
+            checked={enabled}
+            disabled={locked}
+            dataId={`${key}_switch`}
+            label={`${block.label} on/off`}
+            tone="on"
+            size={34}
+            onChange={(on) => toggleBlock(key, on)}
+          />
+          <span className="text-sm font-semibold tracking-wide text-ve-text">
+            {block.label}
+          </span>
+        </div>
+        {hasNav && (
+          <div className="flex gap-1">
+            <button
+              type="button"
+              className="icon-nav"
+              data-id={`${key}_prev`}
+              disabled={locked}
+              aria-label="Previous model"
+              onClick={() => stepModel(-1)}
+            >
+              <Arrow dir="prev" />
+            </button>
+            <button
+              type="button"
+              className="icon-nav"
+              data-id={`${key}_next`}
+              disabled={locked}
+              aria-label="Next model"
+              onClick={() => stepModel(1)}
+            >
+              <Arrow dir="next" />
+            </button>
+          </div>
+        )}
       </div>
 
       {block.hasPicker && (
@@ -73,7 +121,7 @@ export const EffectCard = ({ block }: { block: BlockConfig }) => {
       )}
 
       {hasParams && (
-        <div className="mt-4 rounded-xl border border-ve-stroke bg-ve-bg-1/60 p-4">
+        <div className="ve-well mt-4 rounded-xl p-4">
           <div className="flex flex-wrap justify-center gap-x-4 gap-y-5">
             {defs.map((def, i) => {
               if (!def[0]) return null;

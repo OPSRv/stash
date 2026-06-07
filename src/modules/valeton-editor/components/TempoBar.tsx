@@ -190,7 +190,7 @@ export const TempoBar = () => {
   const bpm = useStore((s) => s.bpm);
 
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-xl border border-ve-stroke bg-ve-bg-1/60 px-3 py-2.5">
+    <div className="ve-well mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 rounded-xl px-3 py-2.5">
       <div className="flex items-center gap-1.5">
         {DIVISIONS.map((d) => {
           const active = tapDivision === d.value;
@@ -201,7 +201,7 @@ export const TempoBar = () => {
               data-id={`tap_${d.value}`}
               disabled={locked}
               title={d.title}
-              className="rounded p-0.5 outline-none transition hover:bg-ve-bg-3 focus-visible:ring-2 focus-visible:ring-ve-accent disabled:opacity-40"
+              className="rounded p-0.5 outline-none transition hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-ve-accent disabled:opacity-40"
               onClick={() => setDivision(d.value)}
             >
               <NoteGlyph kind={d.value} lit={active} />
@@ -241,7 +241,7 @@ export const TempoBar = () => {
         onChange={(v) => setBpm(v)}
       />
 
-      <span className="h-4 w-px bg-ve-stroke" />
+      <span className="h-4 w-px bg-white/15" />
 
       {/* Toggle + підпис тримаємо в одному нерозривному блоці, щоб GLOBAL
           не «відривався» на власний рядок при переносі */}

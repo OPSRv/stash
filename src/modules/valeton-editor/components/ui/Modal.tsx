@@ -36,19 +36,16 @@ export const Modal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm"
       onMouseDown={() => !staticBackdrop && onClose()}
     >
       <div
         data-id={dataId}
-        className="w-full max-w-md rounded-2xl border border-ve-stroke shadow-2xl"
-        style={{
-          background: 'linear-gradient(180deg, var(--color-ve-bg-1), #0f1217)',
-        }}
+        className="ve-panel w-full max-w-md rounded-2xl"
         onMouseDown={(e) => e.stopPropagation()}
       >
         {(title || !hideClose) && (
-          <div className="flex items-center justify-between border-b border-ve-stroke px-4 py-3">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <h2 className="text-base font-bold text-ve-text">{title}</h2>
             {!hideClose && (
               <button
@@ -64,7 +61,7 @@ export const Modal = ({
         )}
         <div className="max-h-[72vh] overflow-y-auto px-4 py-4">{children}</div>
         {footer && (
-          <div className="flex justify-end gap-2 border-t border-ve-stroke px-4 py-3">
+          <div className="flex justify-end gap-2 border-t border-white/10 px-4 py-3">
             {footer}
           </div>
         )}

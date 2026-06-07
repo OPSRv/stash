@@ -61,10 +61,10 @@ export const LiveView = () => {
               key={b}
               type="button"
               data-id={`${block.key}_live`}
-              className={`flex h-full items-center justify-center rounded-2xl border bg-ve-bg-2 p-2 transition disabled:opacity-40 ${
+              className={`ve-pedal flex h-full items-center justify-center rounded-2xl p-2 transition disabled:opacity-40 ${
                 on
-                  ? 'border-ve-on opacity-100 shadow-[0_0_22px_rgba(61,220,151,0.4)]'
-                  : 'border-ve-stroke opacity-40 hover:opacity-70'
+                  ? '!border-ve-on opacity-100 shadow-[0_0_26px_rgba(61,220,151,0.4)]'
+                  : 'opacity-40 hover:opacity-70'
               }`}
               disabled={locked}
               onClick={() => toggleBlock(block.key, !on)}
