@@ -1223,16 +1223,18 @@
 }
 
 /* Scrollbars — thin dark pill, unlayered so they beat any lingering UA
-   or layered rule. `html` prefix gives them non-zero specificity.
-   `-webkit-appearance: none` disables macOS overlay-scrollbar default
-   sizing so our width/height take effect even when "Show scroll bars:
-   Always" is on. Track stays transparent. */
+   or layered rule. `html` prefix gives them non-zero specificity, track
+   stays transparent.
+   NOTE: do NOT add `-webkit-appearance: none` here. Blink (Chrome, where
+   `npm run dev` runs) ignores it and still paints our custom bar, but
+   WKWebView (the production .app) treats it as "use the native look" and
+   falls back to the chunky macOS scrollbar with a visible track. Omitting
+   it is what makes dev and the shipped build match. */
 html ::-webkit-scrollbar,
 html::-webkit-scrollbar {
-  width: 6px !important;
-  height: 6px !important;
+  width: 8px !important;
+  height: 8px !important;
   background: transparent !important;
-  -webkit-appearance: none !important;
 }
 html ::-webkit-scrollbar-track,
 html::-webkit-scrollbar-track {
@@ -1268,21 +1270,16 @@ html, body, * {
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
-/* WKWebView quirk (same class of bug as the textarea/input block below):
-   WebKit honours `::-webkit-scrollbar` reliably only through a *direct,
-   simple* selector. The `html ::-webkit-scrollbar` descendant rule above is
-   matched by Chrome (`npm run dev`) but skipped by WKWebView for many
-   scrollers — most visibly the Valeton patch list, which `PedalSelect`
-   portals to `document.body` (outside `.valeton-root`, so the module's own
-   `.scroll-area` overflow rule can't reach it either). Result: the production
-   `.app` fell back to the chunky native macOS scrollbar while dev looked
-   thin. A bare universal selector gives WebKit the simple form it accepts,
-   so both environments match. Values mirror the `html` block above. */
+/* Bare universal mirror of the `html` block, for scrollers that the
+   descendant selector might miss — e.g. the Valeton patch list, which
+   `PedalSelect` portals to `document.body` (outside `.valeton-root`, so the
+   module's own `.scroll-area` rule can't reach it either). Same no-appearance
+   rule as above: keep it off so WKWebView paints our pill, not the native
+   bar. Values mirror the `html` block. */
 ::-webkit-scrollbar {
-  width: 6px !important;
-  height: 6px !important;
+  width: 8px !important;
+  height: 8px !important;
   background: transparent !important;
-  -webkit-appearance: none !important;
 }
 ::-webkit-scrollbar-track {
   background: transparent !important;
@@ -1291,7 +1288,8 @@ html, body, * {
 }
 ::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb) !important;
-  border: 0 !important;
+  border: 2px solid transparent !important;
+  background-clip: padding-box !important;
   border-radius: 99px !important;
   min-height: 24px !important;
 }
@@ -1317,10 +1315,9 @@ html, body, * {
    environments match. */
 textarea::-webkit-scrollbar,
 input::-webkit-scrollbar {
-  width: 6px !important;
-  height: 6px !important;
+  width: 8px !important;
+  height: 8px !important;
   background: transparent !important;
-  -webkit-appearance: none !important;
 }
 textarea::-webkit-scrollbar-track,
 input::-webkit-scrollbar-track {
