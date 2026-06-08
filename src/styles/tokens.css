@@ -1268,6 +1268,46 @@ html, body, * {
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
+/* WKWebView quirk (same class of bug as the textarea/input block below):
+   WebKit honours `::-webkit-scrollbar` reliably only through a *direct,
+   simple* selector. The `html ::-webkit-scrollbar` descendant rule above is
+   matched by Chrome (`npm run dev`) but skipped by WKWebView for many
+   scrollers — most visibly the Valeton patch list, which `PedalSelect`
+   portals to `document.body` (outside `.valeton-root`, so the module's own
+   `.scroll-area` overflow rule can't reach it either). Result: the production
+   `.app` fell back to the chunky native macOS scrollbar while dev looked
+   thin. A bare universal selector gives WebKit the simple form it accepts,
+   so both environments match. Values mirror the `html` block above. */
+::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+  background: transparent !important;
+  -webkit-appearance: none !important;
+}
+::-webkit-scrollbar-track {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb) !important;
+  border: 0 !important;
+  border-radius: 99px !important;
+  min-height: 24px !important;
+}
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-hover) !important;
+}
+::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
 /* WKWebView quirk: `<textarea>` and `<input>` scrollbars live in
    their internal shadow scroller and ignore the cascading
    `html ::-webkit-scrollbar` rule above. Without direct selectors
