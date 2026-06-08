@@ -31,16 +31,14 @@ const baseJob = (overrides: Partial<SeparatorJob> = {}): SeparatorJob => ({
 });
 
 describe('CompletedRow', () => {
-  it('renders an inline audio player for the source file and every stem', () => {
-    const { container } = render(
-      <CompletedRow job={baseJob()} onRemove={vi.fn()} />,
-    );
-    // 1 source player + 3 stem players = 4 `<audio>` elements.
-    expect(container.querySelectorAll('audio')).toHaveLength(4);
-    // Stem cards each surface their player and label.
-    expect(screen.getByTestId('stem-vocals')).toBeInTheDocument();
-    expect(screen.getByTestId('stem-drums')).toBeInTheDocument();
-    expect(screen.getByTestId('stem-bass')).toBeInTheDocument();
+  it('renders the source player and a mixer lane for every stem', () => {
+    render(<CompletedRow job={baseJob()} onRemove={vi.fn()} />);
+    // Stems now play through a single Web Audio mixer, not per-stem
+    // `<audio>` elements: one lane per stem inside the StemMixer.
+    expect(screen.getByTestId('stem-mixer')).toBeInTheDocument();
+    expect(screen.getByTestId('mixer-lane-vocals')).toBeInTheDocument();
+    expect(screen.getByTestId('mixer-lane-drums')).toBeInTheDocument();
+    expect(screen.getByTestId('mixer-lane-bass')).toBeInTheDocument();
   });
 
   it('does not render the source player for a failed job (file may not exist)', () => {
@@ -57,10 +55,10 @@ describe('CompletedRow', () => {
 
   it('exposes hover-only Finder/Copy actions for each stem', () => {
     render(<CompletedRow job={baseJob()} onRemove={vi.fn()} />);
-    // Each stem ships its own action cluster — opacity-0 by default,
-    // surfaced on hover; we just assert the cluster exists.
-    expect(screen.getByTestId('stem-vocals-actions')).toBeInTheDocument();
-    expect(screen.getByTestId('stem-drums-actions')).toBeInTheDocument();
-    expect(screen.getByTestId('stem-bass-actions')).toBeInTheDocument();
+    // Each mixer lane ships its own action cluster — opacity-0 by
+    // default, surfaced on hover; we just assert the cluster exists.
+    expect(screen.getByTestId('mixer-lane-vocals-actions')).toBeInTheDocument();
+    expect(screen.getByTestId('mixer-lane-drums-actions')).toBeInTheDocument();
+    expect(screen.getByTestId('mixer-lane-bass-actions')).toBeInTheDocument();
   });
 });

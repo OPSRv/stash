@@ -146,6 +146,74 @@ HTMLElement.prototype.getBoundingClientRect = function () {
   } as DOMRect;
 };
 
+// jsdom ships no Web Audio API. Components that build an audio graph on mount
+// (e.g. separator's StemMixer) would otherwise throw `AudioContext is not a
+// constructor` and crash the render. Provide a minimal stub: every node is a
+// chainable no-op exposing the handful of fields our graph touches.
+if (typeof (globalThis as { AudioContext?: unknown }).AudioContext === 'undefined') {
+  const makeParam = () => ({
+    value: 0,
+    setValueAtTime: () => {},
+    linearRampToValueAtTime: () => {},
+    setTargetAtTime: () => {},
+    cancelScheduledValues: () => {},
+  });
+  const makeNode = () => {
+    const node: Record<string, unknown> = {
+      gain: makeParam(),
+      frequency: makeParam(),
+      channelCount: 2,
+      channelCountMode: 'max',
+      channelInterpretation: 'speakers',
+      buffer: null,
+      playbackRate: makeParam(),
+      onended: null,
+      connect: () => node,
+      disconnect: () => {},
+      start: () => {},
+      stop: () => {},
+      getFloatTimeDomainData: () => {},
+      getByteFrequencyData: () => {},
+    };
+    return node;
+  };
+  class AudioContextStub {
+    destination = makeNode();
+    currentTime = 0;
+    sampleRate = 44_100;
+    state = 'running';
+    createGain = makeNode;
+    createBufferSource = makeNode;
+    createAnalyser = makeNode;
+    createMediaElementSource = makeNode;
+    createBuffer = () => ({
+      duration: 0,
+      length: 0,
+      numberOfChannels: 2,
+      sampleRate: 44_100,
+      getChannelData: () => new Float32Array(0),
+    });
+    decodeAudioData = () =>
+      Promise.resolve({
+        duration: 0,
+        length: 0,
+        numberOfChannels: 2,
+        sampleRate: 44_100,
+        getChannelData: () => new Float32Array(0),
+      });
+    resume = () => Promise.resolve();
+    suspend = () => Promise.resolve();
+    close = () => Promise.resolve();
+  }
+  // Only define the standard `AudioContext` — NOT `webkitAudioContext`.
+  // Some consumers prefer `window.webkitAudioContext ?? AudioContext` and
+  // tests that stub `AudioContext` themselves rely on the webkit alias staying
+  // absent so their stub is the one picked up (see metronome engine tests).
+  const Ctor = AudioContextStub as unknown as typeof AudioContext;
+  (globalThis as { AudioContext?: typeof AudioContext }).AudioContext = Ctor;
+  (window as unknown as { AudioContext: typeof AudioContext }).AudioContext = Ctor;
+}
+
 afterEach(() => {
   cleanup();
 });

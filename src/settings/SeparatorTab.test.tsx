@@ -5,6 +5,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { SeparatorTab } from './SeparatorTab';
 import type { SeparatorStatus } from '../modules/separator/api';
 
+// The NeuralNote installer row renders its own independent "Install" button
+// (driven by a separate backend status). It has its own test surface; stub it
+// here so these assertions count only the separator pack's own controls.
+vi.mock('./NeuralNoteInstallRow', () => ({
+  NeuralNoteInstallRow: () => null,
+}));
+
 const mockedInvoke = vi.mocked(invoke);
 
 const notInstalled: SeparatorStatus = {
