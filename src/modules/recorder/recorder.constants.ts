@@ -44,8 +44,9 @@ export const MIC_PREF_KEY = 'stash:recorder:micDeviceId';
 export const GAIN_PREF_KEY = 'stash:recorder:inputGain';
 
 /** Input-gain bounds. `1` is unity (mic passed through untouched); below
- *  attenuates, above boosts. Kept ≤2× so a slip of the slider can't blow the
- *  signal into hard clipping. */
+ *  attenuates, above boosts. Capped at 4× so a genuinely quiet mic can be
+ *  brought up to a usable level — high enough to clip a hot input, so the
+ *  upper half of the range is a "use with care" zone. */
 export const GAIN_MIN = 0;
-export const GAIN_MAX = 2;
+export const GAIN_MAX = 4;
 export const GAIN_DEFAULT = 1;

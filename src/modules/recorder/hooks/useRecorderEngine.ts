@@ -60,6 +60,17 @@ const saveGain = (g: number): void => {
   }
 };
 
+/** Raw-capture audio constraints. The browser defaults — echo cancellation,
+ *  noise suppression and auto-gain — are tuned for VoIP and in WKWebView they
+ *  noticeably duck and dull the signal, which is exactly the "records too
+ *  quiet" complaint. We want the full, unprocessed mic level; the in-app gain
+ *  stage is the only thing allowed to scale it. */
+const RAW_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+};
+
 /** Normalized [0..1] loudness from an `AnalyserNode` — simple RMS, enough for
  *  a visual level meter while recording. */
 const readLevel = (analyser: AnalyserNode, buf: Uint8Array): number => {
@@ -228,15 +239,17 @@ export const useRecorderEngine = () => {
     let stream: MediaStream;
     try {
       stream = wanted
-        ? await nav.mediaDevices.getUserMedia({ audio: { deviceId: { exact: wanted } } })
-        : await nav.mediaDevices.getUserMedia({ audio: true });
+        ? await nav.mediaDevices.getUserMedia({
+            audio: { ...RAW_AUDIO_CONSTRAINTS, deviceId: { exact: wanted } },
+          })
+        : await nav.mediaDevices.getUserMedia({ audio: { ...RAW_AUDIO_CONSTRAINTS } });
     } catch (e) {
       const err = e as DOMException;
       // Saved device vanished — retry on whatever the system default is.
       if (wanted && (err?.name === 'OverconstrainedError' || err?.name === 'NotFoundError')) {
         saveMic(null);
         try {
-          stream = await nav.mediaDevices.getUserMedia({ audio: true });
+          stream = await nav.mediaDevices.getUserMedia({ audio: { ...RAW_AUDIO_CONSTRAINTS } });
         } catch (e2) {
           return failOpen(e2);
         }
