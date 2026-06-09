@@ -17,12 +17,17 @@ import {
 } from './ui/icons';
 import { PedalSelect } from '../../../shared/ui/PedalSelect';
 import {MasterBar} from "./MasterBar.tsx";
+import { InlineTuner } from './InlineTuner';
 
 interface ToolbarProps {
   onOpenPatch: () => void;
   onOpenSettings: () => void;
   onOpenTuner: () => void;
   onOpenPresetAi: () => void;
+  /** Whether the inline live tuner is engaged (mic listening). */
+  tunerLive: boolean;
+  /** Toggle the inline live tuner on/off. */
+  onToggleTuner: () => void;
 }
 
 // бренд-гліф: медіатор (guitar pick) — упізнаваний знак гітарного процесора.
@@ -50,6 +55,8 @@ export const Toolbar = ({
   onOpenSettings,
   onOpenTuner,
   onOpenPresetAi,
+  tunerLive,
+  onToggleTuner,
 }: ToolbarProps) => {
   const connected = useStore((s) => s.connected);
   const connecting = useStore((s) => s.connecting);
@@ -211,12 +218,14 @@ export const Toolbar = ({
           <button
             type="button"
             data-id="btn_show_tuner"
-            className="seg-btn px-2"
-            title="Guitar tuner"
-            onClick={onOpenTuner}
+            className={`seg-btn px-2 ${tunerLive ? 'active' : ''}`}
+            aria-pressed={tunerLive}
+            title={tunerLive ? 'Stop live tuner' : 'Live tuner'}
+            onClick={onToggleTuner}
           >
             <IconTuningFork />
           </button>
+          {tunerLive && <InlineTuner onExpand={onOpenTuner} />}
           <button
             type="button"
             data-id="btn_save_patch"

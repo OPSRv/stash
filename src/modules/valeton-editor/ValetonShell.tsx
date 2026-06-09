@@ -65,6 +65,7 @@ export const ValetonShell = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showPatch, setShowPatch] = useState(false);
   const [showTuner, setShowTuner] = useState(false);
+  const [tunerLive, setTunerLive] = useState(false);
   const [showPresetAi, setShowPresetAi] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -173,6 +174,8 @@ export const ValetonShell = () => {
           onOpenSettings={() => setShowSettings(true)}
           onOpenTuner={() => setShowTuner(true)}
           onOpenPresetAi={() => setShowPresetAi(true)}
+          tunerLive={tunerLive}
+          onToggleTuner={() => setTunerLive((v) => !v)}
         />
       </header>
 

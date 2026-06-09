@@ -8,6 +8,8 @@ interface TranslationBannerProps {
   original: string;
   translated: string;
   to: string;
+  pinned: boolean;
+  onPin: () => void;
   onDismiss: () => void;
 }
 
@@ -24,6 +26,8 @@ export const TranslationBanner = ({
   original,
   translated,
   to,
+  pinned,
+  onPin,
   onDismiss,
 }: TranslationBannerProps) => {
   const copyTranslation = () => {
@@ -32,8 +36,10 @@ export const TranslationBanner = ({
 
   return (
     <div
-      className="p-2.5 rounded-lg flex items-start gap-2"
+      className="p-2.5 rounded-lg flex items-start gap-2 cursor-default"
       style={bannerStyle}
+      onClick={pinned ? undefined : onPin}
+      title={pinned ? undefined : 'Click to keep this translation open'}
     >
       <span
         className="px-1.5 py-0.5 rounded tracking-wider t-primary shrink-0 uppercase"

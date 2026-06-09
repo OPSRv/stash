@@ -118,6 +118,8 @@ export const PopupShell = () => {
     translated: string;
     to: string;
   }>(null);
+  // Clicking the banner pins it open, cancelling the auto-dismiss timer.
+  const [translationPinned, setTranslationPinned] = useState(false);
   const [nowPlaying, setNowPlaying] = useState<NowPlaying | null>(null);
   const [webchatNp, setWebchatNp] = useState<WebchatNowPlaying | null>(null);
   const [webchatServices, setWebchatServices] = useState<
@@ -552,6 +554,7 @@ export const PopupShell = () => {
       to: string;
     };
     const unlisten = listen<Payload>('clipboard:translated', async (e) => {
+      setTranslationPinned(false);
       setTranslation({
         original: e.payload.original,
         translated: e.payload.translated,
@@ -584,12 +587,13 @@ export const PopupShell = () => {
   }, []);
 
   // Auto-dismiss the banner after a comfortable read — but only if the user
-  // hasn't dismissed it manually first. Resets on every new translation.
+  // hasn't dismissed it manually first or pinned it open by clicking. Resets
+  // on every new translation.
   useEffect(() => {
-    if (!translation) return;
+    if (!translation || translationPinned) return;
     const t = window.setTimeout(() => setTranslation(null), 12_000);
     return () => window.clearTimeout(t);
-  }, [translation]);
+  }, [translation, translationPinned]);
 
   // Music is a native child webview overlay — the React `hidden` attribute
   // collapses its sizer but the native surface keeps rendering over whatever
@@ -834,6 +838,8 @@ export const PopupShell = () => {
               original={translation.original}
               translated={translation.translated}
               to={translation.to}
+              pinned={translationPinned}
+              onPin={() => setTranslationPinned(true)}
               onDismiss={() => setTranslation(null)}
             />
           )}

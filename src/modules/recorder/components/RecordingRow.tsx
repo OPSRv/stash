@@ -76,7 +76,10 @@ export const RecordingRow = ({
   const row = (
     <div className="recorder-row-inner group relative flex flex-col gap-1.5 rounded-[8px] px-2 py-2 hover:bg-[var(--bg-hover)]">
       <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
+        <div
+          className="min-w-0 flex-1"
+          onDoubleClick={() => !editing && setEditing(true)}
+        >
           {editing ? (
             <Input
               ref={inputRef}
@@ -96,7 +99,7 @@ export const RecordingRow = ({
               }}
             />
           ) : (
-            <>
+            <div className="select-none">
               <div className="truncate text-body t-primary" title={rec.name}>
                 {rec.name}
               </div>
@@ -104,7 +107,7 @@ export const RecordingRow = ({
                 {formatWhen(rec.created_at)}
                 {rec.device ? ` · ${shortDeviceLabel(rec.device)}` : ''}
               </div>
-            </>
+            </div>
           )}
         </div>
 

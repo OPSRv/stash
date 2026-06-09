@@ -11,6 +11,8 @@ describe('TranslationBanner', () => {
         original="Hello"
         translated="Привіт"
         to="uk"
+        pinned={false}
+        onPin={() => {}}
         onDismiss={() => {}}
       />
     );
@@ -27,6 +29,8 @@ describe('TranslationBanner', () => {
         original="Hello"
         translated="Привіт"
         to="uk"
+        pinned={false}
+        onPin={() => {}}
         onDismiss={() => {}}
       />
     );
@@ -42,6 +46,8 @@ describe('TranslationBanner', () => {
         original="Hello"
         translated="Привіт"
         to="uk"
+        pinned={false}
+        onPin={() => {}}
         onDismiss={onDismiss}
       />
     );

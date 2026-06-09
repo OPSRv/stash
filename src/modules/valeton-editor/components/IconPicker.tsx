@@ -26,7 +26,7 @@ export const IconPicker = ({ block, models, selected, disabled }: Props) => {
     <div className="flex min-h-0 flex-col lg:h-full">
       <div
         ref={gridRef}
-        className="grid auto-rows-min content-start max-h-[360px] gap-2.5 overflow-y-auto pb-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))] lg:max-h-none lg:min-h-0 lg:flex-1"
+        className="grid auto-rows-min content-start max-h-[360px] gap-2.5 overflow-y-auto pb-2 [grid-template-columns:repeat(auto-fill,minmax(104px,1fr))] lg:max-h-none lg:min-h-0 lg:flex-1"
         data-id={`${block.key}_icon_strip`}
         role="listbox"
         aria-label={`${block.label} model`}

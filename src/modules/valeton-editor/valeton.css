@@ -333,7 +333,7 @@
   color: var(--color-ve-accent);
 }
 .valeton-root .icon-tile img {
-  height: 120px;
+  height: 78px;
   width: 100%;
   object-fit: contain;
   pointer-events: none;
@@ -538,6 +538,99 @@
 }
 .valeton-root .seg-btn.accent {
   color: var(--color-ve-accent);
+}
+
+/* ---------- Inline live tuner (пігулка біля камертона) ----------
+ * Зʼявляється у тулбарі, коли камертон-тогл активний: нота + міні-метр центів.
+ * Клік відкриває повну модалку тюнера. */
+.valeton-root .tuner-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  height: 1.75rem;
+  padding: 0 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--ve-glass-sunken);
+  box-shadow: inset 0 0 0 1px var(--ve-glass-border);
+  color: var(--color-ve-dim);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition:
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.valeton-root .tuner-pill:hover {
+  box-shadow: inset 0 0 0 1px var(--ve-glass-border-2);
+}
+.valeton-root .tuner-pill[data-active] {
+  color: #fff;
+}
+.valeton-root .tuner-pill-note {
+  display: inline-block;
+  width: 2.8ch;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.valeton-root .tuner-pill-oct {
+  margin-left: 0.05rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  opacity: 0.6;
+}
+/* Міні-метр: ±50¢ доріжка з центральною рискою та рухомою крапкою. */
+.valeton-root .tuner-pill-meter {
+  position: relative;
+  width: 64px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.valeton-root .tuner-pill-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: rgba(255, 255, 255, 0.28);
+}
+.valeton-root .tuner-pill-dot {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+  background: var(--color-ve-accent);
+  box-shadow: 0 0 6px rgba(var(--stash-accent-rgb), 0.7);
+  transition:
+    left 0.08s linear,
+    background-color 0.15s ease;
+}
+.valeton-root .tuner-pill[data-tuned] .tuner-pill-dot {
+  background: #34d399;
+  box-shadow: 0 0 7px rgba(52, 211, 153, 0.8);
+}
+/* Утримана (не поточна) нота — приглушуємо крапку, але не ховаємо, щоб метр
+ * не блимав між щипками. */
+.valeton-root .tuner-pill:not([data-active]) .tuner-pill-dot {
+  opacity: 0.4;
+}
+.valeton-root .tuner-pill-cents {
+  width: 3ch;
+  text-align: center;
+  font-size: 0.6875rem;
+  opacity: 0.75;
+}
+.valeton-root .tuner-pill[data-tuned] .tuner-pill-cents {
+  color: #34d399;
+  opacity: 1;
+}
+.valeton-root .tuner-pill-msg {
+  font-size: 0.6875rem;
+  color: var(--color-ve-danger, #f87171);
 }
 
 /* ---------- Вертикальний розділювач ---------- */
