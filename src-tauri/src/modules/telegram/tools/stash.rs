@@ -555,6 +555,139 @@ impl Tool for TunerControl {
     }
 }
 
+// ---- Valeton: AI tone ----
+
+pub struct ValetonSetTone;
+
+#[async_trait]
+impl Tool for ValetonSetTone {
+    fn name(&self) -> &'static str {
+        "valeton_set_tone"
+    }
+    fn description(&self) -> &'static str {
+        "Design a guitar tone on the Valeton GP-5 from a natural-language \
+         description and apply it to the current patch. Pass the user's full \
+         intent verbatim — genre, artist/song reference, amp/cab character, \
+         gain level, effects (drive, delay, reverb, modulation), brightness, \
+         etc. An AI designs a complete signal chain (amp, cab, EQ, drive, \
+         time-based fx) matching the request and the editor applies it live. \
+         Use for requests like \"warm Gilmour lead\", \"tight metal rhythm\", \
+         \"clean funk with chorus\". Requires the GP-5 to be connected."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "Free-text description of the desired tone, as detailed as the user gave it."
+                }
+            },
+            "required": ["description"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let desc = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "missing required field: description".to_string())?;
+        run_slash(ctx, "valeton", &format!("tone {desc}")).await
+    }
+}
+
+// ---- Valeton: discrete control ----
+
+pub struct ValetonControl;
+
+#[async_trait]
+impl Tool for ValetonControl {
+    fn name(&self) -> &'static str {
+        "valeton_control"
+    }
+    fn description(&self) -> &'static str {
+        "Drive discrete Valeton GP-5 editor actions: switch to a stored patch, \
+         set the tap-tempo BPM and note division, toggle an effect block on/off, \
+         and save the current edit buffer back into the active patch. Any field \
+         you omit is left untouched. For designing a whole tone from a \
+         description use `valeton_set_tone` instead. Requires the GP-5 connected."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "patch": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 99,
+                    "description": "Stored patch number to switch to (0..99)."
+                },
+                "bpm": {
+                    "type": "integer",
+                    "minimum": 40,
+                    "maximum": 240,
+                    "description": "Tap-tempo / delay-sync BPM."
+                },
+                "division": {
+                    "type": "string",
+                    "enum": ["quarter", "eighth", "dotted"],
+                    "description": "Note division for the tempo."
+                },
+                "block": {
+                    "type": "string",
+                    "enum": ["nr", "pre", "dst", "amp", "cab", "eq", "mod", "dly", "rvb", "ns"],
+                    "description": "Effect block to toggle (NR, pre, distortion, amp, cab, EQ, modulation, delay, reverb, noise-suppressor)."
+                },
+                "block_on": {
+                    "type": "boolean",
+                    "description": "Target on/off state for `block`. Required when `block` is set."
+                },
+                "save": {
+                    "type": "boolean",
+                    "description": "Set true to save the current edit buffer into the active patch."
+                }
+            },
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(p) = args.get("patch").and_then(|v| v.as_u64()) {
+            parts.push(format!("patch={p}"));
+        }
+        if let Some(bpm) = args.get("bpm").and_then(|v| v.as_u64()) {
+            parts.push(format!("bpm={bpm}"));
+        }
+        if let Some(div) = args.get("division").and_then(|v| v.as_str()) {
+            parts.push(format!("div={div}"));
+        }
+        match (
+            args.get("block").and_then(|v| v.as_str()),
+            args.get("block_on").and_then(|v| v.as_bool()),
+        ) {
+            (Some(b), Some(on)) => parts.push(format!("{b}={}", if on { "on" } else { "off" })),
+            (Some(_), None) => {
+                return Err("block_on is required when block is set".to_string())
+            }
+            (None, Some(_)) => {
+                return Err("block is required when block_on is set".to_string())
+            }
+            _ => {}
+        }
+        if args.get("save").and_then(|v| v.as_bool()) == Some(true) {
+            parts.push("save".to_string());
+        }
+        if parts.is_empty() {
+            return Err(
+                "at least one of patch/bpm/division/block/save required".to_string(),
+            );
+        }
+        run_slash(ctx, "valeton", &parts.join(" ")).await
+    }
+}
+
 // ---- Recorder ----
 
 pub struct RecordControl;

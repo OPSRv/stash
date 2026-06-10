@@ -28,6 +28,7 @@ import { confirmHandshake } from './lib/connection';
 import { onDisconnected } from './lib/bluetooth';
 import { connectMidi, disconnectMidi, handleMIDIMessage } from './lib/midi';
 import { handleNotification } from './lib/bluetooth';
+import { applyValetonRemote, type ValetonRemote } from './lib/remote';
 import { runtime } from './lib/runtime';
 import { nextPatch, prevPatch } from './lib/transport';
 import { getState, useStore } from './store/store';
@@ -96,6 +97,18 @@ export const ValetonShell = () => {
   // Сам стрій застосовує TunerShell усередині модалки; тут лише відкриваємо її.
   useEffect(() => {
     const un = listen('tuner:remote', () => setShowTuner(true));
+    return () => {
+      un.then((f) => f()).catch(() => {});
+    };
+  }, []);
+
+  // Асистент / CLI може керувати редактором (вибір патча, темп, перемикання
+  // блоків, AI-тон, збереження) через `valeton:remote`. Дії виконуються тими
+  // ж хелперами з actions.ts, що й ручне редагування.
+  useEffect(() => {
+    const un = listen<ValetonRemote>('valeton:remote', (e) => {
+      void applyValetonRemote(e.payload);
+    });
     return () => {
       un.then((f) => f()).catch(() => {});
     };

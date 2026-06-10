@@ -351,12 +351,15 @@ pub fn valeton_save_file(path: String, bytes: Vec<u8>) -> Result<(), String> {
 use super::preset_prompt::PRESET_SPEC;
 
 /// Ask the configured AI assistant to design a Valeton preset from a
-/// natural-language request and return the raw JSON (the frontend parses +
-/// applies it). A focused one-shot completion — no tool loop, no chat history,
-/// reusing the AI module's provider/key from Settings. The model is told to
-/// emit ONLY the JSON object; the frontend still tolerates a stray code fence.
-#[tauri::command]
-pub async fn valeton_generate_preset(app: AppHandle, prompt: String) -> Result<String, String> {
+/// natural-language request and return the raw JSON. A focused one-shot
+/// completion — no tool loop, no chat history, reusing the AI module's
+/// provider/key from Settings. The model is told to emit ONLY the JSON object;
+/// the frontend still tolerates a stray code fence.
+///
+/// Shared by the `valeton_generate_preset` command (AI modal in the editor) and
+/// the `/valeton tone …` assistant slash-command, so both produce identical
+/// presets from the same spec.
+pub(crate) async fn generate_preset_json(app: &AppHandle, prompt: &str) -> Result<String, String> {
     use crate::modules::ai::state::AiState;
     use crate::modules::telegram::llm::{self, ChatMessage, LlmRequest};
     use tauri::Manager;
@@ -399,4 +402,11 @@ pub async fn valeton_generate_preset(app: AppHandle, prompt: String) -> Result<S
         return Err("The model returned no preset. Try rephrasing the request.".into());
     }
     Ok(text)
+}
+
+/// Thin Tauri-command wrapper around [`generate_preset_json`] for the editor's
+/// AI modal (the frontend parses + applies the returned JSON).
+#[tauri::command]
+pub async fn valeton_generate_preset(app: AppHandle, prompt: String) -> Result<String, String> {
+    generate_preset_json(&app, &prompt).await
 }

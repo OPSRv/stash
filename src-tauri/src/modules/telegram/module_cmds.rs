@@ -1205,6 +1205,58 @@ mod tests {
     }
 
     #[test]
+    fn parse_valeton_collects_patch_bpm_division() {
+        let r = parse_valeton_args("patch=12 bpm=120 div=eighth").unwrap();
+        assert_eq!(r.patch, Some(12));
+        assert_eq!(r.bpm, Some(120));
+        assert_eq!(r.division.as_deref(), Some("eighth"));
+    }
+
+    #[test]
+    fn parse_valeton_block_on_off() {
+        let on = parse_valeton_args("amp=on").unwrap();
+        assert_eq!(on.block.as_deref(), Some("amp"));
+        assert_eq!(on.block_on, Some(true));
+        let off = parse_valeton_args("dly=off").unwrap();
+        assert_eq!(off.block.as_deref(), Some("dly"));
+        assert_eq!(off.block_on, Some(false));
+    }
+
+    #[test]
+    fn parse_valeton_bare_save() {
+        let r = parse_valeton_args("save").unwrap();
+        assert_eq!(r.save, Some(true));
+    }
+
+    #[test]
+    fn parse_valeton_rejects_out_of_range_and_unknown() {
+        assert!(parse_valeton_args("patch=200").unwrap_err().contains("0–99"));
+        assert!(parse_valeton_args("bpm=999").unwrap_err().contains("40–240"));
+        assert!(parse_valeton_args("div=triplet").unwrap_err().contains("div"));
+        assert!(parse_valeton_args("amp=maybe").unwrap_err().contains("on|off"));
+        assert!(parse_valeton_args("foo=1").unwrap_err().contains("невідомий"));
+        // no recognised action at all
+        assert!(parse_valeton_args("").unwrap_err().contains("жодної"));
+    }
+
+    #[test]
+    fn format_valeton_reply_summarises_fields() {
+        let r = ValetonRemote {
+            patch: Some(7),
+            bpm: Some(90),
+            block: Some("amp".into()),
+            block_on: Some(true),
+            save: Some(true),
+            ..Default::default()
+        };
+        let out = format_valeton_reply(&r);
+        assert!(out.contains("патч 7"));
+        assert!(out.contains("90 BPM"));
+        assert!(out.contains("AMP on"));
+        assert!(out.contains("збереження"));
+    }
+
+    #[test]
     fn resolve_tuning_accepts_canonical_ids() {
         assert_eq!(resolve_tuning("standard-e").as_deref(), Some("standard-e"));
         assert_eq!(resolve_tuning("drop-a").as_deref(), Some("drop-a"));
@@ -2155,6 +2207,188 @@ impl CommandHandler for RecordCmd {
             "stop" => "⏹ Запис зупинено й збережено.".to_string(),
             _ => "⏯ Рекордер перемкнуто.".to_string(),
         })
+    }
+}
+
+// -------------------- /valeton --------------------
+
+/// Payload for the `valeton:remote` event. The Valeton editor applies every
+/// `Some` field against the current patch / device, in this order: select
+/// patch → apply AI preset → bpm/division → block on/off → save. Device I/O is
+/// best-effort: if the GP-5 isn't connected the editor updates its UI state and
+/// the changes flush on the next connect.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ValetonRemote {
+    /// Switch to patch 0..99 on the device.
+    pub patch: Option<u8>,
+    /// Tap-tempo / delay-sync BPM (40..240).
+    pub bpm: Option<u32>,
+    /// Note division for the tempo: `quarter` | `eighth` | `dotted`.
+    pub division: Option<String>,
+    /// Effect block key to toggle (`nr|pre|dst|amp|cab|eq|mod|dly|rvb|ns`).
+    pub block: Option<String>,
+    /// Target on/off state for `block`.
+    pub block_on: Option<bool>,
+    /// Persist the current edit buffer into the active patch on the device.
+    pub save: Option<bool>,
+    /// AI-generated preset JSON to parse + apply (set by `/valeton tone …`).
+    pub preset_json: Option<String>,
+}
+
+/// The ten GP-5 effect-block keys, in protocol order.
+const VALETON_BLOCKS: &[&str] = &[
+    "nr", "pre", "dst", "amp", "cab", "eq", "mod", "dly", "rvb", "ns",
+];
+
+pub struct ValetonCmd;
+
+#[async_trait]
+impl CommandHandler for ValetonCmd {
+    fn name(&self) -> &'static str {
+        "valeton"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати редактором Valeton GP-5. Приклади: `tone warm gilmour lead`, \
+         `patch=12`, `bpm=120`, `amp=on`, `save`."
+    }
+    fn usage(&self) -> &'static str {
+        "/valeton tone <опис тону> | [patch=0..99] [bpm=40..240] \
+         [div=quarter|eighth|dotted] [<block>=on|off] [save]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let args = args.trim();
+        if args.is_empty() {
+            return Reply::text(format!("⚠️ нічого не задано\nВикористання: {}", self.usage()));
+        }
+
+        // `tone <free text>` — generate a preset from a natural-language tone
+        // description and apply it to the current patch. Everything after the
+        // `tone` keyword is the prompt (it has spaces, unlike key=val tokens).
+        if let Some(rest) = args
+            .strip_prefix("tone")
+            .filter(|r| r.is_empty() || r.starts_with(char::is_whitespace))
+        {
+            let desc = rest.trim();
+            if desc.is_empty() {
+                return Reply::text(
+                    "⚠️ опиши потрібний тон, напр. `tone warm gilmour lead`.".to_string(),
+                );
+            }
+            let json = match crate::modules::valeton::commands::generate_preset_json(&ctx.app, desc)
+                .await
+            {
+                Ok(j) => j,
+                Err(e) => return Reply::text(format!("⚠️ не вдалося згенерувати тон: {e}")),
+            };
+            reveal_tab(&ctx.app, "valeton-editor");
+            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+            let _ = ctx.app.emit(
+                "valeton:remote",
+                &ValetonRemote {
+                    preset_json: Some(json),
+                    ..Default::default()
+                },
+            );
+            return Reply::text(format!("🎸 Застосовую тон: {desc}"));
+        }
+
+        let parsed = match parse_valeton_args(args) {
+            Ok(p) => p,
+            Err(e) => return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage())),
+        };
+        // Reveal + mount the editor so its `valeton:remote` listener is attached
+        // (and a USB auto-connect has a chance to land) before we emit.
+        reveal_tab(&ctx.app, "valeton-editor");
+        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+        let reply = format_valeton_reply(&parsed);
+        let _ = ctx.app.emit("valeton:remote", &parsed);
+        Reply::text(reply)
+    }
+}
+
+fn parse_valeton_args(args: &str) -> Result<ValetonRemote, String> {
+    let mut out = ValetonRemote::default();
+    for tok in args.split_whitespace() {
+        let lower = tok.to_ascii_lowercase();
+        if lower == "save" {
+            out.save = Some(true);
+            continue;
+        }
+        let (key, val) = lower
+            .split_once('=')
+            .ok_or_else(|| format!("незрозумілий токен: `{tok}` (очікую key=value або save)"))?;
+        match key {
+            "patch" | "preset" => {
+                let n: u8 = val
+                    .parse()
+                    .map_err(|_| format!("patch має бути числом, отримано `{val}`"))?;
+                if n > 99 {
+                    return Err(format!("patch поза межами 0–99: {n}"));
+                }
+                out.patch = Some(n);
+            }
+            "bpm" => {
+                let n: u32 = val
+                    .parse()
+                    .map_err(|_| format!("bpm має бути числом, отримано `{val}`"))?;
+                if !(40..=240).contains(&n) {
+                    return Err(format!("bpm поза межами 40–240: {n}"));
+                }
+                out.bpm = Some(n);
+            }
+            "div" | "division" => {
+                let d = match val {
+                    "quarter" | "q" | "1/4" => "quarter",
+                    "eighth" | "8" | "1/8" => "eighth",
+                    "dotted" | "dot" => "dotted",
+                    _ => return Err(format!("div має бути quarter|eighth|dotted, отримано `{val}`")),
+                };
+                out.division = Some(d.to_string());
+            }
+            block if VALETON_BLOCKS.contains(&block) => {
+                let on = match val {
+                    "on" | "1" | "true" | "enable" => true,
+                    "off" | "0" | "false" | "disable" => false,
+                    _ => return Err(format!("{block} приймає on|off, отримано `{val}`")),
+                };
+                out.block = Some(block.to_string());
+                out.block_on = Some(on);
+            }
+            _ => return Err(format!("невідомий параметр: `{key}`")),
+        }
+    }
+    if out.patch.is_none()
+        && out.bpm.is_none()
+        && out.division.is_none()
+        && out.block.is_none()
+        && out.save.is_none()
+    {
+        return Err("жодної дії не розпізнано".into());
+    }
+    Ok(out)
+}
+
+fn format_valeton_reply(r: &ValetonRemote) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(p) = r.patch {
+        parts.push(format!("патч {p}"));
+    }
+    if let Some(bpm) = r.bpm {
+        parts.push(format!("{bpm} BPM"));
+    }
+    if let Some(div) = &r.division {
+        parts.push(format!("поділ={div}"));
+    }
+    if let (Some(b), Some(on)) = (&r.block, r.block_on) {
+        parts.push(format!("{} {}", b.to_uppercase(), if on { "on" } else { "off" }));
+    }
+    if r.save == Some(true) {
+        parts.push("збереження".into());
+    }
+    if parts.is_empty() {
+        "🎸 Valeton без змін.".to_string()
+    } else {
+        format!("🎸 Valeton: {}", parts.join(", "))
     }
 }
 

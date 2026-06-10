@@ -1147,6 +1147,7 @@ pub fn run() {
             telegram_state.register_command(modules::telegram::module_cmds::MetronomeCmd);
             telegram_state.register_command(modules::telegram::module_cmds::TunerCmd);
             telegram_state.register_command(modules::telegram::module_cmds::RecordCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::ValetonCmd);
             telegram_state.register_command(
                 modules::telegram::module_cmds::PomodoroCmd::new(Arc::clone(&pomodoro_state)),
             );
