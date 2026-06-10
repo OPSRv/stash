@@ -7,7 +7,7 @@ import '../../shared/ui/pedal/pedal.css';
 import './tuner.css';
 import { tunerGetState, tunerSaveState } from './api';
 import { DeviceSelect } from './components/DeviceSelect';
-import { StringRow } from './components/StringRow';
+import { Fretboard } from './components/Fretboard';
 import { TunerMeter } from './components/TunerMeter';
 import { TuningSelect } from './components/TuningSelect';
 import { useTuner } from './hooks/useTuner';
@@ -24,7 +24,7 @@ export const TunerShell = () => {
   const loadedRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
 
-  const { listening, error, reading, devices, toggle, start } = useTuner(tuning, deviceId);
+  const { listening, error, reading, devices, toggle, start } = useTuner(deviceId);
 
   // Hydrate the saved tuning + input device on first mount.
   useEffect(() => {
@@ -70,7 +70,7 @@ export const TunerShell = () => {
     };
   }, []);
 
-  const hasPitch = listening && reading.stringIndex >= 0;
+  const hasPitch = listening && reading.midi >= 0;
   const inTune = hasPitch && Math.abs(reading.cents) <= IN_TUNE_CENTS;
   const noteLetter = reading.note?.replace(/\d+$/, '') ?? '–';
   const noteOctave = reading.note?.match(/\d+$/)?.[0] ?? '';
@@ -133,8 +133,8 @@ export const TunerShell = () => {
         </div>
       </div>
 
-      {/* The selected tuning's strings — the matched one lights up. */}
-      <StringRow tuning={tuning} activeIndex={reading.stringIndex} inTune={inTune} />
+      {/* Chromatic note placed on the neck; the tuning labels the targets. */}
+      <Fretboard tuning={tuning} reading={reading} hasPitch={hasPitch} inTune={inTune} />
 
       {/* Tuning + input pickers, with the mic footswitch alongside. */}
       <div className="flex items-end gap-3 pt-1">

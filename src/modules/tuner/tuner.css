@@ -91,55 +91,46 @@
   text-align: center;
 }
 
-/* ---------- String LED cells ---------- */
-.tuner-string {
+/* ---------- Chromatic fretboard ---------- */
+.tuner-fretboard {
   display: flex;
-  flex: 1 1 0;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  min-width: 0;
-  height: 42px;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #161b22 0%, #0e1218 100%);
+  gap: 4px;
+  padding: 6px 8px 4px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #12171e 0%, #0c1015 100%);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.6),
     inset 0 0 0 1px var(--color-ve-stroke);
-  transition: box-shadow 140ms var(--easing-standard), background 140ms var(--easing-standard);
-}
-.tuner-string-note {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-ve-dim);
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
-}
-.tuner-string-oct {
-  font-size: 9px;
-  color: #41506280;
-  margin-left: 1px;
 }
 
-/* Matched but not yet in tune — amber. */
-.tuner-string[data-state='off'] {
-  box-shadow:
-    inset 0 0 0 1px rgba(245, 166, 35, 0.55),
-    inset 0 0 10px rgba(245, 166, 35, 0.18);
+/* Chromatic ribbon — detected note centred between its neighbours. */
+.tuner-ribbon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
-.tuner-string[data-state='off'] .tuner-string-note {
-  color: #f5c074;
-  text-shadow: 0 0 8px rgba(245, 166, 35, 0.6);
+.tuner-ribbon-cell {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: #3a4658;
+  min-width: 1.1em;
+  text-align: center;
+  transition: color 120ms var(--easing-standard);
 }
-/* Matched and in tune — emerald. */
-.tuner-string[data-state='tuned'] {
-  background: radial-gradient(circle at 50% 30%, #15402f 0%, #0e1218 70%);
-  box-shadow:
-    inset 0 0 0 1px rgba(61, 220, 151, 0.7),
-    inset 0 0 12px rgba(61, 220, 151, 0.25),
-    0 0 8px rgba(61, 220, 151, 0.3);
+.tuner-ribbon-cell[data-cur] {
+  font-size: 16px;
+  font-weight: 800;
+  color: #f5a623;
+  text-shadow: 0 0 10px rgba(245, 166, 35, 0.55);
 }
-.tuner-string[data-state='tuned'] .tuner-string-note {
-  color: #aef7d5;
-  text-shadow: 0 0 8px rgba(61, 220, 151, 0.7);
+.tuner-ribbon-cell[data-tuned] {
+  color: #3ddc97;
+  text-shadow: 0 0 10px rgba(61, 220, 151, 0.65);
+}
+
+.tuner-fretboard-neck {
+  display: block;
 }

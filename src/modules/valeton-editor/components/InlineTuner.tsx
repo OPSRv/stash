@@ -1,12 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { tunerGetState } from '../../tuner/api';
 import { useTuner } from '../../tuner/hooks/useTuner';
-import {
-  DEFAULT_TUNING_ID,
-  IN_TUNE_CENTS,
-  tuningById,
-  type Tuning,
-} from '../../tuner/tuner.constants';
+import { IN_TUNE_CENTS } from '../../tuner/tuner.constants';
 
 /**
  * Compact always-listening tuner that lives inline in the editor toolbar. It
@@ -19,19 +14,16 @@ import {
  * meter, tuning picker and device selector.
  */
 export const InlineTuner = ({ onExpand }: { onExpand: () => void }) => {
-  const [tuning, setTuning] = useState<Tuning>(() => tuningById(DEFAULT_TUNING_ID));
   const [deviceId, setDeviceId] = useState<string | null>(null);
 
-  const { listening, error, reading, start } = useTuner(tuning, deviceId);
+  const { listening, error, reading, start } = useTuner(deviceId);
 
-  // Hydrate the same saved tuning + input the standalone tuner uses, so both
-  // surfaces stay in sync without the player re-picking here.
+  // Hydrate the same saved input device the standalone tuner uses, so both
+  // surfaces share the mic without the player re-picking here. (Detection is
+  // chromatic, so the tuning no longer affects what note the pill reads.)
   useEffect(() => {
     tunerGetState()
-      .then((s) => {
-        setTuning(tuningById(s.tuning_id));
-        setDeviceId(s.device_id ?? null);
-      })
+      .then((s) => setDeviceId(s.device_id ?? null))
       .catch(() => {});
   }, []);
 
@@ -46,8 +38,7 @@ export const InlineTuner = ({ onExpand }: { onExpand: () => void }) => {
   // sitting between strings — never a number worth showing on a tiny meter
   // (the dot would just pin to the edge and the cents read like "−1106").
   const LOCK_CENTS = 50;
-  const locked =
-    listening && reading.stringIndex >= 0 && Math.abs(reading.cents) <= LOCK_CENTS;
+  const locked = listening && reading.midi >= 0 && Math.abs(reading.cents) <= LOCK_CENTS;
 
   // Hold the last *locked* note so brief silences between picks (and a string's
   // decay) don't blank the readout — it just dims (`data-active` off) until the

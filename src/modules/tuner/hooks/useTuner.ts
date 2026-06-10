@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { detectPitch } from '../lib/pitch';
-import { matchString, type Tuning } from '../tuner.constants';
+import { matchChromatic } from '../tuner.constants';
 
-/** Live snapshot of what the tuner hears. */
+/** Live snapshot of what the tuner hears — a chromatic reading, so the note is
+ *  whatever pitch the mic picks up, not constrained to any tuning's strings. */
 export type TunerReading = {
   /** Detected fundamental in Hz, or -1 when no pitch is present. */
   freq: number;
-  /** Matched string's note name (e.g. "E2"), or null when silent. */
+  /** Nearest chromatic note name (e.g. "E2"), or null when silent. */
   note: string | null;
-  /** Signed cents from the matched string (+ sharp, − flat). */
+  /** Nearest chromatic MIDI note (A4 = 69), or -1 when silent. */
+  midi: number;
+  /** Signed cents from that note (+ sharp, − flat). */
   cents: number;
-  /** Index into `tuning.strings`, or -1 when silent. */
-  stringIndex: number;
 };
 
-const EMPTY: TunerReading = { freq: -1, note: null, cents: 0, stringIndex: -1 };
+const EMPTY: TunerReading = { freq: -1, note: null, midi: -1, cents: 0 };
 
 /** FFT window — 4096 samples gives enough period length to resolve the lowest
  *  guitar strings (down to drop/7-string territory) at typical sample rates. */
@@ -41,10 +42,9 @@ type TunerHandle = {
 };
 
 /**
- * @param tuning   Active tuning to match the detected pitch against.
  * @param deviceId Preferred audio-input device, or null for the system default.
  */
-export const useTuner = (tuning: Tuning, deviceId: string | null): TunerHandle => {
+export const useTuner = (deviceId: string | null): TunerHandle => {
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reading, setReading] = useState<TunerReading>(EMPTY);
@@ -65,11 +65,6 @@ export const useTuner = (tuning: Tuning, deviceId: string | null): TunerHandle =
   /// the hook was stopped/unmounted (React StrictMode double-mounts, fast
   /// toggles) can detect it lost the race and release its orphaned stream.
   const genRef = useRef<number>(0);
-
-  // Read the live tuning from a ref so the rAF loop always matches against the
-  // current selection without being torn down and rebuilt on every change.
-  const tuningRef = useRef(tuning);
-  tuningRef.current = tuning;
 
   // Enumerate audio-input devices. Labels are only exposed once the mic has
   // been granted (which the shell does on mount), so this is meaningful after
@@ -123,17 +118,12 @@ export const useTuner = (tuning: Tuning, deviceId: string | null): TunerHandle =
     lastCommitRef.current = ts;
 
     const freq = smoothedRef.current;
-    if (freq <= 0) {
-      setReading((prev) => (prev.stringIndex === -1 ? prev : EMPTY));
+    const m = freq > 0 ? matchChromatic(freq) : null;
+    if (!m) {
+      setReading((prev) => (prev.midi === -1 ? prev : EMPTY));
       return;
     }
-    const { stringIndex, cents } = matchString(freq, tuningRef.current);
-    setReading({
-      freq,
-      cents,
-      stringIndex,
-      note: tuningRef.current.strings[stringIndex]?.name ?? null,
-    });
+    setReading({ freq, note: m.name, midi: m.midi, cents: m.cents });
   }, []);
 
   const start = useCallback(() => {

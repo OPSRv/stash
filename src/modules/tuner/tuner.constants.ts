@@ -107,27 +107,62 @@ export const DEFAULT_STATE: TunerState = {
   device_id: null,
 };
 
-/** Result of matching a detected frequency against a tuning's strings. */
-export type StringMatch = {
-  /** Index into `tuning.strings`, or -1 when no pitch is present. */
-  stringIndex: number;
-  /** Signed cents from the matched string (+ = sharp, − = flat). */
+/** Nearest equal-tempered semitone to `freq`, independent of any tuning. This
+ *  is what makes the tuner genuinely *chromatic*: it names whatever note it
+ *  hears — every pitch class, every octave — rather than snapping the readout
+ *  to the closest open string of the selected tuning. The tuning is then only
+ *  an overlay of targets on the fretboard. */
+export type ChromaticMatch = {
+  /** Nearest MIDI note (A4 = 69). */
+  midi: number;
+  /** Scientific pitch name, e.g. "E2". */
+  name: string;
+  /** Signed cents from that note (+ sharp, − flat), within [-50, 50]. */
   cents: number;
+  /** Target frequency of that note in Hz. */
+  freq: number;
 };
 
-/** Find the string whose pitch is closest (in cents) to `freq`. */
-export const matchString = (freq: number, tuning: Tuning): StringMatch => {
-  if (!Number.isFinite(freq) || freq <= 0) return { stringIndex: -1, cents: 0 };
-  let best = 0;
-  let bestAbs = Infinity;
-  let bestCents = 0;
-  for (let i = 0; i < tuning.strings.length; i++) {
-    const cents = 1200 * Math.log2(freq / tuning.strings[i].freq);
-    if (Math.abs(cents) < bestAbs) {
-      bestAbs = Math.abs(cents);
-      best = i;
-      bestCents = cents;
-    }
-  }
-  return { stringIndex: best, cents: bestCents };
+export const matchChromatic = (freq: number): ChromaticMatch | null => {
+  if (!Number.isFinite(freq) || freq <= 0) return null;
+  // Continuous MIDI value, snapped to the nearest integer semitone; the
+  // fractional remainder is the cents offset.
+  const exact = 69 + 12 * Math.log2(freq / A4_HZ);
+  const midi = Math.round(exact);
+  return {
+    midi,
+    name: midiToName(midi),
+    cents: (exact - midi) * 100,
+    freq: midiToFreq(midi),
+  };
+};
+
+/** Frets the neck diagram spans (0 = open/nut). A full octave guarantees every
+ *  detected note shows at least one position on every string it can reach. */
+export const FRETBOARD_FRETS = 12;
+
+/** Single-dot fret-inlay positions; 12 is rendered as the octave double-dot. */
+export const FRET_MARKERS = [3, 5, 7, 9] as const;
+
+/** A playable spot on the neck. */
+export type FretPosition = {
+  /** Index into `tuning.strings` (lowest string first). */
+  stringIndex: number;
+  /** Fret number (0 = open). */
+  fret: number;
+};
+
+/** Every (string, fret) within `frets` where `midi` is playable on `tuning` —
+ *  i.e. all the places the detected note lives on the fretboard. */
+export const fretPositionsForMidi = (
+  midi: number,
+  tuning: Tuning,
+  frets: number = FRETBOARD_FRETS,
+): FretPosition[] => {
+  const out: FretPosition[] = [];
+  tuning.strings.forEach((s, stringIndex) => {
+    const fret = midi - s.midi;
+    if (fret >= 0 && fret <= frets) out.push({ stringIndex, fret });
+  });
+  return out;
 };
