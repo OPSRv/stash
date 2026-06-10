@@ -349,7 +349,12 @@ export function modelsFor(
     ];
   }
   if (block.key === 'ns') {
-    return nsModels.map((text, value) => ({ value, text }));
+    // GP-5 завжди віддає 80 SnapTone-слотів, але заповнені лише ~50 — решта
+    // приходять як порожні назви. Не показуємо порожні плитки (value = індекс
+    // слота зберігається, тож sendBlockChange шле правильний слот на пристрій).
+    return nsModels
+      .map((text, value) => ({ value, text }))
+      .filter((opt) => opt.text.trim() !== '');
   }
   return block.models;
 }
