@@ -1,6 +1,7 @@
 import type { DevTool } from './types';
 import { svgToImageTool } from './tools/svgToImage';
 import { jwtTool } from './tools/jwt';
+import { diffTool } from './tools/diff';
 
 /// Source-of-truth list of dev tiles in their *default* order. The
 /// user can reorder them via drag-n-drop in the grid; the persisted
@@ -10,6 +11,7 @@ import { jwtTool } from './tools/jwt';
 export const DEV_TOOLS: readonly DevTool[] = [
   svgToImageTool,
   jwtTool,
+  diffTool,
 ];
 
 export const DEV_TOOLS_BY_ID: Record<string, DevTool> = Object.fromEntries(
