@@ -400,7 +400,6 @@
 .valeton-root .scroll-area {
   overflow-y: auto;
   overflow-x: hidden;
-  scrollbar-gutter: stable;
 }
 
 /* ---------- Панелі приладу (хедер / футер) ---------- */
