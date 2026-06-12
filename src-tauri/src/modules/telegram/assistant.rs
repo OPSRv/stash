@@ -508,6 +508,7 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::stash::GetBattery);
     tools.register(super::tools::stash::MetronomeControl);
     tools.register(super::tools::stash::TunerControl);
+    tools.register(super::tools::stash::CircleProgression);
     tools.register(super::tools::stash::ValetonSetTone);
     tools.register(super::tools::stash::ValetonControl);
     tools.register(super::tools::stash::RecordControl);

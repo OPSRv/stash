@@ -4,10 +4,10 @@
  * singleton, and edits made outside it (transpose, assistant pushes) must
  * be able to silence a sounding run before they reshape the progression. */
 
-import { getState, setState } from '../store';
+import { MAX_BPM, MIN_BPM, getState, setState, type CircleState } from '../store';
 import { chordMidis, playChord, playProgression } from './audio';
 import { transposeProgression } from './progressions';
-import { keyAt, pc, type Chord } from './theory';
+import { keyAt, parseChordName, pc, slotOfKey, type Chord } from './theory';
 
 /** One shared gain for implicit chip auditions (quieter than playback). */
 const PREVIEW_GAIN = 0.14;
@@ -65,4 +65,32 @@ export const transposeTo = (slot: number): void => {
     rotation: wrapped,
     progression: transposeProgression(progression, key, to),
   });
+};
+
+/** Apply an assistant-pushed progression (the `circle:progression` event from
+ * the `circle_progression` LLM tool): chord names → progression, key name →
+ * selection + rotation, optional bpm clamped to the UI range. Unparseable
+ * chords are skipped; with no usable chords the push is ignored — the
+ * assistant already confirmed to the user, so a silent no-op beats corrupting
+ * the current state. */
+export const applyExternalProgression = (payload: {
+  key?: unknown;
+  chords?: unknown;
+  bpm?: unknown;
+}): void => {
+  const names = Array.isArray(payload.chords) ? payload.chords : [];
+  const progression = names
+    .map((n) => (typeof n === 'string' ? parseChordName(n) : null))
+    .filter((c): c is Chord => c !== null);
+  if (progression.length === 0) return;
+  stopProgression();
+  const keyChord = typeof payload.key === 'string' ? parseChordName(payload.key) : null;
+  const key = keyChord
+    ? { tonic: keyChord.root, minor: keyChord.quality === 'min' || keyChord.quality === 'min7' }
+    : getState().key;
+  const patch: Partial<CircleState> = { key, rotation: slotOfKey(key), progression };
+  if (typeof payload.bpm === 'number' && Number.isFinite(payload.bpm)) {
+    patch.bpm = Math.min(MAX_BPM, Math.max(MIN_BPM, Math.round(payload.bpm)));
+  }
+  setState(patch);
 };

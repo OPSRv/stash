@@ -9,6 +9,7 @@
  * control inside the shell has focus (those implement their own keys). */
 
 import { useEffect, useRef } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { IconButton } from '../../shared/ui/IconButton';
 import { SpeakerIcon } from '../../shared/ui/icons';
 import { AiPanel } from './components/AiPanel';
@@ -16,7 +17,7 @@ import { CircleSvg } from './components/CircleSvg';
 import { FretboardHint } from './components/FretboardHint';
 import { KeyPanel } from './components/KeyPanel';
 import { ProgressionBar } from './components/ProgressionBar';
-import { previewChord, transposeTo } from './lib/actions';
+import { applyExternalProgression, previewChord, transposeTo } from './lib/actions';
 import { keyAt, pc, slotOfKey } from './lib/theory';
 import { getState, seedTuningFromTuner, setState, useStore } from './store';
 import './circle.css';
@@ -43,6 +44,20 @@ export const CircleShell = () => {
   // tuning was picked or persisted here).
   useEffect(() => {
     void seedTuningFromTuner();
+  }, []);
+
+  // Assistant pushes (`circle_progression` LLM tool → Rust emit). The
+  // listener lives for the shell's lifetime; pushes made before the Circle
+  // view was first opened are dropped by design — the tool's reply tells
+  // the user where to look.
+  useEffect(() => {
+    const un = listen<{ key?: string; chords?: string[]; bpm?: number }>(
+      'circle:progression',
+      (e) => applyExternalProgression(e.payload),
+    );
+    return () => {
+      void un.then((f) => f());
+    };
   }, []);
 
   // Document-level shortcuts, active only while the shell is visible (the
