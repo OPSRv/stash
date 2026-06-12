@@ -9,7 +9,7 @@
  * 'circle-of-fifths'; everything else is per-session. */
 
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_TUNING_ID } from '../../shared/music/tunings';
+import { DEFAULT_TUNING_ID, TUNINGS } from '../../shared/music/tunings';
 import { tunerGetState } from './api';
 import type { Chord, Key, Mode } from './lib/theory';
 
@@ -45,6 +45,10 @@ export type CircleState = {
 
 const STORAGE_KEY = 'circle-of-fifths';
 
+/** Tempo bounds shared with the playback UI's BPM control. */
+export const MIN_BPM = 40;
+export const MAX_BPM = 240;
+
 const PERSISTED_KEYS = ['soundOn', 'bpm', 'tuningId'] as const;
 type PersistedState = Pick<CircleState, (typeof PERSISTED_KEYS)[number]>;
 
@@ -55,8 +59,14 @@ const readPersisted = (): Partial<PersistedState> => {
     const parsed = JSON.parse(raw) as Partial<PersistedState>;
     const out: Partial<PersistedState> = {};
     if (typeof parsed.soundOn === 'boolean') out.soundOn = parsed.soundOn;
-    if (typeof parsed.bpm === 'number' && Number.isFinite(parsed.bpm)) out.bpm = parsed.bpm;
-    if (typeof parsed.tuningId === 'string') out.tuningId = parsed.tuningId;
+    // Clamp so a corrupted value (0, negative, huge) can't break playback math.
+    if (typeof parsed.bpm === 'number' && Number.isFinite(parsed.bpm)) {
+      out.bpm = Math.min(MAX_BPM, Math.max(MIN_BPM, parsed.bpm));
+    }
+    // Unknown tuning ids fall back to the default via initialState.
+    if (typeof parsed.tuningId === 'string' && TUNINGS.some((t) => t.id === parsed.tuningId)) {
+      out.tuningId = parsed.tuningId;
+    }
     return out;
   } catch {
     return {};

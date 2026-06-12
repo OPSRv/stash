@@ -40,16 +40,18 @@ export type NoteOptions = {
   dur?: number;
   /** Peak envelope gain. */
   gain?: number;
+  /** Destination node; defaults to the shared master compressor. */
+  out?: AudioNode;
 };
 
-export function playNote(midi: number, { at, dur = 0.9, gain = 0.18 }: NoteOptions = {}): void {
+export function playNote(midi: number, { at, dur = 0.9, gain = 0.18, out }: NoteOptions = {}): void {
   const audio = ensureCtx();
   const start = at ?? audio.currentTime;
   const freq = midiToFreq(midi);
 
   const env = audio.createGain();
   env.gain.value = 0;
-  env.connect(master!);
+  env.connect(out ?? master!);
 
   const osc = audio.createOscillator();
   osc.type = 'triangle';
@@ -112,8 +114,9 @@ export const chordMidis = (chord: Chord): number[] => {
 
 /* Future audio is scheduled lazily, one setTimeout per bar computed against
  * ctx.currentTime: each timer fires slightly early and schedules its chord at
- * the exact AudioContext time (sample-accurate, no drift), so stop() can
- * cancel everything that hasn't sounded yet. */
+ * the exact AudioContext time (sample-accurate, no drift). All notes of one
+ * playback run through a per-progression gain bus, so stop() both cancels the
+ * unsounded bars and fades out whatever is currently ringing. */
 const LOOKAHEAD = 0.05;
 
 export function playProgression(
@@ -125,27 +128,40 @@ export function playProgression(
   const barSec = (60 / bpm) * 4; // one chord per bar, four beats
   const t0 = audio.currentTime + 0.08;
   const timers: ReturnType<typeof setTimeout>[] = [];
+  let stopped = false;
+
+  const bus = audio.createGain();
+  bus.connect(master!);
 
   chords.forEach((chord, i) => {
     const at = t0 + i * barSec;
     const delayMs = Math.max(0, (at - LOOKAHEAD - audio.currentTime) * 1000);
     timers.push(
       setTimeout(() => {
-        playChord(chordMidis(chord), { at, dur: barSec * 0.9 });
+        playChord(chordMidis(chord), { at, dur: barSec * 0.9, out: bus });
         onStep(i);
       }, delayMs),
     );
   });
 
   const endMs = Math.max(0, (t0 + chords.length * barSec - audio.currentTime) * 1000);
-  timers.push(setTimeout(() => onStep(null), endMs));
+  timers.push(
+    setTimeout(() => {
+      stopped = true; // a later cleanup stop() must not fire onStep(null) again
+      onStep(null);
+      // Free the bus once the last chord's release tail has faded.
+      setTimeout(() => bus.disconnect(), 2000);
+    }, endMs),
+  );
 
-  let stopped = false;
   return {
     stop: () => {
       if (stopped) return;
       stopped = true;
       for (const t of timers) clearTimeout(t);
+      // Fade the sounding bar out fast, then drop the whole bus.
+      bus.gain.setTargetAtTime(0, audio.currentTime, 0.05);
+      setTimeout(() => bus.disconnect(), 400);
       onStep(null);
     },
   };
