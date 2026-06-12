@@ -62,4 +62,5 @@ export interface AppState {
   // UI
   openCard: BlockKey; // відкрита картка ефекту (live-off)
   liveView: boolean;
+  circleView: boolean; // circle-of-fifths workspace (mutually exclusive with live)
 }

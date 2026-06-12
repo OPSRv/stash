@@ -52,6 +52,7 @@ export const initialState: AppState = {
 
   openCard: 'nr',
   liveView: false,
+  circleView: false,
 };
 
 type Listener = () => void;

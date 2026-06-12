@@ -65,6 +65,7 @@ export const Toolbar = ({
   const locked = useStore((s) => s.locked);
   const saveEnabled = useStore((s) => s.saveEnabled);
   const liveView = useStore((s) => s.liveView);
+  const circleView = useStore((s) => s.circleView);
   const patchNames = useStore((s) => s.patchNames);
   const currentPatchNumber = useStore((s) => s.currentPatchNumber);
 
@@ -266,9 +267,20 @@ export const Toolbar = ({
             disabled={locked}
             aria-pressed={liveView}
             title="Live performance view"
-            onClick={() => setState({ liveView: !liveView })}
+            onClick={() => setState({ liveView: !liveView, circleView: false })}
           >
             Live
+          </button>
+          <button
+            type="button"
+            data-id="circle_switch"
+            className={`seg-btn px-3 ${circleView ? 'active' : ''}`}
+            disabled={locked}
+            aria-pressed={circleView}
+            title="Circle of fifths"
+            onClick={() => setState({ circleView: !circleView, liveView: false })}
+          >
+            Circle
           </button>
         </div>
 
