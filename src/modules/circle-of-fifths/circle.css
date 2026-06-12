@@ -137,3 +137,42 @@
     box-shadow: 0 0 0 4px rgba(var(--stash-accent-rgb), 0.08);
   }
 }
+
+/* ── Fretboard hint (FretboardHint.tsx) ─────────────────────────────────── */
+
+.circle-fretboard {
+  display: block;
+  width: 100%;
+}
+
+/* SVG <text> sizing again needs explicit fonts (Tailwind text tokens don't
+ * reach SVG presentation) — mono for the neck chrome, system for dot labels. */
+.circle-fret-string-label {
+  font: 600 10px var(--font-mono);
+  fill: var(--fg-faint);
+  pointer-events: none;
+  user-select: none;
+}
+.circle-fret-num {
+  font: 500 8px var(--font-mono);
+  fill: var(--fg-ghost);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Clickable note dots. Focus ring is a stroke on the dot circles, matching
+ * the circle sectors' :focus-visible treatment. */
+.circle-fret-dot {
+  cursor: pointer;
+  outline: none;
+}
+.circle-fret-dot:focus-visible circle {
+  stroke: rgba(var(--stash-accent-rgb), 0.9);
+  stroke-width: 1.5;
+}
+.circle-fret-dot text {
+  font: 600 7px var(--font-sys);
+  fill: var(--fg);
+  pointer-events: none;
+  user-select: none;
+}
