@@ -237,3 +237,11 @@ export const keyAt = (slot: number, minor: boolean): Key => {
   const entry = CIRCLE[pc(slot)];
   return { tonic: (minor ? entry.minor : entry.major).pc, minor };
 };
+
+/** Circle slot a key renders at: its own slot for majors, the relative
+ * major's for minors — the inverse of `keyAt` for both rings. Components
+ * use it to rotate a programmatic key change to 12 o'clock. */
+export const slotOfKey = (key: Key): number => {
+  const majorPc = key.minor ? relativeOf(key).tonic : key.tonic;
+  return CIRCLE.findIndex((entry) => entry.major.pc === majorPc);
+};

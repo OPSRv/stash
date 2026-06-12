@@ -36,7 +36,7 @@ import { Toggle } from '../../../shared/ui/Toggle';
 import { playNote } from '../lib/audio';
 import { MODES, chordPitches, modeScale, spellPitch } from '../lib/theory';
 import { setState, useStore } from '../store';
-import { pretty } from './KeyPanel';
+import { pretty } from '../lib/format';
 
 const mod12 = (n: number): number => ((n % 12) + 12) % 12;
 

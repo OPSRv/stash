@@ -12,9 +12,9 @@
 import { Button } from '../../../shared/ui/Button';
 import { Checkbox } from '../../../shared/ui/Checkbox';
 import { Select, type SelectOption } from '../../../shared/ui/Select';
-import { chordMidis, playChord } from '../lib/audio';
+import { addChord } from '../lib/actions';
+import { pretty } from '../lib/format';
 import {
-  CIRCLE,
   MODES,
   chordName,
   diatonicChords,
@@ -23,41 +23,18 @@ import {
   relativeOf,
   romanNumeral,
   scaleOf,
+  slotOfKey,
   spellPitch,
-  type Chord,
   type Key,
 } from '../lib/theory';
-import { getState, setState, useStore, type ModeId } from '../store';
-
-/** ASCII accidentals → typographic glyphs for display ('F#' → 'F♯',
- * 'Bb' → 'B♭', 'bVII' → '♭VII'). Display-only — theory keeps ASCII. */
-export const pretty = (label: string): string => label.replace(/#/g, '♯').replace(/b/g, '♭');
+import { setState, useStore, type ModeId } from '../store';
 
 /** Full key name: "C major", "F♯ minor". */
 const keyLong = (key: Key): string =>
   `${pretty(spellPitch(key.tonic, key))} ${key.minor ? 'minor' : 'major'}`;
 
-/** Circle slot a key renders at: its own slot for majors, the relative
- * major's for minors — mirrors CircleSvg's lookup so panel-driven key
- * switches also rotate the selection to 12 o'clock. Exported for AiPanel,
- * which rotates the circle to the AI-composed key the same way. */
-export const slotOfKey = (key: Key): number => {
-  const majorPc = key.minor ? relativeOf(key).tonic : key.tonic;
-  return CIRCLE.findIndex((entry) => entry.major.pc === majorPc);
-};
-
+/** Switching keys also rotates the wheel, like a sector click would. */
 const switchKey = (key: Key): void => setState({ key, rotation: slotOfKey(key) });
-
-/** Quiet chip audition; silent while sound is off. */
-const preview = (chord: Chord): void => {
-  if (!getState().soundOn) return;
-  playChord(chordMidis(chord), { gain: 0.14 });
-};
-
-const addToProgression = (chord: Chord): void => {
-  setState((s) => ({ progression: [...s.progression, chord] }));
-  preview(chord);
-};
 
 const MODE_OPTIONS: SelectOption<ModeId>[] = MODES.map((m) => ({ value: m.id, label: m.label }));
 
@@ -135,7 +112,7 @@ export const KeyPanel = () => {
             key={chord.root}
             type="button"
             className="circle-chip ring-focus"
-            onClick={() => addToProgression(chord)}
+            onClick={() => addChord(chord)}
             onMouseEnter={() => setState({ hoveredChord: chord })}
             onMouseLeave={() => setState({ hoveredChord: null })}
             onFocus={() => setState({ hoveredChord: chord })}

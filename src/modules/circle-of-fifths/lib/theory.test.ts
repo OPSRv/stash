@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CIRCLE, keyAt, keySignature, scaleOf, MODES, modeScale,
   diatonicChords, chordName, romanNumeral, relativeOf, parallelOf,
-  spellPitch, chordPitches, parseChordName,
+  spellPitch, chordPitches, parseChordName, slotOfKey,
 } from './theory';
 
 describe('circle layout', () => {
@@ -183,4 +183,18 @@ describe('modes (extra)', () => {
   it('E phrygian spells as C major notes from E', () =>
     expect(modeScale(4, MODES[2]).map((n) => n.label))
       .toEqual(['E', 'F', 'G', 'A', 'B', 'C', 'D']));
+});
+
+describe('slotOfKey', () => {
+  it('maps majors and relative minors to their circle slot', () => {
+    expect(slotOfKey({ tonic: 0, minor: false })).toBe(0); // C major
+    expect(slotOfKey({ tonic: 9, minor: true })).toBe(0); // A minor
+    expect(slotOfKey({ tonic: 3, minor: true })).toBe(6); // D# minor, slot of F# major
+  });
+  it('inverts keyAt on every slot and ring', () => {
+    for (let s = 0; s < 12; s++) {
+      expect(slotOfKey(keyAt(s, false))).toBe(s);
+      expect(slotOfKey(keyAt(s, true))).toBe(s);
+    }
+  });
 });

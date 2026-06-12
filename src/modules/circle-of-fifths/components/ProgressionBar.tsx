@@ -1,13 +1,13 @@
 /* Progression bar: transport (play/stop + BPM), preset fill, copy / clear,
- * and the horizontal strip of draggable chord chips. Also owns `transposeTo`,
- * the ⌥-click "transpose here" handler that CircleShell wires into
- * CircleSvg's `onAltSelect`.
+ * and the horizontal strip of draggable chord chips. The ⌥-click transpose
+ * handler (`transposeTo`) and the playback handle live in `lib/actions` so
+ * non-component callers (CircleShell wiring, assistant pushes) share them.
  *
  * Playback note: the Play button is explicit user intent, so it sounds even
  * when `soundOn` is off — that toggle gates only the implicit previews
  * (chip click / wheel audition). BPM edits take effect on the next Play. */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { accentSolid } from '../../../shared/theme/accent';
 import { IconButton } from '../../../shared/ui/IconButton';
 import { NumberInput } from '../../../shared/ui/NumberInput';
@@ -15,34 +15,11 @@ import { Select, type SelectOption } from '../../../shared/ui/Select';
 import { useToast } from '../../../shared/ui/Toast';
 import { CloseIcon, CopyIcon, PlayIcon, StopCircleIcon, TrashIcon } from '../../../shared/ui/icons';
 import { copyText } from '../../../shared/util/clipboard';
-import { chordMidis, playChord, playProgression } from '../lib/audio';
-import { PRESETS, presetChords, progressionText, transposeProgression } from '../lib/progressions';
-import { chordName, keyAt, romanNumeral, type Chord } from '../lib/theory';
+import { playCurrentProgression, previewChord, stopProgression } from '../lib/actions';
+import { pretty } from '../lib/format';
+import { PRESETS, presetChords, progressionText } from '../lib/progressions';
+import { chordName, romanNumeral } from '../lib/theory';
 import { MAX_BPM, MIN_BPM, getState, setState, useStore } from '../store';
-import { pretty } from './KeyPanel';
-
-/** "Transpose here": move the whole progression into the key at circle
- * `slot`, keeping the current major/minor flavour, and select that key
- * (rotating it to 12 o'clock like a normal selection). Exported for
- * CircleShell (Task 10), which passes it to `CircleSvg`'s `onAltSelect` —
- * the ⌥-click on a key sector. Lives here so the progression UI and its
- * transpose behaviour stay in one file. */
-export function transposeTo(slot: number): void {
-  const wrapped = ((slot % 12) + 12) % 12;
-  const { key, progression } = getState();
-  const to = keyAt(wrapped, key.minor);
-  setState({
-    key: to,
-    rotation: wrapped,
-    progression: transposeProgression(progression, key, to),
-  });
-}
-
-/** Quiet chip audition; silent while sound is off. */
-const preview = (chord: Chord): void => {
-  if (!getState().soundOn) return;
-  playChord(chordMidis(chord), { gain: 0.14 });
-};
 
 /** The empty-value option renders as the trigger placeholder; picking a real
  * preset fills the progression in the current key (re-picking it refills). */
@@ -62,34 +39,13 @@ export const ProgressionBar = () => {
 
   /* ── Playback ──────────────────────────────────────────────────────── */
 
-  /* `playing` is local (not derived from playingIndex, which is null during
-   * the short scheduling lookahead); the {stop} handle lives in a ref so
-   * Stop and unmount cleanup reach the active run without re-renders. */
-  const handleRef = useRef<{ stop: () => void } | null>(null);
-  const [playing, setPlaying] = useState(false);
+  /* Derived from playingIndex (set by the run's first onStep within one
+   * macrotask of Play, cleared by onStep(null) on stop/finish). The brief
+   * pre-first-tick window where the button still reads "Play" is harmless:
+   * clicking again just restarts the run. */
+  const playing = playingIndex !== null;
 
-  const stopPlayback = useCallback((): void => {
-    handleRef.current?.stop(); // fires onStep(null) → clears playingIndex
-    handleRef.current = null;
-    setPlaying(false);
-  }, []);
-
-  useEffect(() => () => handleRef.current?.stop(), []);
-
-  const startPlayback = (): void => {
-    handleRef.current?.stop();
-    const current = getState();
-    if (current.progression.length === 0) return;
-    setPlaying(true);
-    handleRef.current = playProgression(current.progression, current.bpm, (i) => {
-      setState({ playingIndex: i });
-      if (i === null) {
-        // Finished (or stopped) — release the handle and flip the button back.
-        handleRef.current = null;
-        setPlaying(false);
-      }
-    });
-  };
+  useEffect(() => () => stopProgression(), []);
 
   /* ── Edits ─────────────────────────────────────────────────────────── */
 
@@ -98,18 +54,22 @@ export const ProgressionBar = () => {
   const applyPreset = (id: string): void => {
     setPresetId(id);
     if (!id) return;
-    stopPlayback(); // a sounding run would highlight stale chips
+    stopProgression(); // a sounding run would highlight stale chips
     setState({ progression: presetChords(id, getState().key) });
   };
 
   const clearProgression = (): void => {
-    stopPlayback();
+    stopProgression();
     setPresetId('');
     setState({ progression: [] });
   };
 
-  const removeAt = (index: number): void =>
+  /* Structural edits stop playback: the run plays the snapshot captured at
+   * Play time, so the pulse would land on the wrong chip afterwards. */
+  const removeAt = (index: number): void => {
+    stopProgression();
     setState((s) => ({ progression: s.progression.filter((_, i) => i !== index) }));
+  };
 
   const copyProgression = async (): Promise<void> => {
     const s = getState();
@@ -135,9 +95,13 @@ export const ProgressionBar = () => {
     const drop = dropAt;
     clearDrag();
     if (from === null || drop === null || drop.index !== target || from === target) return;
+    stopProgression(); // see removeAt — reorder desyncs the playing pulse
     setState((s) => {
       const next = [...s.progression];
       const [moved] = next.splice(from, 1);
+      // The store is mutable from outside (assistant pushes); if the
+      // progression shrank mid-drag, the stale index yields no chord.
+      if (!moved) return {};
       let at = drop.index + (drop.pos === 'after' ? 1 : 0);
       if (from < at) at -= 1; // removal above shifted the insertion point
       next.splice(at, 0, moved);
@@ -152,7 +116,7 @@ export const ProgressionBar = () => {
       <div className="flex items-center gap-1.5 min-w-0">
         <IconButton
           title={playing ? 'Stop' : 'Play progression'}
-          onClick={playing ? stopPlayback : startPlayback}
+          onClick={playing ? stopProgression : playCurrentProgression}
           disabled={!playing && empty}
         >
           {playing ? <StopCircleIcon /> : <PlayIcon />}
@@ -230,7 +194,7 @@ export const ProgressionBar = () => {
                   className={`circle-chip ring-focus ${
                     playingIndex === i ? 'circle-chip-playing' : ''
                   }`}
-                  onClick={() => preview(chord)}
+                  onClick={() => previewChord(chord)}
                   onMouseEnter={() => setState({ hoveredChord: chord })}
                   onMouseLeave={() => setState({ hoveredChord: null })}
                 >

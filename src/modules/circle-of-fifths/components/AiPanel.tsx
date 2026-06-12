@@ -12,9 +12,18 @@ import { Button } from '../../../shared/ui/Button';
 import { Input } from '../../../shared/ui/Input';
 import { LazyMarkdown } from '../../../shared/ui/LazyMarkdown';
 import { circleAiAssist, type AiMode } from '../api';
-import { chordMidis, playChord } from '../lib/audio';
+import { addChord, stopProgression } from '../lib/actions';
+import { pretty } from '../lib/format';
 import { progressionText } from '../lib/progressions';
-import { MODES, chordName, parseChordName, spellPitch, type Chord, type Key } from '../lib/theory';
+import {
+  MODES,
+  chordName,
+  parseChordName,
+  slotOfKey,
+  spellPitch,
+  type Chord,
+  type Key,
+} from '../lib/theory';
 import {
   MAX_BPM,
   MIN_BPM,
@@ -24,7 +33,6 @@ import {
   type AiSuggestion,
   type CircleState,
 } from '../store';
-import { pretty, slotOfKey } from './KeyPanel';
 
 /* ── Reply parsing ─────────────────────────────────────────────────────── */
 
@@ -91,6 +99,8 @@ const applyCompose = (raw: string): ApplyResult => {
   if (typeof data.bpm === 'number' && Number.isFinite(data.bpm)) {
     next.bpm = Math.min(MAX_BPM, Math.max(MIN_BPM, Math.round(data.bpm)));
   }
+  // Replacing the progression desyncs a sounding run from the chips.
+  stopProgression();
   return next;
 };
 
@@ -144,17 +154,6 @@ async function runAssist(
     setState({ aiBusy: false, aiError: String(e) });
   }
 }
-
-/** Quiet chip audition; silent while sound is off (KeyPanel idiom). */
-const preview = (chord: Chord): void => {
-  if (!getState().soundOn) return;
-  playChord(chordMidis(chord), { gain: 0.14 });
-};
-
-const appendSuggestion = (chord: Chord): void => {
-  setState((s) => ({ progression: [...s.progression, chord] }));
-  preview(chord);
-};
 
 /* ── Component ─────────────────────────────────────────────────────────── */
 
@@ -252,7 +251,7 @@ export const AiPanel = () => {
               type="button"
               className="circle-chip ring-focus max-w-64"
               title="Append to the progression"
-              onClick={() => appendSuggestion(chord)}
+              onClick={() => addChord(chord)}
               onMouseEnter={() => setState({ hoveredChord: chord })}
               onMouseLeave={() => setState({ hoveredChord: null })}
               onFocus={() => setState({ hoveredChord: chord })}
