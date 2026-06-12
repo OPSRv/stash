@@ -25,10 +25,13 @@
  * - Tonic/root emphasis: the key tonic (scale view) or chord root (chord
  *   view) fills at accent(0.8); other highlighted notes at accent(0.35).
  * - Clicking a dot plays its exact pitch regardless of `soundOn` — a direct
- *   click is explicit intent, same rule as ProgressionBar's Play button. */
+ *   click is explicit intent, same rule as ProgressionBar's Play button.
+ * - Keyboard: the board is one tab stop (like CircleSvg). The svg root holds
+ *   focus and `aria-activedescendant`; ←/→ walk the lit dots, ↑/↓ jump to the
+ *   nearest dot on the neighbouring string, Enter/Space plays the cursor. */
 
-import { useMemo, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { TUNINGS, midiToName, tuningById } from '../../../shared/music/tunings';
+import { useId, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { TUNINGS, tuningById } from '../../../shared/music/tunings';
 import { accent } from '../../../shared/theme/accent';
 import { SegmentedControl, type SegmentOption } from '../../../shared/ui/SegmentedControl';
 import { Select, type SelectOption } from '../../../shared/ui/Select';
@@ -84,10 +87,18 @@ export const FretboardHint = () => {
   const tuningId = useStore((s) => s.tuningId);
   const view = useStore((s) => s.fretboardView);
   const pentatonic = useStore((s) => s.pentatonic);
-  const hoveredChord = useStore((s) => s.hoveredChord);
-  const progression = useStore((s) => s.progression);
   const key = useStore((s) => s.key);
   const mode = useStore((s) => s.mode);
+
+  /* Chord source, derived inside the selector so scale view stays inert to
+   * chip hovers and progression edits (Object.is on the result skips the
+   * re-render): hovered chip wins, else the progression's tail; null means
+   * "fall back to scale rendering" (also the whole story in scale view). */
+  const chord = useStore((s) =>
+    s.fretboardView === 'chord'
+      ? (s.hoveredChord ?? s.progression[s.progression.length - 1] ?? null)
+      : null,
+  );
 
   const tuning = tuningById(tuningId);
   const strings = tuning.strings;
@@ -101,11 +112,6 @@ export const FretboardHint = () => {
   // Open notes live in the gutter; fretted notes sit between their fret wires.
   const fretX = (fret: number): number =>
     fret === 0 ? PAD_L - 15 : PAD_L + ((fret - 0.5) / FRETS) * neckW;
-
-  /* Chord source: hovered chip wins, else the progression's tail; null means
-   * "fall back to scale rendering" (also the whole story in scale view). */
-  const chord =
-    view === 'chord' ? (hoveredChord ?? progression[progression.length - 1] ?? null) : null;
 
   /* Highlight sets are memoized per render so the per-cell loop below does
    * Set lookups only — no scale/chord recomputation per dot. */
@@ -145,13 +151,60 @@ export const FretboardHint = () => {
     [strings, highlight],
   );
 
-  /* role="button" dots must also activate from the keyboard. */
+  /* role="button" dots must also activate from the keyboard (they get DOM
+   * focus on click despite tabIndex={-1}). */
   const onDotKeyDown = (e: ReactKeyboardEvent<SVGGElement>, midi: number): void => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
+      e.stopPropagation(); // the root handler must not double-play
       playNote(midi);
     }
   };
+
+  /* ── Roving keyboard cursor (single tab stop, like CircleSvg) ─────────── */
+
+  const baseId = useId();
+  const dotId = (i: number): string => `${baseId}-${dots[i].stringIndex}-${dots[i].fret}`;
+  const [cursorRaw, setCursorRaw] = useState(0);
+  // Highlight changes can shrink the dot list; clamp instead of resetting so
+  // the cursor stays put across pentatonic/tuning toggles where possible.
+  const cursor = dots.length === 0 ? -1 : Math.min(cursorRaw, dots.length - 1);
+
+  /** Nearest dot (by fret) on the next string in `dir` that has any dots. */
+  const stepString = (from: number, dir: 1 | -1): number => {
+    const { stringIndex, fret } = dots[from];
+    for (let s = stringIndex + dir; s >= 0 && s < n; s += dir) {
+      const onString = dots
+        .map((d, i) => ({ d, i }))
+        .filter(({ d }) => d.stringIndex === s);
+      if (onString.length === 0) continue;
+      return onString.reduce((best, cur) =>
+        Math.abs(cur.d.fret - fret) < Math.abs(best.d.fret - fret) ? cur : best,
+      ).i;
+    }
+    return from;
+  };
+
+  const onRootKeyDown = (e: ReactKeyboardEvent<SVGSVGElement>): void => {
+    if (e.target !== e.currentTarget || cursor < 0) return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+      setCursorRaw((dots.length + cursor + dir) % dots.length);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      // Visually up = a higher string = a larger stringIndex (rowY inverts).
+      setCursorRaw(stepString(cursor, e.key === 'ArrowUp' ? 1 : -1));
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      playNote(dots[cursor].midi);
+    }
+  };
+
+  /** AT-friendly note name: "F# 3" → "F sharp 3" (note letters are uppercase,
+   * so the lowercase-b accidental replacement can't touch a B). */
+  const spoken = (label: string): string =>
+    label.replace(/#/g, ' sharp').replace(/b/g, ' flat');
 
   return (
     <section className="flex flex-col gap-1.5 min-w-0" aria-label="Fretboard hints">
@@ -188,6 +241,9 @@ export const FretboardHint = () => {
         className="circle-fretboard"
         role="group"
         aria-label="Fretboard"
+        tabIndex={0}
+        aria-activedescendant={cursor >= 0 ? dotId(cursor) : undefined}
+        onKeyDown={onRootKeyDown}
       >
         {/* Fret wires (1..FRETS). Fret 0 is the thicker nut. */}
         {Array.from({ length: FRETS }, (_, i) => i + 1).map((fret) => {
@@ -265,17 +321,20 @@ export const FretboardHint = () => {
         })}
 
         {/* Highlighted notes. Click (or Enter/Space) plays the exact pitch. */}
-        {dots.map((d) => {
+        {dots.map((d, i) => {
           const x = fretX(d.fret);
           const y = rowY(d.stringIndex);
           const isRoot = d.pc === highlight.root;
+          const octave = Math.floor(d.midi / 12) - 1;
           return (
             <g
               key={`${d.stringIndex}-${d.fret}`}
+              id={dotId(i)}
               className="circle-fret-dot"
               role="button"
-              tabIndex={0}
-              aria-label={`Play ${midiToName(d.midi)} (string ${n - d.stringIndex}, fret ${d.fret})`}
+              tabIndex={-1}
+              data-kbd-cursor={i === cursor || undefined}
+              aria-label={`Play ${spoken(d.label)} ${octave} (string ${n - d.stringIndex}, fret ${d.fret})`}
               onClick={() => playNote(d.midi)}
               onKeyDown={(e) => onDotKeyDown(e, d.midi)}
             >

@@ -179,6 +179,12 @@
   stroke: rgba(var(--stash-accent-rgb), 0.9);
   stroke-width: 1.5;
 }
+/* Roving keyboard cursor: while the board itself holds keyboard focus, the
+ * dot referenced by aria-activedescendant wears the same ring. */
+.circle-fretboard:focus-visible .circle-fret-dot[data-kbd-cursor] circle {
+  stroke: rgba(var(--stash-accent-rgb), 0.9);
+  stroke-width: 1.5;
+}
 .circle-fret-dot text {
   font: 600 7px var(--font-sys);
   fill: var(--fg);
