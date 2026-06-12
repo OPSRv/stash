@@ -36,28 +36,61 @@ import {
 
 /* ── Reply parsing ─────────────────────────────────────────────────────── */
 
-/** Extract a JSON object from a model reply that may carry prose or fences:
+/** Extract a JSON value from a model reply that may carry prose or fences:
  * take the body of the first ``` fence if present, otherwise the whole text,
- * then slice from the first `{` to the last `}`. Falls through unchanged when
- * no braces are found, so JSON.parse reports a sensible error. */
-const extractJsonObject = (text: string): string => {
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const body = (fence ? fence[1] : text).trim();
-  const start = body.indexOf('{');
-  const end = body.lastIndexOf('}');
-  return start >= 0 && end > start ? body.slice(start, end + 1) : body;
+ * then slice from the first `{`/`[` to its last matching closer. Falls
+ * through unchanged when neither is found, so JSON.parse reports an error. */
+const extractJson = (text: string): string => {
+  // Local reasoning models prepend <think> blocks whose prose can contain
+  // braces — drop them before hunting for the JSON payload.
+  const bare = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const fence = bare.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = (fence ? fence[1] : bare).trim();
+  const obj = body.indexOf('{');
+  const arr = body.indexOf('[');
+  const start = obj >= 0 && (arr < 0 || obj < arr) ? obj : arr;
+  if (start < 0) return body;
+  const end = body.lastIndexOf(body[start] === '{' ? '}' : ']');
+  return end > start ? body.slice(start, end + 1) : body;
 };
 
-/** Extract + parse a reply into a plain object, or null when it isn't one. */
-const parseJsonReply = (raw: string): Record<string, unknown> | null => {
-  try {
-    const parsed: unknown = JSON.parse(extractJsonObject(raw));
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
+/** Extract + parse a reply into an object or array, or null when neither.
+ * Second attempt strips trailing commas (`[1, 2,]`) — the most common JSON
+ * defect of less instruction-compliant models. Logs the raw reply on
+ * failure so a misbehaving model is diagnosable from the console. */
+const parseJsonReply = (raw: string): Record<string, unknown> | unknown[] | null => {
+  const body = extractJson(raw);
+  for (const candidate of [body, body.replace(/,\s*([\]}])/g, '$1')]) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed as Record<string, unknown> | unknown[];
+      }
+    } catch {
+      // fall through to the trailing-comma attempt / failure path
+    }
   }
+  console.warn('[circle] AI reply was not parseable JSON:', raw);
+  return null;
+};
+
+/** One-line peek at a bad reply for the inline error — enough to see what
+ * the model actually sent without opening the console. */
+const replyPeek = (raw: string): string => {
+  const flat = raw.replace(/\s+/g, ' ').trim();
+  return flat.length > 90 ? `${flat.slice(0, 90)}…` : flat;
+};
+
+/** Chord-name parsing with one extra mercy: slash chords (`C/G`) drop their
+ * bass note and parse as the plain chord — models suggest inversions even
+ * when told not to, and losing the voicing beats dropping the suggestion. */
+const parseLooseChord = (name: string): Chord | null => {
+  const trimmed = name.trim();
+  const slash = trimmed.indexOf('/');
+  return (
+    parseChordName(trimmed) ??
+    (slash > 0 ? parseChordName(trimmed.slice(0, slash).trim()) : null)
+  );
 };
 
 /** Read a key name like `Am` / `C` / `F#m` via the chord parser: a minor
@@ -76,14 +109,20 @@ type ApplyResult = Partial<CircleState> | { error: string };
  * key or mode keeps the current one; bpm is clamped; unparseable chord names
  * are skipped — only an empty result is an error. */
 const applyCompose = (raw: string): ApplyResult => {
-  const data = parseJsonReply(raw);
-  if (!data) return { error: 'The model reply was not valid JSON — try again.' };
+  const parsed = parseJsonReply(raw);
+  if (!parsed) {
+    return { error: `The model reply was not valid JSON — try again. It began: ${replyPeek(raw)}` };
+  }
+  // A bare array reads as the chord list (some models skip the wrapper).
+  const data: Record<string, unknown> = Array.isArray(parsed) ? { chords: parsed } : parsed;
   const names = Array.isArray(data.chords) ? data.chords : [];
   const progression = names
-    .map((n) => (typeof n === 'string' ? parseChordName(n) : null))
+    .map((n) => (typeof n === 'string' ? parseLooseChord(n) : null))
     .filter((c): c is Chord => c !== null);
   if (progression.length === 0) {
-    return { error: 'The model reply contained no usable chords — try rephrasing.' };
+    return {
+      error: `The model reply contained no usable chords — try rephrasing. It began: ${replyPeek(raw)}`,
+    };
   }
   const s = getState();
   const key = keyFromName(data.key) ?? s.key;
@@ -107,18 +146,33 @@ const applyCompose = (raw: string): ApplyResult => {
 /** Suggest: `{"suggestions":[{"chord":"F","why":"…"}]}` → chips. Items with
  * unparseable chord names are dropped; only an empty result is an error. */
 const applySuggest = (raw: string): ApplyResult => {
-  const data = parseJsonReply(raw);
-  const items = data && Array.isArray(data.suggestions) ? data.suggestions : null;
-  if (!items) return { error: 'The model reply was not valid JSON — try again.' };
+  const parsed = parseJsonReply(raw);
+  // Tolerate a bare top-level array (the wrapper object skipped).
+  const items = Array.isArray(parsed)
+    ? parsed
+    : parsed && Array.isArray(parsed.suggestions)
+      ? parsed.suggestions
+      : null;
+  if (!items) {
+    return { error: `The model reply was not valid JSON — try again. It began: ${replyPeek(raw)}` };
+  }
   const suggestions: AiSuggestion[] = [];
   for (const item of items) {
-    if (typeof item !== 'object' || item === null) continue;
-    const { chord: name, why } = item as { chord?: unknown; why?: unknown };
-    const chord = typeof name === 'string' ? parseChordName(name) : null;
+    // Item shapes seen in the wild: {chord, why} per the prompt, or a bare
+    // chord-name string from terser models.
+    const { chord: name, why } =
+      typeof item === 'string'
+        ? { chord: item, why: undefined }
+        : typeof item === 'object' && item !== null
+          ? (item as { chord?: unknown; why?: unknown })
+          : { chord: undefined, why: undefined };
+    const chord = typeof name === 'string' ? parseLooseChord(name) : null;
     if (chord) suggestions.push({ chord, why: typeof why === 'string' ? why : '' });
   }
   if (suggestions.length === 0) {
-    return { error: 'The model reply contained no usable suggestions — try again.' };
+    return {
+      error: `The model reply contained no usable suggestions — try again. It began: ${replyPeek(raw)}`,
+    };
   }
   return { aiSuggestions: suggestions };
 };
