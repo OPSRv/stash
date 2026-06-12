@@ -1,0 +1,91 @@
+/* Circle of Fifths — styling for the interactive SVG wheel (CircleSvg.tsx).
+ * Imported once by CircleShell. Highlight fills are computed in TS via
+ * `accent(α)` and applied inline; this file owns the resting look, the
+ * rotation transitions and the SVG text sizing. */
+
+.circle-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+.circle-svg:focus-visible {
+  outline: 2px solid rgba(var(--stash-accent-rgb), 0.45);
+  outline-offset: 2px;
+  border-radius: 9999px;
+}
+
+/* Rotor — the <g> carrying all three rings. TS sets the rotation angle as an
+ * inline `transform: rotate(…)`; the transition lives here so reduced-motion
+ * can switch it off in one place. `transform-box: view-box` pins the origin
+ * to the centre of the 400×400 viewBox. */
+.circle-rotor {
+  transform-box: view-box;
+  transform-origin: center;
+  transition: transform 0.35s var(--easing-standard);
+}
+
+/* Key sectors (major + minor rings). Base fill is the elevated-surface token
+ * so the wheel reads in both themes; selection/neighbour/relative fills are
+ * inline accent(α) from TS and win over this rule. The diatonic-arc stroke
+ * uses a data attribute instead of an inline style so :focus-visible (later
+ * in the cascade) can override it. */
+.circle-sector {
+  fill: var(--bg-elev);
+  stroke: transparent;
+  stroke-width: 1;
+  cursor: pointer;
+  outline: none;
+  transition:
+    fill var(--duration-fast) var(--easing-standard),
+    opacity var(--duration-fast) var(--easing-standard);
+}
+.circle-sector[data-arc='true'] {
+  stroke: rgba(var(--stash-accent-rgb), 0.4);
+}
+.circle-sector:focus-visible {
+  stroke: rgba(var(--stash-accent-rgb), 0.9);
+  stroke-width: 1.5;
+}
+
+/* Inner thin ring — decorative key-signature ticks, never interactive. */
+.circle-sig-sector {
+  fill: var(--bg-elev);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* Labels counter-rotate (inline transform from TS) so text stays upright
+ * while the rotor spins; `fill-box` makes each glyph pivot on itself. */
+.circle-label {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.35s var(--easing-standard);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* SVG <text> sizing: the Tailwind text tokens (text-meta / text-body /
+ * text-title) are HTML utility classes and don't reach SVG presentation, so
+ * sizes are set explicitly here, mirroring the app scale (15 ≈ title for
+ * majors, 11 ≈ meta for minors, 9 for the signature tick). */
+.circle-major-label {
+  font: 600 15px var(--font-sys);
+  fill: var(--fg);
+}
+.circle-minor-label {
+  font: 500 11px var(--font-sys);
+  fill: var(--fg-mute);
+}
+.circle-sig-label {
+  font: 600 9px var(--font-sys);
+  fill: var(--fg-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .circle-rotor,
+  .circle-label,
+  .circle-sector {
+    transition: none;
+  }
+}
