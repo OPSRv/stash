@@ -193,7 +193,7 @@ export const TranslatorComposer = ({
             {isBusy && <Spinner size={11} />}
           </div>
           <div
-            className="stash-selectable flex-1 t-primary text-body leading-snug break-words overflow-y-auto nice-scroll"
+            className="stash-selectable flex-1 t-primary text-body leading-snug whitespace-pre-wrap break-words overflow-y-auto nice-scroll"
             dir={isRtl(target) ? 'rtl' : 'auto'}
             aria-live="polite"
           >
