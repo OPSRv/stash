@@ -209,8 +209,9 @@ use modules::recorder::commands::{
 use modules::recorder::repo::RecorderRepo;
 use modules::valeton::commands::{
     valeton_connect_ble, valeton_connect_usb, valeton_disconnect, valeton_generate_preset,
-    valeton_save_file, valeton_send, ValetonState,
+    valeton_save_file, valeton_send, valeton_usb_present, ValetonState,
 };
+use modules::circle::commands::circle_ai_assist;
 use modules::music::commands::{
     music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
     music_show, music_status,
@@ -714,8 +715,10 @@ pub fn run() {
             valeton_connect_ble,
             valeton_send,
             valeton_disconnect,
+            valeton_usb_present,
             valeton_save_file,
             valeton_generate_preset,
+            circle_ai_assist,
             pty_open,
             pty_write,
             pty_resize,

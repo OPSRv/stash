@@ -340,6 +340,14 @@ pub async fn valeton_disconnect(state: State<'_, ValetonState>) -> Result<(), St
     Ok(())
 }
 
+/// Is a GP-5 USB-MIDI port present right now? A silent presence probe used by
+/// the frontend to auto-connect when the device is powered on *after* the app —
+/// without spamming the connect log on every poll while it's still off.
+#[tauri::command]
+pub fn valeton_usb_present() -> bool {
+    gp5_usb_port_present()
+}
+
 /// Write a preset (`.prst`) blob to a path chosen via the native save dialog.
 /// WKWebView can't trigger an `<a download>` save, so the bytes are handed to
 /// Rust to write.

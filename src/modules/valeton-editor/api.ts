@@ -29,6 +29,11 @@ export const sendBytes = (bytes: number[]): Promise<void> =>
 export const disconnectDevice = (): Promise<void> =>
   invoke('valeton_disconnect');
 
+/** Чи присутній зараз USB-MIDI порт GP-5? Тихий пробінг для авто-підключення,
+    коли процесор вмикають уже після відкриття програми (без спаму в лог). */
+export const usbPresent = (): Promise<boolean> =>
+  invoke<boolean>('valeton_usb_present').catch(() => false);
+
 /** Записати .prst-файл на диск (WKWebView не вміє `<a download>`). */
 export const saveFileBytes = (path: string, bytes: number[]): Promise<void> =>
   invoke('valeton_save_file', { path, bytes });
