@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod circle;
 pub mod clipboard;
 pub mod converter;
 pub mod diarization;
