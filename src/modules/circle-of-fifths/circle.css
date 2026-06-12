@@ -89,3 +89,51 @@
     transition: none;
   }
 }
+
+/* ── Chord chips (key panel grid + progression strip) ───────────────────── */
+
+/* Two-line chord chip: roman numeral over the chord name. Text sizes come
+ * from the text-meta / text-body utilities in the markup; this class owns
+ * the box. */
+.circle-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--easing-standard),
+    border-color var(--duration-fast) var(--easing-standard);
+}
+.circle-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--hairline-strong);
+}
+
+/* Chip of the chord currently sounding. The static accent fill marks it for
+ * everyone (including reduced-motion users); the pulse ring is motion-gated. */
+.circle-chip-playing,
+.circle-chip-playing:hover {
+  background: rgba(var(--stash-accent-rgb), 0.22);
+  border-color: rgba(var(--stash-accent-rgb), 0.45);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .circle-chip-playing {
+    animation: circle-chip-pulse 0.9s ease-in-out infinite;
+  }
+}
+@keyframes circle-chip-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--stash-accent-rgb), 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(var(--stash-accent-rgb), 0.08);
+  }
+}
