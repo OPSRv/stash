@@ -65,10 +65,13 @@
 }
 
 /* Labels counter-rotate (inline transform from TS) so text stays upright
- * while the rotor spins; `fill-box` makes each glyph pivot on itself. */
+ * while the rotor spins. The TS transform is `translate(anchor) rotate(-a)`
+ * around the LOCAL origin — do not switch to `transform-box: fill-box`:
+ * WKWebView ignores it on SVG <text> and the labels orbit away from their
+ * sectors (the translate-then-rotate form needs no reference box at all). */
 .circle-label {
-  transform-box: fill-box;
-  transform-origin: center;
+  transform-box: view-box;
+  transform-origin: 0 0;
   transition: transform 0.35s var(--easing-standard);
   pointer-events: none;
   user-select: none;

@@ -296,7 +296,15 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
   /* The rotor subtree (36 paths + 36 labels) only depends on the angle and
    * the highlight inputs — memoized so tooltip show/hide re-renders skip it. */
   const rotor = useMemo(() => {
-    const counterRotate: CSSProperties = { transform: `rotate(${-angle}deg)` };
+    /* Labels counter-rotate so text stays upright while the rotor spins.
+     * The anchor translate is baked into the same CSS transform and the
+     * rotation happens around the local origin (transform-origin 0 0 in
+     * circle.css): WKWebView ignores `transform-box: fill-box` on SVG
+     * <text>, so pivoting "on the glyph itself" via fill-box sends labels
+     * orbiting around the viewBox origin instead. */
+    const counterRotate = ([x, y]: readonly [number, number]): CSSProperties => ({
+      transform: `translate(${x}px, ${y}px) rotate(${-angle}deg)`,
+    });
     const prevSlot = mod12(selectedSlot - 1);
     const nextSlot = mod12(selectedSlot + 1);
 
@@ -361,34 +369,28 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
               />
               <path d={slot.sigPath} className="circle-sig-sector" aria-hidden="true" />
               <text
-                x={slot.majorPos[0]}
-                y={slot.majorPos[1]}
                 className="circle-label circle-major-label"
                 textAnchor="middle"
                 dominantBaseline="central"
-                style={{ ...counterRotate, opacity: majorStyle.opacity }}
+                style={{ ...counterRotate(slot.majorPos), opacity: majorStyle.opacity }}
                 aria-hidden="true"
               >
                 {slot.majorText}
               </text>
               <text
-                x={slot.minorPos[0]}
-                y={slot.minorPos[1]}
                 className="circle-label circle-minor-label"
                 textAnchor="middle"
                 dominantBaseline="central"
-                style={{ ...counterRotate, opacity: minorStyle.opacity }}
+                style={{ ...counterRotate(slot.minorPos), opacity: minorStyle.opacity }}
                 aria-hidden="true"
               >
                 {slot.minorText}
               </text>
               <text
-                x={slot.sigPos[0]}
-                y={slot.sigPos[1]}
                 className="circle-label circle-sig-label"
                 textAnchor="middle"
                 dominantBaseline="central"
-                style={counterRotate}
+                style={counterRotate(slot.sigPos)}
                 aria-hidden="true"
               >
                 {slot.sigText}
