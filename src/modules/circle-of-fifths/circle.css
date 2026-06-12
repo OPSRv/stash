@@ -48,6 +48,15 @@
   stroke-width: 1.5;
 }
 
+/* Composite-widget keyboard cursor: the wheel is a single tab stop (sectors
+ * are tabIndex=-1; the root carries aria-activedescendant), so while the
+ * root has keyboard focus the selected sector — marked by aria-pressed —
+ * doubles as the visible focus ring that ←/→ move around the circle. */
+.circle-svg:focus-visible .circle-sector[aria-pressed='true'] {
+  stroke: rgba(var(--stash-accent-rgb), 0.9);
+  stroke-width: 1.5;
+}
+
 /* Inner thin ring — decorative key-signature ticks, never interactive. */
 .circle-sig-sector {
   fill: var(--bg-elev);

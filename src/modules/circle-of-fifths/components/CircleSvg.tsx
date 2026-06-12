@@ -10,6 +10,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -94,6 +95,14 @@ const SLOTS: SlotDatum[] = CIRCLE.map((entry, i) => {
   const mid = i * SLOT_DEG;
   const sig = keySignature(keyAt(i, false));
   const sigText = sig.sharps > 0 ? `${sig.sharps}♯` : sig.flats > 0 ? `${sig.flats}♭` : '0';
+  /* Spoken signature for aria-labels, so keyboard/AT users get the same
+   * information the hover tooltip shows. */
+  const sigSpoken =
+    sig.sharps > 0
+      ? `${sig.sharps} sharp${sig.sharps > 1 ? 's' : ''}`
+      : sig.flats > 0
+        ? `${sig.flats} flat${sig.flats > 1 ? 's' : ''}`
+        : 'no sharps or flats';
   const minorName = entry.minor.label.slice(0, -1); // 'Am' → 'A'
   return {
     majorPath: sectorPath(CX, CY, R_MAJOR[0], R_MAJOR[1], a0, a1),
@@ -105,8 +114,8 @@ const SLOTS: SlotDatum[] = CIRCLE.map((entry, i) => {
     majorText: entry.major.label,
     minorText: entry.minor.label,
     sigText,
-    majorAria: `${entry.major.label} major`,
-    minorAria: `${minorName} minor`,
+    majorAria: `${entry.major.label} major, ${sigSpoken}`,
+    minorAria: `${minorName} minor, ${sigSpoken}`,
     majorTip: `${entry.major.label} major · ${sigText}`,
     minorTip: `${minorName} minor · ${sigText}`,
   };
@@ -131,6 +140,9 @@ const slotOfKey = (key: Key): number =>
  * fast trackpad flick steps once instead of spinning the wheel wildly. */
 const WHEEL_STEP = 40;
 const WHEEL_LOCK_MS = 140;
+/** Idle gap after which sub-threshold wheel residue is stale and dropped,
+ * so a leftover +35 from one gesture can't make a later +5 fire a step. */
+const WHEEL_IDLE_RESET_MS = 200;
 /** Sector-click audition is quieter than progression playback (0.18). */
 const QUIET_GAIN = 0.12;
 
@@ -154,6 +166,8 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
   const rotation = useStore((s) => s.rotation);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
+  /* Stable prefix for sector ids — they feed the root's aria-activedescendant. */
+  const baseId = useId();
 
   /* Continuous rotation angle. The store keeps `rotation` as a slot index
    * (0–11); animating `-rotation * 30` directly would spin the long way
@@ -177,10 +191,17 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
     if (!el) return;
     let acc = 0;
     let lockedUntil = 0;
+    let lastWheelAt = 0;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
       const now = performance.now();
       if (now < lockedUntil) return;
+      /* Stale residue never carries over: a fresh gesture (idle gap) or a
+       * direction reversal restarts accumulation from zero, so reversals
+       * step immediately and old sub-threshold deltas can't fire early. */
+      if (now - lastWheelAt > WHEEL_IDLE_RESET_MS) acc = 0;
+      if (acc !== 0 && acc * e.deltaY < 0) acc = 0;
+      lastWheelAt = now;
       acc += e.deltaY;
       if (Math.abs(acc) < WHEEL_STEP) return;
       const dir = acc > 0 ? 1 : -1;
@@ -230,7 +251,8 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
     [onAltSelect],
   );
 
-  /* role="button" sectors must also activate from the keyboard. */
+  /* Sectors are not tab stops, but a mouse click still focuses them
+   * (tabIndex={-1}); Enter/Space on a click-focused sector must activate. */
   const onSectorKeyDown = useCallback(
     (e: ReactKeyboardEvent<SVGPathElement>, slot: number, minor: boolean): void => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -306,30 +328,32 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
           return (
             <g key={slot.majorText}>
               <path
+                id={`${baseId}-major-${i}`}
                 d={slot.majorPath}
                 className="circle-sector"
                 data-arc={inArc(i) ? 'true' : undefined}
                 role="button"
-                tabIndex={0}
+                tabIndex={-1}
                 aria-label={slot.majorAria}
                 aria-pressed={!selectedMinor && i === selectedSlot}
                 style={majorStyle}
-                onClick={(e) => onSectorClick(i, false, e.altKey)}
+                onClick={(e) => e.detail === 1 && onSectorClick(i, false, e.altKey)}
                 onKeyDown={(e) => onSectorKeyDown(e, i, false)}
                 onMouseEnter={(e) => showTip(slot.majorTip, e)}
                 onMouseMove={placeTip}
                 onMouseLeave={hideTip}
               />
               <path
+                id={`${baseId}-minor-${i}`}
                 d={slot.minorPath}
                 className="circle-sector"
                 data-arc={inArc(i) ? 'true' : undefined}
                 role="button"
-                tabIndex={0}
+                tabIndex={-1}
                 aria-label={slot.minorAria}
                 aria-pressed={selectedMinor && i === selectedSlot}
                 style={minorStyle}
-                onClick={(e) => onSectorClick(i, true, e.altKey)}
+                onClick={(e) => e.detail === 1 && onSectorClick(i, true, e.altKey)}
                 onKeyDown={(e) => onSectorKeyDown(e, i, true)}
                 onMouseEnter={(e) => showTip(slot.minorTip, e)}
                 onMouseMove={placeTip}
@@ -376,6 +400,7 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
     );
   }, [
     angle,
+    baseId,
     selectedSlot,
     selectedMinor,
     diatonicMask,
@@ -386,6 +411,18 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
     hideTip,
   ]);
 
+  /* Single-tab-stop composite widget (aria-activedescendant variant): the
+   * root is the only tab stop, sectors are tabIndex={-1}, and the root
+   * points at the selected sector via aria-activedescendant — 25 sequential
+   * tab stops would make the wheel a keyboard wall. Roving tabindex was the
+   * alternative, but here the "cursor" IS the selection, so keeping DOM
+   * focus on the root (which already owns ←/→ and Enter) is simpler and
+   * avoids re-focusing paths inside a rotating subtree. While the root
+   * shows :focus-visible, CSS gives the selected (aria-pressed) sector a
+   * strong stroke so the active descendant is visible. role="group"
+   * supports aria-activedescendant per ARIA 1.2. */
+  const activeDescendant = `${baseId}-${selectedMinor ? 'minor' : 'major'}-${selectedSlot}`;
+
   return (
     <>
       <svg
@@ -394,6 +431,7 @@ export const CircleSvg = ({ onAltSelect }: CircleSvgProps) => {
         className="circle-svg"
         role="group"
         aria-label="Circle of fifths"
+        aria-activedescendant={activeDescendant}
         tabIndex={0}
         onKeyDown={onRootKeyDown}
         onMouseLeave={hideTip}
