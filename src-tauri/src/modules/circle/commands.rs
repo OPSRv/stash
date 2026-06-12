@@ -23,8 +23,9 @@ substitution ideas. No JSON, no code fences.";
 const SUGGEST_PROMPT: &str = "You are a music-theory assistant. The user message contains a \
 chord progression and its key. Return ONLY JSON \
 {\"suggestions\":[{\"chord\":\"F\",\"why\":\"...\"}]} with 2-3 items, each a next chord that \
-fits the progression and a short reason why. Chords use names like C, Cm, Cmaj7, C7, Cm7, \
-Cdim, Cm7b5. No prose, no markdown code fence.";
+fits the progression and a short reason why — keep every \"why\" under 12 words so the \
+reply stays compact. Chords use names like C, Cm, Cmaj7, C7, Cm7, Cdim, Cm7b5. No prose, \
+no markdown code fence.";
 
 /// Map an assist mode to its system prompt. Unknown modes are a user-facing
 /// error, not a panic — the frontend only ever sends the three known values.
@@ -93,9 +94,12 @@ pub async fn circle_ai_assist(
         messages: vec![ChatMessage::system(system), ChatMessage::user(payload)],
         tools: Vec::new(),
         // Low temperature: compose/suggest want consistent, parseable JSON,
-        // not creative variance.
+        // not creative variance. The token budget is roomy for the short
+        // replies the prompts pin — a chatty model truncating its JSON
+        // mid-string was observed at 1024 (reasoning models can also burn
+        // budget on thinking before the payload).
         temperature: 0.4,
-        max_tokens: 1024,
+        max_tokens: 2048,
     };
     let resp = client.chat(req).await.map_err(|e| e.to_string())?;
     let text = strip_code_fences(&resp.text);

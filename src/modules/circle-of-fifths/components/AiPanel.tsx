@@ -145,15 +145,33 @@ const applyCompose = (raw: string): ApplyResult => {
 
 /** Suggest: `{"suggestions":[{"chord":"F","why":"…"}]}` → chips. Items with
  * unparseable chord names are dropped; only an empty result is an error. */
+/** Last-resort salvage for a TRUNCATED suggestions reply (max_tokens cut the
+ * JSON mid-string): every complete flat `{...}` carrying a "chord" key still
+ * parses on its own; the cut-off trailing item simply never closes its brace
+ * and is skipped. */
+const salvageSuggestionItems = (raw: string): unknown[] => {
+  const items: unknown[] = [];
+  for (const fragment of raw.match(/\{[^{}]*\}/g) ?? []) {
+    try {
+      const item: unknown = JSON.parse(fragment.replace(/,\s*}/g, '}'));
+      if (typeof item === 'object' && item !== null && 'chord' in item) items.push(item);
+    } catch {
+      // incomplete or junk fragment — skip
+    }
+  }
+  return items;
+};
+
 const applySuggest = (raw: string): ApplyResult => {
   const parsed = parseJsonReply(raw);
-  // Tolerate a bare top-level array (the wrapper object skipped).
+  // Tolerate a bare top-level array (the wrapper object skipped); when even
+  // that fails, harvest whatever complete items a truncated reply contains.
   const items = Array.isArray(parsed)
     ? parsed
     : parsed && Array.isArray(parsed.suggestions)
       ? parsed.suggestions
-      : null;
-  if (!items) {
+      : salvageSuggestionItems(raw);
+  if (items.length === 0) {
     return { error: `The model reply was not valid JSON — try again. It began: ${replyPeek(raw)}` };
   }
   const suggestions: AiSuggestion[] = [];
