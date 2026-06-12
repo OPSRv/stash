@@ -8,6 +8,7 @@ import {
   type Key,
   chordName,
   diatonicChords,
+  pc,
   scaleOf,
   spellPitch,
 } from './theory';
@@ -105,7 +106,7 @@ const respellRoot = (root: number, to: Key, sourceLabel: string | undefined): st
 export const transposeProgression = (chords: Chord[], from: Key, to: Key): Chord[] => {
   const shift = to.tonic - from.tonic;
   return chords.map((chord) => {
-    const root = (((chord.root + shift) % 12) + 12) % 12;
+    const root = pc(chord.root + shift);
     return { ...chord, root, rootLabel: respellRoot(root, to, chord.rootLabel) };
   });
 };

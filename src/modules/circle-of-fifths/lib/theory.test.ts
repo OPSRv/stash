@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CIRCLE, keyAt, keySignature, scaleOf, MODES, modeScale,
   diatonicChords, chordName, romanNumeral, relativeOf, parallelOf,
-  spellPitch, chordPitches,
+  spellPitch, chordPitches, parseChordName,
 } from './theory';
 
 describe('circle layout', () => {
@@ -155,6 +155,20 @@ describe('roman numerals (extra)', () => {
     const chords = diatonicChords({ tonic: 9, minor: true }, false);
     expect(chords.map((c) => romanNumeral(c, { tonic: 9, minor: true })))
       .toEqual(['i', 'ii°', 'III', 'iv', 'v', 'VI', 'VII']);
+  });
+});
+
+describe('parseChordName', () => {
+  it('parses Cmaj7', () =>
+    expect(parseChordName('Cmaj7')).toEqual({ root: 0, quality: 'maj7', rootLabel: 'C' }));
+  it('parses F#m7b5', () =>
+    expect(parseChordName('F#m7b5')).toEqual({ root: 6, quality: 'm7b5', rootLabel: 'F#' }));
+  it('parses Bbm', () =>
+    expect(parseChordName('Bbm')).toEqual({ root: 10, quality: 'min', rootLabel: 'Bb' }));
+  it('returns null for garbage', () => {
+    expect(parseChordName('H7')).toBeNull();
+    expect(parseChordName('Csus4')).toBeNull();
+    expect(parseChordName('')).toBeNull();
   });
 });
 

@@ -25,7 +25,7 @@ export type Mode = { id: string; label: string; intervals: number[] };
 export type KeySignature = { sharps: number; flats: number; notes: string[] };
 
 /** Normalize any integer to a pitch class 0–11. */
-const pc = (n: number): number => ((n % 12) + 12) % 12;
+export const pc = (n: number): number => ((n % 12) + 12) % 12;
 
 const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const FLAT_NAMES = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -165,6 +165,29 @@ const NAME_SUFFIX: Record<ChordQuality, string> = {
 
 export const chordName = (chord: Chord): string =>
   `${chord.rootLabel ?? SHARP_NAMES[pc(chord.root)]}${NAME_SUFFIX[chord.quality]}`;
+
+/** Reverse of `chordName`'s suffix table — quality by printable suffix — so
+ * parsing and printing stay in lockstep by construction. */
+const QUALITY_BY_SUFFIX = new Map<string, ChordQuality>(
+  (Object.keys(NAME_SUFFIX) as ChordQuality[]).map((q) => [NAME_SUFFIX[q], q]),
+);
+
+/** Parse a chord name (`C`, `Bbm`, `C7`, `Ebmaj7`, `F#m7b5`, …) into a Chord.
+ * `rootLabel` keeps the name's own root spelling so it survives round-trips
+ * through `chordName`. Unknown roots or qualities (`H7`, `Csus4`) → null. */
+export const parseChordName = (name: string): Chord | null => {
+  const m = /^([A-G])(#{1,2}|b{1,2})?(.*)$/.exec(name.trim());
+  if (!m) return null;
+  const [, letter, accidentals = '', suffix] = m;
+  const quality = QUALITY_BY_SUFFIX.get(suffix);
+  if (quality === undefined) return null;
+  const offset = accidentals.startsWith('#') ? accidentals.length : -accidentals.length;
+  return {
+    root: pc(LETTER_PCS[LETTERS.indexOf(letter)] + offset),
+    quality,
+    rootLabel: letter + accidentals,
+  };
+};
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 

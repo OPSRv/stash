@@ -39,8 +39,9 @@ const keyLong = (key: Key): string =>
 
 /** Circle slot a key renders at: its own slot for majors, the relative
  * major's for minors — mirrors CircleSvg's lookup so panel-driven key
- * switches also rotate the selection to 12 o'clock. */
-const slotOfKey = (key: Key): number => {
+ * switches also rotate the selection to 12 o'clock. Exported for AiPanel,
+ * which rotates the circle to the AI-composed key the same way. */
+export const slotOfKey = (key: Key): number => {
   const majorPc = key.minor ? relativeOf(key).tonic : key.tonic;
   return CIRCLE.findIndex((entry) => entry.major.pc === majorPc);
 };
