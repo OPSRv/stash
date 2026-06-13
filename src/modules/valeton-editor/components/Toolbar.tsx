@@ -271,11 +271,15 @@ export const Toolbar = ({
           >
             Live
           </button>
+          {/* Circle of fifths is a standalone music-theory tool (its own
+              store + Rust command) with no dependency on the GP-5 — so it
+              stays reachable while the editor is `locked` (no device / still
+              connecting). Live, by contrast, mirrors the device's live state
+              and keeps the lock. */}
           <button
             type="button"
             data-id="circle_switch"
             className={`seg-btn px-3 ${circleView ? 'active' : ''}`}
-            disabled={locked}
             aria-pressed={circleView}
             title="Circle of fifths"
             onClick={() => setState({ circleView: !circleView, liveView: false })}
