@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { generatePreset } from '../../api';
 import { importPreset, savePatchToDevice } from '../../lib/actions';
-import { extractJsonObject, parsePreset } from '../../lib/presetIO';
-import { useStore } from '../../store/store';
+import { extractJsonObject, parsePreset, serializePreset } from '../../lib/presetIO';
+import { getState, useStore } from '../../store/store';
 import { Modal } from '../ui/Modal';
 
 type Msg = { kind: 'ok' | 'err' | 'info'; text: string };
@@ -60,6 +60,23 @@ export const PresetAiModal = ({
     } finally {
       setGenerating(false);
     }
+  };
+
+  /** Узяти поточний патч пристрою (live-стан стора) як редагований JSON —
+      стартова точка для ручних правок чи щоб скопіювати тон. */
+  const loadCurrent = () => {
+    if (locked) {
+      setMsg({
+        kind: 'err',
+        text: 'No GP-5 connected — connect and load a patch first.',
+      });
+      return;
+    }
+    setJson(serializePreset(getState()));
+    setMsg({
+      kind: 'info',
+      text: `Loaded patch ${patchLabel} as JSON — edit below, then Apply.`,
+    });
   };
 
   const apply = async (save: boolean) => {
@@ -171,7 +188,23 @@ export const PresetAiModal = ({
 
       <hr className="my-3 border-white/10" />
 
-      <p className="mb-1 text-sm text-ve-dim">Preset JSON</p>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <p className="text-sm text-ve-dim">Preset JSON</p>
+        <button
+          type="button"
+          data-id="preset_ai_use_current"
+          className="btn btn-ghost px-2 py-1 text-xs"
+          disabled={locked || generating || busy}
+          onClick={loadCurrent}
+          title={
+            locked
+              ? 'Connect a GP-5 first'
+              : 'Load the current patch as editable JSON'
+          }
+        >
+          Use current
+        </button>
+      </div>
       <textarea
         data-id="preset_ai_json"
         className="h-40 w-full resize-y rounded-md border border-white/10 bg-[var(--ve-glass-sunken)] p-2 font-mono text-xs text-ve-text placeholder:text-ve-dim/60 focus:border-ve-accent focus:outline-none"

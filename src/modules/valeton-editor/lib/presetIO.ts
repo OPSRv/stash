@@ -8,7 +8,7 @@
 import { BLOCK_BY_KEY } from './blocks';
 import { effectsLIST } from './constants';
 import { paramDefs } from './protocol';
-import type { BlockKey } from '../store/types';
+import type { AppState, BlockKey } from '../store/types';
 import { cleanName, roundToStep } from './utils';
 
 export interface ParsedBlock {
@@ -162,4 +162,45 @@ export function parsePreset(text: string): ParseResult {
     preset.bpm = Math.round(clamp(raw.bpm, 40, 240));
 
   return { ok: true, preset };
+}
+
+/** Серіалізувати поточний live-стан патча у той самий JSON-формат, який читає
+    `parsePreset` — повний round-trip і дзеркало `importPreset` у зворотний бік.
+    Для кожного блока виводимо лише видимі (підписані) параметри обраної моделі;
+    приховані слоти `parsePreset` відновить із дефолтів. `ctl` пишемо лише коли
+    увімкнено (як у генераторі). Зручно як стартова точка для ручних правок або
+    щоб скопіювати поточний тон. */
+export function serializePreset(s: AppState): string {
+  const blocks: Record<string, Record<string, unknown>> = {};
+
+  for (const key of BLOCK_KEYS) {
+    const { index } = BLOCK_BY_KEY[key];
+    const model = s.selected[index] ?? 0;
+    const values = s.params[index] ?? [];
+
+    const params: Record<string, number> = {};
+    paramDefs(index, model).forEach(([show, label, , , , step], pi) => {
+      if (!show || !label) return; // приховані слоти мають порожній підпис
+      const v = values[pi];
+      if (typeof v === 'number') params[label] = roundToStep(v, step);
+    });
+
+    const block: Record<string, unknown> = {
+      on: Boolean(s.enabled[index]),
+      model,
+    };
+    if (Object.keys(params).length) block.params = params;
+    if (s.ctl[index]) block.ctl = true;
+    blocks[key] = block;
+  }
+
+  const name = cleanName(s.patchNames[s.currentPatchNumber] ?? '').trim();
+  const preset: Record<string, unknown> = {};
+  if (name) preset.name = name;
+  preset.patchVOL = s.patchVOL;
+  preset.bpm = s.bpm;
+  preset.order = s.order;
+  preset.blocks = blocks;
+
+  return JSON.stringify(preset, null, 2);
 }
