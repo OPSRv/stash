@@ -433,8 +433,12 @@ export function StemMixer({
         //    uses for the master track.
         const url = await mediaStreamUrl(stem.path);
         const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const bytes = await res.arrayBuffer();
+        // A non-2xx is just another load failure — reject so it lands in
+        // the shared catch below alongside network / decode errors,
+        // instead of throwing into our own try/catch one line later.
+        const bytes = res.ok
+          ? await res.arrayBuffer()
+          : await Promise.reject(new Error(`HTTP ${res.status}`));
         if (cancelled) return;
         const buf = await ctx.decodeAudioData(bytes);
         if (cancelled) return;
@@ -1502,8 +1506,9 @@ function ChordRibbon({
   useEffect(() => {
     const el = ribbonRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      setRibbonWidth(entry.contentRect.width);
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setRibbonWidth(entry.contentRect.width);
     });
     ro.observe(el);
     setRibbonWidth(el.getBoundingClientRect().width);
