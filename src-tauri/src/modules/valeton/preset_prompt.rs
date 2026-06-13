@@ -240,7 +240,8 @@ Schema rules (follow exactly):
 - `name` — string, ≤10 chars (longer is auto-truncated; non-ASCII letters stripped).
 - `note` — optional string (≤120 chars): caveats, the closest-match amp chosen for a
   named tone, or assumptions you made. This is the ONLY place for prose — put nothing
-  outside the JSON.
+  outside the JSON. Write the `note` in Ukrainian, but keep amp/pedal model names and
+  parameter labels in their original form (e.g. "JCM800", "Time (ms)").
 - `confidence` — optional number 0..1: how closely the preset matches a specifically
   named tone/artist/song. Use ~0.9+ for generic genre requests you can nail, lower
   (~0.5–0.7) for vague or hard-to-emulate targets, and add a `note` explaining why.
