@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { releaseSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
 import { useMetronomeEngine } from './useMetronomeEngine';
 
 const cfg = {
@@ -29,6 +30,7 @@ class FakeOsc {
 class FakeGain {
   gain = { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() };
   connect = vi.fn();
+  disconnect = vi.fn();
 }
 
 class FakeAudioContext {
@@ -46,6 +48,10 @@ class FakeAudioContext {
 let lastCtx: FakeAudioContext | null = null;
 
 beforeEach(() => {
+  // The engine now pulls a shared, app-wide AudioContext singleton. Drop any
+  // instance a prior test created so our stubbed ctor is the one constructed
+  // (and `lastCtx` is repopulated) on the next `start()`.
+  void releaseSharedAudioContext();
   lastCtx = null;
   function AudioContextCtor() {
     lastCtx = new FakeAudioContext();

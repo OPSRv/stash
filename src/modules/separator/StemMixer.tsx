@@ -18,6 +18,7 @@ import { IconButton } from '../../shared/ui/IconButton';
 import { useToast } from '../../shared/ui/Toast';
 import { CopyIcon, ExternalIcon, NextIcon, NoteIcon, PauseIcon, PlayIcon, PrevIcon, TrashIcon } from '../../shared/ui/icons';
 import { revealFile } from '../../shared/util/revealFile';
+import { copyText } from '../../shared/util/clipboard';
 import { dragIconPath, mediaStreamUrl, mixdown, readPeaks, STEM_LABELS, stemColor, writePeaks, type ChordSegment } from './api';
 
 interface StemMixerProps {
@@ -1455,11 +1456,27 @@ function chordTint(idx: number, minor: boolean): string {
   return `rgba(var(--stash-accent-rgb), ${a.toFixed(3)})`;
 }
 
+/// Flatten the chord track into a copy-pasteable progression string.
+/// The sidecar already merges adjacent equal labels into one segment,
+/// so this is usually one label per segment — we still collapse any
+/// consecutive repeats defensively (older cached tracks, edge cases)
+/// and join with spaces, e.g. "Am F C G". This is the practice-sheet
+/// form most people paste into a note or chat.
+function chordProgressionText(chords: ChordSegment[]): string {
+  const labels: string[] = [];
+  for (const { label } of chords) {
+    const trimmed = label.trim();
+    if (trimmed && labels[labels.length - 1] !== trimmed) labels.push(trimmed);
+  }
+  return labels.join(' ');
+}
+
 /// Thin horizontal track above the stem lanes that renders detected
 /// chord segments. Segments are clickable — clicking seeks to the
 /// segment start, which is the practice-friendly way to jump straight
 /// to "the F#m bit". When no chords are cached yet we surface a
 /// "Detect chords" CTA so the user knows the feature is available.
+/// The left gutter doubles as a "copy the whole progression" affordance.
 function ChordRibbon({
   chords,
   duration,
@@ -1479,6 +1496,7 @@ function ChordRibbon({
   busy: boolean;
   leftGutterPx: number;
 }) {
+  const { toast } = useToast();
   const ribbonRef = useRef<HTMLDivElement | null>(null);
   const [ribbonWidth, setRibbonWidth] = useState(0);
   useEffect(() => {
@@ -1491,6 +1509,17 @@ function ChordRibbon({
     setRibbonWidth(el.getBoundingClientRect().width);
     return () => ro.disconnect();
   }, [chords]);
+
+  const handleCopyChords = async () => {
+    const text = chordProgressionText(chords ?? []);
+    if (!text) return;
+    const ok = await copyText(text);
+    toast(
+      ok
+        ? { title: 'Chords copied', description: text, variant: 'success' }
+        : { title: 'Could not copy chords', variant: 'error' },
+    );
+  };
 
   if (chords && chords.length === 0 && !busy) return null;
   if (!chords) {
@@ -1528,9 +1557,16 @@ function ChordRibbon({
       {leftGutterPx > 0 && (
         <div
           style={{ width: leftGutterPx }}
-          className="shrink-0"
-          aria-hidden
-        />
+          className="shrink-0 flex items-center justify-end pr-1.5"
+        >
+          <IconButton
+            title="Copy chord progression"
+            onClick={handleCopyChords}
+            tooltipSide="top"
+          >
+            <CopyIcon />
+          </IconButton>
+        </div>
       )}
       <div
         ref={ribbonRef}

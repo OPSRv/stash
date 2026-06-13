@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { resumeSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
 import { shortDeviceLabel } from '../../../shared/util/deviceLabel';
 import {
   GAIN_DEFAULT,
@@ -109,6 +110,7 @@ export const useRecorderEngine = () => {
   const startedAtRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const srcNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   // Mirrors `gain` for use inside `start`/`setGain` without re-creating the
@@ -194,10 +196,15 @@ export const useRecorderEngine = () => {
       recordStreamRef.current.getTracks().forEach((t) => t.stop());
       recordStreamRef.current = null;
     }
-    if (audioCtxRef.current) {
-      audioCtxRef.current.close().catch(() => {});
-      audioCtxRef.current = null;
-    }
+    // Detach our capture graph from the *shared* context but never close it —
+    // the Metronome (and others) play on the same context, and closing it here
+    // is exactly what would kill their audio. Disconnecting the source releases
+    // the mic graph; the stream tracks are already stopped above.
+    srcNodeRef.current?.disconnect();
+    gainNodeRef.current?.disconnect();
+    analyserRef.current?.disconnect();
+    srcNodeRef.current = null;
+    audioCtxRef.current = null;
     analyserRef.current = null;
     gainNodeRef.current = null;
     recorderRef.current = null;
@@ -264,12 +271,16 @@ export const useRecorderEngine = () => {
     if (resolvedId) setDeviceId(resolvedId);
 
     try {
-      const ctx = new (window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      // Shared, app-wide context — opening the mic on our own context used to
+      // drag the device sample rate onto the mic and stutter a running
+      // metronome. Resume in case it was left suspended by the autoplay policy
+      // or a macOS audio-session interruption (this `start` is a user gesture).
+      const ctx = resumeSharedAudioContext();
       const src = ctx.createMediaStreamSource(stream);
       // mic → gain → { analyser (post-gain meter), destination → recorder }
       // Routing the recorder through the gain stage is what makes the slider
-      // affect the *captured* signal, not just the meter.
+      // affect the *captured* signal, not just the meter. Nothing connects to
+      // `ctx.destination`, so capture never bleeds into the speakers.
       const gainNode = ctx.createGain();
       gainNode.gain.value = gainRef.current;
       const analyser = ctx.createAnalyser();
@@ -279,6 +290,7 @@ export const useRecorderEngine = () => {
       gainNode.connect(analyser);
       gainNode.connect(dest);
       audioCtxRef.current = ctx;
+      srcNodeRef.current = src;
       analyserRef.current = analyser;
       gainNodeRef.current = gainNode;
       recordStreamRef.current = dest.stream;

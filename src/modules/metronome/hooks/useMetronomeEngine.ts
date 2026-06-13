@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
 import {
   type MetronomeState,
   type SoundPreset,
@@ -77,8 +78,10 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
 
   const ensureCtx = (): AudioContext => {
     if (!ctxRef.current) {
-      const Ctor = (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ?? AudioContext;
-      ctxRef.current = new Ctor();
+      // Shared, app-wide context — see `sharedAudioContext.ts`. Using our own
+      // context here is what let the Recorder's mic-open renegotiate the device
+      // rate out from under a running metronome ("тупить when recorder starts").
+      ctxRef.current = getSharedAudioContext();
       const master = ctxRef.current.createGain();
       master.gain.value = 5;
       master.connect(ctxRef.current.destination);
@@ -227,7 +230,11 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
       }
       for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
       pendingBeatTimersRef.current.clear();
-      ctxRef.current?.close().catch(() => {});
+      // Detach our master from the *shared* context — never close it, other
+      // modules (Recorder, Tuner, …) may still be using the same graph.
+      masterRef.current?.disconnect();
+      masterRef.current = null;
+      ctxRef.current = null;
     };
   }, []);
 
