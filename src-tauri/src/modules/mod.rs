@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod canvas;
 pub mod circle;
 pub mod clipboard;
 pub mod converter;

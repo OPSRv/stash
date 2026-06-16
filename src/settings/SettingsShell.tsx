@@ -13,6 +13,7 @@ import { setTranslatorSettings } from '../modules/translator/api';
 import { AboutTab } from './AboutTab';
 import { AiTab } from './AiTab';
 import { AppearanceTab } from './AppearanceTab';
+import { CanvasTab } from './CanvasTab';
 import { ClipboardTab } from './ClipboardTab';
 import { DataTab } from './DataTab';
 import { DownloadsTab } from './DownloadsTab';
@@ -34,6 +35,7 @@ type Tab =
   | 'clipboard'
   | 'downloads'
   | 'terminal'
+  | 'canvas'
   | 'notes'
   | 'ai'
   | 'web'
@@ -118,6 +120,11 @@ const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
         <line x1="12" y1="19" x2="20" y2="19" />
       </svg>
     ),
+  },
+  {
+    id: 'canvas',
+    label: 'Canvas',
+    icon: <Stroke d="M3 3h13v13H3zM3 12l3-3 3 3M13 21l1-4 5-5 3 3-5 5z" />,
   },
   {
     id: 'notes',
@@ -358,6 +365,7 @@ export const SettingsShell = () => {
         {tab === 'clipboard' && <ClipboardTab settings={settings} onChange={update} />}
         {tab === 'downloads' && <DownloadsTab settings={settings} onChange={update} />}
         {tab === 'terminal' && <TerminalTab settings={settings} onChange={update} />}
+        {tab === 'canvas' && <CanvasTab settings={settings} onChange={update} />}
         {tab === 'notes' && (
           <NotesTab
             autoTranscribe={settings.notesAutoTranscribe}

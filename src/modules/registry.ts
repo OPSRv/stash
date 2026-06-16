@@ -1,5 +1,6 @@
 import type { ModuleDefinition } from './types';
 import { aiModule } from './ai';
+import { canvasModule } from './canvas';
 import { clipboardModule } from './clipboard';
 import { converterModule } from './converter';
 import { devModule } from './dev';
@@ -29,6 +30,7 @@ export const modules: ModuleDefinition[] = [
   separatorModule,
   converterModule,
   valetonEditorModule,
+  canvasModule,
   pomodoroModule,
   remindersModule,
   terminalModule,

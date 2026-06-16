@@ -211,6 +211,15 @@ use modules::valeton::commands::{
     valeton_connect_ble, valeton_connect_usb, valeton_disconnect, valeton_generate_preset,
     valeton_save_file, valeton_send, valeton_usb_present, ValetonState,
 };
+use modules::canvas::{
+    capture::{canvas_capture_image, canvas_capture_text},
+    commands::{
+        canvas_delete_project, canvas_list_projects, canvas_load_asset, canvas_save_asset,
+        canvas_save_project, canvas_write_png, CanvasState,
+    },
+    repo::CanvasRepo,
+    shortcuts::{canvas_set_capture_shortcuts, CanvasShortcutState},
+};
 use modules::circle::commands::circle_ai_assist;
 use modules::music::commands::{
     music_close, music_embed, music_hide, music_next, music_play_pause, music_prev, music_reload,
@@ -521,6 +530,39 @@ pub fn run() {
                         // switch" feel a lot better than redirecting
                         // through a tab.
                         let _ = modules::voice::popup::voice_popup_toggle(app.clone());
+                    } else if modules::canvas::shortcuts::is_image(app, shortcut) {
+                        // Capture → Image. screencapture blocks until the user
+                        // finishes selecting, so run it off the shortcut thread;
+                        // marshal the window raise back to the main thread.
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            match modules::canvas::capture::capture_for_image(&app) {
+                                Ok(Some(b64)) => {
+                                    let _ = app.emit("nav:activate", "canvas");
+                                    let _ = app.emit("canvas:open-capture", b64);
+                                    let app2 = app.clone();
+                                    let _ = app.run_on_main_thread(move || {
+                                        if let Some(win) = resolve_popup(&app2) {
+                                            let pos_state =
+                                                app2.state::<Arc<PopupPositionState>>();
+                                            position_popup(&win, &pos_state);
+                                            let _ = win.show();
+                                            let _ = win.set_focus();
+                                        }
+                                    });
+                                }
+                                Ok(None) => {}
+                                Err(e) => eprintln!("[canvas] capture image failed: {e}"),
+                            }
+                        });
+                    } else if modules::canvas::shortcuts::is_text(app, shortcut) {
+                        // Capture → Text (OCR → clipboard). Also off-thread.
+                        let app = app.clone();
+                        std::thread::spawn(move || {
+                            if let Err(e) = modules::canvas::capture::capture_and_ocr(&app) {
+                                eprintln!("[canvas] capture text failed: {e}");
+                            }
+                        });
                     }
                 })
                 .build(),
@@ -719,6 +761,15 @@ pub fn run() {
             valeton_save_file,
             valeton_generate_preset,
             circle_ai_assist,
+            canvas_list_projects,
+            canvas_save_project,
+            canvas_delete_project,
+            canvas_save_asset,
+            canvas_load_asset,
+            canvas_write_png,
+            canvas_capture_image,
+            canvas_capture_text,
+            canvas_set_capture_shortcuts,
             pty_open,
             pty_write,
             pty_resize,
@@ -930,6 +981,13 @@ pub fn run() {
             let notes_repo_for_telegram = Arc::clone(&notes_repo);
             app.manage(NotesState { repo: notes_repo });
 
+            // Canvas — project persistence + on-disk raster assets.
+            let canvas_db = data_dir.join("canvas.sqlite");
+            let canvas_repo = CanvasRepo::new(Connection::open(&canvas_db)?)?;
+            let canvas_assets = data_dir.join("canvas").join("assets");
+            app.manage(CanvasState::new(canvas_repo, canvas_assets));
+            app.manage(CanvasShortcutState::default());
+
             // Register the notes-managed roots with the shared media
             // server. Audio = inline voice memos + per-note attachments
             // + (optional) Stash Stems. Image = managed images +
@@ -1098,6 +1156,7 @@ pub fn run() {
                 modules::telegram::module_cmds::NotesListCmd::new(notes_repo_for_telegram),
             );
             telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::OcrCmd);
             telegram_state.register_command(modules::telegram::module_cmds::KeepAwakeCmd);
             telegram_state.register_command(modules::telegram::module_cmds::LaunchClaudeCmd);
             telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
@@ -1259,6 +1318,16 @@ pub fn run() {
                 app.global_shortcut().register(toggle)?;
                 app.global_shortcut().register(notes)?;
                 app.global_shortcut().register(voice)?;
+                // Canvas capture shortcuts are user-rebindable (Settings →
+                // Canvas), so they're registered through the canvas module's
+                // state rather than hardcoded. Defaults avoid the native macOS
+                // screenshot binds (⌘⇧3/4/5). Best-effort: a conflict mustn't
+                // abort boot.
+                let _ = modules::canvas::shortcuts::apply(
+                    app.handle(),
+                    modules::canvas::shortcuts::DEFAULT_IMAGE_ACCEL,
+                    modules::canvas::shortcuts::DEFAULT_TEXT_ACCEL,
+                );
             }
 
             let auto_hide = Arc::new(PopupAutoHide(AtomicBool::new(true)));

@@ -74,6 +74,10 @@ export type Settings = {
   /** Persisted popup size in logical pixels. Never stored below the 920×640 floor. */
   popupWidth: number;
   popupHeight: number;
+  /** Global Canvas capture shortcuts (Tauri accelerator strings). Rebindable
+   *  in Settings → Canvas; re-registered on the Rust side on change. */
+  canvasCaptureImageShortcut: string;
+  canvasCaptureTextShortcut: string;
   /**
    * Per-user quick-commands surfaced as buttons in the Terminal header.
    * Each writes its `command` followed by a newline into the PTY when
@@ -177,6 +181,8 @@ export const DEFAULT_SETTINGS: Settings = {
   notesAutoPolish: true,
   popupWidth: 920,
   popupHeight: 640,
+  canvasCaptureImageShortcut: 'CommandOrControl+Shift+S',
+  canvasCaptureTextShortcut: 'CommandOrControl+Shift+O',
   terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
   terminalClaudeCommand: 'claude',
   hiddenModules: [],

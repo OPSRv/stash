@@ -33,6 +33,7 @@ import {
   setRateLimit,
 } from '../modules/downloader/api';
 import { setTranslatorSettings } from '../modules/translator/api';
+import { canvasSetCaptureShortcuts } from '../modules/canvas/api';
 import { Cheatsheet } from '../shared/ui/Cheatsheet';
 import { GlobeLoader } from '../shared/ui/GlobeLoader';
 import { GlobalSearch } from '../shared/ui/GlobalSearch';
@@ -302,6 +303,11 @@ export const PopupShell = () => {
               target: s.translateTarget,
               minChars: s.translateMinChars,
             }),
+            // Apply the user's (possibly rebound) Canvas capture shortcuts.
+            canvasSetCaptureShortcuts(
+              s.canvasCaptureImageShortcut,
+              s.canvasCaptureTextShortcut,
+            ).catch(() => {}),
           ]);
         })
         .catch(() => {});

@@ -181,6 +181,13 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           onChange={(e) => setDraft(e.currentTarget.value)}
           onBlur={(e) => commit(e.currentTarget.value)}
           onKeyDown={onKey}
+          onWheel={(e) => {
+            // Scroll-to-nudge, but only once the field is focused so wheeling
+            // over a scrollable panel doesn't accidentally change values.
+            if (disabled || document.activeElement !== e.currentTarget) return;
+            e.stopPropagation();
+            nudge(e.deltaY < 0 ? 1 : -1, e.shiftKey ? 10 : 1);
+          }}
           className={`flex-1 min-w-0 bg-transparent outline-none text-right tabular-nums ${inputPadRight[size]}`}
           style={{ fontVariantNumeric: 'tabular-nums' }}
         />

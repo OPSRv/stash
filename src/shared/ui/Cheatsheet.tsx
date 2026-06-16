@@ -13,9 +13,27 @@ const globalShortcuts: ShortcutGroup = {
     { keys: ['⌘⇧V'], label: 'Toggle Stash popup' },
     { keys: ['⌘⇧J'], label: 'Quick-open Notes' },
     { keys: ['⌘⇧F'], label: 'Global search' },
+    { keys: ['⌘⇧S'], label: 'Capture region → annotate in Canvas' },
+    { keys: ['⌘⇧O'], label: 'Capture region → OCR text to clipboard' },
     { keys: ['⌘⌥1', '⌘⌥2', '⌘⌥3'], label: 'Switch tab' },
     { keys: ['Esc', '⌘W'], label: 'Hide popup' },
     { keys: ['?'], label: 'Open this cheatsheet' },
+  ],
+};
+
+const canvasShortcuts: ShortcutGroup = {
+  title: 'Canvas',
+  items: [
+    { keys: ['V', 'R', 'O', 'L', 'A'], label: 'Select / Rectangle / Oval / Line / Arrow' },
+    { keys: ['P', 'T', 'H', 'C'], label: 'Freehand / Text / Highlighter / Counter' },
+    { keys: ['B', 'E', 'X'], label: 'Blur / Erase area / Eraser brush' },
+    { keys: ['⌘Z', '⌘⇧Z'], label: 'Undo / Redo' },
+    { keys: ['⌘C', '⌘V'], label: 'Copy / paste layers (or image)' },
+    { keys: ['⌘D'], label: 'Duplicate selection' },
+    { keys: ['⌘S'], label: 'Save PNG' },
+    { keys: ['⌫'], label: 'Delete selection' },
+    { keys: ['Space-drag'], label: 'Pan · Wheel: zoom' },
+    { keys: ['Right-click'], label: 'Context menu' },
   ],
 };
 
@@ -108,6 +126,7 @@ export const Cheatsheet = ({
   if (!tab || tab === 'web') groups.push(webShortcuts);
   if (!tab || tab === 'downloads') groups.push(downloadsShortcuts);
   if (!tab || tab === 'terminal') groups.push(terminalShortcuts);
+  if (!tab || tab === 'canvas') groups.push(canvasShortcuts);
 
   return (
     <div

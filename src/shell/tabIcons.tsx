@@ -37,6 +37,7 @@ export const TAB_ICON_COLORS: Record<string, string> = {
   separator: '#22d3ee',
   converter: '#facc15',
   'valeton-editor': '#5b9dff',
+  canvas: '#fb923c',
   pomodoro: '#ef4444',
   reminders: '#fde047',
   terminal: '#84cc16',
@@ -189,6 +190,26 @@ export const TAB_ICONS: Record<string, ReactNode> = {
       <circle cx="9.5" cy="7" r="1.2" />
       <circle cx="14.5" cy="7" r="1.2" />
       <circle cx="12" cy="16" r="2.6" />
+    </svg>
+  ),
+  canvas: (
+    /* Image frame with an annotation pen reaching into it — reads as a
+       screenshot markup / Canvas editor at 13×13. */
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <rect x="3" y="3" width="13" height="13" rx="2" />
+      <path d="M3 12l3-3 3 3" />
+      <circle cx="7" cy="7" r="1" />
+      <path d="M13 21l1-4 5-5 3 3-5 5z" />
     </svg>
   ),
   pomodoro: (

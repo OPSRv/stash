@@ -873,6 +873,20 @@ export const ClipboardPopup = () => {
           out.push({ kind: 'separator' });
           out.push({
             kind: 'action',
+            label: 'Open in Canvas',
+            icon: <ExternalIcon size={12} />,
+            onSelect: () => {
+              // Copy to the OS clipboard, jump to Canvas, then ping it to
+              // paste — twice, so a first-time lazy mount still catches it.
+              void copyOnly(item.id);
+              window.dispatchEvent(new CustomEvent('stash:navigate', { detail: 'canvas' }));
+              const ping = () => window.dispatchEvent(new CustomEvent('stash:canvas-paste'));
+              window.setTimeout(ping, 250);
+              window.setTimeout(ping, 750);
+            },
+          });
+          out.push({
+            kind: 'action',
             label: 'Open in Preview',
             icon: <ExternalIcon size={12} />,
             onSelect: () => openImageInViewer(meta.path),

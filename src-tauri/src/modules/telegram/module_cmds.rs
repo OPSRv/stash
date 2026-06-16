@@ -71,6 +71,44 @@ impl CommandHandler for BatteryCmd {
     }
 }
 
+// -------------------- /ocr --------------------
+
+pub struct OcrCmd;
+
+#[async_trait]
+impl CommandHandler for OcrCmd {
+    fn name(&self) -> &'static str {
+        "ocr"
+    }
+    fn description(&self) -> &'static str {
+        "Розпізнати текст із зображення (Apple Vision). Без аргументу — захопити область екрана"
+    }
+    fn usage(&self) -> &'static str {
+        "/ocr [шлях до зображення]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        let arg = args.trim();
+        let result = if arg.is_empty() {
+            // No path → interactive region capture on the Mac, then OCR.
+            let app = ctx.app.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::modules::canvas::capture::capture_and_ocr(&app)
+            })
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r)
+            .map(|opt| opt.unwrap_or_default())
+        } else {
+            crate::modules::canvas::capture::ocr_file(std::path::Path::new(arg))
+        };
+        match result {
+            Ok(text) if !text.trim().is_empty() => Reply::text(text),
+            Ok(_) => Reply::text("🔍 Текст не знайдено."),
+            Err(e) => Reply::text(format!("⚠️ OCR не вдалося: {e}")),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BatterySnapshot {
     Present {
