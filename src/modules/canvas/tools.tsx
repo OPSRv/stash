@@ -36,6 +36,16 @@ export const TOOLS: ToolDef[] = [
     icon: <S><path d="M5 3l6 16 2.5-6.5L20 10z" /></S>,
   },
   {
+    kind: 'marquee',
+    title: 'Marquee select',
+    hotkey: 'm',
+    icon: (
+      <S>
+        <rect x="4" y="5" width="16" height="14" rx="1" strokeDasharray="3 2.5" />
+      </S>
+    ),
+  },
+  {
     kind: 'rect',
     title: 'Rectangle',
     hotkey: 'r',

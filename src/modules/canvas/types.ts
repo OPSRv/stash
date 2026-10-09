@@ -6,6 +6,7 @@
 
 export type ToolKind =
   | 'select'
+  | 'marquee'
   | 'rect'
   | 'oval'
   | 'line'

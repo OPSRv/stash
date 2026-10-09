@@ -29,10 +29,21 @@ interface EditorState {
   clipboard: CanvasNode[] | null;
 }
 
+/** What undo/redo snapshots: the scene plus the page size (so Crop, which
+ *  redefines width/height, round-trips cleanly). */
+type SceneSnapshot = Pick<CanvasProject, 'nodes' | 'backdrop' | 'width' | 'height'>;
+
 interface History {
-  past: Array<Pick<CanvasProject, 'nodes' | 'backdrop'>>;
-  future: Array<Pick<CanvasProject, 'nodes' | 'backdrop'>>;
+  past: SceneSnapshot[];
+  future: SceneSnapshot[];
 }
+
+const snapshot = (p: CanvasProject): SceneSnapshot => ({
+  nodes: p.nodes,
+  backdrop: p.backdrop,
+  width: p.width,
+  height: p.height,
+});
 
 const HISTORY_LIMIT = 80;
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -172,6 +183,24 @@ class CanvasStore {
     });
   }
 
+  /** Crop the page to a rectangle (stage coords): translate every node so the
+   *  rect's top-left becomes the new origin and shrink the page to its size.
+   *  Undoable as one step. The backdrop is switched off because its export
+   *  region is derived from content bounds and would otherwise re-expand past
+   *  the crop — a crop is an explicit, exact page. */
+  cropTo(projectId: string, bounds: { x: number; y: number; width: number; height: number }) {
+    const w = Math.max(1, Math.round(bounds.width));
+    const h = Math.max(1, Math.round(bounds.height));
+    this.mutate(projectId, (p) => {
+      p.nodes = p.nodes.map(
+        (n) => ({ ...n, x: n.x - bounds.x, y: n.y - bounds.y }) as CanvasNode,
+      );
+      p.width = w;
+      p.height = h;
+      p.backdrop = { ...p.backdrop, enabled: false, preset: '__user__' };
+    });
+  }
+
   // ---- ui ----------------------------------------------------------------
 
   setTool(projectId: string, tool: ToolKind) {
@@ -196,7 +225,7 @@ class CanvasStore {
 
   // ---- scene mutations ---------------------------------------------------
 
-  private pushHistory(projectId: string, snap: Pick<CanvasProject, 'nodes' | 'backdrop'>) {
+  private pushHistory(projectId: string, snap: SceneSnapshot) {
     const h = this.histories.get(projectId) ?? { past: [], future: [] };
     h.past.push(clone(snap));
     if (h.past.length > HISTORY_LIMIT) h.past.shift();
@@ -213,7 +242,7 @@ class CanvasStore {
     const proj = this.state.projects.find((p) => p.id === projectId);
     if (!proj) return;
     if (opts.history !== false) {
-      this.pushHistory(projectId, { nodes: proj.nodes, backdrop: proj.backdrop });
+      this.pushHistory(projectId, snapshot(proj));
     }
     const draft = clone(proj);
     recipe(draft);
@@ -248,7 +277,7 @@ class CanvasStore {
    *  so the whole gesture collapses to a single undo step. */
   beginHistory(projectId: string) {
     const proj = this.state.projects.find((p) => p.id === projectId);
-    if (proj) this.pushHistory(projectId, { nodes: proj.nodes, backdrop: proj.backdrop });
+    if (proj) this.pushHistory(projectId, snapshot(proj));
   }
 
   /** Per-frame position update during a drag — no history entry, so the
@@ -392,10 +421,12 @@ class CanvasStore {
     const proj = this.state.projects.find((p) => p.id === projectId);
     if (!h || !proj || h.past.length === 0) return;
     const prev = h.past.pop()!;
-    h.future.push(clone({ nodes: proj.nodes, backdrop: proj.backdrop }));
+    h.future.push(clone(snapshot(proj)));
     this.mutate(projectId, (p) => {
       p.nodes = prev.nodes;
       p.backdrop = prev.backdrop;
+      p.width = prev.width;
+      p.height = prev.height;
     }, { history: false });
   }
 
@@ -404,10 +435,12 @@ class CanvasStore {
     const proj = this.state.projects.find((p) => p.id === projectId);
     if (!h || !proj || h.future.length === 0) return;
     const next = h.future.pop()!;
-    h.past.push(clone({ nodes: proj.nodes, backdrop: proj.backdrop }));
+    h.past.push(clone(snapshot(proj)));
     this.mutate(projectId, (p) => {
       p.nodes = next.nodes;
       p.backdrop = next.backdrop;
+      p.width = next.width;
+      p.height = next.height;
     }, { history: false });
   }
 

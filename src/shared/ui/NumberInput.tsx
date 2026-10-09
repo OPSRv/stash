@@ -1,8 +1,10 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
@@ -93,6 +95,18 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
     const digits = precision ?? fractionDigits(step);
     const [draft, setDraft] = useState<string | null>(null);
 
+    // We need a local handle on the <input> for the native wheel listener
+    // below while still honouring a forwarded ref.
+    const innerRef = useRef<HTMLInputElement | null>(null);
+    const setRefs = useCallback(
+      (node: HTMLInputElement | null) => {
+        innerRef.current = node;
+        if (typeof ref === 'function') ref(node);
+        else if (ref) ref.current = node;
+      },
+      [ref],
+    );
+
     const displayed = useMemo(() => {
       if (draft != null) return draft;
       if (value == null || Number.isNaN(value)) return '';
@@ -140,6 +154,26 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
       [value, step, min, max, digits, onChange],
     );
 
+    // Scroll-to-nudge while focused. This is a *native*, non-passive listener
+    // on purpose: React routes `onWheel` through a passive root listener, so a
+    // `preventDefault()` there is a no-op and the surrounding panel would keep
+    // scrolling underneath. Binding it ourselves lets us both nudge the value
+    // and swallow the scroll, so a focused field never fights its scroller.
+    const onWheelRef = useRef<(e: WheelEvent) => void>(() => {});
+    onWheelRef.current = (e: WheelEvent) => {
+      if (disabled || document.activeElement !== innerRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      nudge(e.deltaY < 0 ? 1 : -1, e.shiftKey ? 10 : 1);
+    };
+    useEffect(() => {
+      const el = innerRef.current;
+      if (!el) return;
+      const handler = (e: WheelEvent) => onWheelRef.current(e);
+      el.addEventListener('wheel', handler, { passive: false });
+      return () => el.removeEventListener('wheel', handler);
+    }, []);
+
     const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -165,7 +199,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
         className={`input-field ring-focus-within rounded-[var(--r-lg)] flex items-center ${wrapperSize[size]} ${dangerCls} ${disCls} ${className}`.trim()}
       >
         <input
-          ref={ref}
+          ref={setRefs}
           id={id}
           type="text"
           inputMode="decimal"
@@ -181,13 +215,6 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           onChange={(e) => setDraft(e.currentTarget.value)}
           onBlur={(e) => commit(e.currentTarget.value)}
           onKeyDown={onKey}
-          onWheel={(e) => {
-            // Scroll-to-nudge, but only once the field is focused so wheeling
-            // over a scrollable panel doesn't accidentally change values.
-            if (disabled || document.activeElement !== e.currentTarget) return;
-            e.stopPropagation();
-            nudge(e.deltaY < 0 ? 1 : -1, e.shiftKey ? 10 : 1);
-          }}
           className={`flex-1 min-w-0 bg-transparent outline-none text-right tabular-nums ${inputPadRight[size]}`}
           style={{ fontVariantNumeric: 'tabular-nums' }}
         />

@@ -41,6 +41,13 @@ const isTextTarget = (t: EventTarget | null): boolean => {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 };
 
+// Layout-independent letter for the physical key. On non-Latin layouts (e.g.
+// Ukrainian) `e.key` yields Cyrillic, so ⌘V / single-key tool shortcuts never
+// match — `e.code` ('KeyV') is stable across layouts. Mirrors how PopupShell
+// keys ⌘W off `e.code` for the same reason.
+const codeLetter = (e: KeyboardEvent): string =>
+  /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : '';
+
 const Mini = ({ d }: { d: string }) => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
     <path d={d} />
@@ -59,6 +66,7 @@ export const CanvasShell = () => {
   const { toast } = useToast();
   const stageRef = useRef<CanvasStageHandle>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [layersOpen, setLayersOpen] = useState(true);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState<ContextMenuInfo | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -196,6 +204,15 @@ export const CanvasShell = () => {
     }
   };
 
+  const onCopyRegion = async (url: string) => {
+    try {
+      await copyPngToClipboard(url);
+      toast({ title: 'Region copied' });
+    } catch (e) {
+      toast({ title: 'Copy failed', description: String(e), variant: 'error' });
+    }
+  };
+
   const onSave = async () => {
     const url = stageRef.current?.toPng(2);
     if (!url) return void toast({ title: 'Nothing to save', variant: 'error' });
@@ -247,7 +264,7 @@ export const CanvasShell = () => {
     if (!rootRef.current || rootRef.current.offsetParent === null) return;
     if (isTextTarget(e.target) || ui.editingId) return;
     const meta = e.metaKey || e.ctrlKey;
-    const k = e.key.toLowerCase();
+    const k = codeLetter(e);
     const sel = ui.selectedIds;
     if (meta && k === 'c') {
       if (sel.length) {
@@ -292,7 +309,7 @@ export const CanvasShell = () => {
       }
       return;
     }
-    if (HOTKEYS[k]) canvasStore.setTool(project.id, HOTKEYS[k]);
+    if (!e.altKey && k && HOTKEYS[k]) canvasStore.setTool(project.id, HOTKEYS[k]);
   };
 
   useEffect(() => {
@@ -427,16 +444,27 @@ export const CanvasShell = () => {
             selectedIds={ui.selectedIds}
             editingId={ui.editingId}
             onContextMenu={setMenu}
+            onCopyRegion={(url) => void onCopyRegion(url)}
           />
         </div>
         {panelOpen && (
           <div className="flex w-64 shrink-0 flex-col border-l hair">
-            {/* Layers takes the flexible space and scrolls internally; the
-                Inspector keeps a fixed share so the divider never jumps. */}
-            <div className="min-h-0 flex-1 border-b hair">
-              <LayersPanel project={project} selectedIds={ui.selectedIds} />
+            {/* Layers is an accordion: open, it takes the flexible space and
+                scrolls internally while the Inspector keeps a fixed share;
+                collapsed, it shrinks to its header so the Inspector claims the
+                whole column and its settings stop needing to scroll. */}
+            <div className={`border-b hair ${layersOpen ? 'min-h-0 flex-1' : 'shrink-0'}`}>
+              <LayersPanel
+                project={project}
+                selectedIds={ui.selectedIds}
+                open={layersOpen}
+                onToggle={() => setLayersOpen((v) => !v)}
+              />
             </div>
-            <div className="no-scrollbar shrink-0 overflow-y-auto" style={{ height: '42%' }}>
+            <div
+              className={`no-scrollbar overflow-y-auto ${layersOpen ? 'shrink-0' : 'min-h-0 flex-1'}`}
+              style={layersOpen ? { height: '42%' } : undefined}
+            >
               <Inspector project={project} selectedIds={ui.selectedIds} />
             </div>
           </div>

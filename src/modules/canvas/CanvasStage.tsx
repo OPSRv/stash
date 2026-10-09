@@ -9,7 +9,11 @@ import {
   useState,
 } from 'react';
 import Konva from 'konva';
-import { Layer, Rect, Stage, Transformer } from 'react-konva';
+import { Group, Layer, Rect, Stage, Transformer } from 'react-konva';
+import { Button } from '../../shared/ui/Button';
+import { IconButton } from '../../shared/ui/IconButton';
+import { CopyIcon, CloseIcon } from '../../shared/ui/icons';
+import { accent } from '../../shared/theme/accent';
 import { NodeView } from './NodeView';
 import { canvasStore } from './store';
 import {
@@ -34,6 +38,8 @@ interface Props {
   selectedIds: string[];
   editingId: string | null;
   onContextMenu?: (info: ContextMenuInfo) => void;
+  /** Copy a flattened PNG of the marquee region to the OS clipboard. */
+  onCopyRegion?: (dataUrl: string) => void;
 }
 
 export interface CanvasStageHandle {
@@ -85,6 +91,13 @@ const nodeBounds = (n: CanvasNode): Bounds => {
   return { x: n.x, y: n.y, width: w, height: h };
 };
 
+/** Axis-aligned overlap test — used to pick the nodes a marquee covers. */
+const rectsIntersect = (a: Bounds, b: Bounds): boolean =>
+  a.x < b.x + b.width &&
+  a.x + a.width > b.x &&
+  a.y < b.y + b.height &&
+  a.y + a.height > b.y;
+
 const unionBounds = (nodes: CanvasNode[]): Bounds | null => {
   let minX = Infinity;
   let minY = Infinity;
@@ -103,18 +116,26 @@ const unionBounds = (nodes: CanvasNode[]): Bounds | null => {
 };
 
 export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasStage(
-  { project, tool, selectedIds, editingId, onContextMenu },
+  { project, tool, selectedIds, editingId, onContextMenu, onCopyRegion },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const trRef = useRef<Konva.Transformer>(null);
+  const marqueeRef = useRef<Konva.Group>(null);
   const nodeRefs = useRef<Map<string, Konva.Node>>(new Map());
 
   const [size, setSize] = useState({ width: 800, height: 600 });
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const [draft, setDraft] = useState<Draft | null>(null);
   const [spaceDown, setSpaceDown] = useState(false);
+  // Marquee selection (Photoshop-style dashed box). `marquee` is the current
+  // rectangle in stage coords; it survives the drag so the Copy/Crop toolbar
+  // can act on it. `marqueeStart` tracks the drag anchor.
+  const [marquee, setMarquee] = useState<Bounds | null>(null);
+  const [marqueeDragging, setMarqueeDragging] = useState(false);
+  const marqueeStart = useRef<{ x: number; y: number } | null>(null);
+  const pendingFit = useRef(false);
 
   const baseImage = useMemo(
     () => (project.nodes.find((n) => n.tool === 'image') as ImageNode | undefined) ?? null,
@@ -187,42 +208,81 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id, size.width, size.height]);
 
+  // Flatten an arbitrary stage-coord rectangle to a PNG. Selection chrome (the
+  // transformer handles and the marquee box) is hidden for the snapshot so it
+  // never bleeds into the export.
+  const exportRegion = useCallback((bounds: Bounds, pixelRatio = 2): string | null => {
+    const stage = stageRef.current;
+    if (!stage) return null;
+    const tr = trRef.current;
+    const mq = marqueeRef.current;
+    const trVisible = tr?.visible() ?? false;
+    const mqVisible = mq?.visible() ?? false;
+    tr?.visible(false);
+    mq?.visible(false);
+    const prevScale = stage.scaleX();
+    const prevPos = stage.position();
+    stage.scale({ x: 1, y: 1 });
+    stage.position({ x: 0, y: 0 });
+    stage.batchDraw();
+    let url: string | null = null;
+    try {
+      url = stage.toDataURL({
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        pixelRatio,
+      });
+    } catch {
+      url = null;
+    }
+    stage.scale({ x: prevScale, y: prevScale });
+    stage.position(prevPos);
+    if (tr && trVisible) tr.visible(true);
+    if (mq && mqVisible) mq.visible(true);
+    stage.batchDraw();
+    return url;
+  }, []);
+
   useImperativeHandle(
     ref,
     () => ({
-      toPng: (pixelRatio = 2) => {
-        const stage = stageRef.current;
-        if (!stage) return null;
-        const tr = trRef.current;
-        const trVisible = tr?.visible() ?? false;
-        tr?.visible(false);
-        const prevScale = stage.scaleX();
-        const prevPos = stage.position();
-        stage.scale({ x: 1, y: 1 });
-        stage.position({ x: 0, y: 0 });
-        stage.batchDraw();
-        let url: string | null = null;
-        try {
-          url = stage.toDataURL({
-            x: region.x,
-            y: region.y,
-            width: region.width,
-            height: region.height,
-            pixelRatio,
-          });
-        } catch {
-          url = null;
-        }
-        stage.scale({ x: prevScale, y: prevScale });
-        stage.position(prevPos);
-        if (tr && trVisible) tr.visible(true);
-        stage.batchDraw();
-        return url;
-      },
+      toPng: (pixelRatio = 2) => exportRegion(region, pixelRatio),
       fit,
     }),
-    [region.x, region.y, region.width, region.height, fit],
+    [region, exportRegion, fit],
   );
+
+  // Leaving the marquee tool drops the dashed box (the selection it produced
+  // stays — you switch to Select to move it, with the Transformer now showing).
+  useEffect(() => {
+    if (tool !== 'marquee') {
+      marqueeStart.current = null;
+      setMarqueeDragging(false);
+      setMarquee(null);
+    }
+  }, [tool]);
+
+  // Re-centre once after a crop, when the region has actually changed size.
+  useEffect(() => {
+    if (!pendingFit.current) return;
+    pendingFit.current = false;
+    fit();
+  }, [region.width, region.height, fit]);
+
+  const copyMarquee = () => {
+    if (!marquee) return;
+    const url = exportRegion(marquee, 2);
+    if (url) onCopyRegion?.(url);
+  };
+
+  const cropToMarquee = () => {
+    if (!marquee) return;
+    canvasStore.cropTo(project.id, marquee);
+    pendingFit.current = true;
+    setMarquee(null);
+  };
 
   // ---- transformer follows selection ------------------------------------
   useEffect(() => {
@@ -267,6 +327,15 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     // Take keyboard focus so ⌘Z / Delete / tool keys reach this surface.
     containerRef.current?.focus();
     if (spaceDown || e.evt.button === 2) return; // panning / right-click
+
+    if (tool === 'marquee') {
+      const { x, y } = relPoint();
+      marqueeStart.current = { x, y };
+      setMarqueeDragging(true);
+      setMarquee({ x, y, width: 0, height: 0 });
+      return;
+    }
+
     const clickedEmpty = e.target === e.target.getStage() || e.target.name() === 'backdrop';
 
     if (tool === 'select') {
@@ -316,6 +385,17 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   };
 
   const onMouseMove = () => {
+    if (marqueeStart.current) {
+      const { x, y } = relPoint();
+      const s = marqueeStart.current;
+      setMarquee({
+        x: Math.min(s.x, x),
+        y: Math.min(s.y, y),
+        width: Math.abs(x - s.x),
+        height: Math.abs(y - s.y),
+      });
+      return;
+    }
     if (!draft) return;
     const { x, y } = relPoint();
     const d = draft;
@@ -338,6 +418,34 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   };
 
   const onMouseUp = () => {
+    if (marqueeStart.current) {
+      const s = marqueeStart.current;
+      const { x, y } = relPoint();
+      marqueeStart.current = null;
+      setMarqueeDragging(false);
+      const box: Bounds = {
+        x: Math.min(s.x, x),
+        y: Math.min(s.y, y),
+        width: Math.abs(x - s.x),
+        height: Math.abs(y - s.y),
+      };
+      // A click (no real drag) just clears — no box, no selection.
+      if (box.width < 4 || box.height < 4) {
+        setMarquee(null);
+        canvasStore.setSelected(project.id, []);
+        return;
+      }
+      setMarquee(box);
+      // Select every annotation the box touches. The base screenshot is left
+      // out (it spans the page, so any box would grab it); a zero hit is fine —
+      // the box still lets you Copy/Crop a bare region of the picture.
+      const baseId = baseImage?.id ?? null;
+      const hits = project.nodes
+        .filter((n) => n.id !== baseId && n.visible && !n.locked && rectsIntersect(nodeBounds(n), box))
+        .map((n) => n.id);
+      canvasStore.setSelected(project.id, hits);
+      return;
+    }
     if (!draft) return;
     const node = draft.node;
     const tooSmall =
@@ -412,6 +520,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (e.code === 'Space' && document.activeElement === containerRef.current) setSpaceDown(true);
+      // Esc drops the marquee box (CanvasShell's Esc clears the selection).
+      if (e.code === 'Escape') setMarquee(null);
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpaceDown(false);
@@ -538,6 +648,41 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
               registerRef={() => {}}
             />
           )}
+          {marquee && (
+            // Two-tone dashed outline so the marching-ants box reads on any
+            // backdrop. `strokeScaleEnabled={false}` keeps it 1px at any zoom;
+            // `listening={false}` so it never eats pointer events.
+            <Group ref={marqueeRef} listening={false}>
+              <Rect
+                x={marquee.x}
+                y={marquee.y}
+                width={marquee.width}
+                height={marquee.height}
+                fill={accent(0.08)}
+              />
+              <Rect
+                x={marquee.x}
+                y={marquee.y}
+                width={marquee.width}
+                height={marquee.height}
+                stroke="rgba(0,0,0,0.7)"
+                strokeWidth={1}
+                strokeScaleEnabled={false}
+                dash={[5, 4]}
+              />
+              <Rect
+                x={marquee.x}
+                y={marquee.y}
+                width={marquee.width}
+                height={marquee.height}
+                stroke="#ffffff"
+                strokeWidth={1}
+                strokeScaleEnabled={false}
+                dash={[5, 4]}
+                dashOffset={5}
+              />
+            </Group>
+          )}
           {tool === 'select' && !draft && (
             <Transformer
               ref={trRef}
@@ -550,6 +695,19 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           )}
         </Layer>
       </Stage>
+
+      {marquee && !marqueeDragging && tool === 'marquee' && (
+        <MarqueeToolbar
+          marquee={marquee}
+          view={view}
+          onCopy={copyMarquee}
+          onCrop={cropToMarquee}
+          onClose={() => {
+            setMarquee(null);
+            canvasStore.setSelected(project.id, []);
+          }}
+        />
+      )}
 
       {editingNode && (
         <TextOverlay
@@ -569,6 +727,64 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     </div>
   );
 });
+
+const CropMini = () => (
+  <svg
+    width="13"
+    height="13"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    <path d="M6 2v16h16M2 6h16v16" />
+  </svg>
+);
+
+/** HTML action bar pinned to the marquee box: copy the boxed region as a PNG,
+ *  or crop the page down to it. Positioned in screen space from the stage view
+ *  transform; flips below the box when it would clip past the top edge. */
+const MarqueeToolbar = ({
+  marquee,
+  view,
+  onCopy,
+  onCrop,
+  onClose,
+}: {
+  marquee: Bounds;
+  view: { scale: number; x: number; y: number };
+  onCopy: () => void;
+  onCrop: () => void;
+  onClose: () => void;
+}) => {
+  const left = view.x + marquee.x * view.scale;
+  const boxTop = view.y + marquee.y * view.scale;
+  const boxBottom = view.y + (marquee.y + marquee.height) * view.scale;
+  const below = boxTop < 52;
+  return (
+    <div
+      className="pane-elev absolute z-50 flex items-center gap-1 rounded-lg border hair p-1 shadow-lg"
+      style={{
+        left: Math.max(8, left),
+        top: below ? boxBottom + 8 : boxTop - 8,
+        transform: below ? undefined : 'translateY(-100%)',
+      }}
+    >
+      <Button size="xs" variant="soft" leadingIcon={<CopyIcon size={13} />} onClick={onCopy}>
+        Copy
+      </Button>
+      <Button size="xs" variant="soft" leadingIcon={<CropMini />} onClick={onCrop}>
+        Crop
+      </Button>
+      <IconButton title="Clear selection" onClick={onClose}>
+        <CloseIcon />
+      </IconButton>
+    </div>
+  );
+};
 
 /** Inline HTML textarea overlaid on a Text node while editing. */
 const TextOverlay = ({

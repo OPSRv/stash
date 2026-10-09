@@ -15,6 +15,8 @@ const EyeOff = () => <Mini d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.8 2.8M9.4 5.3A9 9
 const LockOpen = () => <Mini d="M7 11V8a5 5 0 0 1 9.6-2M5 11h14v10H5zM12 15v3" />;
 const LockClosed = () => <Mini d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5zM12 15v3" />;
 const GripIcon = () => <Mini d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01" />;
+// Disclosure chevron — rotates from ▸ (collapsed) to ▾ (open) via the caller.
+const Chevron = () => <Mini d="M9 6l6 6-6 6" />;
 
 const nodeLabel = (n: CanvasNode) =>
   n.tool === 'image' ? 'Image' : TOOL_BY_KIND[n.tool]?.title ?? n.name;
@@ -22,9 +24,13 @@ const nodeLabel = (n: CanvasNode) =>
 interface Props {
   project: CanvasProject;
   selectedIds: string[];
+  /** Accordion state — when closed only the header shows and the Inspector
+   *  below claims the freed vertical space. */
+  open: boolean;
+  onToggle: () => void;
 }
 
-export const LayersPanel = ({ project, selectedIds }: Props) => {
+export const LayersPanel = ({ project, selectedIds, open, onToggle }: Props) => {
   // Render top-most layer first (array is bottom-first).
   const rows = [...project.nodes].reverse();
   const [dragId, setDragId] = useState<string | null>(null);
@@ -65,7 +71,22 @@ export const LayersPanel = ({ project, selectedIds }: Props) => {
 
   return (
     <div className="flex h-full min-h-0 flex-col" style={{ userSelect: dragId ? 'none' : undefined }}>
-      <div className="shrink-0 px-2.5 py-1.5 text-meta t-tertiary">Layers</div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex shrink-0 items-center gap-1 px-2.5 py-1.5 text-left text-meta t-tertiary transition-colors hover:t-secondary"
+      >
+        <span
+          className="transition-transform"
+          style={{ transform: open ? 'rotate(90deg)' : undefined }}
+        >
+          <Chevron />
+        </span>
+        <span>Layers</span>
+        {rows.length > 0 && <span className="t-quaternary">{rows.length}</span>}
+      </button>
+      {open && (
       <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {rows.length === 0 && (
           <div className="px-1.5 py-2 text-meta t-quaternary">
@@ -126,6 +147,7 @@ export const LayersPanel = ({ project, selectedIds }: Props) => {
           );
         })}
       </div>
+      )}
     </div>
   );
 };
