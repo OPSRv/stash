@@ -12,6 +12,7 @@ pub mod metronome;
 pub mod music;
 pub mod neuralnote;
 pub mod notes;
+pub mod npm_scripts;
 pub mod ocr;
 pub mod pomodoro;
 pub mod recorder;

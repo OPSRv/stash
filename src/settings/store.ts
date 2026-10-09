@@ -95,6 +95,12 @@ export type Settings = {
    */
   terminalClaudeCommand: string;
   /**
+   * Absolute paths of project folders (each with a `package.json`) whose
+   * npm scripts are listed in the tray context menu. Pushed to Rust via
+   * `npm_set_projects` on boot and on every change.
+   */
+  npmProjects: string[];
+  /**
    * Module ids the user has hidden from the popup tab bar. Stored as a
    * "what to hide" set rather than "what to show" so that adding a new
    * module to `registry.ts` automatically becomes visible — users only
@@ -185,6 +191,7 @@ export const DEFAULT_SETTINGS: Settings = {
   canvasCaptureTextShortcut: 'CommandOrControl+Shift+O',
   terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
   terminalClaudeCommand: 'claude',
+  npmProjects: [],
   hiddenModules: [],
   moduleOrder: [],
 };

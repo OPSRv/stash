@@ -2,7 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 
-import { ptyClose, ptyGetCwd } from './api';
+import {
+  ptyClose,
+  ptyGetCwd,
+  ptyWrite,
+  shellQuote,
+  terminalTakePendingRuns,
+  type PendingRun,
+} from './api';
+import { encodeBase64 } from './ui/xtermTheme';
 import { useDrag } from './hooks/useDrag';
 import {
   allLeafIds,
@@ -62,6 +70,15 @@ export const TerminalShell = () => {
     (paneId: string) => initialCwdsRef.current.get(paneId),
     [],
   );
+  /// One-shot startup command per new pane id (tray npm scripts,
+  /// assistant). `TerminalPane` takes it right after its PTY spawns;
+  /// taking deletes the entry so a remount never re-runs it.
+  const initialCommandsRef = useRef<Map<string, string>>(new Map());
+  const takeInitialCommand = useCallback((paneId: string) => {
+    const cmd = initialCommandsRef.current.get(paneId);
+    initialCommandsRef.current.delete(paneId);
+    return cmd;
+  }, []);
   /// Terminal font size shared by every pane. Persisted so users don't
   /// have to re-adjust after reopening the popup. ⌘+/⌘−/⌘0 mutate this
   /// from the keyboard handler below.
@@ -141,6 +158,63 @@ export const TerminalShell = () => {
     };
   }, []);
 
+  // Open a fresh tab in `cwd` that runs `command` once its shell is up.
+  // When the tab cap is reached, fall back to the focused pane: `cd` there
+  // and run the command in place rather than silently dropping it.
+  const runInNewTab = useCallback((run: PendingRun) => {
+    const prev = tabsRef.current;
+    if (prev.length >= MAX_TABS) {
+      const paneId = focusedPaneRef.current;
+      ptyWrite(
+        paneId,
+        encodeBase64(`cd ${shellQuote(run.cwd)} && ${run.command}\r`),
+      ).catch(() => {});
+      return;
+    }
+    const tabId = newTabId(new Set(prev.map((t) => t.id)));
+    const paneId = newPaneId(allLeafIds(prev));
+    initialCwdsRef.current.set(paneId, run.cwd);
+    initialCommandsRef.current.set(paneId, run.command);
+    const next: Tab[] = [
+      ...prev,
+      { id: tabId, root: leaf(paneId), label: run.label ?? undefined },
+    ];
+    // Update the ref eagerly so several queued runs drained in one batch
+    // get distinct tab/pane ids.
+    tabsRef.current = next;
+    setTabs(next);
+    setActiveId(tabId);
+    setFocusedPane(paneId);
+  }, []);
+
+  // Rust parks run requests in a queue (the tab is lazy, so an event fired
+  // before mount would be lost). Drain on mount, and again on every
+  // `terminal:run_command` ping. Both paths go through the same
+  // take-once command, so a request can never run twice.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    // Apply results even if this effect was torn down meanwhile: a taken
+    // request is gone from the Rust queue, and under StrictMode's
+    // mount→unmount→mount the component instance (and its refs) survive.
+    const drain = () => {
+      terminalTakePendingRuns()
+        .then((runs) => runs.forEach(runInNewTab))
+        .catch(() => {});
+    };
+    listen('terminal:run_command', drain)
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    drain();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [runInNewTab]);
+
   // Auto-clear maximize when its pane no longer exists in the active
   // tab (could have been closed or dragged elsewhere).
   useEffect(() => {
@@ -196,6 +270,7 @@ export const TerminalShell = () => {
       for (const p of collectLeafIds(target.root)) {
         ptyClose(p).catch(() => {});
         initialCwdsRef.current.delete(p);
+        initialCommandsRef.current.delete(p);
       }
       if (tabId === activeIdRef.current) {
         const idx = prev.findIndex((t) => t.id === tabId);
@@ -240,6 +315,7 @@ export const TerminalShell = () => {
         if (next === prev) return prev;
         ptyClose(paneId).catch(() => {});
         initialCwdsRef.current.delete(paneId);
+        initialCommandsRef.current.delete(paneId);
         const target = next.find((t) => t.id === tabId);
         if (target) {
           const leaves = collectLeafIds(target.root);
@@ -464,6 +540,7 @@ export const TerminalShell = () => {
               splitPane(t.id, paneId, orientation, sourceCwd)
             }
             getInitialCwd={getInitialCwd}
+            takeInitialCommand={takeInitialCommand}
             fontSize={fontSize}
             onClosePane={(paneId) => closePane(t.id, paneId)}
             onRatios={(path, index, pct) => setRatios(t.id, path, index, pct)}

@@ -280,6 +280,7 @@ use modules::telegram::reminders::{
 };
 use modules::terminal::commands::{
     pty_close, pty_get_cwd, pty_open, pty_resize, pty_set_cwd, pty_write, terminal_save_paste_blob,
+    terminal_take_pending_runs,
 };
 use modules::terminal::state::TerminalState;
 use modules::translator::{
@@ -777,6 +778,9 @@ pub fn run() {
             pty_set_cwd,
             pty_get_cwd,
             terminal_save_paste_blob,
+            terminal_take_pending_runs,
+            modules::npm_scripts::commands::npm_read_project,
+            modules::npm_scripts::commands::npm_set_projects,
             ai_list_sessions,
             ai_create_session,
             ai_find_session_by_context,
@@ -1303,6 +1307,9 @@ pub fn run() {
             });
 
             app.manage(Arc::new(tray::TrayState::new()));
+            app.manage(Arc::new(
+                modules::npm_scripts::state::NpmScriptsState::default(),
+            ));
             tray::install(app.handle())?;
 
             #[cfg(desktop)]

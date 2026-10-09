@@ -19,6 +19,7 @@ import { IconButton } from '../shared/ui/IconButton';
 import { accent } from '../shared/theme/accent';
 import { PinIcon } from '../shared/ui/icons';
 import { loadSettings, saveSetting } from '../settings/store';
+import { npmSetProjects } from '../settings/npmScriptsApi';
 
 const MIN_WIDTH = 1500;
 const MIN_HEIGHT = 840;
@@ -308,6 +309,8 @@ export const PopupShell = () => {
               s.canvasCaptureImageShortcut,
               s.canvasCaptureTextShortcut,
             ).catch(() => {}),
+            // Seed the tray "npm scripts" submenus.
+            npmSetProjects(s.npmProjects).catch(() => {}),
           ]);
         })
         .catch(() => {});
@@ -319,6 +322,12 @@ export const PopupShell = () => {
     // object on subsequent calls.
     const onChanged = (e: Event) => {
       const detail = (e as CustomEvent<string>).detail;
+      if (detail === 'npmProjects') {
+        loadSettings()
+          .then((s) => npmSetProjects(s.npmProjects))
+          .catch(() => {});
+        return;
+      }
       if (detail !== 'hiddenModules' && detail !== 'moduleOrder') return;
       loadSettings()
         .then((s) => {

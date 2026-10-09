@@ -10,6 +10,21 @@ use portable_pty::{Child, MasterPty};
 /// anything about the current layout.
 pub struct TerminalState {
     pub sessions: Mutex<HashMap<String, PtySession>>,
+    /// Run requests (e.g. tray "npm scripts") waiting for the Terminal
+    /// tab to pick them up. The tab is lazy and may not be mounted when a
+    /// request arrives, so a bare event could be lost — instead the
+    /// request is parked here and `terminal_take_pending_runs` drains it
+    /// on mount and on every `terminal:run_command` ping.
+    pub pending_runs: Mutex<Vec<PendingRun>>,
+}
+
+/// One "open a new terminal tab in `cwd` and run `command`" request.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PendingRun {
+    pub cwd: String,
+    pub command: String,
+    /// Optional tab label (e.g. the script name).
+    pub label: Option<String>,
 }
 
 pub struct PtySession {
@@ -35,6 +50,7 @@ impl TerminalState {
     pub fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            pending_runs: Mutex::new(Vec::new()),
         }
     }
 }

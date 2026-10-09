@@ -48,3 +48,19 @@ export const terminalSavePasteBlob = (bytes: Uint8Array, extension: string) =>
     bytes: Array.from(bytes),
     extension,
   });
+
+/** "Open a new tab in `cwd` and run `command`" request queued on the Rust
+ *  side (tray npm scripts, assistant tool). */
+export interface PendingRun {
+  cwd: string;
+  command: string;
+  label: string | null;
+}
+
+/** Drain every queued run request. Safe to call concurrently — Rust hands
+ *  each request out exactly once. */
+export const terminalTakePendingRuns = async (): Promise<PendingRun[]> =>
+  (await invoke<PendingRun[] | null>('terminal_take_pending_runs')) ?? [];
+
+/** POSIX single-quote a word for the shell: `it's` → `'it'\''s'`. */
+export const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;

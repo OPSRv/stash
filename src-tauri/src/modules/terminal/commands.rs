@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
 use super::pty::{open_session, resize, write_input};
-use super::state::TerminalState;
+use super::state::{PendingRun, TerminalState};
 
 fn normalise_id(id: &str) -> Result<String, String> {
     let trimmed = id.trim();
@@ -200,4 +200,43 @@ pub fn terminal_save_paste_blob(
     path.into_os_string()
         .into_string()
         .map_err(|_| "path is not valid UTF-8".to_string())
+}
+
+/// Queue a "new tab in `cwd`, run `command`" request for the Terminal tab,
+/// reveal the popup on that tab and ping the frontend. The ping carries
+/// no payload on purpose — the frontend always drains via
+/// `terminal_take_pending_runs`, so a mount-time drain and a live event
+/// can never run the same request twice.
+pub fn queue_run(
+    app: &AppHandle,
+    cwd: String,
+    command: String,
+    label: Option<String>,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let state = app
+        .try_state::<Arc<TerminalState>>()
+        .ok_or_else(|| "terminal state is not initialised".to_string())?;
+    state
+        .pending_runs
+        .lock()
+        .map_err(|_| "terminal queue poisoned".to_string())?
+        .push(PendingRun { cwd, command, label });
+    crate::tray::show_popup(app);
+    let _ = app.emit("nav:activate", "terminal");
+    let _ = app.emit("terminal:run_command", ());
+    Ok(())
+}
+
+/// Drain every queued run request. Called by `TerminalShell` on mount and
+/// whenever `terminal:run_command` fires.
+#[tauri::command]
+pub fn terminal_take_pending_runs(
+    state: tauri::State<'_, Arc<TerminalState>>,
+) -> Result<Vec<PendingRun>, String> {
+    let mut q = state
+        .pending_runs
+        .lock()
+        .map_err(|_| "terminal queue poisoned".to_string())?;
+    Ok(std::mem::take(&mut *q))
 }

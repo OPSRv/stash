@@ -10,6 +10,10 @@
 //!      visible modules via `tray_set_menu` on startup (and whenever the
 //!      user later hides or reorders tabs in settings), and we cache it so
 //!      player updates don't have to re-consult the frontend.
+//!   3. An "npm scripts" block above Quit — one submenu per project folder
+//!      configured in Settings → Terminal, read from the
+//!      `NpmScriptsState` cache (filled by `npm_set_projects`). Hidden
+//!      when no projects are configured.
 //!
 //! Menu ids follow a simple scheme:
 //!   - `show`                — open the popup
@@ -18,17 +22,22 @@
 //!   - `player:music:play`   — toggle YT Music play/pause
 //!   - `player:music:prev`   — previous track
 //!   - `player:music:next`   — next track
+//!   - `pomodoro:resume`     — resume a paused Pomodoro session
+//!   - `npm:<p>:<s>`         — run script `s` of npm project `p` (indices
+//!                             into the cached `NpmScriptsState` snapshot)
+//!   - `npm:info:<p>`        — disabled status row (unreadable package.json)
 
 use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use tauri::{
     image::Image,
-    menu::{IconMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{IconMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager,
 };
 
+use crate::modules::npm_scripts::state::{snapshot as npm_snapshot, NpmProject, NpmScriptsState};
 use crate::{position_popup, resolve_popup, toggle_popup, PopupPositionState};
 
 /// Payload for one tray menu entry contributed by the frontend.
@@ -152,6 +161,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         &state.player_icons.lock().unwrap(),
         state.artwork.lock().unwrap().as_deref(),
         false,
+        &npm_projects(app),
     )?;
 
     let tray_icon = {
@@ -263,7 +273,13 @@ pub fn set_title(app: &AppHandle, title: Option<&str>) {
     }
 }
 
-fn rebuild(app: &AppHandle) {
+fn npm_projects(app: &AppHandle) -> Vec<NpmProject> {
+    app.try_state::<Arc<NpmScriptsState>>()
+        .map(|s| npm_snapshot(&s))
+        .unwrap_or_default()
+}
+
+pub(crate) fn rebuild(app: &AppHandle) {
     let state = match app.try_state::<Arc<TrayState>>() {
         Some(s) => s,
         None => return,
@@ -273,6 +289,7 @@ fn rebuild(app: &AppHandle) {
     let icons = state.player_icons.lock().unwrap().clone();
     let artwork = state.artwork.lock().unwrap().clone();
     let pomodoro_paused = *state.pomodoro_paused.lock().unwrap();
+    let npm = npm_projects(app);
     let menu = match build_menu(
         app,
         &modules,
@@ -280,6 +297,7 @@ fn rebuild(app: &AppHandle) {
         &icons,
         artwork.as_deref(),
         pomodoro_paused,
+        &npm,
     ) {
         Ok(m) => m,
         Err(err) => {
@@ -301,6 +319,7 @@ fn build_menu(
     icons: &PlayerIcons,
     artwork: Option<&[u8]>,
     pomodoro_paused: bool,
+    npm: &[NpmProject],
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
 
@@ -355,9 +374,58 @@ fn build_menu(
     if !items.is_empty() {
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
+
+    if !npm.is_empty() {
+        append_npm_block(app, &menu, npm)?;
+        menu.append(&PredefinedMenuItem::separator(app)?)?;
+    }
+
     let quit = MenuItem::with_id(app, "quit", "Quit Stash", true, None::<&str>)?;
     menu.append(&quit)?;
     Ok(menu)
+}
+
+/// One submenu per configured npm project; each script is a leaf item
+/// whose id encodes (project index, script index) into the cached snapshot.
+fn append_npm_block(
+    app: &AppHandle,
+    menu: &Menu<tauri::Wry>,
+    npm: &[NpmProject],
+) -> tauri::Result<()> {
+    let header = MenuItem::with_id(app, "npm:header", "npm scripts", false, None::<&str>)?;
+    menu.append(&header)?;
+    for (pi, project) in npm.iter().enumerate() {
+        let sub = Submenu::new(app, &project.name, true)?;
+        if let Some(err) = &project.error {
+            let row = MenuItem::with_id(app, format!("npm:info:{pi}"), err, false, None::<&str>)?;
+            sub.append(&row)?;
+        } else if project.scripts.is_empty() {
+            let row = MenuItem::with_id(
+                app,
+                format!("npm:info:{pi}"),
+                "No scripts",
+                false,
+                None::<&str>,
+            )?;
+            sub.append(&row)?;
+        } else {
+            for (si, script) in project.scripts.iter().enumerate() {
+                let item =
+                    MenuItem::with_id(app, format!("npm:{pi}:{si}"), script, true, None::<&str>)?;
+                sub.append(&item)?;
+            }
+        }
+        menu.append(&sub)?;
+    }
+    Ok(())
+}
+
+/// Parse `npm:<project>:<script>` into indices. Returns `None` for the
+/// disabled `npm:info:*` / `npm:header` rows and malformed ids.
+fn parse_npm_id(id: &str) -> Option<(usize, usize)> {
+    let rest = id.strip_prefix("npm:")?;
+    let (p, s) = rest.split_once(':')?;
+    Some((p.parse().ok()?, s.parse().ok()?))
 }
 
 fn append_music_block(
@@ -468,7 +536,11 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             let _ = crate::modules::pomodoro::commands::pomodoro_resume_from_tray(app.clone());
         }
         other => {
-            if let Some(module_id) = other.strip_prefix("module:") {
+            if let Some((pi, si)) = parse_npm_id(other) {
+                if let Err(err) = crate::modules::npm_scripts::commands::run_by_index(app, pi, si) {
+                    tracing::warn!(error = %err, "tray: npm script launch failed");
+                }
+            } else if let Some(module_id) = other.strip_prefix("module:") {
                 show_popup(app);
                 let _ = app.emit("nav:activate", module_id.to_string());
             }
@@ -476,7 +548,7 @@ fn on_menu_event(app: &AppHandle, id: &str) {
     }
 }
 
-fn show_popup(app: &AppHandle) {
+pub(crate) fn show_popup(app: &AppHandle) {
     if let Some(win) = resolve_popup(app) {
         let pos_state = app.state::<Arc<PopupPositionState>>();
         position_popup(&win, &pos_state);
@@ -520,6 +592,15 @@ mod tests {
         // 48 chars + ellipsis.
         assert_eq!(label.chars().count(), 49);
         assert!(label.ends_with('…'));
+    }
+
+    #[test]
+    fn npm_ids_parse_into_indices() {
+        assert_eq!(parse_npm_id("npm:0:3"), Some((0, 3)));
+        assert_eq!(parse_npm_id("npm:12:0"), Some((12, 0)));
+        assert_eq!(parse_npm_id("npm:info:1"), None);
+        assert_eq!(parse_npm_id("npm:header"), None);
+        assert_eq!(parse_npm_id("module:npm"), None);
     }
 
     #[test]

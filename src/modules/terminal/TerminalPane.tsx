@@ -64,6 +64,9 @@ export type TerminalPaneProps = {
   /// source pane's cwd. Ignored on restart (Rust remembers the
   /// last OSC 7 itself).
   initialCwd?: string | null;
+  /// Returns (and forgets) a command to run once this pane's PTY has
+  /// spawned — used for "new tab running `npm run …`" requests.
+  takeInitialCommand?: (paneId: string) => string | undefined;
   /// Close control — `undefined` when this is the sole pane of a tab
   /// (the tab-bar × handles that case).
   onClosePane?: () => void;
@@ -95,12 +98,14 @@ export const TerminalPane = ({
   onToggleMaximize,
   maximized = false,
   initialCwd,
+  takeInitialCommand,
   fontSize,
 }: TerminalPaneProps) => {
   // Captured once — subsequent prop changes must not re-seed the PTY
   // (Rust's pty_open is a resize on an existing session, but keeping
   // the semantic local guards against future refactors).
   const initialCwdRef = useRef<string | null>(initialCwd ?? null);
+  const takeInitialCommandRef = useRef(takeInitialCommand);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -208,6 +213,13 @@ export const TerminalPane = ({
     try {
       await ptyOpen(id, term.cols, term.rows, initialCwdRef.current);
       setDead(false);
+      // One-shot startup command (e.g. `npm run dev`). The PTY buffers
+      // input until the shell reads it, so writing right after spawn is
+      // safe; `take` forgets it so a remount never re-runs it.
+      const startup = takeInitialCommandRef.current?.(id);
+      if (startup) {
+        await ptyWrite(id, encodeBase64(`${startup}\r`)).catch(() => {});
+      }
     } catch (e) {
       term.write(`\r\n\x1b[31mterminal: ${String(e)}\x1b[0m\r\n`);
       setDead(true);

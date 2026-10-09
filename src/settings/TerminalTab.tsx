@@ -1,5 +1,6 @@
 import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
+import { NpmProjectsSection } from './NpmProjectsSection';
 import { SettingRow } from './SettingRow';
 import { SettingsSection, SettingsTab } from './SettingsLayout';
 import type { Settings, TerminalSnippet } from './store';
@@ -119,5 +120,9 @@ export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
         ))}
       </div>
     </SettingsSection>
+    <NpmProjectsSection
+      projects={settings.npmProjects}
+      onChange={(next) => onChange('npmProjects', next)}
+    />
   </SettingsTab>
 );

@@ -24,6 +24,9 @@ export type TabContentProps = {
   /// pane was created via split), or undefined for panes restored
   /// from persisted state.
   getInitialCwd: (paneId: string) => string | undefined;
+  /// One-shot startup command for a freshly created pane (consumed on
+  /// first take). Optional so callers without run requests can omit it.
+  takeInitialCommand?: (paneId: string) => string | undefined;
   onClosePane: (paneId: string) => void;
   /// Commit a splitter drag: rewrite ratios of the split at `path`,
   /// shifting the boundary between sibling `index` and `index + 1` to
@@ -65,6 +68,7 @@ export const TabContent = ({
   onToggleMaximize,
   revision,
   getInitialCwd,
+  takeInitialCommand,
   fontSize,
 }: TabContentProps) => {
   const leafCount = countLeaves(tab.root);
@@ -92,6 +96,7 @@ export const TabContent = ({
           onToggleMaximize={isSplit ? () => onToggleMaximize(node.id) : undefined}
           maximized={isMaximized}
           initialCwd={getInitialCwd(node.id)}
+          takeInitialCommand={takeInitialCommand}
           fontSize={fontSize}
         />
       );
