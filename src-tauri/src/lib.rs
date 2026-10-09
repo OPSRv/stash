@@ -280,7 +280,7 @@ use modules::telegram::reminders::{
 };
 use modules::terminal::commands::{
     pty_close, pty_get_cwd, pty_open, pty_resize, pty_set_cwd, pty_write, terminal_save_paste_blob,
-    terminal_take_pending_runs,
+    terminal_bind_run, terminal_take_pending_runs,
 };
 use modules::terminal::state::TerminalState;
 use modules::translator::{
@@ -779,6 +779,7 @@ pub fn run() {
             pty_get_cwd,
             terminal_save_paste_blob,
             terminal_take_pending_runs,
+            terminal_bind_run,
             modules::npm_scripts::commands::npm_read_project,
             modules::npm_scripts::commands::npm_set_projects,
             ai_list_sessions,

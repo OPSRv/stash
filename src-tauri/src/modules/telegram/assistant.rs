@@ -520,6 +520,7 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::stash::NavigateTab);
     tools.register(super::tools::stash::NpmListScripts);
     tools.register(super::tools::stash::NpmRunScript);
+    tools.register(super::tools::stash::NpmStopScript);
     tools.register(super::tools::stash::InvokeCommand);
     tools.register(super::tools::stash::SeparateStems);
     tools.register(super::tools::stash::DetectBpm);

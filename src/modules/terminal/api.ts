@@ -52,6 +52,9 @@ export const terminalSavePasteBlob = (bytes: Uint8Array, extension: string) =>
 /** "Open a new tab in `cwd` and run `command`" request queued on the Rust
  *  side (tray npm scripts, assistant tool). */
 export interface PendingRun {
+  /** Echoed back via `terminalBindRun` once a pane is picked, so Rust can
+   *  track (running state, ports, stop) what that pane runs. */
+  runId: number;
   cwd: string;
   command: string;
   label: string | null;
@@ -61,6 +64,10 @@ export interface PendingRun {
  *  each request out exactly once. */
 export const terminalTakePendingRuns = async (): Promise<PendingRun[]> =>
   (await invoke<PendingRun[] | null>('terminal_take_pending_runs')) ?? [];
+
+/** Tell Rust which pane a queued run landed in. */
+export const terminalBindRun = (runId: number, paneId: string) =>
+  invoke<null>('terminal_bind_run', { runId, paneId });
 
 /** POSIX single-quote a word for the shell: `it's` → `'it'\''s'`. */
 export const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;

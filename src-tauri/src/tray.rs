@@ -13,7 +13,10 @@
 //!   3. An "npm scripts" block above Quit — one submenu per project folder
 //!      configured in Settings → Terminal, read from the
 //!      `NpmScriptsState` cache (filled by `npm_set_projects`). Hidden
-//!      when no projects are configured.
+//!      when no projects are configured. A script that is currently
+//!      running (tracked by `npm_scripts::runs`) becomes a nested submenu
+//!      titled `● dev  :5173` with "Stop" and "Show in Terminal"; the
+//!      project title gets a `●` prefix while any of its scripts run.
 //!
 //! Menu ids follow a simple scheme:
 //!   - `show`                — open the popup
@@ -26,6 +29,11 @@
 //!   - `npm:<p>:<s>`         — run script `s` of npm project `p` (indices
 //!                             into the cached `NpmScriptsState` snapshot)
 //!   - `npm:info:<p>`        — disabled status row (unreadable package.json)
+//!   - `npm:stop:<run>`      — stop running script instance `run` (run id
+//!                             from `npm_scripts::runs`)
+//!   - `npm:show:<run>`      — reveal that run's terminal pane
+//!   - `npm:stopping:<run>`  — disabled "Stopping…" row while a stop is in
+//!                             flight
 
 use std::sync::{Arc, Mutex};
 
@@ -37,6 +45,7 @@ use tauri::{
     AppHandle, Emitter, Manager,
 };
 
+use crate::modules::npm_scripts::runs::{running as npm_running, RunView};
 use crate::modules::npm_scripts::state::{snapshot as npm_snapshot, NpmProject, NpmScriptsState};
 use crate::{position_popup, resolve_popup, toggle_popup, PopupPositionState};
 
@@ -162,6 +171,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         state.artwork.lock().unwrap().as_deref(),
         false,
         &npm_projects(app),
+        &npm_running(app),
     )?;
 
     let tray_icon = {
@@ -290,6 +300,7 @@ pub(crate) fn rebuild(app: &AppHandle) {
     let artwork = state.artwork.lock().unwrap().clone();
     let pomodoro_paused = *state.pomodoro_paused.lock().unwrap();
     let npm = npm_projects(app);
+    let npm_runs = npm_running(app);
     let menu = match build_menu(
         app,
         &modules,
@@ -298,6 +309,7 @@ pub(crate) fn rebuild(app: &AppHandle) {
         artwork.as_deref(),
         pomodoro_paused,
         &npm,
+        &npm_runs,
     ) {
         Ok(m) => m,
         Err(err) => {
@@ -312,6 +324,7 @@ pub(crate) fn rebuild(app: &AppHandle) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_menu(
     app: &AppHandle,
     items: &[TrayModuleItem],
@@ -320,6 +333,7 @@ fn build_menu(
     artwork: Option<&[u8]>,
     pomodoro_paused: bool,
     npm: &[NpmProject],
+    npm_runs: &[RunView],
 ) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
 
@@ -376,7 +390,7 @@ fn build_menu(
     }
 
     if !npm.is_empty() {
-        append_npm_block(app, &menu, npm)?;
+        append_npm_block(app, &menu, npm, npm_runs)?;
         menu.append(&PredefinedMenuItem::separator(app)?)?;
     }
 
@@ -385,17 +399,26 @@ fn build_menu(
     Ok(menu)
 }
 
-/// One submenu per configured npm project; each script is a leaf item
-/// whose id encodes (project index, script index) into the cached snapshot.
+/// One submenu per configured npm project; each idle script is a leaf item
+/// whose id encodes (project index, script index) into the cached snapshot,
+/// each running instance a nested submenu with Stop / Show in Terminal.
 fn append_npm_block(
     app: &AppHandle,
     menu: &Menu<tauri::Wry>,
     npm: &[NpmProject],
+    runs: &[RunView],
 ) -> tauri::Result<()> {
     let header = MenuItem::with_id(app, "npm:header", "npm scripts", false, None::<&str>)?;
     menu.append(&header)?;
     for (pi, project) in npm.iter().enumerate() {
-        let sub = Submenu::new(app, &project.name, true)?;
+        let project_runs: Vec<&RunView> =
+            runs.iter().filter(|r| r.project_path == project.path).collect();
+        let title = if project_runs.is_empty() {
+            project.name.clone()
+        } else {
+            format!("● {}", project.name)
+        };
+        let sub = Submenu::new(app, title, true)?;
         if let Some(err) = &project.error {
             let row = MenuItem::with_id(app, format!("npm:info:{pi}"), err, false, None::<&str>)?;
             sub.append(&row)?;
@@ -410,14 +433,73 @@ fn append_npm_block(
             sub.append(&row)?;
         } else {
             for (si, script) in project.scripts.iter().enumerate() {
-                let item =
-                    MenuItem::with_id(app, format!("npm:{pi}:{si}"), script, true, None::<&str>)?;
-                sub.append(&item)?;
+                let mut instances = project_runs.iter().filter(|r| &r.script == script).peekable();
+                if instances.peek().is_none() {
+                    let item = MenuItem::with_id(
+                        app,
+                        format!("npm:{pi}:{si}"),
+                        script,
+                        true,
+                        None::<&str>,
+                    )?;
+                    sub.append(&item)?;
+                    continue;
+                }
+                for run in instances {
+                    sub.append(&npm_run_submenu(app, run)?)?;
+                }
             }
         }
         menu.append(&sub)?;
     }
     Ok(())
+}
+
+fn npm_run_submenu(app: &AppHandle, run: &RunView) -> tauri::Result<Submenu<tauri::Wry>> {
+    let id = run.run_id;
+    let sub = Submenu::new(app, format_npm_run_label(&run.script, &run.ports), true)?;
+    let stop = if run.stopping {
+        MenuItem::with_id(app, format!("npm:stopping:{id}"), "Stopping…", false, None::<&str>)?
+    } else {
+        MenuItem::with_id(app, format!("npm:stop:{id}"), "Stop", true, None::<&str>)?
+    };
+    sub.append(&stop)?;
+    let show = MenuItem::with_id(
+        app,
+        format!("npm:show:{id}"),
+        "Show in Terminal",
+        true,
+        None::<&str>,
+    )?;
+    sub.append(&show)?;
+    Ok(sub)
+}
+
+/// `● dev  :5173, :24678` — or just `● dev` while no port is bound yet.
+pub fn format_npm_run_label(script: &str, ports: &[u16]) -> String {
+    if ports.is_empty() {
+        return format!("● {script}");
+    }
+    let ports: Vec<String> = ports.iter().map(|p| format!(":{p}")).collect();
+    format!("● {script}  {}", ports.join(", "))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NpmRunAction {
+    Stop,
+    Show,
+}
+
+/// Parse `npm:stop:<run>` / `npm:show:<run>`.
+fn parse_npm_run_action(id: &str) -> Option<(NpmRunAction, u64)> {
+    let rest = id.strip_prefix("npm:")?;
+    let (verb, run) = rest.split_once(':')?;
+    let action = match verb {
+        "stop" => NpmRunAction::Stop,
+        "show" => NpmRunAction::Show,
+        _ => return None,
+    };
+    Some((action, run.parse().ok()?))
 }
 
 /// Parse `npm:<project>:<script>` into indices. Returns `None` for the
@@ -536,7 +618,16 @@ fn on_menu_event(app: &AppHandle, id: &str) {
             let _ = crate::modules::pomodoro::commands::pomodoro_resume_from_tray(app.clone());
         }
         other => {
-            if let Some((pi, si)) = parse_npm_id(other) {
+            if let Some((action, run_id)) = parse_npm_run_action(other) {
+                use crate::modules::npm_scripts::commands::{show_by_id, stop_by_id};
+                let res = match action {
+                    NpmRunAction::Stop => stop_by_id(app, run_id),
+                    NpmRunAction::Show => show_by_id(app, run_id),
+                };
+                if let Err(err) = res {
+                    tracing::warn!(error = %err, "tray: npm run action failed");
+                }
+            } else if let Some((pi, si)) = parse_npm_id(other) {
                 if let Err(err) = crate::modules::npm_scripts::commands::run_by_index(app, pi, si) {
                     tracing::warn!(error = %err, "tray: npm script launch failed");
                 }
@@ -601,6 +692,28 @@ mod tests {
         assert_eq!(parse_npm_id("npm:info:1"), None);
         assert_eq!(parse_npm_id("npm:header"), None);
         assert_eq!(parse_npm_id("module:npm"), None);
+        assert_eq!(parse_npm_id("npm:stop:7"), None);
+        assert_eq!(parse_npm_id("npm:show:7"), None);
+    }
+
+    #[test]
+    fn npm_run_action_ids_parse() {
+        assert_eq!(parse_npm_run_action("npm:stop:7"), Some((NpmRunAction::Stop, 7)));
+        assert_eq!(parse_npm_run_action("npm:show:42"), Some((NpmRunAction::Show, 42)));
+        assert_eq!(parse_npm_run_action("npm:stopping:7"), None);
+        assert_eq!(parse_npm_run_action("npm:stop:x"), None);
+        assert_eq!(parse_npm_run_action("npm:0:1"), None);
+        assert_eq!(parse_npm_run_action("module:npm"), None);
+    }
+
+    #[test]
+    fn npm_run_label_lists_ports() {
+        assert_eq!(format_npm_run_label("dev", &[]), "● dev");
+        assert_eq!(format_npm_run_label("dev", &[5173]), "● dev  :5173");
+        assert_eq!(
+            format_npm_run_label("dev", &[5173, 24678]),
+            "● dev  :5173, :24678"
+        );
     }
 
     #[test]

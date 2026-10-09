@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{Child, MasterPty};
@@ -16,11 +17,22 @@ pub struct TerminalState {
     /// request is parked here and `terminal_take_pending_runs` drains it
     /// on mount and on every `terminal:run_command` ping.
     pub pending_runs: Mutex<Vec<PendingRun>>,
+    /// Monotonic id source for `PendingRun::run_id`.
+    pub next_run_id: AtomicU64,
+    /// Which pane each queued run landed in: `None` until `TerminalShell`
+    /// reports it via `terminal_bind_run`. Entries are created by
+    /// `queue_run` and dropped by `forget_run`, so a bind for an unknown
+    /// (already forgotten) id is ignored instead of leaking.
+    pub run_panes: Mutex<HashMap<u64, Option<String>>>,
 }
 
 /// One "open a new terminal tab in `cwd` and run `command`" request.
 #[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PendingRun {
+    /// Handle the frontend echoes back via `terminal_bind_run` once it
+    /// knows which pane runs the command.
+    pub run_id: u64,
     pub cwd: String,
     pub command: String,
     /// Optional tab label (e.g. the script name).
@@ -51,6 +63,8 @@ impl TerminalState {
         Self {
             sessions: Mutex::new(HashMap::new()),
             pending_runs: Mutex::new(Vec::new()),
+            next_run_id: AtomicU64::new(1),
+            run_panes: Mutex::new(HashMap::new()),
         }
     }
 }

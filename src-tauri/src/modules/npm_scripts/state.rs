@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -16,6 +17,10 @@ pub struct NpmProject {
 #[derive(Default)]
 pub struct NpmScriptsState {
     pub projects: Mutex<Vec<NpmProject>>,
+    /// Script launches being watched (see `runs.rs`).
+    pub runs: Mutex<Vec<super::runs::TrackedRun>>,
+    /// `true` while the run monitor thread is alive.
+    pub monitor_running: AtomicBool,
 }
 
 /// Snapshot of the configured projects (cheap clone for menu rebuilds).

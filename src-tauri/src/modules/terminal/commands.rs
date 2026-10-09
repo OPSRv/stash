@@ -207,25 +207,39 @@ pub fn terminal_save_paste_blob(
 /// no payload on purpose — the frontend always drains via
 /// `terminal_take_pending_runs`, so a mount-time drain and a live event
 /// can never run the same request twice.
+///
+/// Returns the run id; the frontend reports the pane it picked for it via
+/// `terminal_bind_run`, after which `run_pane` can resolve the live shell.
 pub fn queue_run(
     app: &AppHandle,
     cwd: String,
     command: String,
     label: Option<String>,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     use tauri::Emitter;
     let state = app
         .try_state::<Arc<TerminalState>>()
         .ok_or_else(|| "terminal state is not initialised".to_string())?;
+    let run_id = state.next_run_id.fetch_add(1, Ordering::SeqCst);
+    state
+        .run_panes
+        .lock()
+        .map_err(|_| "terminal run map poisoned".to_string())?
+        .insert(run_id, None);
     state
         .pending_runs
         .lock()
         .map_err(|_| "terminal queue poisoned".to_string())?
-        .push(PendingRun { cwd, command, label });
+        .push(PendingRun {
+            run_id,
+            cwd,
+            command,
+            label,
+        });
     crate::tray::show_popup(app);
     let _ = app.emit("nav:activate", "terminal");
     let _ = app.emit("terminal:run_command", ());
-    Ok(())
+    Ok(run_id)
 }
 
 /// Drain every queued run request. Called by `TerminalShell` on mount and
@@ -239,4 +253,107 @@ pub fn terminal_take_pending_runs(
         .lock()
         .map_err(|_| "terminal queue poisoned".to_string())?;
     Ok(std::mem::take(&mut *q))
+}
+
+/// Record which pane a queued run was assigned to. Unknown ids (already
+/// forgotten by their owner) are ignored.
+#[tauri::command]
+pub fn terminal_bind_run(
+    state: tauri::State<'_, Arc<TerminalState>>,
+    run_id: u64,
+    pane_id: String,
+) -> Result<(), String> {
+    let pane_id = normalise_id(&pane_id)?;
+    let mut map = state
+        .run_panes
+        .lock()
+        .map_err(|_| "terminal run map poisoned".to_string())?;
+    if let Some(slot) = map.get_mut(&run_id) {
+        *slot = Some(pane_id);
+    }
+    Ok(())
+}
+
+/// Where a queued run currently stands, from the PTY's point of view.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunPane {
+    /// Queued, but the frontend has not reported a pane yet.
+    Unbound,
+    /// Unknown run id, or its pane's PTY was closed / its shell exited.
+    Gone,
+    Live {
+        pane_id: String,
+        /// Pid of the pane's shell (the PTY child).
+        shell_pid: u32,
+        /// Foreground process group of the PTY (`tcgetpgrp`). Equals
+        /// `shell_pid` while the shell sits at its prompt.
+        fg_pgid: Option<i32>,
+    },
+}
+
+/// Resolve a run id to its pane's live shell.
+pub fn run_pane(app: &AppHandle, run_id: u64) -> RunPane {
+    let Some(state) = app.try_state::<Arc<TerminalState>>() else {
+        return RunPane::Gone;
+    };
+    // Release `run_panes` before touching `sessions` — never hold both.
+    let pane_id = match state.run_panes.lock().ok().and_then(|m| m.get(&run_id).cloned()) {
+        None => return RunPane::Gone,
+        Some(None) => return RunPane::Unbound,
+        Some(Some(p)) => p,
+    };
+    let Ok(mut map) = state.sessions.lock() else {
+        return RunPane::Gone;
+    };
+    let Some(session) = map.get_mut(&pane_id) else {
+        return RunPane::Gone;
+    };
+    if session.child.try_wait().ok().flatten().is_some() {
+        return RunPane::Gone;
+    }
+    let Some(shell_pid) = session.child.process_id() else {
+        return RunPane::Gone;
+    };
+    RunPane::Live {
+        pane_id,
+        shell_pid,
+        fg_pgid: session.master.process_group_leader(),
+    }
+}
+
+/// Drop a run's pane binding (its owner stopped tracking it).
+pub fn forget_run(app: &AppHandle, run_id: u64) {
+    if let Some(state) = app.try_state::<Arc<TerminalState>>() {
+        if let Ok(mut map) = state.run_panes.lock() {
+            map.remove(&run_id);
+        }
+    }
+}
+
+/// Write raw bytes (e.g. `\x03` for Ctrl+C) into a pane's PTY, exactly as
+/// if the user had typed them.
+pub fn write_to_pane(app: &AppHandle, pane_id: &str, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let state = app
+        .try_state::<Arc<TerminalState>>()
+        .ok_or_else(|| "terminal state is not initialised".to_string())?;
+    let mut map = state.sessions.lock().map_err(|_| "terminal state poisoned".to_string())?;
+    let session = map
+        .get_mut(pane_id)
+        .ok_or_else(|| format!("no pty session: {pane_id}"))?;
+    session
+        .writer
+        .write_all(bytes)
+        .map_err(|e| format!("pty write: {e}"))?;
+    session.writer.flush().ok();
+    Ok(())
+}
+
+/// Open the popup on the Terminal tab and ask `TerminalShell` to activate
+/// the tab holding `pane_id` and focus that pane.
+pub fn reveal_pane(app: &AppHandle, pane_id: &str) {
+    use tauri::Emitter;
+    crate::tray::show_popup(app);
+    let _ = app.emit("nav:activate", "terminal");
+    let _ = app.emit("terminal:focus_pane", pane_id.to_string());
 }

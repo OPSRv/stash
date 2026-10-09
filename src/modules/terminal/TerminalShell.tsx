@@ -7,6 +7,7 @@ import {
   ptyGetCwd,
   ptyWrite,
   shellQuote,
+  terminalBindRun,
   terminalTakePendingRuns,
   type PendingRun,
 } from './api';
@@ -165,6 +166,7 @@ export const TerminalShell = () => {
     const prev = tabsRef.current;
     if (prev.length >= MAX_TABS) {
       const paneId = focusedPaneRef.current;
+      terminalBindRun(run.runId, paneId).catch(() => {});
       ptyWrite(
         paneId,
         encodeBase64(`cd ${shellQuote(run.cwd)} && ${run.command}\r`),
@@ -173,6 +175,7 @@ export const TerminalShell = () => {
     }
     const tabId = newTabId(new Set(prev.map((t) => t.id)));
     const paneId = newPaneId(allLeafIds(prev));
+    terminalBindRun(run.runId, paneId).catch(() => {});
     initialCwdsRef.current.set(paneId, run.cwd);
     initialCommandsRef.current.set(paneId, run.command);
     const next: Tab[] = [
@@ -214,6 +217,30 @@ export const TerminalShell = () => {
       unlisten?.();
     };
   }, [runInNewTab]);
+
+  // Tray "Show in Terminal" for a running npm script: activate the tab
+  // holding that pane and focus it.
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listen<string>('terminal:focus_pane', ({ payload: paneId }) => {
+      const tab = tabsRef.current.find((t) =>
+        collectLeafIds(t.root).includes(paneId),
+      );
+      if (!tab) return;
+      setActiveId(tab.id);
+      setFocusedPane(paneId);
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Auto-clear maximize when its pane no longer exists in the active
   // tab (could have been closed or dragged elsewhere).
