@@ -66,6 +66,7 @@ AI-асистент — **first-class surface** для кожного модул
 - **Slash-команди Telegram** — детерміністичні швидкі дії (`/summarize`, `/note`, `/remind`, `/volume`, `/music`…).
 - **LLM tools** — асистент сам мапить natural-language параметри на args модуля (BPM метронома, тривалість Pomodoro, формат запису Downloader, текст нотатки тощо).
 - **CLI** — `stash ai "нагадай через 20 хвилин випити води"` ходить через той самий dispatcher.
+- **MCP** — `stash mcp` піднімає stdio MCP-сервер: кожна slash-команда стає інструментом для Claude Desktop / Claude Code. Claude Code: `claude mcp add stash -- stash mcp`. Claude Desktop (`claude_desktop_config.json`): `{"mcpServers":{"stash":{"command":"/Applications/Stash.app/Contents/Resources/bin/stash","args":["mcp"]}}}`.
 
 Єдина точка — `telegram::assistant::handle_user_text`. Telegram, CLI, майбутній voice popup — усі транспорти використовують один tool-loop, жодного дублювання LLM-коду.
 

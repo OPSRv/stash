@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
+mod mcp;
+
 /// Bundle identifier must match `tauri.conf.json` `identifier`. Matched
 /// here so the CLI can resolve the app's data directory without a
 /// runtime handshake.
@@ -61,6 +63,8 @@ fn print_usage() {
          stash note \"buy milk\"\n  \
          stash metronome start bpm=140 sig=6/8\n  \
          stash ai \"включи метроном на 120\"\n  \
+         stash send \"build is green\"     # message your phone via Telegram\n  \
+         stash mcp                       # MCP server on stdio (Claude Desktop / Code)\n  \
          stash \"включи метроном на 120\"   # unknown → auto-routes to /ai\n\
          \n\
          flags:\n  \
@@ -151,6 +155,10 @@ async fn main() -> ExitCode {
     }
 
     let cmd = rest.remove(0);
+    // Local subcommand: never forwarded to the app.
+    if cmd == "mcp" && rest.is_empty() {
+        return mcp::run().await;
+    }
     let args_text = rest.join(" ");
     let cwd = std::env::current_dir()
         .ok()
@@ -241,63 +249,74 @@ async fn main() -> ExitCode {
     }
 }
 
+/// Transport-level failure talking to the app socket.
+#[derive(Debug)]
+enum TransportError {
+    /// Socket missing or connect refused — Stash isn't running.
+    NotRunning,
+    /// Encode/write/read/decode failure or timeout.
+    Protocol(String),
+}
+
+impl std::fmt::Display for TransportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TransportError::NotRunning => f.write_str("Stash app is not running"),
+            TransportError::Protocol(m) => f.write_str(m),
+        }
+    }
+}
+
 /// Connect → send one request → read one response. Returns the parsed
 /// `Response` plus the raw line the server sent (needed for `--json`
-/// passthrough). On any transport or protocol error returns the exit
-/// code the caller should terminate with — `main` surfaces it verbatim.
-async fn round_trip(path: &std::path::Path, req: &Request) -> Result<(Response, String), ExitCode> {
+/// passthrough). Shared by the one-shot CLI and `stash mcp`.
+async fn send_request(
+    path: &std::path::Path,
+    req: &Request,
+) -> Result<(Response, String), TransportError> {
+    use TransportError::{NotRunning, Protocol};
+
     let stream = match tokio::time::timeout(Duration::from_secs(2), UnixStream::connect(path)).await
     {
         Ok(Ok(s)) => s,
-        Ok(Err(_)) | Err(_) => {
-            eprintln!("stash: Stash app is not running");
-            return Err(ExitCode::from(2));
-        }
+        Ok(Err(_)) | Err(_) => return Err(NotRunning),
     };
 
     let (read_half, mut write_half) = stream.into_split();
-    let mut body = match serde_json::to_string(req) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("stash: encode request: {e}");
-            return Err(ExitCode::from(3));
-        }
-    };
+    let mut body =
+        serde_json::to_string(req).map_err(|e| Protocol(format!("encode request: {e}")))?;
     body.push('\n');
 
-    if let Err(e) = write_half.write_all(body.as_bytes()).await {
-        eprintln!("stash: write: {e}");
-        return Err(ExitCode::from(3));
-    }
+    write_half
+        .write_all(body.as_bytes())
+        .await
+        .map_err(|e| Protocol(format!("write: {e}")))?;
     let _ = write_half.shutdown().await;
 
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
     match tokio::time::timeout(Duration::from_secs(60), reader.read_line(&mut line)).await {
-        Ok(Ok(0)) => {
-            eprintln!("stash: server closed connection without reply");
-            return Err(ExitCode::from(3));
-        }
+        Ok(Ok(0)) => return Err(Protocol("server closed connection without reply".into())),
         Ok(Ok(_)) => {}
-        Ok(Err(e)) => {
-            eprintln!("stash: read: {e}");
-            return Err(ExitCode::from(3));
-        }
-        Err(_) => {
-            eprintln!("stash: server timed out");
-            return Err(ExitCode::from(3));
-        }
+        Ok(Err(e)) => return Err(Protocol(format!("read: {e}"))),
+        Err(_) => return Err(Protocol("server timed out".into())),
     }
 
-    let resp: Response = match serde_json::from_str(line.trim_end()) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("stash: invalid response: {e}");
-            return Err(ExitCode::from(3));
-        }
-    };
-
+    let resp: Response = serde_json::from_str(line.trim_end())
+        .map_err(|e| Protocol(format!("invalid response: {e}")))?;
     Ok((resp, line))
+}
+
+/// CLI wrapper over `send_request`: prints the failure and maps it to
+/// the documented exit code.
+async fn round_trip(path: &std::path::Path, req: &Request) -> Result<(Response, String), ExitCode> {
+    send_request(path, req).await.map_err(|e| {
+        eprintln!("stash: {e}");
+        match e {
+            TransportError::NotRunning => ExitCode::from(2),
+            TransportError::Protocol(_) => ExitCode::from(3),
+        }
+    })
 }
 
 #[cfg(test)]

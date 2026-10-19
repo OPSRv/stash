@@ -197,10 +197,40 @@ where
     Ok(())
 }
 
+/// Reserved request name: returns the command registry as a JSON array
+/// of `{name, description, usage}` in `text`. Used by `stash mcp` to
+/// expose every slash command as an MCP tool. The `__` prefix can't
+/// collide with a real command name.
+pub(crate) const LIST_COMMANDS: &str = "__commands";
+
+fn list_commands_json(state: &TelegramState) -> String {
+    let entries: Vec<serde_json::Value> = state
+        .commands
+        .read()
+        .map(|reg| {
+            reg.enumerate()
+                .iter()
+                .map(|h| {
+                    serde_json::json!({
+                        "name": h.name(),
+                        "description": h.description(),
+                        "usage": h.usage(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    serde_json::Value::Array(entries).to_string()
+}
+
 pub(crate) async fn dispatch(req: Request, app: AppHandle, state: Arc<TelegramState>) -> Response {
     let cmd_name = req.cmd.trim().to_ascii_lowercase();
     if cmd_name.is_empty() {
         return Response::err("missing command");
+    }
+
+    if cmd_name == LIST_COMMANDS {
+        return Response::ok(list_commands_json(&state));
     }
 
     let handler = match state.find_command(&cmd_name) {
