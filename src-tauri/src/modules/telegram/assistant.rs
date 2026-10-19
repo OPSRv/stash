@@ -517,6 +517,7 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::stash::VolumeControl);
     tools.register(super::tools::stash::SaveNote);
     tools.register(super::tools::stash::ListNotes);
+    tools.register(super::tools::stash::SendTelegram);
     tools.register(super::tools::stash::NavigateTab);
     tools.register(super::tools::stash::NpmListScripts);
     tools.register(super::tools::stash::NpmRunScript);

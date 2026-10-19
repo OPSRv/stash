@@ -1,8 +1,5 @@
-//! Read-only tools exposing Stash state to the assistant.
-//!
-//! Kept narrow on purpose: write-capable tools (create_reminder,
-//! remember_fact) need user intent behind each call; these four
-//! are pure look-ups the assistant can invoke without prompting.
+//! Tools exposing Stash state and actions to the assistant: read-only
+//! look-ups plus module controls (notes, pomodoro, music, Telegram send…).
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -1028,6 +1025,52 @@ impl Tool for SaveNote {
     }
 }
 
+// ---- Telegram ----
+
+pub struct SendTelegram;
+
+#[async_trait]
+impl Tool for SendTelegram {
+    fn name(&self) -> &'static str {
+        "send_telegram"
+    }
+    fn description(&self) -> &'static str {
+        "Push a text message to the user's phone via their paired Telegram \
+         chat. Use when the user asks to be notified / messaged in Telegram, \
+         or when the request comes from the CLI and the user wants the \
+         result on their phone. The text is sent verbatim. Returns \
+         {sent:false, reason:'not_paired'} if Telegram isn't set up."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Message text to send, as-is."
+                }
+            },
+            "required": ["text"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing required field: text".to_string())?;
+        if text.trim().is_empty() {
+            return Err("text must not be empty".to_string());
+        }
+        Ok(if ctx.state.send_to_paired(text) {
+            json!({ "sent": true })
+        } else {
+            json!({ "sent": false, "reason": "not_paired" })
+        })
+    }
+}
+
 pub struct ListNotes;
 
 #[async_trait]
@@ -1853,6 +1896,14 @@ mod tests {
             app: None,
             now_ms: 0,
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_telegram_rejects_empty_and_reports_unpaired() {
+        let c = ctx();
+        assert!(SendTelegram.invoke(&c, json!({ "text": "  " })).await.is_err());
+        let out = SendTelegram.invoke(&c, json!({ "text": "hi" })).await.unwrap();
+        assert_eq!(out, json!({ "sent": false, "reason": "not_paired" }));
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -327,6 +327,44 @@ impl CommandHandler for NoteCmd {
     }
 }
 
+// -------------------- /send --------------------
+
+/// `/send <text>` — push the text verbatim into the paired chat.
+/// From the CLI (`stash send "…"`) this is how scripts / Claude Code
+/// deliver a notification to the user's phone.
+pub struct SendCmd {
+    state: Arc<TelegramState>,
+}
+
+impl SendCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for SendCmd {
+    fn name(&self) -> &'static str {
+        "send"
+    }
+    fn description(&self) -> &'static str {
+        "Надіслати текст у спарений Telegram-чат"
+    }
+    fn usage(&self) -> &'static str {
+        "/send <текст>"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        if args.trim().is_empty() {
+            return Reply::text("✍️ Використання: /send <текст>");
+        }
+        if self.state.send_to_paired(args) {
+            Reply::text("📨 Надіслано в Telegram.")
+        } else {
+            Reply::text("⚠️ Telegram не спарено — відкрий Settings → Telegram.")
+        }
+    }
+}
+
 // -------------------- /notes --------------------
 
 pub struct NotesListCmd {

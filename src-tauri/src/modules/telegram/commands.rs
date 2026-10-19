@@ -461,18 +461,7 @@ pub fn telegram_send_text(
     state: State<'_, Arc<TelegramState>>,
     text: String,
 ) -> Result<bool, String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return Ok(false);
-    }
-    let pairing = state.pairing.lock().map_err(|e| e.to_string())?;
-    let chat_id = match &*pairing {
-        PairingState::Paired { chat_id } => *chat_id,
-        _ => return Ok(false),
-    };
-    drop(pairing);
-    state.sender.enqueue(chat_id, trimmed.to_string());
-    Ok(true)
+    Ok(state.send_to_paired(&text))
 }
 
 /// Overwrite the stored transcript for a voice inbox row. Used by the

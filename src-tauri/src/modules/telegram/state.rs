@@ -52,6 +52,23 @@ impl TelegramState {
     pub fn find_command(&self, name: &str) -> Option<Arc<dyn CommandHandler>> {
         self.commands.read().unwrap().find(name)
     }
+
+    /// Enqueue `text` (trimmed) to the paired chat. Returns `false`
+    /// without sending when the text is blank or the bot isn't paired.
+    /// Bypasses the notifier's cooldowns — meant for explicit,
+    /// user-initiated sends (`/send`, `send_telegram` tool).
+    pub fn send_to_paired(&self, text: &str) -> bool {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let chat_id = match self.pairing.lock().as_deref() {
+            Ok(PairingState::Paired { chat_id }) => *chat_id,
+            _ => return false,
+        };
+        self.sender.enqueue(chat_id, trimmed.to_string());
+        true
+    }
 }
 
 fn refresh_help_snapshot(commands: &CommandRegistry, help: &HelpCmd) {
