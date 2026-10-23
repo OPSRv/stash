@@ -6,7 +6,7 @@ import { Textarea } from '../../shared/ui/Textarea';
 import { Tooltip } from '../../shared/ui/Tooltip';
 import { CloseIcon, SendToAiIcon, StopCircleIcon } from '../../shared/ui/icons';
 import { useToast } from '../../shared/ui/Toast';
-import { buildModel } from '../ai/provider';
+import { buildModel, providerNeedsKey, providerNeedsModel } from '../ai/provider';
 import { useAiSettings } from '../ai/useAiSettings';
 
 type Props = {
@@ -101,9 +101,11 @@ export const NoteAiBar = ({
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  const hasModel =
+    !providerNeedsModel(settings.aiProvider) || Boolean(settings.aiModel.trim());
   const aiReady =
-    Boolean(settings.aiModel.trim()) &&
-    Boolean(settings.aiApiKeys[settings.aiProvider]);
+    hasModel &&
+    (!providerNeedsKey(settings.aiProvider) || Boolean(settings.aiApiKeys[settings.aiProvider]));
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -115,7 +117,7 @@ export const NoteAiBar = ({
 
     if (!aiReady) {
       toast({
-        title: !settings.aiModel.trim() ? 'Set a model in Settings → AI' : 'No API key',
+        title: !hasModel ? 'Set a model in Settings → AI' : 'No API key',
         description: 'Configure the AI provider before rewriting notes.',
         variant: 'error',
       });
@@ -180,6 +182,7 @@ export const NoteAiBar = ({
     abortRef.current = null;
   }, [
     aiReady,
+    hasModel,
     beginTransaction,
     body,
     endTransaction,

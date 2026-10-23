@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 import { aiDeleteApiKey, aiSetApiKey } from '../modules/ai/api';
-import { buildModel } from '../modules/ai/provider';
+import { buildModel, providerNeedsKey, providerNeedsModel } from '../modules/ai/provider';
 import { Badge } from '../shared/ui/Badge';
 import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
@@ -37,6 +37,7 @@ const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'google', label: 'Google' },
   { value: 'custom', label: 'Custom' },
+  { value: 'claude-code', label: 'Claude Code' },
 ];
 
 /// Curated, provider-specific model catalogs. Lets the user pick from
@@ -77,6 +78,11 @@ const MODEL_CATALOG: Record<Exclude<AiProvider, 'custom'>, ModelOption[]> = {
     { id: 'o1', label: 'o1', hint: 'Reasoning, складні задачі' },
     { id: 'o1-mini', label: 'o1-mini', hint: 'Reasoning, дешева' },
   ],
+  'claude-code': [
+    { id: 'sonnet', label: 'Sonnet', hint: 'Balanced (Claude Code alias)' },
+    { id: 'opus', label: 'Opus', hint: 'Most capable (Claude Code alias)' },
+    { id: 'haiku', label: 'Haiku', hint: 'Fastest (Claude Code alias)' },
+  ],
   google: [
     { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', hint: 'Топ-моделька' },
     {
@@ -102,6 +108,8 @@ const modelPlaceholder = (p: AiProvider): string => {
       return 'gemini-2.5-pro, gemini-2.5-flash, …';
     case 'custom':
       return 'model id as your provider expects it';
+    case 'claude-code':
+      return 'sonnet / opus / haiku (empty = Claude Code default)';
   }
 };
 
@@ -165,13 +173,13 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
   const runTest = async () => {
     setTest({ kind: 'pending' });
     try {
-      if (!settings.aiModel.trim()) {
+      if (providerNeedsModel(settings.aiProvider) && !settings.aiModel.trim()) {
         throw new Error('Set a model name first');
       }
       if (settings.aiProvider === 'custom' && !settings.aiBaseUrl) {
         throw new Error('Custom provider requires a base URL');
       }
-      if (!currentKey) {
+      if (!currentKey && providerNeedsKey(settings.aiProvider)) {
         throw new Error('No API key saved for this provider');
       }
       const model = await buildModel(
@@ -200,7 +208,7 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
       <SettingsSection label="API">
         <SettingRow
           title="Provider"
-          description="OpenAI / Anthropic / Google use their native APIs. Custom points at any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter, …)."
+          description="OpenAI / Anthropic / Google use their native APIs. Custom points at any OpenAI-compatible endpoint (Ollama, LM Studio, OpenRouter, …). Claude Code runs the local Claude Code CLI on your subscription."
           control={
             <SegmentedControl<AiProvider>
               value={settings.aiProvider}
@@ -222,60 +230,69 @@ export const AiTab = ({ settings, onChange }: AiTabProps) => {
             />
           }
         />
-        <SettingRow
-          title="API key"
-          description="Спочатку пробує OS Keychain; на unsigned-білдах падає у зашифрований файл поряд із SQLite."
-          control={
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-2">
-                {keyStored ? (
-                  <Badge tone="success" title="API key is stored for this provider">
-                    ✓ Saved
-                  </Badge>
-                ) : (
-                  <Badge tone="warning" title="No API key for this provider yet">
-                    Not configured
-                  </Badge>
-                )}
-                <Input
-                  size="sm"
-                  aria-label="API key"
-                  type={showKey ? 'text' : 'password'}
-                  placeholder={keyStored ? 'Replace key…' : keyPlaceholder(settings.aiProvider)}
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.currentTarget.value)}
-                  maxLength={512}
-                  spellCheck={false}
-                  autoComplete="off"
-                  className="w-[240px]"
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setShowKey((v) => !v)}
-                  aria-label={showKey ? 'Hide key' : 'Show key'}
-                  title={showKey ? 'Hide' : 'Show'}
-                >
-                  {showKey ? 'Hide' : 'Show'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="soft"
-                  tone="accent"
-                  onClick={saveKey}
-                  disabled={!keyInput.trim()}
-                >
-                  Save
-                </Button>
-                {keyStored && (
-                  <Button size="sm" variant="ghost" tone="danger" onClick={clearKey}>
-                    Clear
+        {settings.aiProvider === 'claude-code' && (
+          <SettingRow
+            title="Claude Code"
+            description="Uses your Claude Pro/Max subscription via the local Claude Code CLI (`claude`). Stash tools are exposed through `stash mcp`."
+            control={null}
+          />
+        )}
+        {providerNeedsKey(settings.aiProvider) && (
+          <SettingRow
+            title="API key"
+            description="Спочатку пробує OS Keychain; на unsigned-білдах падає у зашифрований файл поряд із SQLite."
+            control={
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex items-center gap-2">
+                  {keyStored ? (
+                    <Badge tone="success" title="API key is stored for this provider">
+                      ✓ Saved
+                    </Badge>
+                  ) : (
+                    <Badge tone="warning" title="No API key for this provider yet">
+                      Not configured
+                    </Badge>
+                  )}
+                  <Input
+                    size="sm"
+                    aria-label="API key"
+                    type={showKey ? 'text' : 'password'}
+                    placeholder={keyStored ? 'Replace key…' : keyPlaceholder(settings.aiProvider)}
+                    value={keyInput}
+                    onChange={(e) => setKeyInput(e.currentTarget.value)}
+                    maxLength={512}
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="w-[240px]"
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowKey((v) => !v)}
+                    aria-label={showKey ? 'Hide key' : 'Show key'}
+                    title={showKey ? 'Hide' : 'Show'}
+                  >
+                    {showKey ? 'Hide' : 'Show'}
                   </Button>
-                )}
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    tone="accent"
+                    onClick={saveKey}
+                    disabled={!keyInput.trim()}
+                  >
+                    Save
+                  </Button>
+                  {keyStored && (
+                    <Button size="sm" variant="ghost" tone="danger" onClick={clearKey}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          }
-        />
+            }
+          />
+        )}
         {settings.aiProvider === 'custom' && (
           <SettingRow
             title="Base URL"
@@ -405,7 +422,7 @@ const ModelPicker = ({ provider, value, onChange }: ModelPickerProps) => {
             onChange(next);
           }}
           options={options}
-          placeholder="Select a model…"
+          placeholder={provider === 'claude-code' ? 'Claude Code default' : 'Select a model…'}
         />
       </div>
       {showCustom && (
@@ -434,6 +451,7 @@ const keyPlaceholder = (p: AiProvider): string => {
     case 'google':
       return 'AIza…';
     case 'custom':
+    case 'claude-code':
       return 'API key';
   }
 };

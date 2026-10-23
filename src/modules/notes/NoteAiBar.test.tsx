@@ -63,7 +63,8 @@ vi.mock('ai', () => ({
   },
 }));
 
-vi.mock('../ai/provider', () => ({
+vi.mock('../ai/provider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ai/provider')>()),
   buildModel: vi.fn().mockResolvedValue({ id: 'stub-model' }),
 }));
 

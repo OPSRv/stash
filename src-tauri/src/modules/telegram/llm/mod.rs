@@ -6,6 +6,7 @@
 //! trait so it never learns a provider-specific detail.
 
 pub mod anthropic;
+pub mod claude_code;
 pub mod factory;
 pub mod google;
 pub mod openai;
@@ -153,6 +154,14 @@ impl std::error::Error for LlmError {}
 #[async_trait]
 pub trait LlmClient: Send + Sync {
     async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError>;
+
+    /// Whether the client executes `LlmRequest::tools` through the
+    /// orchestrator's tool loop. `false` for clients that bring their
+    /// own tool surface (Claude Code reaches Stash via MCP), so the
+    /// assistant skips function-tool specs and prompt hints for them.
+    fn native_tools(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

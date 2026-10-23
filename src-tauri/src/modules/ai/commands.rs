@@ -153,6 +153,64 @@ pub fn ai_has_api_key(state: State<'_, AiState>, provider: String) -> Result<boo
     Ok(state.secrets.get(&provider)?.is_some())
 }
 
+/// One message of a plain completion request from the frontend.
+#[derive(serde::Deserialize)]
+pub struct CompleteMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Plain (tool-less) completion through the Rust provider factory. Used by
+/// the frontend for providers it can't reach over HTTP itself — currently
+/// Claude Code, which runs as a local CLI. Returns the reply text.
+#[tauri::command]
+pub async fn ai_complete(
+    app: tauri::AppHandle,
+    messages: Vec<CompleteMessage>,
+    system: Option<String>,
+) -> Result<String, String> {
+    use crate::modules::telegram::llm::{factory, ChatMessage, LlmError, LlmRequest, Role};
+    use tauri::Manager;
+
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir: {e}"))?;
+    let cfg = factory::read_config(&data_dir.join("settings.json")).map_err(|e| e.to_string())?;
+    let ai_state = app
+        .try_state::<AiState>()
+        .ok_or_else(|| "AI module is not initialised".to_string())?;
+    let client = factory::build_client(&cfg, &ai_state.secrets).map_err(|e| e.to_string())?;
+
+    let mut chat: Vec<ChatMessage> = Vec::with_capacity(messages.len() + 1);
+    if let Some(s) = system.filter(|s| !s.trim().is_empty()) {
+        chat.push(ChatMessage::system(s));
+    }
+    for m in messages {
+        let role = match m.role.as_str() {
+            "system" => Role::System,
+            "assistant" => Role::Assistant,
+            _ => Role::User,
+        };
+        chat.push(ChatMessage {
+            role,
+            content: m.content,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        });
+    }
+    let req = LlmRequest {
+        messages: chat,
+        ..Default::default()
+    };
+    let resp = client.chat(req).await.map_err(|e| match e {
+        // Adapters already phrase these for humans; drop the generic prefix.
+        LlmError::BadResponse(msg) => msg,
+        other => other.to_string(),
+    })?;
+    Ok(resp.text)
+}
+
 /// Send a chat message through the full tool-enabled assistant (same loop used
 /// by Telegram and the CLI). The user message has already been persisted by the
 /// caller; this command runs the LLM + tool round-trips, persists the assistant

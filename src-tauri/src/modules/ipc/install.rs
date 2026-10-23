@@ -30,7 +30,7 @@ pub struct StashCliStatus {
 /// Development fallback: `target/{release,debug}/stash` next to the
 /// manifest — lets the Settings UI smoke-test the install flow before
 /// a full app bundle exists.
-fn resolve_binary(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn resolve_binary(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(res) = app.path().resource_dir() {
         let candidate = res.join("bin").join("stash");
         if candidate.exists() {

@@ -8,6 +8,14 @@ export type AiConfig = {
   baseUrl: string | null;
 };
 
+/// Whether the provider authenticates with an API key from Settings.
+/// Claude Code uses the local CLI's own login (Pro/Max subscription).
+export const providerNeedsKey = (p: AiProvider): boolean => p !== 'claude-code';
+
+/// Whether a model id must be set. Claude Code falls back to the CLI's
+/// own default model when it's empty.
+export const providerNeedsModel = (p: AiProvider): boolean => p !== 'claude-code';
+
 /// Build a Vercel AI SDK model handle from the user's config and secret.
 /// Each `@ai-sdk/*` package is ~150 KB; importing all three eagerly bloats
 /// every chunk that touches the AI module (Notes pulls polish, Settings
@@ -32,6 +40,12 @@ export const buildModel = async (
     case 'google': {
       const { createGoogleGenerativeAI } = await import('@ai-sdk/google');
       return createGoogleGenerativeAI({ apiKey })(cfg.model);
+    }
+    case 'claude-code': {
+      // Runs through Rust (`claude -p`), which reads the model from
+      // settings.json — `apiKey` is unused.
+      const { createClaudeCodeModel } = await import('./claudeCodeModel');
+      return createClaudeCodeModel(cfg.model);
     }
     case 'custom': {
       if (!cfg.baseUrl) {

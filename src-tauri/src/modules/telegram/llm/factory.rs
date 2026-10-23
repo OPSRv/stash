@@ -4,10 +4,11 @@
 //! `LlmClient`. Keeps the telegram assistant independent of the
 //! specific provider.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::anthropic::AnthropicClient;
+use super::claude_code::ClaudeCodeClient;
 use super::google::GoogleClient;
 use super::openai::OpenAiClient;
 use super::{LlmClient, LlmError};
@@ -21,6 +22,9 @@ pub enum AiProvider {
     Anthropic,
     Google,
     Custom,
+    /// Local Claude Code CLI (`claude -p`) on the user's Pro/Max
+    /// subscription — no API key.
+    ClaudeCode,
 }
 
 impl AiProvider {
@@ -30,6 +34,7 @@ impl AiProvider {
             "anthropic" => Some(Self::Anthropic),
             "google" => Some(Self::Google),
             "custom" => Some(Self::Custom),
+            "claude-code" => Some(Self::ClaudeCode),
             _ => None,
         }
     }
@@ -41,6 +46,7 @@ impl AiProvider {
             Self::Anthropic => "anthropic",
             Self::Google => "google",
             Self::Custom => "custom",
+            Self::ClaudeCode => "claude-code",
         }
     }
 }
@@ -109,11 +115,28 @@ const GOOGLE_DEFAULT_BASE: &str = "https://generativelanguage.googleapis.com/v1b
 
 /// Construct a provider-specific `LlmClient`. Callers must supply
 /// the shared AI `SecretStore` (pointing at `com.stash.ai`); missing
-/// key → `LlmError::Auth`.
+/// key → `LlmError::Auth`. Claude Code runs as a plain completion
+/// with no Stash MCP tools — see [`build_client_with_mcp`].
 pub fn build_client(
     cfg: &AiConfig,
     ai_secrets: &Arc<dyn SecretStore>,
 ) -> Result<Box<dyn LlmClient>, LlmError> {
+    build_client_with_mcp(cfg, ai_secrets, None)
+}
+
+/// Like [`build_client`], but for the Claude Code provider attaches
+/// `stash mcp` (from `stash_bin`) so the CLI can drive Stash. Ignored
+/// by the HTTP providers, which get tools through `LlmRequest::tools`.
+pub fn build_client_with_mcp(
+    cfg: &AiConfig,
+    ai_secrets: &Arc<dyn SecretStore>,
+    stash_bin: Option<PathBuf>,
+) -> Result<Box<dyn LlmClient>, LlmError> {
+    // No key and an optional model (empty = the CLI's default).
+    if cfg.provider == AiProvider::ClaudeCode {
+        return Ok(Box::new(ClaudeCodeClient::new(stash_bin, &cfg.model)));
+    }
+
     let key = ai_secrets
         .get(cfg.provider.key_account())
         .map_err(|e| LlmError::BadResponse(format!("keyring: {e}")))?
@@ -155,6 +178,7 @@ pub fn build_client(
                 .unwrap_or_else(|| GOOGLE_DEFAULT_BASE.to_string());
             Ok(Box::new(GoogleClient::new(base, key, cfg.model.clone())))
         }
+        AiProvider::ClaudeCode => unreachable!("handled before the key check"),
     }
 }
 
@@ -300,6 +324,35 @@ mod tests {
             LlmError::BadResponse(m) => assert!(m.to_lowercase().contains("model")),
             e => panic!("expected BadResponse, got {e}"),
         }
+    }
+
+    #[test]
+    fn parse_claude_code_provider() {
+        assert_eq!(AiProvider::parse("claude-code"), Some(AiProvider::ClaudeCode));
+        assert_eq!(AiProvider::ClaudeCode.key_account(), "claude-code");
+    }
+
+    #[test]
+    fn read_config_parses_claude_code() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("settings.json");
+        std::fs::write(&path, r#"{"aiProvider":"claude-code","aiModel":""}"#).unwrap();
+        let cfg = read_config(&path).unwrap();
+        assert_eq!(cfg.provider, AiProvider::ClaudeCode);
+        assert_eq!(cfg.model, "");
+    }
+
+    #[test]
+    fn build_client_claude_code_needs_no_key_or_model() {
+        let secrets: Arc<dyn SecretStore> = Arc::new(MemStore::new());
+        let cfg = AiConfig {
+            provider: AiProvider::ClaudeCode,
+            model: "".into(),
+            base_url: None,
+            api_key_fallback: None,
+        };
+        assert!(build_client(&cfg, &secrets).is_ok());
+        assert!(build_client_with_mcp(&cfg, &secrets, Some(PathBuf::from("/x/stash"))).is_ok());
     }
 
     #[test]

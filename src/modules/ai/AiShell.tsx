@@ -19,7 +19,7 @@ import {
 } from './api';
 import { ChatComposer } from './ChatComposer';
 import { ChatThread } from './ChatThread';
-import { buildModel } from './provider';
+import { buildModel, providerNeedsKey, providerNeedsModel } from './provider';
 import { SessionSidebar } from './SessionSidebar';
 import { useAiSettings } from './useAiSettings';
 
@@ -158,7 +158,7 @@ export const AiShell = () => {
     const prompt = input.trim();
     if (!prompt || isStreaming) return;
 
-    if (!settings.aiModel.trim()) {
+    if (providerNeedsModel(settings.aiProvider) && !settings.aiModel.trim()) {
       toast({
         title: 'Set a model in Settings → AI',
         description: 'Model name is required before sending.',
@@ -189,8 +189,8 @@ export const AiShell = () => {
       );
     }
 
-    const key = settings.aiApiKeys[settings.aiProvider];
-    if (!key) {
+    const key = settings.aiApiKeys[settings.aiProvider] ?? '';
+    if (!key && providerNeedsKey(settings.aiProvider)) {
       toast({
         title: 'No API key',
         description: 'Save an API key for this provider in Settings → AI.',
@@ -326,7 +326,7 @@ export const AiShell = () => {
     }
   };
 
-  const notConfigured = !settings.aiModel.trim();
+  const notConfigured = providerNeedsModel(settings.aiProvider) && !settings.aiModel.trim();
 
   const emptyHero = (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">

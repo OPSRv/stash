@@ -81,6 +81,14 @@ export const aiAppendMessage = (args: {
 export const aiChatSend = (sessionId: string, prompt: string): Promise<Message> =>
   invoke('ai_chat_send', { sessionId, prompt });
 
+export type CompleteMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+
+/** Plain (tool-less) completion through the Rust provider factory, using the
+ *  provider/model saved in settings. Used for providers the webview can't
+ *  reach over HTTP (Claude Code runs as a local CLI). Resolves to the reply. */
+export const aiComplete = (messages: CompleteMessage[], system?: string): Promise<string> =>
+  invoke('ai_complete', { messages, system: system ?? null });
+
 export const aiGetApiKey = (provider: AiProvider): Promise<string | null> =>
   invoke('ai_get_api_key', { provider });
 

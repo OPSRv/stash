@@ -126,7 +126,7 @@ export const DEFAULT_TERMINAL_SNIPPETS: TerminalSnippet[] = [
   { id: 'claude', label: 'Claude Code', command: 'claude' },
 ];
 
-export type AiProvider = 'openai' | 'anthropic' | 'google' | 'custom';
+export type AiProvider = 'openai' | 'anthropic' | 'google' | 'custom' | 'claude-code';
 export type WhisperModelSize = 'tiny' | 'base' | 'small' | 'medium';
 export type WebChatService = {
   id: string;

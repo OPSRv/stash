@@ -1,4 +1,4 @@
-import { buildModel } from '../ai/provider';
+import { buildModel, providerNeedsKey, providerNeedsModel } from '../ai/provider';
 import type { AiSettings } from '../ai/useAiSettings';
 
 /** Strict system prompt designed to leave the transcript's content untouched
@@ -41,11 +41,11 @@ export const polishTranscript = async (
 ): Promise<PolishOutcome> => {
   const trimmed = raw.trim();
   if (!trimmed) return { kind: 'skipped', reason: 'empty transcript' };
-  if (!settings.aiModel) {
+  if (!settings.aiModel && providerNeedsModel(settings.aiProvider)) {
     return { kind: 'skipped', reason: 'no AI model configured' };
   }
   const apiKey = settings.aiApiKeys?.[settings.aiProvider];
-  if (!apiKey && settings.aiProvider !== 'custom') {
+  if (!apiKey && settings.aiProvider !== 'custom' && providerNeedsKey(settings.aiProvider)) {
     return { kind: 'skipped', reason: 'missing API key for the active provider' };
   }
 

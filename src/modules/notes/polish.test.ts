@@ -6,7 +6,8 @@ const generateTextMock = vi.hoisted(() => vi.fn());
 vi.mock('ai', () => ({
   generateText: generateTextMock,
 }));
-vi.mock('../ai/provider', () => ({
+vi.mock('../ai/provider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../ai/provider')>()),
   buildModel: vi.fn((cfg, key) => ({ __mock: true, cfg, key })),
 }));
 

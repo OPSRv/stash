@@ -75,6 +75,10 @@ impl Assistant {
         now_secs: Option<i64>,
     ) -> Result<AssistantReply, LlmError> {
         let ai_settings = AiSettings::load(self.state.as_ref());
+        // Clients with their own tool surface (Claude Code → `stash mcp`)
+        // get no function-tool specs and prompt text that points at the
+        // MCP commands instead.
+        let native_tools = self.client.native_tools();
 
         // 1. Load history + facts.
         let history = self
@@ -100,7 +104,7 @@ impl Assistant {
         // year sits in their training data and confidently answer
         // "today's date" with stale values. Injected per turn so the
         // first message after midnight already sees the new day.
-        messages.push(ChatMessage::system(current_time_prompt(now_secs)));
+        messages.push(ChatMessage::system(current_time_prompt(now_secs, native_tools)));
         if !facts.is_empty() {
             let joined = facts
                 .iter()
@@ -110,10 +114,13 @@ impl Assistant {
             messages.push(ChatMessage::system(format!("Known facts:\n{joined}")));
         }
         // Expose every registered slash-command so the model can
-        // dispatch them via the `invoke_command` tool.
-        let commands_text = list_commands_for_prompt(&self.state);
-        if !commands_text.is_empty() {
-            messages.push(ChatMessage::system(commands_text));
+        // dispatch them via the `invoke_command` tool. MCP clients
+        // already get the same catalog as their tool list.
+        if native_tools {
+            let commands_text = list_commands_for_prompt(&self.state);
+            if !commands_text.is_empty() {
+                messages.push(ChatMessage::system(commands_text));
+            }
         }
         // Inject a terse recap of the most recent inbox items so the
         // assistant can reference them ("що я надсилав учора?",
@@ -124,7 +131,7 @@ impl Assistant {
             use tauri::Manager;
             app.path().app_data_dir().ok()
         });
-        let inbox_text = recent_inbox_for_prompt(&self.state, data_dir.as_deref());
+        let inbox_text = recent_inbox_for_prompt(&self.state, data_dir.as_deref(), native_tools);
         if !inbox_text.is_empty() {
             messages.push(ChatMessage::system(inbox_text));
         }
@@ -154,7 +161,11 @@ impl Assistant {
         });
 
         let mut depth = 0usize;
-        let tools_spec = self.tools.specs();
+        let tools_spec = if native_tools {
+            self.tools.specs()
+        } else {
+            Vec::new()
+        };
         let mut truncated = false;
         let final_text: String = loop {
             let req = LlmRequest {
@@ -262,7 +273,11 @@ impl Assistant {
 /// expect from a chat assistant: ISO date, weekday, 24-hour clock,
 /// timezone offset. Pulled from `inbox::today_str` + a tiny clock
 /// helper so we don't add a chrono dependency.
-fn current_time_prompt(now_override: Option<i64>) -> String {
+///
+/// `native_tools` picks how the reminder rules name the action: the
+/// `create_reminder` function tool, or the `remind` MCP command (same
+/// `reminders::parse_when` parser, args `<when> <text>`).
+fn current_time_prompt(now_override: Option<i64>, native_tools: bool) -> String {
     use super::inbox::{local_offset_seconds_public, today_str};
     // Prefer the timestamp from the incoming Telegram message — Telegram
     // servers stamp it from authoritative UTC, so we sidestep a skewed
@@ -284,6 +299,18 @@ fn current_time_prompt(now_override: Option<i64>) -> String {
     let sign = if offset >= 0 { '+' } else { '-' };
     let off_h = offset.abs() / 3600;
     let off_m = (offset.abs() % 3600) / 60;
+    let (bare_rule, series_rule) = if native_tools {
+        (
+            "pass that exact string to `create_reminder` as `when`",
+            "pass RELATIVE offsets to `create_reminder`: `5m`, `10m`, `15m`, …",
+        )
+    } else {
+        (
+            "call `mcp__stash__remind` with args `HH:MM <text>`, using that exact HH:MM",
+            "make one `mcp__stash__remind` call per reminder with RELATIVE offsets as \
+             args: `5m <text>`, `10m <text>`, `15m <text>`, …",
+        )
+    };
     format!(
         "Current local time: {date} {hh:02}:{mm:02} ({weekday}, UTC{sign}{off_h:02}:{off_m:02}). \
          Use this for any 'today / tomorrow / what day is it' question.\n\
@@ -293,12 +320,12 @@ fn current_time_prompt(now_override: Option<i64>) -> String {
          Compare the digits — do not reason about 'just past midnight' or 'AM/PM'. \
          Example at the current time: '01:00' vs '{hh:02}:{mm:02}' → \
          {bare_ahead_hint}\n\
-         - When the user gives a bare HH:MM, pass that exact string to `create_reminder` as `when`. \
+         - When the user gives a bare HH:MM, {bare_rule}. \
          The parser picks today (if still ahead) or tomorrow (if past) on its own. \
          Never refuse, never ask the user 'today чи завтра?' — let the tool decide.\n\
          - When the user asks for a series spaced from NOW without naming a start time \
          (e.g. 'кожні 5 хв', 'every 5 minutes', 'через 10, 20, 30 хвилин'), \
-         pass RELATIVE offsets to `create_reminder`: `5m`, `10m`, `15m`, … — never \
+         {series_rule} — never \
          invent a bare HH:MM. Bare clock times you choose yourself will silently roll \
          to tomorrow when they happen to be earlier than the current {hh:02}:{mm:02}, \
          which is almost never what the user wanted. Relative offsets are anchored to \
@@ -369,7 +396,14 @@ fn list_commands_for_prompt(state: &TelegramState) -> String {
 /// here and feeds it straight to `convert_media` / `transcribe_to_file`.
 /// The stored `file_path` is relative to the app data dir (see
 /// `inbox::target_paths`), so we join it back on here.
-fn recent_inbox_for_prompt(state: &TelegramState, data_dir: Option<&std::path::Path>) -> String {
+///
+/// `native_tools == false` (MCP clients) names no function tools — the
+/// path goes to whichever Stash command takes a file.
+fn recent_inbox_for_prompt(
+    state: &TelegramState,
+    data_dir: Option<&std::path::Path>,
+    native_tools: bool,
+) -> String {
     let repo = match state.repo.lock() {
         Ok(r) => r,
         Err(_) => return String::new(),
@@ -380,10 +414,15 @@ fn recent_inbox_for_prompt(state: &TelegramState, data_dir: Option<&std::path::P
     if items.is_empty() {
         return String::new();
     }
-    let mut out = String::from(
+    let file_target = if native_tools {
+        "file tools such as `convert_media` or `transcribe_to_file`"
+    } else {
+        "a Stash command that takes a file"
+    };
+    let mut out = format!(
         "Recent Telegram inbox (newest first — may help ground follow-up questions). \
          Lines with `file:` carry the attachment's absolute path — pass it directly to \
-         file tools such as `convert_media` or `transcribe_to_file`:\n",
+         {file_target}:\n",
     );
     for it in items {
         let summary = it
@@ -496,7 +535,18 @@ pub fn build_runtime_assistant(
     let ai_state = app
         .try_state::<AiState>()
         .ok_or_else(|| LlmError::BadResponse("AI module state is not initialised".into()))?;
-    let client = llm::factory::build_client(&cfg, &ai_state.secrets)?;
+    // Claude Code reaches Stash's commands through `stash mcp`; the
+    // HTTP providers ignore this and use the tool registry below.
+    let stash_bin = if cfg.provider == llm::factory::AiProvider::ClaudeCode {
+        let bin = crate::modules::ipc::install::resolve_binary(app);
+        if bin.is_none() {
+            tracing::warn!("claude-code: stash CLI binary not found — running without Stash MCP tools");
+        }
+        bin
+    } else {
+        None
+    };
+    let client = llm::factory::build_client_with_mcp(&cfg, &ai_state.secrets, stash_bin)?;
 
     let mut tools = ToolRegistry::new();
     tools.register(super::tools::memory::RememberFact);
@@ -988,7 +1038,7 @@ mod tests {
             .unwrap();
 
         let data_dir = std::path::Path::new("/data");
-        let out = recent_inbox_for_prompt(&state, Some(data_dir));
+        let out = recent_inbox_for_prompt(&state, Some(data_dir), true);
 
         // The absolute path is what lets the model feed the clip to
         // `convert_media` without the user pasting a path by hand.
@@ -1019,7 +1069,7 @@ mod tests {
 
         // No app handle (unit-test mode) → no data dir → no path tag,
         // but the recap line still renders so summaries keep working.
-        let out = recent_inbox_for_prompt(&state, None);
+        let out = recent_inbox_for_prompt(&state, None, true);
         assert!(out.contains("[video]"));
         // The header mentions `file:` as guidance; what must be absent
         // is the per-row path tag (" · file: …").
@@ -1032,6 +1082,88 @@ mod tests {
     #[test]
     fn recent_inbox_empty_without_items() {
         let state = fresh_state();
-        assert!(recent_inbox_for_prompt(&state, Some(std::path::Path::new("/data"))).is_empty());
+        assert!(recent_inbox_for_prompt(&state, Some(std::path::Path::new("/data")), true).is_empty());
+    }
+
+    /// Captures requests and reports a configurable `native_tools`.
+    struct ModeClient {
+        native: bool,
+        tap: Arc<Mutex<Vec<LlmRequest>>>,
+    }
+
+    #[async_trait]
+    impl LlmClient for ModeClient {
+        async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
+            self.tap.lock().unwrap().push(req);
+            Ok(plain_reply("ok"))
+        }
+        fn native_tools(&self) -> bool {
+            self.native
+        }
+    }
+
+    async fn first_request(native: bool) -> LlmRequest {
+        let state = fresh_state();
+        let tap = Arc::new(Mutex::new(Vec::new()));
+        let mut tools = ToolRegistry::new();
+        tools.register(super::super::tools::memory::ListFacts);
+        let assistant = Assistant {
+            state,
+            app: None,
+            client: Box::new(ModeClient {
+                native,
+                tap: Arc::clone(&tap),
+            }),
+            tools,
+        };
+        assistant.handle("hello").await.unwrap();
+        let req = tap.lock().unwrap().remove(0);
+        req
+    }
+
+    fn system_text(req: &LlmRequest) -> String {
+        req.messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_mode_keeps_catalog_tools_and_create_reminder() {
+        let req = first_request(true).await;
+        let sys = system_text(&req);
+        assert!(sys.contains("Available Stash commands"));
+        assert!(sys.contains("`create_reminder`"));
+        assert!(!sys.contains("mcp__stash__"));
+        assert!(!req.tools.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn mcp_mode_drops_catalog_and_tools_and_points_at_remind() {
+        let req = first_request(false).await;
+        let sys = system_text(&req);
+        assert!(!sys.contains("Available Stash commands"));
+        assert!(!sys.contains("invoke_command"));
+        assert!(!sys.contains("create_reminder"));
+        assert!(sys.contains("`mcp__stash__remind` with args `HH:MM <text>`"));
+        assert!(sys.contains("`5m <text>`, `10m <text>`"));
+        assert!(req.tools.is_empty());
+    }
+
+    #[test]
+    fn recent_inbox_mcp_mode_names_no_function_tools() {
+        let state = fresh_state();
+        state
+            .repo
+            .lock()
+            .unwrap()
+            .insert_media_inbox(42, "video", Some("a/b.mp4"), None, None, None, 1_000)
+            .unwrap();
+        let out = recent_inbox_for_prompt(&state, Some(std::path::Path::new("/data")), false);
+        assert!(out.contains("pass it directly to a Stash command that takes a file:"));
+        assert!(!out.contains("convert_media"));
+        assert!(out.contains("file: /data/a/b.mp4"));
     }
 }
