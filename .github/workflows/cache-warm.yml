@@ -1,0 +1,66 @@
+name: Warm build cache
+
+# GitHub Actions caches are scoped to the ref that saved them, and a run on a
+# tag can only restore caches from its own tag or the default branch. Release
+# runs fire on fresh `v*` tags, so without this workflow they never find a
+# Rust cache and compile everything from scratch (~15 min).
+#
+# This job runs the same build as `release.yml` on every push to `main` and
+# saves the cache under `main`, which tag runs can then restore. Keep the
+# toolchain, target, `shared-key` and build commands in sync with
+# `release.yml` — any drift changes the cache key or the compiled artefacts
+# and the release falls back to a cold build.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/**'
+      - 'package-lock.json'
+      - '.github/workflows/cache-warm.yml'
+  workflow_dispatch:
+
+# A newer push to main supersedes an in-flight warm-up.
+concurrency:
+  group: cache-warm
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    name: Warm macOS arm64 cache
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: macos-arm64
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/sherpa-rs
+          key: sherpa-rs-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            sherpa-rs-${{ runner.os }}-
+
+      - run: npm ci
+
+      # `--no-bundle` skips DMG/updater packaging (and the signing key) —
+      # only the compiled Rust artefacts matter for the cache.
+      - name: Build main app (arm64)
+        run: npm run tauri build -- --target aarch64-apple-darwin --no-bundle
+
+      - name: Build diarization sidecar
+        working-directory: src-tauri
+        run: cargo build -p stash-diarize --release --target aarch64-apple-darwin

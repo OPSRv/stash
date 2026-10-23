@@ -45,9 +45,15 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
+      # Restores the cache that `cache-warm.yml` saves on `main` (tag runs
+      # can't see caches from other tags). `shared-key` must match that
+      # workflow; saving here is skipped because a tag-scoped cache is
+      # unreachable by the next release anyway.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          shared-key: macos-arm64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # `sherpa-rs` (linked from the `stash-diarize` sidecar crate, *not*
       # from the main app) downloads its prebuilt dylibs into
