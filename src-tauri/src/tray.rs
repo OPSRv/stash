@@ -110,6 +110,11 @@ pub struct TrayState {
     /// `true` when the active Pomodoro session is paused — shows "Resume
     /// Pomodoro" in the context menu below the music block.
     pomodoro_paused: Mutex<bool>,
+    /// Latest built context menu. Deliberately *not* attached to the status
+    /// item: on macOS 27 an attached `NSStatusItem.menu` opens on every
+    /// click, swallowing the left-click popup toggle. It is attached only
+    /// for the duration of a right-click — see `show_context_menu`.
+    menu: Mutex<Option<Menu<tauri::Wry>>>,
 }
 
 impl TrayState {
@@ -120,6 +125,7 @@ impl TrayState {
             player_icons: Mutex::new(PlayerIcons::default()),
             artwork: Mutex::new(None),
             pomodoro_paused: Mutex::new(false),
+            menu: Mutex::new(None),
         }
     }
 }
@@ -173,6 +179,7 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         &npm_projects(app),
         &npm_running(app),
     )?;
+    *state.menu.lock().unwrap() = Some(menu);
 
     let tray_icon = {
         let bytes = include_bytes!("../icons/tray.png");
@@ -182,25 +189,31 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
                 .clone()
         })
     };
+    // Left-click toggles the popup, right-click opens the context menu.
     TrayIconBuilder::with_id("main")
         .icon(tray_icon)
         .icon_as_template(false)
-        .menu(&menu)
-        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| on_menu_event(app, event.id.as_ref()))
         .on_tray_icon_event(|tray, event| {
             let app = tray.app_handle();
             tauri_plugin_positioner::on_tray_event(app, &event);
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                if let Some(win) = resolve_popup(app) {
-                    let pos_state = app.state::<Arc<PopupPositionState>>();
-                    toggle_popup(&win, &pos_state);
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                } => {
+                    if let Some(win) = resolve_popup(app) {
+                        let pos_state = app.state::<Arc<PopupPositionState>>();
+                        toggle_popup(&win, &pos_state);
+                    }
                 }
+                TrayIconEvent::Click {
+                    button: MouseButton::Right,
+                    button_state: MouseButtonState::Down,
+                    ..
+                } => show_context_menu(tray),
+                _ => {}
             }
         })
         .build(app)?;
@@ -317,11 +330,23 @@ pub(crate) fn rebuild(app: &AppHandle) {
             return;
         }
     };
-    if let Some(tray) = app.tray_by_id("main") {
-        if let Err(err) = tray.set_menu(Some(menu)) {
-            tracing::warn!(error = %err, "tray: set_menu failed");
-        }
+    *state.menu.lock().unwrap() = Some(menu);
+}
+
+/// Attach the cached menu, pop it open, then detach it again so the next
+/// left-click reaches our handler instead of the native menu. `show_menu`
+/// runs the menu's modal tracking loop, so it returns once the menu closes.
+fn show_context_menu(tray: &tauri::tray::TrayIcon) {
+    let app = tray.app_handle();
+    let Some(menu) = app.state::<Arc<TrayState>>().menu.lock().unwrap().clone() else {
+        return;
+    };
+    if let Err(err) = tray.set_menu(Some(menu)) {
+        tracing::warn!(error = %err, "tray: set_menu failed");
+        return;
     }
+    let _ = tray.with_inner_tray_icon(|inner| inner.show_menu());
+    let _ = tray.set_menu(None::<Menu<tauri::Wry>>);
 }
 
 #[allow(clippy::too_many_arguments)]
