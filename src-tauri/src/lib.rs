@@ -1227,6 +1227,7 @@ pub fn run() {
             );
             telegram_state.register_command(modules::telegram::module_cmds::SeparateStemsCmd);
             telegram_state.register_command(modules::telegram::module_cmds::DetectBpmCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::UpdateCmd);
 
             // Outbound watchers — battery + calendar + reminders ticker.
             modules::telegram::battery_watcher::spawn(app.handle().clone());

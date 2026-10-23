@@ -3492,3 +3492,62 @@ impl CommandHandler for LaunchClaudeCmd {
         Reply::text("💻 Відкриваю Terminal і запускаю Claude Code…")
     }
 }
+
+// -------------------- /update --------------------
+
+pub struct UpdateCmd;
+
+#[async_trait]
+impl CommandHandler for UpdateCmd {
+    fn name(&self) -> &'static str {
+        "update"
+    }
+    fn description(&self) -> &'static str {
+        "Перевірити оновлення Stash; без аргументів — завантажити, встановити й перезапустити"
+    }
+    fn usage(&self) -> &'static str {
+        "/update [check]"
+    }
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        use tauri_plugin_updater::UpdaterExt;
+
+        let current = ctx.app.package_info().version.to_string();
+        let check_only = match args.trim() {
+            "" | "install" => false,
+            "check" => true,
+            other => return Reply::text(format!("Невідомий аргумент «{other}». Використання: /update [check]")),
+        };
+        let update = match ctx.app.updater() {
+            Ok(u) => match u.check().await {
+                Ok(u) => u,
+                Err(e) => return Reply::text(format!("⚠️ Не вдалося перевірити оновлення: {e}")),
+            },
+            Err(e) => return Reply::text(format!("⚠️ Updater недоступний: {e}")),
+        };
+        let Some(update) = update else {
+            return Reply::text(format!("✅ Stash v{current} — це остання версія."));
+        };
+        let latest = update.version.clone();
+        if check_only {
+            return Reply::text(format!(
+                "⬆️ Доступна v{latest} (зараз v{current}). Встановити: /update"
+            ));
+        }
+        // Download + install runs detached: the archive can take longer than
+        // the CLI/MCP 60 s reply timeout, and the restart kills this process
+        // anyway, so the caller gets an immediate ack instead.
+        let app = ctx.app.clone();
+        tauri::async_runtime::spawn(async move {
+            match update.download_and_install(|_, _| {}, || {}).await {
+                Ok(()) => {
+                    tracing::info!(version = %update.version, "update: installed, restarting");
+                    app.restart();
+                }
+                Err(e) => tracing::warn!(error = %e, "update: download/install failed"),
+            }
+        });
+        Reply::text(format!(
+            "⬇️ Встановлюю v{latest} (зараз v{current}). Stash перезапуститься сам за хвилину."
+        ))
+    }
+}
