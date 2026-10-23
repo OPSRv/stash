@@ -182,20 +182,17 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
                 .clone()
         })
     };
-    // Right-click opens the popup; left-click shows the context menu.
-    // Tauri only exposes the left-click flag, so the right-click one is
-    // flipped on the inner `tray_icon::TrayIcon` right after build.
-    let tray = TrayIconBuilder::with_id("main")
+    TrayIconBuilder::with_id("main")
         .icon(tray_icon)
         .icon_as_template(false)
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| on_menu_event(app, event.id.as_ref()))
         .on_tray_icon_event(|tray, event| {
             let app = tray.app_handle();
             tauri_plugin_positioner::on_tray_event(app, &event);
             if let TrayIconEvent::Click {
-                button: MouseButton::Right,
+                button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
@@ -207,7 +204,6 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
             }
         })
         .build(app)?;
-    tray.with_inner_tray_icon(|inner| inner.set_show_menu_on_right_click(false))?;
     Ok(())
 }
 
