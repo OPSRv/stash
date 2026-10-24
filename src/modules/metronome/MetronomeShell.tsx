@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import { CloseIcon, PauseIcon, PlayIcon } from '../../shared/ui/icons';
 import { IconButton } from '../../shared/ui/IconButton';
 import { Footswitch } from '../../shared/ui/pedal/Footswitch';
@@ -7,8 +7,11 @@ import { PedalEnclosure } from '../../shared/ui/pedal/PedalEnclosure';
 import '../../shared/ui/pedal/pedal.css';
 import './metronome.css';
 import { metronomeGetState, metronomeSaveState } from './api';
-import { BPM_MAX, BPM_MIN, DEFAULT_STATE, SOUND_PRESETS, TIME_SIGNATURES, tempoName, type MetronomeState, type SoundId } from './metronome.constants';
+import { BPM_MAX, BPM_MIN, DEFAULT_STATE, SOUND_PRESETS, TIME_SIGNATURES, tempoName, type MetronomeState, type Preset, type SoundId, type TrainerConfig } from './metronome.constants';
 
+/** Mirrors `MetronomeRemote` in `module_cmds.rs`. Fields are pre-resolved on
+ *  the Rust side (relative BPM, presets, trainer merge) and already persisted
+ *  to disk, so the listener only copies them into live state. */
 type MetronomeRemote = {
   action?: 'start' | 'stop' | 'toggle' | 'status' | null;
   bpm?: number | null;
@@ -16,7 +19,16 @@ type MetronomeRemote = {
   denominator?: number | null;
   subdivision?: number | null;
   sound?: string | null;
+  click_volume?: number | null;
+  accent_volume?: number | null;
+  beat_accents?: boolean[] | null;
+  trainer?: TrainerConfig | null;
+  presets?: Preset[] | null;
+  /** Echoed back on `metronome:remote:ack`; re-emits reuse the same id. */
+  ack_id?: number | null;
 };
+
+const clampUnit = (v: number) => Math.max(0, Math.min(1, v));
 import { RangeSlider } from '../../shared/ui/RangeSlider';
 import { BpmDial } from './components/BpmDial';
 import { BeatStrip } from './components/BeatStrip';
@@ -121,7 +133,8 @@ export const MetronomeShell = ({ embedded = false }: MetronomeShellProps) => {
   const patch = useCallback((p: Partial<MetronomeState>) => {
     setState((prev) => {
       let next = { ...prev, ...p };
-      if (p.numerator !== undefined && p.numerator !== prev.numerator) {
+      // An explicit accent pattern (preset / remote) wins over the reshape.
+      if (p.numerator !== undefined && p.numerator !== prev.numerator && p.beat_accents === undefined) {
         next.beat_accents = reshapeAccents(prev.beat_accents, p.numerator);
       }
       return next;
@@ -144,41 +157,72 @@ export const MetronomeShell = ({ embedded = false }: MetronomeShellProps) => {
   // Remote control from the assistant / CLI. Agent surface (CLAUDE.md) —
   // any new user-facing metronome knob MUST be reachable from here so the
   // assistant can drive it; keep this listener's switch in sync with
-  // `parse_metronome_args` on the Rust side.
+  // `resolve_metronome` on the Rust side. The listener is bound once (engine
+  // read through a ref) so there's no unsubscribe gap on re-render, and every
+  // payload is acked so Rust can stop re-emitting.
+  const engineRef = useRef(engine);
+  useLayoutEffect(() => {
+    engineRef.current = engine;
+  });
+  const lastAckRef = useRef<number | null>(null);
   useEffect(() => {
     const unlisten = listen<MetronomeRemote>('metronome:remote', (e) => {
       const p = e.payload ?? {};
-      const patchFields: Partial<MetronomeState> = {};
-      if (typeof p.bpm === 'number') patchFields.bpm = clampBpm(p.bpm);
-      if (typeof p.numerator === 'number') patchFields.numerator = p.numerator;
-      if (typeof p.denominator === 'number' && (p.denominator === 2 || p.denominator === 4 || p.denominator === 8)) {
-        patchFields.denominator = p.denominator;
+      const eng = engineRef.current;
+      const ackId = typeof p.ack_id === 'number' ? p.ack_id : null;
+      const duplicate = ackId !== null && ackId === lastAckRef.current;
+      let playing = eng.isPlaying;
+      if (!duplicate) {
+        lastAckRef.current = ackId;
+        const patchFields: Partial<MetronomeState> = {};
+        if (typeof p.bpm === 'number') patchFields.bpm = clampBpm(p.bpm);
+        if (typeof p.numerator === 'number') patchFields.numerator = p.numerator;
+        if (typeof p.denominator === 'number' && (p.denominator === 2 || p.denominator === 4 || p.denominator === 8)) {
+          patchFields.denominator = p.denominator;
+        }
+        if (typeof p.subdivision === 'number' && p.subdivision >= 1 && p.subdivision <= 4) {
+          patchFields.subdivision = p.subdivision as 1 | 2 | 3 | 4;
+        }
+        if (typeof p.sound === 'string' && SOUND_PRESETS.some((s) => s.id === p.sound)) {
+          patchFields.sound = p.sound as SoundId;
+        }
+        if (typeof p.click_volume === 'number') patchFields.click_volume = clampUnit(p.click_volume);
+        if (typeof p.accent_volume === 'number') patchFields.accent_volume = clampUnit(p.accent_volume);
+        if (Array.isArray(p.beat_accents)) patchFields.beat_accents = [...p.beat_accents];
+        if (p.trainer && typeof p.trainer === 'object') patchFields.trainer = { ...p.trainer };
+        if (Array.isArray(p.presets)) patchFields.presets = p.presets;
+        if (Object.keys(patchFields).length > 0) patch(patchFields);
+        switch (p.action) {
+          case 'start':
+            if (!eng.isPlaying) eng.start();
+            playing = true;
+            break;
+          case 'stop':
+            if (eng.isPlaying) eng.stop();
+            playing = false;
+            break;
+          case 'toggle':
+            eng.toggle();
+            playing = !eng.isPlaying;
+            break;
+          default:
+            break;
+        }
+      } else if (p.action === 'start' || p.action === 'stop') {
+        playing = p.action === 'start';
       }
-      if (typeof p.subdivision === 'number' && p.subdivision >= 1 && p.subdivision <= 4) {
-        patchFields.subdivision = p.subdivision as 1 | 2 | 3 | 4;
-      }
-      if (typeof p.sound === 'string' && SOUND_PRESETS.some((s) => s.id === p.sound)) {
-        patchFields.sound = p.sound as SoundId;
-      }
-      if (Object.keys(patchFields).length > 0) patch(patchFields);
-      switch (p.action) {
-        case 'start':
-          if (!engine.isPlaying) engine.start();
-          break;
-        case 'stop':
-          if (engine.isPlaying) engine.stop();
-          break;
-        case 'toggle':
-          engine.toggle();
-          break;
-        default:
-          break;
+      if (ackId !== null) {
+        try {
+          void emit('metronome:remote:ack', { ack_id: ackId, playing }).catch(() => {});
+        } catch {
+          // Event bridge unavailable (tests / plain Vite) — Rust just times out.
+        }
       }
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
-  }, [engine, patch]);
+  }, [patch]);
 
   // Keyboard shortcuts (only when this tab is active and no input is focused).
   // Skipped when embedded — the host tab (Valeton editor) owns the keyboard
