@@ -1091,6 +1091,281 @@ impl Tool for ListNotes {
     }
 }
 
+// Direct Notes-repo tools. Each holds the same `Arc<Mutex<NotesRepo>>`
+// the Notes tab uses, and nudges it with `notes:changed` after writes.
+
+type NotesRepoHandle = Arc<std::sync::Mutex<crate::modules::notes::repo::NotesRepo>>;
+
+fn note_id_arg(args: &Value) -> Result<i64, String> {
+    args.get("id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| "missing required field: id".to_string())
+}
+
+fn note_title_from_body(body: &str) -> String {
+    let t: String = body.lines().next().unwrap_or("").trim().chars().take(80).collect();
+    if t.is_empty() {
+        "Без заголовка".to_string()
+    } else {
+        t
+    }
+}
+
+fn emit_notes_changed(ctx: &ToolCtx, id: i64) {
+    if let Some(app) = ctx.app.as_ref() {
+        use tauri::Emitter;
+        let _ = app.emit("notes:changed", id);
+    }
+}
+
+pub struct SearchNotes {
+    repo: NotesRepoHandle,
+}
+
+impl SearchNotes {
+    pub fn new(repo: NotesRepoHandle) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl Tool for SearchNotes {
+    fn name(&self) -> &'static str {
+        "search_notes"
+    }
+    fn description(&self) -> &'static str {
+        "Full-text search over Stash notes (title + body). Returns up to 20 \
+         matches with id, title, preview and pinned flag. Use `get_note` to \
+         read a match in full."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "minLength": 1, "description": "Words or substring to look for." }
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, _ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let query = args
+            .get("query")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .ok_or_else(|| "missing required field: query".to_string())?;
+        let repo = self.repo.lock().map_err(|e| e.to_string())?;
+        let hits = repo
+            .search_summaries(query, crate::modules::notes::repo::FolderFilter::All)
+            .map_err(|e| e.to_string())?;
+        Ok(json!({
+            "matches": hits.iter().take(20).map(|n| json!({
+                "id": n.id,
+                "title": n.title,
+                "preview": truncate(&n.preview, 200),
+                "pinned": n.pinned,
+                "updated_at_ms": n.updated_at,
+            })).collect::<Vec<_>>(),
+        }))
+    }
+}
+
+pub struct GetNote {
+    repo: NotesRepoHandle,
+}
+
+impl GetNote {
+    pub fn new(repo: NotesRepoHandle) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl Tool for GetNote {
+    fn name(&self) -> &'static str {
+        "get_note"
+    }
+    fn description(&self) -> &'static str {
+        "Read one Stash note in full by numeric id (from list_notes / search_notes)."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "id": { "type": "integer", "description": "Note id." } },
+            "required": ["id"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, _ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let id = note_id_arg(&args)?;
+        let repo = self.repo.lock().map_err(|e| e.to_string())?;
+        let note = repo
+            .get(id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("note {id} not found"))?;
+        Ok(json!({
+            "id": note.id,
+            "title": note.title,
+            "body": truncate(&note.body, 8_000),
+            "pinned": note.pinned,
+            "created_at_ms": note.created_at,
+            "updated_at_ms": note.updated_at,
+        }))
+    }
+}
+
+pub struct AppendToNote {
+    repo: NotesRepoHandle,
+}
+
+impl AppendToNote {
+    pub fn new(repo: NotesRepoHandle) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl Tool for AppendToNote {
+    fn name(&self) -> &'static str {
+        "append_to_note"
+    }
+    fn description(&self) -> &'static str {
+        "Append text to the end of an existing Stash note (on a new line). \
+         Use for 'add milk to my shopping list' once the note id is known."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "integer", "description": "Note id." },
+                "text": { "type": "string", "minLength": 1, "description": "Text to append." }
+            },
+            "required": ["id", "text"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let id = note_id_arg(&args)?;
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .map(str::trim_end)
+            .filter(|t| !t.trim().is_empty())
+            .ok_or_else(|| "missing required field: text".to_string())?;
+        {
+            let mut repo = self.repo.lock().map_err(|e| e.to_string())?;
+            let note = repo
+                .get(id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("note {id} not found"))?;
+            let body = if note.body.trim().is_empty() {
+                text.to_string()
+            } else {
+                format!("{}\n{text}", note.body.trim_end())
+            };
+            repo.update(id, &note.title, &body, ctx.now_ms)
+                .map_err(|e| e.to_string())?;
+        }
+        emit_notes_changed(ctx, id);
+        Ok(json!({ "id": id, "appended": true }))
+    }
+}
+
+pub struct UpdateNote {
+    repo: NotesRepoHandle,
+}
+
+impl UpdateNote {
+    pub fn new(repo: NotesRepoHandle) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl Tool for UpdateNote {
+    fn name(&self) -> &'static str {
+        "update_note"
+    }
+    fn description(&self) -> &'static str {
+        "Replace the body (and optionally the title) of a Stash note. When \
+         `title` is omitted, the first line of `body` becomes the title. \
+         Prefer `append_to_note` for additions — this overwrites."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "integer", "description": "Note id." },
+                "body": { "type": "string", "minLength": 1, "description": "New full body." },
+                "title": { "type": "string", "description": "Optional explicit title." }
+            },
+            "required": ["id", "body"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let id = note_id_arg(&args)?;
+        let body = args
+            .get("body")
+            .and_then(|v| v.as_str())
+            .filter(|b| !b.trim().is_empty())
+            .ok_or_else(|| "missing required field: body".to_string())?;
+        let title = args
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| note_title_from_body(body));
+        {
+            let mut repo = self.repo.lock().map_err(|e| e.to_string())?;
+            if repo.get(id).map_err(|e| e.to_string())?.is_none() {
+                return Err(format!("note {id} not found"));
+            }
+            repo.update(id, &title, body, ctx.now_ms)
+                .map_err(|e| e.to_string())?;
+        }
+        emit_notes_changed(ctx, id);
+        Ok(json!({ "id": id, "title": title, "updated": true }))
+    }
+}
+
+pub struct DeleteNote {
+    repo: NotesRepoHandle,
+}
+
+impl DeleteNote {
+    pub fn new(repo: NotesRepoHandle) -> Self {
+        Self { repo }
+    }
+}
+
+#[async_trait]
+impl Tool for DeleteNote {
+    fn name(&self) -> &'static str {
+        "delete_note"
+    }
+    fn description(&self) -> &'static str {
+        "Permanently delete a Stash note (and its audio / attachments) by id. \
+         Destructive — confirm with the user first unless they were explicit."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "id": { "type": "integer", "description": "Note id." } },
+            "required": ["id"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let id = note_id_arg(&args)?;
+        let deleted =
+            crate::modules::telegram::module_cmds::delete_note(ctx.app.as_ref(), &self.repo, id)?;
+        Ok(json!({ "id": id, "deleted": deleted }))
+    }
+}
+
 // ---- npm scripts ----
 
 pub struct NpmListScripts;
@@ -1464,6 +1739,80 @@ impl Tool for ClipboardClear {
         let mut repo = self.state.repo.lock().map_err(|e| e.to_string())?;
         let removed = repo.clear_all().map_err(|e| e.to_string())?;
         Ok(json!({ "removed": removed }))
+    }
+}
+
+fn clip_id_arg(args: &Value) -> Result<i64, String> {
+    args.get("id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| "missing required field: id".to_string())
+}
+
+/// Delete one clipboard entry by id (removes the captured PNG for image
+/// rows, same as the Clipboard tab's delete).
+pub struct ClipboardDelete;
+
+#[async_trait]
+impl Tool for ClipboardDelete {
+    fn name(&self) -> &'static str {
+        "clipboard_delete"
+    }
+    fn description(&self) -> &'static str {
+        "Delete a single clipboard-history entry by numeric id (from \
+         clipboard_search). Destructive — only when the user asked."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "id": { "type": "integer", "description": "Numeric id from clipboard_search." } },
+            "required": ["id"],
+            "additionalProperties": false,
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let id = clip_id_arg(&args)?;
+        let app = ctx
+            .app
+            .as_ref()
+            .ok_or_else(|| "app handle unavailable".to_string())?;
+        let state = app
+            .try_state::<Arc<ClipboardState>>()
+            .ok_or_else(|| "clipboard state not initialised".to_string())?;
+        crate::modules::clipboard::commands::clipboard_delete(state, id)?;
+        Ok(json!({ "id": id, "deleted": true }))
+    }
+}
+
+/// Put a history entry (text, image or files) back onto the Mac's
+/// system clipboard so the user can paste it there.
+pub struct ClipboardCopyToMac;
+
+#[async_trait]
+impl Tool for ClipboardCopyToMac {
+    fn name(&self) -> &'static str {
+        "clipboard_copy_to_mac"
+    }
+    fn description(&self) -> &'static str {
+        "Copy a clipboard-history entry (by id from clipboard_search) back \
+         onto the Mac's system clipboard, ready to paste. Works for text, \
+         images and files."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "id": { "type": "integer", "description": "Numeric id from clipboard_search." } },
+            "required": ["id"],
+            "additionalProperties": false,
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let id = clip_id_arg(&args)?;
+        let app = ctx
+            .app
+            .as_ref()
+            .ok_or_else(|| "app handle unavailable".to_string())?;
+        crate::modules::telegram::module_cmds::clip_copy_to_mac(app, id)?;
+        Ok(json!({ "id": id, "copied": true }))
     }
 }
 
