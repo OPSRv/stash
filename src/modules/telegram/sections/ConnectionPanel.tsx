@@ -192,7 +192,7 @@ function PairingRow({
             {code}
           </div>
           <IconButton
-            title={copied ? 'Скопійовано' : 'Скопіювати /pair команду'}
+            title={copied ? 'Copied' : 'Copy /pair command'}
             onClick={onCopy}
             data-testid="copy-pair-code"
           >
@@ -204,7 +204,7 @@ function PairingRow({
               role="status"
               aria-live="polite"
             >
-              Скопійовано
+              Copied
             </span>
           )}
         </div>
