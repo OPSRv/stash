@@ -9,6 +9,7 @@ pub mod anthropic;
 pub mod claude_code;
 pub mod factory;
 pub mod google;
+pub(crate) mod http;
 pub mod openai;
 
 use async_trait::async_trait;
@@ -72,6 +73,34 @@ impl ChatMessage {
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: Vec::new(),
         }
+    }
+
+    /// Marker row splitting the system prompt into a static prefix
+    /// (everything before it) and a volatile tail (everything after).
+    /// Anthropic turns the split into a prompt-cache breakpoint; every
+    /// other adapter simply drops the row. Encoded as a sentinel system
+    /// message so `LlmRequest` keeps its shape for existing callers.
+    pub fn cache_breakpoint() -> Self {
+        Self::system(CACHE_BREAKPOINT)
+    }
+
+    pub fn is_cache_breakpoint(&self) -> bool {
+        self.role == Role::System && self.content == CACHE_BREAKPOINT
+    }
+}
+
+/// Sentinel content of `ChatMessage::cache_breakpoint()`. Contains a
+/// NUL so it can never collide with a real prompt.
+const CACHE_BREAKPOINT: &str = "\u{0}stash:cache-breakpoint";
+
+/// Char-safe truncation: keeps at most `max_chars` characters and
+/// appends `suffix` when anything was cut. Never splits a UTF-8
+/// sequence, unlike byte slicing (`&s[..n]`), which panics on
+/// Cyrillic / emoji.
+pub fn truncate_chars(s: &str, max_chars: usize, suffix: &str) -> String {
+    match s.char_indices().nth(max_chars) {
+        None => s.to_string(),
+        Some((byte_idx, _)) => format!("{}{suffix}", &s[..byte_idx]),
     }
 }
 
@@ -187,6 +216,25 @@ mod tests {
         let tool = ChatMessage::tool("call_1", "{}");
         assert_eq!(tool.role, Role::Tool);
         assert_eq!(tool.tool_call_id.as_deref(), Some("call_1"));
+    }
+
+    #[test]
+    fn truncate_chars_is_utf8_safe() {
+        // Byte slicing at 3 would land mid-codepoint for Cyrillic.
+        assert_eq!(truncate_chars("привіт", 3, "…"), "при…");
+        assert_eq!(truncate_chars("🙂🙂🙂", 2, "…"), "🙂🙂…");
+        assert_eq!(truncate_chars("short", 10, "…"), "short");
+        assert_eq!(truncate_chars("exact", 5, "…"), "exact");
+        assert_eq!(truncate_chars("", 0, "…"), "");
+    }
+
+    #[test]
+    fn cache_breakpoint_is_recognised_only_as_system() {
+        assert!(ChatMessage::cache_breakpoint().is_cache_breakpoint());
+        assert!(!ChatMessage::system("plain").is_cache_breakpoint());
+        let mut u = ChatMessage::cache_breakpoint();
+        u.role = Role::User;
+        assert!(!u.is_cache_breakpoint());
     }
 
     #[test]

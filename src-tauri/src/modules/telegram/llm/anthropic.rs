@@ -4,7 +4,8 @@
 //! tested directly, with a thin `chat` I/O wrapper on top.
 //!
 //! Notable translations vs OpenAI:
-//! - `system` is a top-level string, not a message.
+//! - `system` is a top-level field, not a message (string, or text
+//!   blocks with a prompt-cache breakpoint when the caller marks one).
 //! - Assistant turns return a `content` array of blocks; text blocks
 //!   and `tool_use` blocks interleave. We concatenate text and collect
 //!   tool_use entries into `ToolCall`s.
@@ -14,7 +15,7 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{ChatMessage, LlmClient, LlmError, LlmRequest, LlmResponse, Role, ToolCall};
+use super::{http, ChatMessage, LlmClient, LlmError, LlmRequest, LlmResponse, Role, ToolCall};
 
 pub struct AnthropicClient {
     http: reqwest::Client,
@@ -30,7 +31,7 @@ impl AnthropicClient {
         model: impl Into<String>,
     ) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: http::build_client(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
             model: model.into(),
@@ -41,73 +42,37 @@ impl AnthropicClient {
 #[async_trait]
 impl LlmClient for AnthropicClient {
     async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-        let body = to_wire(&self.model, &req);
+        let body = to_wire(&self.model, &req).to_string();
         let url = format!("{}/messages", self.base_url);
-
-        let mut attempt = 0;
-        let response = loop {
-            let resp = self
-                .http
-                .post(&url)
-                .header("x-api-key", &self.api_key)
-                .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .body(body.to_string())
-                .send()
-                .await;
-            match resp {
-                Ok(r) => {
-                    if r.status().is_server_error() && attempt == 0 {
-                        attempt += 1;
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
-                    break r;
-                }
-                Err(e) => return Err(LlmError::Network(e.to_string())),
-            }
-        };
-
-        let status = response.status();
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err(LlmError::Auth);
-        }
-        if status.as_u16() == 429 {
-            return Err(LlmError::RateLimit);
-        }
-
-        let text = response
-            .text()
-            .await
-            .map_err(|e| LlmError::Network(e.to_string()))?;
-
-        if !status.is_success() {
-            return Err(LlmError::BadResponse(format!(
-                "status {}: {}",
-                status.as_u16(),
-                truncate(&text, 200)
-            )));
-        }
-
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|e| LlmError::BadResponse(format!("json parse: {e}")))?;
+        let value = http::post_json_with_retry(
+            || {
+                self.http
+                    .post(&url)
+                    .header("x-api-key", &self.api_key)
+                    .header("anthropic-version", "2023-06-01")
+                    .header("Content-Type", "application/json")
+                    .body(body.clone())
+            },
+            |_, _| None,
+        )
+        .await?;
         from_wire(&value)
     }
 }
 
 pub fn to_wire(model: &str, req: &LlmRequest) -> Value {
-    // Pull out the System message — Anthropic wants a top-level
-    // `system` string, not a role entry.
-    let mut system_txt = String::new();
+    // Pull out the System messages — Anthropic wants a top-level
+    // `system` field, not a role entry. A cache breakpoint row splits
+    // them into a static prefix and a volatile tail.
+    let mut static_parts: Vec<&str> = Vec::new();
+    let mut dynamic_parts: Vec<&str> = Vec::new();
+    let mut seen_breakpoint = false;
     let mut messages: Vec<Value> = Vec::new();
     for m in &req.messages {
         match m.role {
-            Role::System => {
-                if !system_txt.is_empty() {
-                    system_txt.push_str("\n\n");
-                }
-                system_txt.push_str(&m.content);
-            }
+            Role::System if m.is_cache_breakpoint() => seen_breakpoint = true,
+            Role::System if seen_breakpoint => dynamic_parts.push(&m.content),
+            Role::System => static_parts.push(&m.content),
             Role::User => messages.push(json!({
                 "role": "user",
                 "content": m.content,
@@ -123,11 +88,11 @@ pub fn to_wire(model: &str, req: &LlmRequest) -> Value {
         "max_tokens": req.max_tokens,
         "temperature": req.temperature,
     });
-    if !system_txt.is_empty() {
-        body["system"] = Value::String(system_txt);
+    if let Some(system) = system_to_wire(&static_parts, &dynamic_parts, seen_breakpoint) {
+        body["system"] = system;
     }
     if !req.tools.is_empty() {
-        let tools: Vec<Value> = req
+        let mut tools: Vec<Value> = req
             .tools
             .iter()
             .map(|t| {
@@ -138,9 +103,42 @@ pub fn to_wire(model: &str, req: &LlmRequest) -> Value {
                 })
             })
             .collect();
+        // Tool definitions are identical across turns — cache them.
+        if let Some(last) = tools.last_mut() {
+            last["cache_control"] = json!({ "type": "ephemeral" });
+        }
         body["tools"] = Value::Array(tools);
     }
     body
+}
+
+/// Build the `system` field. Without a cache breakpoint it stays the
+/// plain string other callers (one-shot prompts) have always sent. With
+/// one, it becomes text blocks and the static block carries
+/// `cache_control`, so tools + static prompt are served from the prompt
+/// cache while the clock / facts tail changes freely.
+fn system_to_wire(
+    static_parts: &[&str],
+    dynamic_parts: &[&str],
+    breakpoint: bool,
+) -> Option<Value> {
+    let static_txt = static_parts.join("\n\n");
+    let dynamic_txt = dynamic_parts.join("\n\n");
+    if !breakpoint {
+        return (!static_txt.is_empty()).then(|| Value::String(static_txt));
+    }
+    let mut blocks: Vec<Value> = Vec::new();
+    if !static_txt.is_empty() {
+        blocks.push(json!({
+            "type": "text",
+            "text": static_txt,
+            "cache_control": { "type": "ephemeral" },
+        }));
+    }
+    if !dynamic_txt.is_empty() {
+        blocks.push(json!({ "type": "text", "text": dynamic_txt }));
+    }
+    (!blocks.is_empty()).then(|| Value::Array(blocks))
 }
 
 fn assistant_to_wire(msg: &ChatMessage) -> Value {
@@ -229,14 +227,6 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
     Ok(LlmResponse { text, tool_calls })
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +245,44 @@ mod tests {
         assert_eq!(wire["system"], "you are brisk");
         assert_eq!(wire["messages"].as_array().unwrap().len(), 1);
         assert_eq!(wire["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn cache_breakpoint_splits_system_into_cached_blocks() {
+        let req = LlmRequest {
+            messages: vec![
+                ChatMessage::system("base"),
+                ChatMessage::system("catalog"),
+                ChatMessage::cache_breakpoint(),
+                ChatMessage::system("clock"),
+                ChatMessage::system("facts"),
+                ChatMessage::user("hi"),
+            ],
+            tools: vec![
+                ToolSpec {
+                    name: "a".into(),
+                    description: "".into(),
+                    schema: json!({ "type": "object" }),
+                },
+                ToolSpec {
+                    name: "b".into(),
+                    description: "".into(),
+                    schema: json!({ "type": "object" }),
+                },
+            ],
+            ..Default::default()
+        };
+        let wire = to_wire("claude", &req);
+        let sys = wire["system"].as_array().expect("system blocks");
+        assert_eq!(sys.len(), 2);
+        assert_eq!(sys[0]["text"], "base\n\ncatalog");
+        assert_eq!(sys[0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(sys[1]["text"], "clock\n\nfacts");
+        assert!(sys[1].get("cache_control").is_none());
+        // Only the last tool carries the breakpoint.
+        assert!(wire["tools"][0].get("cache_control").is_none());
+        assert_eq!(wire["tools"][1]["cache_control"]["type"], "ephemeral");
+        assert_eq!(wire["messages"].as_array().unwrap().len(), 1);
     }
 
     #[test]
