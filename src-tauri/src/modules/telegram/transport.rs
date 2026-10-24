@@ -1164,7 +1164,17 @@ async fn edit_message(
         req = req.reply_markup(m);
     }
     match req.await {
-        Ok(_) | Err(RequestError::Api(ApiError::MessageNotModified)) => {}
+        Ok(_) => {}
+        // Same text but the keyboard may have changed (e.g. a toggle
+        // button) — Telegram rejects the whole edit, so push markup alone.
+        Err(RequestError::Api(ApiError::MessageNotModified)) => {
+            if let Some(m) = markup {
+                let _ = bot
+                    .edit_message_reply_markup(ChatId(chat_id), message_id)
+                    .reply_markup(m)
+                    .await;
+            }
+        }
         Err(e) => {
             tracing::debug!(error = %e, "editMessageText (HTML) failed, retrying plain");
             let mut plain = bot.edit_message_text(ChatId(chat_id), message_id, chunk);
