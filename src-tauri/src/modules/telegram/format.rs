@@ -209,6 +209,15 @@ fn inline(s: &str) -> String {
 fn inline_into(c: &[char], out: &mut String) {
     let mut i = 0;
     while i < c.len() {
+        // Bare URLs are literal: `_` / `*` inside them must not open
+        // italics (`https://x.com/_foo_/bar`).
+        if let Some(end) = bare_url_end(c, i) {
+            for &x in &c[i..end] {
+                push_escaped(out, x);
+            }
+            i = end;
+            continue;
+        }
         if let Some(next) = try_span(c, i, out) {
             i = next;
             continue;
@@ -310,14 +319,53 @@ fn find_italic_close(c: &[char], from: usize, m: char) -> Option<usize> {
     })
 }
 
-/// `[text](url)` starting at `i` → (index of `]`, index of `)`).
+/// If a bare `http://` / `https://` token starts at `i` (at a token
+/// boundary), the index just past it (first whitespace or end).
+fn bare_url_end(c: &[char], i: usize) -> Option<usize> {
+    if i > 0 && (c[i - 1].is_alphanumeric() || c[i - 1] == '_') {
+        return None;
+    }
+    let starts = |p: &str| {
+        let n = p.chars().count();
+        c.len() >= i + n
+            && c[i..i + n]
+                .iter()
+                .zip(p.chars())
+                .all(|(a, b)| a.to_ascii_lowercase() == b)
+    };
+    if !(starts("https://") || starts("http://")) {
+        return None;
+    }
+    Some(
+        (i..c.len())
+            .find(|&j| c[j].is_whitespace())
+            .unwrap_or(c.len()),
+    )
+}
+
+/// `[text](url)` starting at `i` → (index of `]`, index of `)`). Parens
+/// inside the URL must balance (`https://en.wikipedia.org/wiki/Rust_(lang)`).
 fn find_link(c: &[char], i: usize) -> Option<(usize, usize)> {
     let text_end = find_char(c, i + 1, ']')?;
     if text_end == i + 1 || c.get(text_end + 1) != Some(&'(') {
         return None;
     }
-    let url_end = find_char(c, text_end + 2, ')')?;
-    if url_end == text_end + 2 || c[text_end + 2..url_end].iter().any(|x| x.is_whitespace()) {
+    let mut depth = 0usize;
+    let mut url_end = None;
+    for (j, &x) in c.iter().enumerate().skip(text_end + 2) {
+        match x {
+            _ if x.is_whitespace() => return None,
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                url_end = Some(j);
+                break;
+            }
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    let url_end = url_end?;
+    if url_end == text_end + 2 {
         return None;
     }
     Some((text_end, url_end))
@@ -343,6 +391,27 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_urls_are_not_italicised() {
+        let h = markdown_to_telegram_html("see https://x.com/_foo_/bar ok");
+        assert!(!h.contains("<i>"), "{h}");
+        assert!(h.contains("https://x.com/_foo_/bar"), "{h}");
+        let h = markdown_to_telegram_html("http://a.b/*x* and _real_");
+        assert!(h.contains("http://a.b/*x*"), "{h}");
+        assert!(h.contains("<i>real</i>"), "{h}");
+    }
+
+    #[test]
+    fn link_urls_keep_balanced_parens() {
+        let h = markdown_to_telegram_html("[Rust](https://en.wikipedia.org/wiki/Rust_(lang)) tail");
+        assert!(
+            h.contains("<a href=\"https://en.wikipedia.org/wiki/Rust_(lang)\">Rust</a> tail"),
+            "{h}"
+        );
+        let h = markdown_to_telegram_html("[a](https://x.com/b)");
+        assert!(h.contains("<a href=\"https://x.com/b\">a</a>"), "{h}");
+    }
 
     fn html(s: &str) -> String {
         markdown_to_telegram_html(s)

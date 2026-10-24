@@ -640,8 +640,10 @@ async fn handle_update(
             // article"). Pure chat without URLs still flows only to
             // the assistant; otherwise the inbox would fill up with
             // every "привіт" and become useless.
+            // Edits re-run the assistant on the corrected text but never
+            // re-save the link / re-send the link card.
             let mut inbox_already = false;
-            if contains_url(&text) {
+            if should_save_link(edited, &text) {
                 let msg_id = msg.id.0 as i64;
                 if let Ok(mut repo) = state.repo.lock() {
                     if let Ok(id) = repo.insert_text_inbox(msg_id, &text, now) {
@@ -686,8 +688,9 @@ async fn handle_update(
                 Err(e) => {
                     tracing::info!(error = %e, "assistant unavailable, falling back to inbox");
                     let friendly = friendly_llm_error(&e);
-                    if inbox_already {
-                        // The URL-detect path already persisted this
+                    if inbox_already || edited {
+                        // An edit's original was handled already; the
+                        // URL-detect path may also have persisted this
                         // message — avoid a duplicate row. Surface the
                         // assistant failure so the user knows why
                         // there's no AI reply, but don't pretend we're
@@ -730,6 +733,12 @@ async fn handle_update(
         }
     }
     let _ = app.emit("telegram:status_changed", ());
+}
+
+/// URL messages are saved to the inbox (with a link card) once — on the
+/// original message, not on every edit of it.
+fn should_save_link(edited: bool, text: &str) -> bool {
+    !edited && contains_url(text)
 }
 
 /// Text of the message the user replied to: its text/caption, plus the
@@ -1303,6 +1312,13 @@ pub(crate) fn build_welcome_message(app: &AppHandle) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edited_messages_do_not_resave_links() {
+        assert!(should_save_link(false, "глянь https://example.com"));
+        assert!(!should_save_link(true, "глянь https://example.com"));
+        assert!(!should_save_link(false, "привіт"));
+    }
     use crate::modules::telegram::keyring::MemStore;
 
     fn store() -> MemStore {

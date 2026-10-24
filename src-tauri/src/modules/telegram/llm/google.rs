@@ -76,7 +76,11 @@ pub fn to_wire(req: &LlmRequest) -> Value {
     // Gemini correlates tool results by function *name*; our ids are
     // synthetic, so remember which name each id belongs to.
     let mut call_names: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    // Gemini wants every functionResponse answering one model turn in a
+    // single `user` content; consecutive tool messages are merged.
+    let mut last_was_tool = false;
     for m in &req.messages {
+        let is_tool = m.role == Role::Tool;
         match m.role {
             Role::System if m.is_cache_breakpoint() => {}
             Role::System => {
@@ -101,8 +105,22 @@ pub fn to_wire(req: &LlmRequest) -> Value {
                     .get(id)
                     .map(|n| n.to_string())
                     .unwrap_or_else(|| name_from_call_id(id));
-                contents.push(tool_result_to_wire(&name, m));
+                let wire = tool_result_to_wire(&name, m);
+                let merged = last_was_tool
+                    && contents
+                        .last_mut()
+                        .and_then(|c| c["parts"].as_array_mut())
+                        .map(|parts| {
+                            parts.extend(wire["parts"].as_array().cloned().unwrap_or_default())
+                        })
+                        .is_some();
+                if !merged {
+                    contents.push(wire);
+                }
             }
+        }
+        if !(m.role == Role::System) {
+            last_was_tool = is_tool;
         }
     }
 
@@ -487,13 +505,52 @@ mod tests {
             ..Default::default()
         };
         let wire = to_wire(&req);
+        // Parallel calls → both responses in ONE user content.
+        assert_eq!(wire["contents"].as_array().unwrap().len(), 3);
+        assert_eq!(wire["contents"][2]["role"], "user");
+        assert_eq!(wire["contents"][2]["parts"].as_array().unwrap().len(), 2);
         let fr0 = &wire["contents"][2]["parts"][0]["functionResponse"];
         assert_eq!(fr0["name"], "get_battery");
         assert_eq!(fr0["response"]["pct"], 72);
-        let fr1 = &wire["contents"][3]["parts"][0]["functionResponse"];
+        let fr1 = &wire["contents"][2]["parts"][1]["functionResponse"];
         assert_eq!(fr1["name"], "list_facts");
         // Non-object JSON is wrapped so `response` stays an object.
         assert_eq!(fr1["response"]["content"], "[]");
+    }
+
+    #[test]
+    fn tool_results_of_separate_turns_are_not_merged() {
+        let mut a1 = ChatMessage::assistant("");
+        a1.tool_calls = vec![super::super::ToolCall {
+            id: "google-get_battery-0".into(),
+            name: "get_battery".into(),
+            args_json: "{}".into(),
+            ..Default::default()
+        }];
+        let mut a2 = ChatMessage::assistant("");
+        a2.tool_calls = vec![super::super::ToolCall {
+            id: "google-list_facts-0".into(),
+            name: "list_facts".into(),
+            args_json: "{}".into(),
+            ..Default::default()
+        }];
+        let req = LlmRequest {
+            messages: vec![
+                ChatMessage::user("x"),
+                a1,
+                ChatMessage::tool("google-get_battery-0", "{}"),
+                a2,
+                ChatMessage::tool("google-list_facts-0", "{}"),
+                ChatMessage::user("y"),
+            ],
+            ..Default::default()
+        };
+        let wire = to_wire(&req);
+        let contents = wire["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 6);
+        assert_eq!(contents[2]["parts"].as_array().unwrap().len(), 1);
+        assert_eq!(contents[4]["parts"].as_array().unwrap().len(), 1);
+        assert_eq!(contents[5]["parts"][0]["text"], "y");
     }
 
     #[test]

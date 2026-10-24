@@ -38,7 +38,9 @@ pub const TOOL_TIMEOUT: Duration = Duration::from_secs(5);
 /// `voice` / `ask` re-enter the LLM (recursion + tool-timeout kills),
 /// the rest are interactive / internal plumbing (pairing, the
 /// confirmation-card callback, retry of the last prompt, onboarding).
-/// Mirrors `RECURSIVE_TOOLS` in `llm/claude_code.rs` for the MCP path.
+/// Single source of truth: also fed to `--disallowedTools` for the
+/// claude_code provider (`llm/claude_code.rs`) and enforced by the IPC
+/// dispatcher for assistant-origin MCP calls (`ipc/server.rs`).
 pub const LLM_EXCLUDED_COMMANDS: &[&str] = &[
     "ai",
     "summarize",
@@ -157,7 +159,7 @@ impl ToolRegistry {
             "tool invoke"
         );
 
-        if super::confirm::tool_needs_confirmation(tool.name()) {
+        if super::confirm::tool_needs_confirmation(tool.name(), &args) {
             let description = super::confirm::describe_tool(tool.name(), &args);
             let pending = super::confirm::PendingAction::Tool {
                 tool: Arc::clone(&tool),

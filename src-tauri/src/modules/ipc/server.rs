@@ -22,8 +22,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
 use super::protocol::{Request, Response};
-use crate::modules::telegram::commands_registry::Ctx;
+use crate::modules::telegram::commands_registry::{CommandHandler, Ctx};
+use crate::modules::telegram::confirm;
 use crate::modules::telegram::state::TelegramState;
+use crate::modules::telegram::tools::is_llm_excluded_command;
 
 /// Return `true` if something is currently accepting connections on
 /// the socket at `path`. Short-timeout blocking connect — we only run
@@ -238,9 +240,55 @@ pub(crate) async fn dispatch(req: Request, app: AppHandle, state: Arc<TelegramSt
         None => return Response::err(format!("unknown command: {cmd_name}")),
     };
 
+    if is_assistant_origin(&req) {
+        match assistant_gate(&*handler, &req.args_text) {
+            AssistantGate::Allow => {}
+            AssistantGate::Excluded => {
+                return Response::err(format!(
+                    "/{cmd_name} cannot be invoked from the assistant (it re-enters the AI or \
+                     is internal). Answer the user directly instead."
+                ))
+            }
+            AssistantGate::Confirm => {
+                let pending = confirm::PendingAction::Command {
+                    name: cmd_name.clone(),
+                    args: req.args_text.trim().to_string(),
+                };
+                let description = confirm::describe_command(&cmd_name, &req.args_text);
+                return Response::ok(confirm::request(&state, pending, &description).to_string());
+            }
+        }
+    }
+
     let ctx = Ctx { app };
     let reply = handler.handle(ctx, &req.args_text).await;
     Response::ok(reply.text)
+}
+
+fn is_assistant_origin(req: &Request) -> bool {
+    req.origin
+        .as_deref()
+        .is_some_and(|o| o.trim().eq_ignore_ascii_case(confirm::ASSISTANT_ORIGIN))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AssistantGate {
+    Allow,
+    Excluded,
+    Confirm,
+}
+
+/// Same rules `invoke_command` applies to the HTTP providers, so the
+/// claude_code provider (which reaches commands over MCP -> IPC) can't
+/// bypass them.
+fn assistant_gate(handler: &dyn CommandHandler, args: &str) -> AssistantGate {
+    if is_llm_excluded_command(handler.name()) {
+        AssistantGate::Excluded
+    } else if confirm::command_needs_confirmation(handler, args) {
+        AssistantGate::Confirm
+    } else {
+        AssistantGate::Allow
+    }
 }
 
 #[cfg(test)]
@@ -266,6 +314,63 @@ mod tests {
         assert_eq!(r.cmd, "status");
         assert_eq!(r.args_text, "");
         assert!(r.cwd.is_none());
+        assert!(r.origin.is_none());
+        assert!(!is_assistant_origin(&r));
+    }
+
+    struct Named(&'static str);
+    #[async_trait::async_trait]
+    impl CommandHandler for Named {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn description(&self) -> &'static str {
+            ""
+        }
+        fn usage(&self) -> &'static str {
+            ""
+        }
+        async fn handle(
+            &self,
+            _ctx: Ctx,
+            _args: &str,
+        ) -> crate::modules::telegram::commands_registry::Reply {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn assistant_origin_is_detected() {
+        let r: Request =
+            serde_json::from_str(r#"{"cmd":"shutdown","origin":"assistant"}"#).unwrap();
+        assert!(is_assistant_origin(&r));
+    }
+
+    #[test]
+    fn assistant_gate_matches_invoke_command_rules() {
+        assert_eq!(
+            assistant_gate(&Named("shutdown"), ""),
+            AssistantGate::Confirm
+        );
+        assert_eq!(
+            assistant_gate(&Named("shutdown"), "status"),
+            AssistantGate::Allow
+        );
+        assert_eq!(assistant_gate(&Named("update"), ""), AssistantGate::Confirm);
+        assert_eq!(
+            assistant_gate(&Named("app"), "quit Safari"),
+            AssistantGate::Confirm
+        );
+        assert_eq!(
+            assistant_gate(&Named("app"), "open Safari"),
+            AssistantGate::Allow
+        );
+        assert_eq!(assistant_gate(&Named("ai"), "hi"), AssistantGate::Excluded);
+        assert_eq!(
+            assistant_gate(&Named("confirm"), "abc"),
+            AssistantGate::Excluded
+        );
+        assert_eq!(assistant_gate(&Named("volume"), "50"), AssistantGate::Allow);
     }
 
     // Round-trip: pair of UnixStreams, server side runs `serve_one` with

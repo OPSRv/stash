@@ -45,9 +45,13 @@ fn is_retryable_status(status: u16) -> bool {
 /// (HTTP-date is rare for LLM APIs and falls back to backoff).
 fn retry_delay(attempt: u32, retry_after: Option<&str>) -> Option<Duration> {
     if let Some(secs) = retry_after.and_then(|v| v.trim().parse::<f64>().ok()) {
+        // Bounds are checked on the float *before* converting:
+        // `Duration::from_secs_f64` panics on overflow (`1e30`, `inf`).
+        if secs > MAX_RETRY_AFTER.as_secs_f64() {
+            return None;
+        }
         if secs.is_finite() && secs >= 0.0 {
-            let d = Duration::from_secs_f64(secs);
-            return (d <= MAX_RETRY_AFTER).then_some(d);
+            return Some(Duration::from_secs_f64(secs));
         }
     }
     Some(BASE_BACKOFF * 2u32.pow(attempt))
@@ -156,6 +160,16 @@ mod tests {
         );
         // Too long to wait in a chat turn → give up.
         assert_eq!(retry_delay(0, Some("60")), None);
+        // Huge / infinite values must not panic in Duration conversion.
+        assert_eq!(retry_delay(0, Some("1e30")), None);
+        assert_eq!(retry_delay(0, Some("inf")), None);
+        assert_eq!(retry_delay(0, Some("1e400")), None);
+        // NaN / negative → plain backoff.
+        assert_eq!(
+            retry_delay(0, Some("NaN")),
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(retry_delay(0, Some("-5")), Some(Duration::from_millis(500)));
         // Unparseable (HTTP-date) → plain backoff.
         assert_eq!(
             retry_delay(1, Some("Wed, 21 Oct 2015 07:28:00 GMT")),

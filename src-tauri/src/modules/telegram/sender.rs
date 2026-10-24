@@ -38,6 +38,11 @@ const MIN_SEND_GAP: Duration = Duration::from_millis(1_100);
 /// Initial backoff; doubled each attempt up to `MAX_RETRIES`.
 const BACKOFF_START: Duration = Duration::from_millis(200);
 const MAX_RETRIES: u32 = 6;
+/// Cap on a single flood-control wait: Telegram can ask for minutes, but
+/// one message must not stall the whole outbound queue that long.
+const MAX_RETRY_AFTER_WAIT: Duration = Duration::from_secs(30);
+/// Total sleep budget across all retries of one Bot API call.
+const MAX_RETRY_BUDGET: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct Outbound {
@@ -226,28 +231,57 @@ where
 {
     let mut backoff = BACKOFF_START;
     let mut attempt = 0u32;
+    let mut spent = Duration::ZERO;
     loop {
         let e = match op().await {
             Ok(v) => return Ok(v),
             Err(e) => e,
         };
-        let wait = match classify(&e) {
-            Failure::Permanent => return Err(e),
-            Failure::RetryAfter(d) => d,
-            Failure::Retry => {
-                let d = backoff;
-                backoff = backoff.saturating_mul(2).min(Duration::from_secs(30));
-                d
-            }
-        };
-        if attempt >= MAX_RETRIES {
-            tracing::warn!(error = %e, what, attempts = attempt + 1, "telegram sender: giving up after max retries");
+        let failure = classify(&e);
+        if failure == Failure::Permanent {
             return Err(e);
         }
+        let Some(wait) = next_wait(&failure, attempt, &mut backoff, spent) else {
+            tracing::warn!(error = %e, what, attempts = attempt + 1, "telegram sender: giving up (retry limit / budget)");
+            return Err(e);
+        };
         attempt += 1;
+        spent += wait;
         tracing::debug!(error = %e, what, attempt, wait_ms = wait.as_millis() as u64, "telegram send failed, retrying");
         tokio::time::sleep(wait).await;
     }
+}
+
+/// Wait before the next retry of a transient failure, or `None` to give
+/// up: attempt limit hit, or the wait would push the total sleep for
+/// this call past `MAX_RETRY_BUDGET`. Flood-control waits are capped at
+/// `MAX_RETRY_AFTER_WAIT`.
+fn next_wait(
+    failure: &Failure,
+    attempt: u32,
+    backoff: &mut Duration,
+    spent: Duration,
+) -> Option<Duration> {
+    if attempt >= MAX_RETRIES {
+        return None;
+    }
+    let wait = match failure {
+        Failure::Permanent => return None,
+        Failure::RetryAfter(d) => (*d).min(MAX_RETRY_AFTER_WAIT),
+        Failure::Retry => {
+            let d = *backoff;
+            *backoff = backoff.saturating_mul(2).min(Duration::from_secs(30));
+            d
+        }
+    };
+    (spent.saturating_add(wait) <= MAX_RETRY_BUDGET).then_some(wait)
+}
+
+/// Only a permanent rejection (bad entities, too-long caption, …) is
+/// worth resending in a different shape. After flood-control or network
+/// exhaustion the same request would just repeat the whole retry cycle.
+fn worth_fallback(e: &RequestError) -> bool {
+    classify(e) == Failure::Permanent
 }
 
 /// What to do with an outbound text body.
@@ -321,8 +355,8 @@ async fn deliver(bot: &Bot, msg: &Outbound) {
 }
 
 /// Send Markdown `text` as HTML, split into ≤4096-char messages; the
-/// keyboard rides on the last one. A chunk Telegram refuses (bad entity
-/// parse, etc.) is resent once as plain text.
+/// keyboard rides on the last one. A chunk Telegram refuses permanently
+/// (bad entity parse, etc.) is resent once as plain text.
 async fn send_text(bot: &Bot, chat: ChatId, text: &str, markup: Option<InlineKeyboardMarkup>) {
     let chunks = match plan_text(text, markup.is_some()) {
         TextPlan::Skip => {
@@ -350,18 +384,26 @@ async fn send_text(bot: &Bot, chat: ChatId, text: &str, markup: Option<InlineKey
             r.send()
         })
         .await;
-        if let Err(e) = res {
-            tracing::warn!(error = %e, "telegram sender: HTML send rejected, retrying as plain text");
-            let plain = retrying("sendMessage(plain)", || {
-                let mut r = bot.send_message(chat, chunk.clone());
-                if let Some(k) = kb.clone() {
-                    r = r.reply_markup(k);
-                }
-                r.send()
-            })
-            .await;
-            if let Err(e) = plain {
+        match res {
+            Ok(_) => {}
+            // Flood control / network exhausted: a plain resend would
+            // just repeat the whole retry cycle.
+            Err(e) if !worth_fallback(&e) => {
                 tracing::warn!(error = %e, "telegram sender: giving up on message chunk");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "telegram sender: HTML send rejected, retrying as plain text");
+                let plain = retrying("sendMessage(plain)", || {
+                    let mut r = bot.send_message(chat, chunk.clone());
+                    if let Some(k) = kb.clone() {
+                        r = r.reply_markup(k);
+                    }
+                    r.send()
+                })
+                .await;
+                if let Err(e) = plain {
+                    tracing::warn!(error = %e, "telegram sender: giving up on message chunk");
+                }
             }
         }
         if i != last {
@@ -432,6 +474,7 @@ async fn send_file(
         .await;
         match res {
             Ok(_) => return Ok(()),
+            Err(e) if !worth_fallback(&e) => return Err(e),
             Err(e) => tracing::info!(error = %e, "sendPhoto failed, falling back to sendDocument"),
         }
     }
@@ -454,7 +497,7 @@ async fn send_file(
     match send_doc(caption_html.clone(), true).await {
         Ok(_) => Ok(()),
         // Caption markup rejected — resend with the raw caption.
-        Err(e) if caption.is_some() => {
+        Err(e) if caption.is_some() && worth_fallback(&e) => {
             tracing::warn!(error = %e, "sendDocument with HTML caption failed, retrying plain");
             send_doc(caption.map(str::to_string), false).await.map(|_| ())
         }
@@ -507,7 +550,71 @@ mod tests {
             classify(&RequestError::Api(ApiError::MessageTextIsEmpty)),
             Failure::Permanent
         );
-        assert_eq!(classify(&RequestError::Api(ApiError::ChatNotFound)), Failure::Permanent);
+        assert_eq!(
+            classify(&RequestError::Api(ApiError::ChatNotFound)),
+            Failure::Permanent
+        );
+    }
+
+    #[test]
+    fn retry_after_is_capped_per_wait() {
+        let mut b = BACKOFF_START;
+        let w = next_wait(
+            &Failure::RetryAfter(Duration::from_secs(600)),
+            0,
+            &mut b,
+            Duration::ZERO,
+        );
+        assert_eq!(w, Some(MAX_RETRY_AFTER_WAIT));
+        let w = next_wait(
+            &Failure::RetryAfter(Duration::from_secs(3)),
+            0,
+            &mut b,
+            Duration::ZERO,
+        );
+        assert_eq!(w, Some(Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn retries_stop_at_total_budget() {
+        // Simulate repeated flood-control answers asking for 25 s.
+        let mut b = BACKOFF_START;
+        let mut spent = Duration::ZERO;
+        let mut attempt = 0;
+        while let Some(w) = next_wait(
+            &Failure::RetryAfter(Duration::from_secs(25)),
+            attempt,
+            &mut b,
+            spent,
+        ) {
+            spent += w;
+            attempt += 1;
+        }
+        assert!(spent <= MAX_RETRY_BUDGET, "{spent:?}");
+        assert_eq!(attempt, 2);
+        // Attempt cap still applies to cheap backoffs.
+        let mut b = BACKOFF_START;
+        assert_eq!(
+            next_wait(&Failure::Retry, MAX_RETRIES, &mut b, Duration::ZERO),
+            None
+        );
+        assert_eq!(
+            next_wait(&Failure::Permanent, 0, &mut b, Duration::ZERO),
+            None
+        );
+    }
+
+    #[test]
+    fn plain_fallback_only_after_permanent_errors() {
+        assert!(worth_fallback(&RequestError::Api(
+            ApiError::CantParseEntities("bad".into())
+        )));
+        assert!(!worth_fallback(&RequestError::RetryAfter(
+            teloxide::types::Seconds::from_seconds(7)
+        )));
+        assert!(!worth_fallback(&RequestError::Api(ApiError::Unknown(
+            "Bad Gateway".into()
+        ))));
     }
 
     #[test]
