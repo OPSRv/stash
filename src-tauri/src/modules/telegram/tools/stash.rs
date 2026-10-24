@@ -1286,7 +1286,9 @@ impl Tool for InvokeCommand {
         "Execute any registered Stash slash-command by name. The catalog of \
          available commands is provided in a system message at the start of \
          the conversation. Use this for actions like changing volume, \
-         controlling music, creating notes, etc."
+         controlling music, creating notes, etc. Destructive commands \
+         (shutdown, sleep, update, quitting apps) are not run directly: \
+         the user gets a confirmation button instead — do not retry them."
     }
     fn schema(&self) -> Value {
         json!({
@@ -1314,6 +1316,12 @@ impl Tool for InvokeCommand {
         if name.is_empty() {
             return Err("command name is empty".to_string());
         }
+        if super::is_llm_excluded_command(name) {
+            return Err(format!(
+                "/{name} cannot be invoked from the assistant (it re-enters the AI or is \
+                 internal). Answer the user directly instead."
+            ));
+        }
         let cmd_args = args.get("args").and_then(|v| v.as_str()).unwrap_or("");
         let app = ctx
             .app
@@ -1323,6 +1331,20 @@ impl Tool for InvokeCommand {
             .state
             .find_command(name)
             .ok_or_else(|| format!("unknown command: /{name}"))?;
+        // Destructive commands (shutdown, sleep, update, app quit, …) are
+        // parked behind a Telegram ✅/✖ card instead of running now.
+        if crate::modules::telegram::confirm::command_needs_confirmation(&*handler, cmd_args) {
+            let pending = crate::modules::telegram::confirm::PendingAction::Command {
+                name: name.to_string(),
+                args: cmd_args.trim().to_string(),
+            };
+            let description = crate::modules::telegram::confirm::describe_command(name, cmd_args);
+            return Ok(crate::modules::telegram::confirm::request(
+                &ctx.state,
+                pending,
+                &description,
+            ));
+        }
         let reply = handler
             .handle(
                 crate::modules::telegram::commands_registry::Ctx { app },
@@ -1330,6 +1352,11 @@ impl Tool for InvokeCommand {
             )
             .await;
         Ok(json!({ "text": reply.text }))
+    }
+    fn timeout(&self) -> Option<std::time::Duration> {
+        // Commands like /stems, /weather or /screenshot legitimately take
+        // longer than the 5 s default for local tools.
+        Some(std::time::Duration::from_secs(30))
     }
 }
 
@@ -2127,6 +2154,19 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("AppHandle"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn invoke_command_refuses_recursive_commands() {
+        // Re-entering the LLM through /ai (or /summarize, /voice) would
+        // recurse and get killed by the tool timeout — refuse up front.
+        for name in ["ai", "/summarize", "voice", "confirm"] {
+            let err = InvokeCommand
+                .invoke(&ctx(), json!({ "name": name, "args": "hi" }))
+                .await
+                .unwrap_err();
+            assert!(err.contains("cannot be invoked"), "{name}: {err}");
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -374,7 +374,12 @@ fn list_commands_for_prompt(state: &TelegramState) -> String {
         "Available Stash commands (dispatch with the `invoke_command` tool, \
          arguments passed as a single free-text string):\n",
     );
-    for h in handlers {
+    // Recursive / internal commands are refused by `invoke_command`,
+    // so don't advertise them either.
+    for h in handlers
+        .into_iter()
+        .filter(|h| !super::tools::is_llm_excluded_command(h.name()))
+    {
         out.push_str(&format!(
             "- {} — {} ({})\n",
             h.name(),

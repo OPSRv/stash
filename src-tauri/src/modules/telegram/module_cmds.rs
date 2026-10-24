@@ -1412,6 +1412,52 @@ mod tests {
     }
 
     #[test]
+    fn known_tabs_cover_every_frontend_module() {
+        // Every `id: '…'` declared by a frontend module wired into
+        // `registry.ts` (plus Settings, which lives outside src/modules)
+        // must be navigable from Telegram / the assistant.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let registry = std::fs::read_to_string(root.join("src/modules/registry.ts"))
+            .expect("read registry.ts");
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("src/modules"))
+            .expect("read src/modules")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().join("index.tsx"))
+            .filter(|p| p.exists())
+            .collect();
+        files.push(root.join("src/settings/index.tsx"));
+        let mut checked = 0;
+        for file in files {
+            let src = std::fs::read_to_string(&file).unwrap();
+            let Some(export) = src
+                .split("export const ")
+                .nth(1)
+                .and_then(|r| r.split(':').next())
+                .map(str::trim)
+            else {
+                continue;
+            };
+            if !registry.contains(export) {
+                continue;
+            }
+            let Some(id) = src
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("id: '"))
+                .and_then(|r| r.split('\'').next())
+            else {
+                continue;
+            };
+            assert!(
+                KNOWN_TABS.contains(&id),
+                "KNOWN_TABS is missing frontend tab `{id}` ({})",
+                file.display()
+            );
+            checked += 1;
+        }
+        assert!(checked >= 15, "parsed only {checked} frontend tab ids");
+    }
+
+    #[test]
     fn known_tabs_include_valeton_and_pomodoro() {
         // The metronome no longer has its own tab — it lives inside the
         // Valeton editor — so `/metronome` reveals `valeton-editor`.
@@ -2000,8 +2046,9 @@ impl CommandHandler for AppCmd {
 }
 
 /// Tab IDs the frontend's module registry currently recognises. Kept in
-/// sync manually with `src/modules/*/index.tsx` — changes there must land
-/// here the same commit (see CLAUDE.md "Agent surface").
+/// sync manually with `src/modules/*/index.tsx` + `src/settings/index.tsx`
+/// — the `known_tabs_cover_every_frontend_module` test fails when a
+/// frontend tab is missing here (see CLAUDE.md "Agent surface").
 pub const KNOWN_TABS: &[&str] = &[
     "clipboard",
     "translator",
@@ -2015,6 +2062,12 @@ pub const KNOWN_TABS: &[&str] = &[
     "terminal",
     "web",
     "system",
+    "canvas",
+    "converter",
+    "separator",
+    "reminders",
+    "dev",
+    "settings",
 ];
 
 pub struct NavigateCmd;
@@ -3045,7 +3098,7 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
                 InlineButton::new("❓ Help", "help"),
             ],
         ],
-        // Page 3 — jump to any of the 13 app tabs.
+        // Page 3 — jump to any app tab.
         _ => vec![
             vec![
                 InlineButton::new("📋 Clipboard", "navigate:clipboard"),
@@ -3068,6 +3121,16 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
                 InlineButton::new("⚙️ System", "navigate:system"),
             ],
             vec![InlineButton::new("🎙 Voice", "navigate:voice")],
+            vec![
+                InlineButton::new("🖼 Canvas", "navigate:canvas"),
+                InlineButton::new("🔄 Converter", "navigate:converter"),
+                InlineButton::new("🎚 Stems", "navigate:separator"),
+            ],
+            vec![
+                InlineButton::new("⏰ Reminders", "navigate:reminders"),
+                InlineButton::new("🛠 Dev", "navigate:dev"),
+                InlineButton::new("🔧 Settings", "navigate:settings"),
+            ],
         ],
     };
     // Footer row is shared: Refresh self + paginate. Arrows wrap around
