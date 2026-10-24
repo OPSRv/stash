@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 // Cross-module import (deliberate trade-off): the Metronome no longer has its
 // own tab — it is hosted here, inside the Valeton editor. The module still
 // lives under `src/modules/metronome/` and keeps its own Rust state + agent
@@ -137,9 +137,23 @@ export const ValetonShell = () => {
   // Асистент / CLI може керувати редактором (вибір патча, темп, перемикання
   // блоків, AI-тон, збереження) через `valeton:remote`. Дії виконуються тими
   // ж хелперами з actions.ts, що й ручне редагування.
+  // Rust re-emits until acked (lazy first mount), so ack on receipt and
+  // dedupe repeats by `ack_id`.
+  const lastValetonAckRef = useRef<number | null>(null);
   useEffect(() => {
     const un = listen<ValetonRemote>('valeton:remote', (e) => {
-      void applyValetonRemote(e.payload);
+      const ackId = typeof e.payload.ack_id === 'number' ? e.payload.ack_id : null;
+      if (ackId === null || ackId !== lastValetonAckRef.current) {
+        lastValetonAckRef.current = ackId;
+        void applyValetonRemote(e.payload);
+      }
+      if (ackId !== null) {
+        try {
+          void emit('valeton:remote:ack', { ack_id: ackId }).catch(() => {});
+        } catch {
+          // Event bridge unavailable (tests / plain Vite) — Rust just times out.
+        }
+      }
     });
     return () => {
       un.then((f) => f()).catch(() => {});

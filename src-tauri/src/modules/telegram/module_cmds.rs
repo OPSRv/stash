@@ -3646,28 +3646,43 @@ impl CommandHandler for ValetonCmd {
                 Err(e) => return Reply::text(format!("⚠️ не вдалося згенерувати тон: {e}")),
             };
             reveal_tab(&ctx.app, "valeton-editor");
-            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-            let _ = ctx.app.emit(
-                "valeton:remote",
+            let delivered = emit_valeton(
+                &ctx.app,
                 &ValetonRemote {
                     preset_json: Some(json),
                     ..Default::default()
                 },
-            );
-            return Reply::text(format!("🎸 Застосовую тон: {desc}"));
+            )
+            .await;
+            return Reply::text(with_valeton_note(format!("🎸 Застосовую тон: {desc}"), delivered));
         }
 
         let parsed = match parse_valeton_args(args) {
             Ok(p) => p,
             Err(e) => return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage())),
         };
-        // Reveal + mount the editor so its `valeton:remote` listener is attached
-        // (and a USB auto-connect has a chance to land) before we emit.
+        // Reveal + mount the editor and re-emit until its `valeton:remote`
+        // listener acks, so a lazy first mount doesn't drop the command.
         reveal_tab(&ctx.app, "valeton-editor");
-        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
         let reply = format_valeton_reply(&parsed);
-        let _ = ctx.app.emit("valeton:remote", &parsed);
-        Reply::text(reply)
+        let delivered = emit_valeton(&ctx.app, &parsed).await;
+        Reply::text(with_valeton_note(reply, delivered))
+    }
+}
+
+/// Deliver a `valeton:remote` payload with retries until the editor acks.
+async fn emit_valeton(app: &tauri::AppHandle, payload: &ValetonRemote) -> bool {
+    let value = serde_json::to_value(payload).unwrap_or_default();
+    emit_with_ack(app, "valeton:remote", value, std::time::Duration::from_secs(4))
+        .await
+        .is_some()
+}
+
+fn with_valeton_note(reply: String, delivered: bool) -> String {
+    if delivered {
+        reply
+    } else {
+        format!("{reply}\n⚠️ Редактор Valeton не відповів — відкрий Stash → Valeton.")
     }
 }
 

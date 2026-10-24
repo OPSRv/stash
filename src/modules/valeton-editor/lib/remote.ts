@@ -18,14 +18,17 @@ import type { BlockKey } from '../store/types';
 
 /** Payload події `valeton:remote` (дзеркалить `ValetonRemote` у Rust). */
 export interface ValetonRemote {
-  patch?: number;
-  bpm?: number;
-  division?: 'quarter' | 'eighth' | 'dotted';
-  block?: string;
-  block_on?: boolean;
-  save?: boolean;
+  // Rust serialises unset `Option` fields as `null`, hence `| null`.
+  patch?: number | null;
+  bpm?: number | null;
+  division?: 'quarter' | 'eighth' | 'dotted' | null;
+  block?: string | null;
+  block_on?: boolean | null;
+  save?: boolean | null;
   /** JSON AI-пресета (від `/valeton tone …`) для розбору + застосування. */
-  preset_json?: string;
+  preset_json?: string | null;
+  /** Echoed back on `valeton:remote:ack`; re-emits reuse the same id. */
+  ack_id?: number | null;
 }
 
 const isBlockKey = (k: string): k is BlockKey => k in BLOCK_BY_KEY;
@@ -34,7 +37,7 @@ const isBlockKey = (k: string): k is BlockKey => k in BLOCK_BY_KEY;
     гонки: вибір патча (тригерить дамп з пристрою) → AI-пресет → темп → блок →
     збереження. */
 export async function applyValetonRemote(p: ValetonRemote): Promise<void> {
-  if (p.patch !== undefined) selectPatch(p.patch);
+  if (p.patch != null) selectPatch(p.patch);
 
   if (p.preset_json) {
     const res = parsePreset(p.preset_json);
@@ -44,10 +47,10 @@ export async function applyValetonRemote(p: ValetonRemote): Promise<void> {
     }
   }
 
-  if (p.bpm !== undefined) setBpm(p.bpm);
-  if (p.division !== undefined) setDivision(p.division);
+  if (p.bpm != null) setBpm(p.bpm);
+  if (p.division != null) setDivision(p.division);
 
-  if (p.block && p.block_on !== undefined && isBlockKey(p.block)) {
+  if (p.block && p.block_on != null && isBlockKey(p.block)) {
     toggleBlock(p.block, p.block_on);
   }
 
