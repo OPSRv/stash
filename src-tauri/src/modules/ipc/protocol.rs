@@ -23,6 +23,13 @@ pub struct Request {
     pub args: Vec<String>,
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Who is calling on the user's behalf. `Some("assistant")` when the
+    /// request comes from the `stash mcp` server spawned by the
+    /// assistant's own `claude -p` run (see `confirm::MCP_ORIGIN_ENV`):
+    /// destructive commands are then parked behind the Telegram
+    /// confirmation card. `None` for a human at the CLI — never gated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// Response envelope returned to the CLI. `ok=false` sets a non-zero
