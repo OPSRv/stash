@@ -44,7 +44,7 @@ type VideoNoteItemProps = {
   durationSec: number | null;
 };
 
-/// Telegram's round "video note" (кружечок). Same mp4 container as a
+/// Telegram's round "video note" (round video). Same mp4 container as a
 /// regular video, but presented as a circle to match the chat UI. Sized
 /// down vs. the rectangular `VideoItem` since these are always short
 /// face-cam clips.
@@ -86,7 +86,7 @@ export const DocumentItem = ({ filePath, mimeType, caption }: DocumentItemProps)
       <div className="flex flex-col gap-1">
         <AudioPlayer src={filePath} caption={basename(filePath)} />
         {caption && (
-          <p className="text-body text-white/80 whitespace-pre-wrap">
+          <p className="text-body t-secondary whitespace-pre-wrap">
             {caption}
           </p>
         )}
@@ -131,7 +131,7 @@ export const TextItem = ({ content }: TextItemProps) => {
               ⤓ Download
             </Button>
             {urls.length > 1 && (
-              <span className="text-white/40">+{urls.length - 1} more</span>
+              <span className="t-tertiary">+{urls.length - 1} more</span>
             )}
           </div>
         </>

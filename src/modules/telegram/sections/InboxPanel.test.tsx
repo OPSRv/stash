@@ -214,7 +214,7 @@ describe('<InboxPanel />', () => {
     });
     const { container } = render(<InboxPanel />);
     await screen.findByTestId('inbox-item-11');
-    expect(screen.getByText(/Кружечок/i)).toBeInTheDocument();
+    expect(screen.getByText(/Video note/i)).toBeInTheDocument();
     const video = container.querySelector('video');
     expect(video).not.toBeNull();
     expect(video?.className).toMatch(/rounded-full/);

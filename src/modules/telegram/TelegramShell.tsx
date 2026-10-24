@@ -19,7 +19,7 @@ export function TelegramShell() {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-3 py-2 border-b [border-color:var(--hairline)]">
-        <div className="text-meta font-medium uppercase tracking-wider text-white/40">
+        <div className="text-meta font-medium uppercase tracking-wider t-tertiary">
           Inbox
         </div>
         <Button
@@ -27,7 +27,6 @@ export function TelegramShell() {
           variant="ghost"
           onClick={openSettings}
           aria-label="Open Telegram settings"
-          title="Telegram settings"
           leadingIcon={
             <svg
               width="13"
