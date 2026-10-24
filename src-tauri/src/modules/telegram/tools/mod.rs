@@ -4,7 +4,10 @@
 //! do work (usually through another module's API), and return a
 //! JSON result. The `ToolRegistry` publishes their `ToolSpec`s to
 //! the LLM and routes `ToolCall`s back to the right handler with a
-//! hard 5-second timeout + audit log per call.
+//! hard per-call timeout (5 s unless the tool overrides `timeout`) +
+//! audit log per call. Destructive tools (`confirm::DANGEROUS_TOOLS`)
+//! are never run directly: the call is parked behind a Telegram
+//! confirmation card instead.
 //!
 //! `Tool::args_redaction` lets each tool mark free-text fields that
 //! should not be written verbatim into the log — so a `remember`
@@ -30,6 +33,27 @@ use super::state::TelegramState;
 /// response is the right move.
 pub const TOOL_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Slash-commands the LLM must not dispatch via `invoke_command` (and
+/// that are hidden from its command catalog). `ai` / `summarize` /
+/// `voice` / `ask` re-enter the LLM (recursion + tool-timeout kills),
+/// the rest are interactive / internal plumbing (pairing, the
+/// confirmation-card callback, retry of the last prompt, onboarding).
+/// Mirrors `RECURSIVE_TOOLS` in `llm/claude_code.rs` for the MCP path.
+pub const LLM_EXCLUDED_COMMANDS: &[&str] = &[
+    "ai",
+    "summarize",
+    "voice",
+    "pair",
+    "confirm",
+    "retry",
+    "ask",
+    "start",
+];
+
+pub fn is_llm_excluded_command(name: &str) -> bool {
+    LLM_EXCLUDED_COMMANDS.contains(&name)
+}
+
 pub struct ToolCtx {
     pub state: Arc<TelegramState>,
     /// Tauri handle for tools that dispatch slash-commands or emit
@@ -47,6 +71,13 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &'static str;
     fn schema(&self) -> Value;
     async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String>;
+
+    /// Per-tool timeout override. `None` → the registry default
+    /// (`TOOL_TIMEOUT`). Tools that legitimately wait on another
+    /// command (e.g. `invoke_command`) raise it.
+    fn timeout(&self) -> Option<Duration> {
+        None
+    }
 }
 
 pub struct ToolRegistry {
@@ -126,10 +157,20 @@ impl ToolRegistry {
             "tool invoke"
         );
 
+        if super::confirm::tool_needs_confirmation(tool.name()) {
+            let description = super::confirm::describe_tool(tool.name(), &args);
+            let pending = super::confirm::PendingAction::Tool {
+                tool: Arc::clone(&tool),
+                args,
+            };
+            return Ok(super::confirm::request(&ctx.state, pending, &description).to_string());
+        }
+
+        let timeout = tool.timeout().unwrap_or(self.timeout);
         let work = tool.invoke(ctx, args);
-        let result = tokio::time::timeout(self.timeout, work)
+        let result = tokio::time::timeout(timeout, work)
             .await
-            .map_err(|_| format!("tool {} timed out after {:?}", call.name, self.timeout))??;
+            .map_err(|_| format!("tool {} timed out after {:?}", call.name, timeout))??;
 
         Ok(result.to_string())
     }
@@ -274,6 +315,78 @@ mod tests {
         };
         let res = reg.invoke(&ctx, &call).await;
         assert!(res.unwrap_err().contains("timed out"));
+    }
+
+    struct SlowTool;
+
+    #[async_trait]
+    impl Tool for SlowTool {
+        fn name(&self) -> &'static str {
+            "slow"
+        }
+        fn description(&self) -> &'static str {
+            "sleeps past the registry default"
+        }
+        fn schema(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        async fn invoke(&self, _ctx: &ToolCtx, _args: Value) -> Result<Value, String> {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            Ok(json!({ "done": true }))
+        }
+        fn timeout(&self) -> Option<Duration> {
+            Some(Duration::from_secs(2))
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn per_tool_timeout_overrides_registry_default() {
+        let mut reg = ToolRegistry::with_timeout(Duration::from_millis(20));
+        reg.register(SlowTool);
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "slow".into(),
+            args_json: "{}".into(),
+            signature: None,
+        };
+        let out = reg.invoke(&fake_ctx(), &call).await.unwrap();
+        assert!(out.contains("\"done\":true"));
+    }
+
+    struct FakeDangerous(Arc<std::sync::atomic::AtomicBool>);
+
+    #[async_trait]
+    impl Tool for FakeDangerous {
+        fn name(&self) -> &'static str {
+            "clipboard_clear"
+        }
+        fn description(&self) -> &'static str {
+            "pretends to wipe history"
+        }
+        fn schema(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        async fn invoke(&self, _ctx: &ToolCtx, _args: Value) -> Result<Value, String> {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(json!({}))
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn dangerous_tool_is_not_run_without_confirmation() {
+        let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut reg = ToolRegistry::new();
+        reg.register(FakeDangerous(Arc::clone(&ran)));
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "clipboard_clear".into(),
+            args_json: "{}".into(),
+            signature: None,
+        };
+        let out = reg.invoke(&fake_ctx(), &call).await.unwrap();
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+        // Unpaired state → the LLM is told confirmation isn't possible.
+        assert!(out.contains("confirmation_unavailable"), "{out}");
     }
 
     #[test]

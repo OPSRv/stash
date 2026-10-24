@@ -104,6 +104,16 @@ pub trait CommandHandler: Send + Sync {
     fn usage(&self) -> &'static str;
 
     async fn handle(&self, ctx: Ctx, args: &str) -> Reply;
+
+    /// `true` when running this command with `args` is destructive or
+    /// irreversible. Only consulted when the LLM dispatches the command
+    /// (`invoke_command`) — the action is then parked behind a Telegram
+    /// confirmation card. User-typed commands are never gated. Most
+    /// built-ins are covered by the central list in `confirm.rs`; this
+    /// hook lets a handler opt in without touching that list.
+    fn dangerous(&self, _args: &str) -> bool {
+        false
+    }
 }
 
 /// Registry of slash-command handlers keyed by `name()`.
@@ -201,29 +211,58 @@ impl CommandHandler for HelpCmd {
 
 /// Command groups shown in `/help`. A command that isn't listed here
 /// falls through to a trailing "Інше" bucket so new commands surface
-/// automatically even without updating this table.
+/// automatically even without updating this table — but the
+/// `every_command_is_categorised` test fails on such a gap, so keep it
+/// complete. Names that aren't registered (yet) are skipped silently.
 const HELP_CATEGORIES: &[(&str, &[&str])] = &[
-    ("🧭 Overview", &["dashboard", "status"]),
+    ("🧭 Огляд", &["dashboard", "menu", "status"]),
     (
-        "💻 System",
-        &["battery", "display", "sleep", "shutdown", "screenshot"],
+        "💻 Система",
+        &[
+            "battery",
+            "display",
+            "volume",
+            "keepawake",
+            "focus",
+            "app",
+            "sleep",
+            "shutdown",
+            "update",
+        ],
     ),
     (
-        "📥 Capture",
+        "📥 Захоплення",
+        &["clip", "screenshot", "ocr", "note", "notes", "send"],
+    ),
+    (
+        "🎵 Музика",
+        &["music", "metronome", "tuner", "record", "valeton", "stems", "bpm"],
+    ),
+    ("📁 Файли та медіа", &["dl", "tr"]),
+    (
+        "⏰ Продуктивність",
+        &["pomodoro", "remind", "reminders", "forget", "weather"],
+    ),
+    (
+        "🤖 AI",
         &[
-            "clip",
-            "note",
-            "notes",
+            "ai",
+            "ask",
+            "retry",
+            "summarize",
+            "voice",
             "memory",
             "remember",
             "forget_fact",
-            "summarize",
+            "claude_code",
         ],
     ),
-    ("🎛 Control", &["music", "volume"]),
-    ("⏰ Time", &["remind", "reminders", "forget"]),
-    ("ℹ️ Meta", &["help"]),
+    ("ℹ️ Meta", &["help", "start", "navigate"]),
 ];
+
+/// Internal plumbing commands that never appear in `/help` (they're
+/// driven by inline buttons, not typed by the user).
+const HELP_HIDDEN: &[&str] = &["confirm", "pair"];
 
 fn render_help(snap: &[(&'static str, &'static str, &'static str)]) -> String {
     // Index by name so category lookup is O(n) rather than O(n*m).
@@ -247,7 +286,10 @@ fn render_help(snap: &[(&'static str, &'static str, &'static str)]) -> String {
     }
     // Anything uncategorised — keeps new commands discoverable even when
     // someone forgets to update HELP_CATEGORIES.
-    let leftovers: Vec<_> = snap.iter().filter(|(n, _, _)| !seen.contains(n)).collect();
+    let leftovers: Vec<_> = snap
+        .iter()
+        .filter(|(n, _, _)| !seen.contains(n) && !HELP_HIDDEN.contains(n))
+        .collect();
     if !leftovers.is_empty() {
         out.push_str("📦 Інше\n");
         for (_n, u, d) in leftovers {
@@ -414,16 +456,17 @@ mod tests {
         ];
         let out = render_help(&snap);
         // Category headers present in the order defined by HELP_CATEGORIES.
-        let idx_sys = out.find("💻 System").unwrap();
-        let idx_cap = out.find("📥 Capture").unwrap();
-        let idx_ctrl = out.find("🎛 Control").unwrap();
-        let idx_time = out.find("⏰ Time").unwrap();
+        let idx_sys = out.find("💻 Система").unwrap();
+        let idx_cap = out.find("📥 Захоплення").unwrap();
+        let idx_music = out.find("🎵 Музика").unwrap();
+        let idx_prod = out.find("⏰ Продуктивність").unwrap();
         let idx_meta = out.find("ℹ️ Meta").unwrap();
-        assert!(idx_sys < idx_cap && idx_cap < idx_ctrl);
-        assert!(idx_ctrl < idx_time);
+        assert!(idx_sys < idx_cap && idx_cap < idx_music);
+        assert!(idx_music < idx_prod);
         // `help` sits in the Meta bucket; the presence of Meta confirms
-        // category ordering extends past the Time header.
-        assert!(idx_time < idx_meta);
+        // category ordering extends past the Productivity header.
+        assert!(idx_prod < idx_meta);
+        assert!(!out.contains("📦 Інше"));
         // Every command in the snapshot appears exactly once.
         for (_, usage, _) in &snap {
             let occurrences = out.matches(usage).count();
@@ -469,6 +512,67 @@ mod tests {
             out.is_empty(),
             "expected no suggestions for wild input, got {out:?}"
         );
+    }
+
+    /// Every `CommandHandler::name()` declared in the command sources
+    /// must sit in a help category (or be explicitly hidden), so `/help`
+    /// never dumps real commands into "Інше".
+    #[test]
+    fn every_command_is_categorised() {
+        let sources = [
+            include_str!("commands_registry.rs"),
+            include_str!("module_cmds.rs"),
+            include_str!("confirm.rs"),
+        ];
+        let marker = "fn name(&self) -> &'static str {";
+        let mut names = Vec::new();
+        for src in sources {
+            for chunk in src.split(marker).skip(1) {
+                let Some(name) = chunk
+                    .trim_start()
+                    .strip_prefix('"')
+                    .and_then(|r| r.split('"').next())
+                else {
+                    continue;
+                };
+                // Skips this test's own `marker` literal and anything
+                // that isn't a plain command identifier.
+                if name.is_empty()
+                    || !name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')
+                {
+                    continue;
+                }
+                names.push(name.to_string());
+            }
+        }
+        assert!(names.len() >= 35, "parsed only {} command names", names.len());
+        let categorised: std::collections::HashSet<&str> = HELP_CATEGORIES
+            .iter()
+            .flat_map(|(_, ns)| ns.iter().copied())
+            .chain(HELP_HIDDEN.iter().copied())
+            .collect();
+        for name in &names {
+            assert!(
+                categorised.contains(name.as_str()),
+                "/{name} is not in HELP_CATEGORIES (or HELP_HIDDEN)"
+            );
+        }
+    }
+
+    #[test]
+    fn help_categories_have_no_duplicates() {
+        let mut seen = std::collections::HashSet::new();
+        for name in HELP_CATEGORIES.iter().flat_map(|(_, ns)| ns.iter()) {
+            assert!(seen.insert(*name), "/{name} listed in two help categories");
+        }
+    }
+
+    #[test]
+    fn render_help_hides_internal_commands() {
+        let snap = vec![("confirm", "/confirm <id>", "c"), ("help", "/help", "h")];
+        let out = render_help(&snap);
+        assert!(!out.contains("/confirm"));
+        assert!(!out.contains("📦 Інше"));
     }
 
     #[test]

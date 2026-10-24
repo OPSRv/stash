@@ -4,6 +4,7 @@ pub mod battery_watcher;
 pub mod calendar;
 pub mod commands;
 pub mod commands_registry;
+pub mod confirm;
 pub mod file_secrets;
 pub mod inbox;
 pub mod keyring;
