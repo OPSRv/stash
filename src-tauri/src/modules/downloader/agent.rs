@@ -123,6 +123,18 @@ pub async fn start_download(app: &AppHandle, req: StartReq) -> Result<DownloadJo
     .await
     .map_err(|e| e.to_string())??;
     agent_jobs().lock().unwrap().insert(id);
+    // `start_job` spawned the runner before the id was flagged above; a
+    // job that already reached a terminal state missed its card.
+    if let Ok(job) = get_download(app, id) {
+        let retrying = state.retry_counts.lock().unwrap().contains_key(&id);
+        match terminal_action(&job.status, retrying) {
+            TerminalAction::Notify => {
+                notify_finished(app, id);
+            }
+            TerminalAction::Forget => forget_agent_job(id),
+            TerminalAction::None => {}
+        }
+    }
     notify_ui(app, id);
 
     let (app3, state3, url3) = (app.clone(), Arc::clone(&state), req.url);
@@ -179,7 +191,10 @@ pub fn control_download(
     let state = runner_state(app)?;
     get_download(app, id)?;
     match action {
-        Control::Cancel => runner::cancel_download(&state, id)?,
+        Control::Cancel => {
+            runner::cancel_download(&state, id)?;
+            forget_agent_job(id);
+        }
         Control::Pause => runner::pause_download(&state, id)?,
         Control::Resume => runner::resume_download(&state, id)?,
         Control::Retry => {
@@ -188,6 +203,7 @@ pub fn control_download(
             agent_jobs().lock().unwrap().insert(id);
         }
         Control::Delete => {
+            forget_agent_job(id);
             if let Some(mut child) = state.active.lock().unwrap().remove(&id) {
                 let _ = child.kill();
             }
@@ -239,6 +255,37 @@ fn agent_jobs() -> &'static Mutex<HashSet<i64>> {
     SET.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// Drop a job from the agent set without notifying (cancel / delete).
+pub fn forget_agent_job(id: i64) {
+    agent_jobs().lock().unwrap().remove(&id);
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TerminalAction {
+    Notify,
+    Forget,
+    None,
+}
+
+/// What `start_download` does with a job that may have finished before it
+/// was flagged as agent-originated. A failed job with a pending auto-retry
+/// isn't final yet.
+fn terminal_action(status: &str, retrying: bool) -> TerminalAction {
+    match status {
+        "completed" => TerminalAction::Notify,
+        "failed" if !retrying => TerminalAction::Notify,
+        "cancelled" => TerminalAction::Forget,
+        _ => TerminalAction::None,
+    }
+}
+
+/// Completion cards respect the "Download complete" notification toggle;
+/// failure cards always go out — the user asked for this download from
+/// the agent surface and would otherwise never learn it failed.
+fn card_allowed(status: &str, download_complete_enabled: bool) -> bool {
+    status != "completed" || download_complete_enabled
+}
+
 /// Called by the runner when a job reaches a terminal state (completed or
 /// finally failed). Pushes the job card with follow-up buttons to the
 /// paired chat. Returns `true` when this job was agent-originated (so the
@@ -255,6 +302,13 @@ pub fn notify_finished(app: &AppHandle, id: i64) -> bool {
         _ => return true,
     };
     if let Ok(job) = get_download(app, id) {
+        let enabled = crate::modules::telegram::settings::category_enabled(
+            &tg,
+            crate::modules::telegram::notifier::Category::DownloadComplete,
+        );
+        if !card_allowed(&job.status, enabled) {
+            return true;
+        }
         let reply = job_card(&job);
         tg.sender
             .enqueue_with_keyboard(chat_id, reply.text, reply.keyboard);
@@ -1017,6 +1071,23 @@ pub fn register_tools(tools: &mut ToolRegistry) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_action_for_jobs_finished_before_flagging() {
+        assert_eq!(terminal_action("completed", false), TerminalAction::Notify);
+        assert_eq!(terminal_action("failed", false), TerminalAction::Notify);
+        assert_eq!(terminal_action("failed", true), TerminalAction::None);
+        assert_eq!(terminal_action("cancelled", false), TerminalAction::Forget);
+        assert_eq!(terminal_action("active", false), TerminalAction::None);
+        assert_eq!(terminal_action("pending", false), TerminalAction::None);
+    }
+
+    #[test]
+    fn completion_card_respects_toggle_but_failures_always_go_out() {
+        assert!(card_allowed("completed", true));
+        assert!(!card_allowed("completed", false));
+        assert!(card_allowed("failed", false));
+    }
 
     fn job(id: i64, status: &str, path: Option<&str>) -> DownloadJob {
         DownloadJob {

@@ -62,7 +62,8 @@ fn low_battery_keyboard() -> InlineKeyboard {
                 InlineButton::new("🔋 Статус", "battery"),
                 InlineButton::new("☕ Keep awake off", "keepawake:off"),
             ],
-            vec![InlineButton::new("💤 Sleep Mac", "sleep")],
+            // Two-tap: opens a confirm card instead of sleeping on one tap.
+            vec![InlineButton::new("💤 Sleep Mac", "sleep:ask")],
         ],
     }
 }
@@ -133,7 +134,7 @@ mod tests {
             .flatten()
             .map(|b| b.callback_data.as_str())
             .collect();
-        assert_eq!(cbs, vec!["battery", "keepawake:off", "sleep"]);
+        assert_eq!(cbs, vec!["battery", "keepawake:off", "sleep:ask"]);
         assert!(cbs.iter().all(|c| c.len() <= 64));
     }
 }

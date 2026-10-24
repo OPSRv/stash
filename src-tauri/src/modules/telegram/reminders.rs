@@ -218,6 +218,51 @@ pub fn format_local_when(due: i64, now: i64, offset: i64) -> String {
     }
 }
 
+/// Instant a snooze is measured from. A still-pending reminder (snoozed
+/// from the active list) moves relative to its own due time, so "+1 год"
+/// on a reminder due next Friday lands next Friday + 1h — not 1h from
+/// now. A fired reminder snoozes from now.
+pub fn snooze_base(original: &Reminder, now: i64) -> i64 {
+    if !original.sent && !original.cancelled {
+        original.due_at.max(now)
+    } else {
+        now
+    }
+}
+
+/// Two inserts of the same text whose due times are this close are
+/// treated as one (double-tapped buttons, repeated calendar taps).
+const DEDUPE_WINDOW_SEC: i64 = 90;
+
+/// Id of an active reminder that an insert of `(text, due)` would
+/// duplicate, if any.
+pub fn find_duplicate(active: &[Reminder], text: &str, due: i64) -> Option<i64> {
+    active
+        .iter()
+        .find(|r| {
+            !r.sent
+                && !r.cancelled
+                && r.text == text
+                && (r.due_at - due).abs() <= DEDUPE_WINDOW_SEC
+        })
+        .map(|r| r.id)
+}
+
+/// Insert unless an equivalent active reminder already exists; returns
+/// the (new or existing) id.
+fn insert_dedup(
+    repo: &mut super::repo::TelegramRepo,
+    text: &str,
+    due: i64,
+    now: i64,
+) -> Result<i64, String> {
+    let active = repo.list_active_reminders().map_err(|e| e.to_string())?;
+    if let Some(id) = find_duplicate(&active, text, due) {
+        return Ok(id);
+    }
+    repo.insert_reminder(text, due, now).map_err(|e| e.to_string())
+}
+
 pub fn snooze_cb(id: i64, spec: &str) -> String {
     format!("refresh:reminders:snooze:{id}:{spec}")
 }
@@ -230,10 +275,11 @@ pub fn cancel_cb(id: i64) -> String {
     format!("refresh:reminders:cancel:{id}")
 }
 
-/// Callback that schedules `text` at `due`. The text is cut on a char
+/// Callback that schedules `text` at `due`. `refresh:` so the source card
+/// turns into the confirmation (a second tap can't add another). The text is cut on a char
 /// boundary so the payload stays within Telegram's 64-byte limit.
 pub fn at_cb(due: i64, text: &str) -> String {
-    let mut out = format!("reminders:at:{due}:");
+    let mut out = format!("refresh:reminders:at:{due}:");
     for c in text.trim().chars() {
         if out.len() + c.len_utf8() > 64 {
             break;
@@ -394,18 +440,37 @@ pub fn handle_command(app: &tauri::AppHandle, state: &TelegramState, args: &str)
                 Ok(None) => return Reply::text(format!("❓ Немає нагадування №{id}.")),
                 Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
             };
-            let due = snooze_due(spec, now, offset);
+            // Cancelled = already moved by an earlier snooze tap (or
+            // cancelled). Re-snoozing would spawn a second copy.
+            let gone = || {
+                render_list(
+                    state,
+                    Some(format!("❓ Нагадування №{id} вже скасовано або перенесено.")),
+                )
+            };
+            if original.cancelled {
+                return gone();
+            }
+            let due = snooze_due(spec, snooze_base(&original, now), offset);
             let new_id = {
                 let mut repo = match state.repo.lock() {
                     Ok(r) => r,
                     Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
                 };
                 // Still pending (snoozed from the list) → move it rather
-                // than leaving a duplicate behind.
-                if !original.sent && !original.cancelled {
-                    let _ = repo.cancel_reminder(id);
+                // than leaving a duplicate behind. A lost race (another
+                // tap moved it first) aborts instead of inserting twice.
+                if !original.sent {
+                    match repo.cancel_reminder(id) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            drop(repo);
+                            return gone();
+                        }
+                        Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
+                    }
                 }
-                match repo.insert_reminder(&original.text, due, now) {
+                match insert_dedup(&mut repo, &original.text, due, now) {
                     Ok(v) => v,
                     Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
                 }
@@ -434,7 +499,7 @@ pub fn handle_command(app: &tauri::AppHandle, state: &TelegramState, args: &str)
                 .repo
                 .lock()
                 .map_err(|e| e.to_string())
-                .and_then(|mut r| r.insert_reminder(&text, due, now).map_err(|e| e.to_string()));
+                .and_then(|mut r| insert_dedup(&mut r, &text, due, now));
             match result {
                 Ok(id) => {
                     let _ = app.emit("reminders:changed", ());
@@ -999,6 +1064,46 @@ mod tests {
         );
     }
 
+    fn rem(id: i64, text: &str, due_at: i64, sent: bool, cancelled: bool) -> Reminder {
+        Reminder { id, text: text.into(), due_at, sent, cancelled }
+    }
+
+    #[test]
+    fn snooze_of_pending_reminder_moves_from_its_own_due_time() {
+        let now = 1_000_000;
+        // Due next week → +1h lands next week + 1h, not now + 1h.
+        let future = rem(1, "x", now + 7 * 86_400, false, false);
+        assert_eq!(
+            snooze_due(SnoozeSpec::Offset(3600), snooze_base(&future, now), 0),
+            now + 7 * 86_400 + 3600
+        );
+        // Overdue pending → from now.
+        let overdue = rem(2, "x", now - 500, false, false);
+        assert_eq!(snooze_base(&overdue, now), now);
+        // Fired → from now, even though due_at is in the past.
+        let fired = rem(3, "x", now - 60, true, false);
+        assert_eq!(snooze_base(&fired, now), now);
+        // Tomorrow is relative to the original's day.
+        assert_eq!(
+            snooze_due(SnoozeSpec::Tomorrow, snooze_base(&future, now), 0),
+            (11 + 7 + 1) * 86_400 + 9 * 3600
+        );
+    }
+
+    #[test]
+    fn find_duplicate_matches_text_within_window_only() {
+        let active = vec![
+            rem(1, "📅 Standup", 10_000, false, false),
+            rem(2, "other", 10_000, false, false),
+        ];
+        assert_eq!(find_duplicate(&active, "📅 Standup", 10_000), Some(1));
+        assert_eq!(find_duplicate(&active, "📅 Standup", 10_060), Some(1));
+        assert_eq!(find_duplicate(&active, "📅 Standup", 10_000 + 600), None);
+        assert_eq!(find_duplicate(&active, "Standup", 10_000), None);
+        let done = vec![rem(3, "x", 10_000, true, false), rem(4, "x", 10_000, false, true)];
+        assert_eq!(find_duplicate(&done, "x", 10_000), None);
+    }
+
     #[test]
     fn format_local_when_labels_days() {
         let now = 10 * 86_400 + 8 * 3600;
@@ -1024,7 +1129,7 @@ mod tests {
         }
         // at_cb round-trips through the parser.
         let cb = at_cb(1_700_000_000, "Стендап");
-        let args = cb.strip_prefix("reminders:").unwrap();
+        let args = cb.strip_prefix("refresh:reminders:").unwrap();
         assert_eq!(
             parse_reminders_args(args),
             Ok(RemindersAction::At(1_700_000_000, "Стендап".into()))

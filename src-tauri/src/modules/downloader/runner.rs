@@ -310,16 +310,26 @@ pub fn spawn_download(
                     .cloned()
                     .collect::<Vec<_>>()
                     .join("\n");
-                let _ = repo.set_failed(
-                    job_id,
-                    &if tail.is_empty() {
-                        format!("yt-dlp exited with {:?}", status)
-                    } else {
-                        tail.clone()
-                    },
-                    now(),
-                );
+                let marked_failed = repo
+                    .set_failed(
+                        job_id,
+                        &if tail.is_empty() {
+                            format!("yt-dlp exited with {:?}", status)
+                        } else {
+                            tail.clone()
+                        },
+                        now(),
+                    )
+                    .unwrap_or(true);
                 drop(repo);
+                // User cancelled (the kill made the child exit non-zero):
+                // the row stays `cancelled` — no retries, no "failed" card.
+                if !marked_failed {
+                    state_clone.retry_counts.lock().unwrap().remove(&job_id);
+                    super::agent::forget_agent_job(job_id);
+                    drain_queue(app_clone.clone(), Arc::clone(&state_clone), &yt_dlp_owned);
+                    return;
+                }
                 // Stale browser cookies poison YouTube's response (only
                 // storyboards come back), surfacing as "Requested format is
                 // not available". One immediate retry without cookies almost
