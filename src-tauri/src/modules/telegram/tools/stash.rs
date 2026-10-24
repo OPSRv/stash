@@ -476,6 +476,327 @@ impl Tool for PomodoroStop {
     }
 }
 
+fn pomodoro_snapshot_json(snap: &crate::modules::pomodoro::engine::SessionSnapshot) -> Value {
+    use crate::modules::pomodoro::engine::SessionStatus;
+    let status = match snap.status {
+        SessionStatus::Idle => "idle",
+        SessionStatus::Running => "running",
+        SessionStatus::Paused => "paused",
+    };
+    let blocks: Vec<Value> = snap
+        .blocks
+        .iter()
+        .map(|b| {
+            json!({
+                "label": b.name,
+                "posture": format!("{:?}", b.posture).to_lowercase(),
+                "duration_sec": b.duration_sec,
+            })
+        })
+        .collect();
+    json!({
+        "status": status,
+        "current_block_index": if snap.status == SessionStatus::Idle { Value::Null } else { json!(snap.current_idx + 1) },
+        "remaining_sec": (snap.remaining_ms / 1000).max(0),
+        "blocks": blocks,
+    })
+}
+
+fn require_app(ctx: &ToolCtx, tool: &str) -> Result<tauri::AppHandle, String> {
+    ctx.app
+        .clone()
+        .ok_or_else(|| format!("{tool} requires a Tauri AppHandle (not in test)"))
+}
+
+/// Pause / resume / skip within the running Pomodoro session.
+pub struct PomodoroControl {
+    state: Arc<PomodoroState>,
+}
+
+impl PomodoroControl {
+    pub fn new(state: Arc<PomodoroState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for PomodoroControl {
+    fn name(&self) -> &'static str {
+        "pomodoro_control"
+    }
+    fn description(&self) -> &'static str {
+        "Control the running Pomodoro session: `pause`, `resume`, `toggle` \
+         (pause↔resume), `skip` (jump to the next block; finishes the session \
+         on the last block) or `skip_to` with a 1-based `block` number. \
+         Returns the resulting session snapshot. Use pomodoro_stop to end it."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["pause", "resume", "toggle", "skip", "skip_to"]
+                },
+                "block": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "1-based block number for skip_to."
+                }
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        use crate::modules::pomodoro::commands::{pause_session, resume_session, skip_to_session};
+        use crate::modules::pomodoro::engine::SessionStatus;
+        let action = args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing required field: action".to_string())?;
+        let snap = self.state.core.lock().map_err(|e| e.to_string())?.snapshot();
+        if snap.status == SessionStatus::Idle {
+            return Err("no Pomodoro session is running".to_string());
+        }
+        let app = require_app(ctx, "pomodoro_control")?;
+        let out = match action {
+            "pause" => pause_session(&app, &self.state),
+            "resume" => resume_session(&app, &self.state),
+            "toggle" if snap.status == SessionStatus::Running => pause_session(&app, &self.state),
+            "toggle" => resume_session(&app, &self.state),
+            "skip" => crate::modules::telegram::module_cmds::pomodoro_skip_next(&app, &self.state),
+            "skip_to" => {
+                let n = args
+                    .get("block")
+                    .and_then(|v| v.as_u64())
+                    .ok_or_else(|| "skip_to requires `block`".to_string())? as usize;
+                if n == 0 || n > snap.blocks.len() {
+                    return Err(format!("block must be 1..={}", snap.blocks.len()));
+                }
+                skip_to_session(&app, &self.state, n - 1)
+            }
+            other => return Err(format!("unknown action: {other}")),
+        };
+        Ok(pomodoro_snapshot_json(&out))
+    }
+}
+
+/// Replace the block list of the running session (cursor preserved by position).
+pub struct PomodoroEditBlocks {
+    state: Arc<PomodoroState>,
+}
+
+impl PomodoroEditBlocks {
+    pub fn new(state: Arc<PomodoroState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for PomodoroEditBlocks {
+    fn name(&self) -> &'static str {
+        "pomodoro_edit_blocks"
+    }
+    fn description(&self) -> &'static str {
+        "Replace the blocks of the currently running Pomodoro session without \
+         restarting it (e.g. extend the current focus block, add a walk at the \
+         end). Pass the FULL new list — read it first with pomodoro_status or \
+         pomodoro_control. Blocks are matched by position, so the current \
+         block keeps its remaining time when its position is unchanged."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "blocks": blocks_schema() },
+            "required": ["blocks"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let raw_blocks = args
+            .get("blocks")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| "missing required field: blocks".to_string())?;
+        let blocks = parse_blocks(raw_blocks, ctx.now_ms)?;
+        let snap = self.state.core.lock().map_err(|e| e.to_string())?.snapshot();
+        if snap.status == crate::modules::pomodoro::engine::SessionStatus::Idle {
+            return Err("no Pomodoro session is running — use pomodoro_start".to_string());
+        }
+        let app = require_app(ctx, "pomodoro_edit_blocks")?;
+        let blocks = crate::modules::telegram::module_cmds::reuse_block_ids(blocks, &snap.blocks);
+        let out = crate::modules::pomodoro::commands::edit_blocks_session(&app, &self.state, blocks);
+        Ok(pomodoro_snapshot_json(&out))
+    }
+}
+
+/// List / start / delete saved Pomodoro presets.
+pub struct PomodoroPresets {
+    state: Arc<PomodoroState>,
+}
+
+impl PomodoroPresets {
+    pub fn new(state: Arc<PomodoroState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for PomodoroPresets {
+    fn name(&self) -> &'static str {
+        "pomodoro_presets"
+    }
+    fn description(&self) -> &'static str {
+        "Manage saved Pomodoro presets. `list` returns every preset (id, name, \
+         kind, blocks). `start` runs the preset with `id` (replacing any \
+         running session). `delete` removes the preset with `id` — only when \
+         the user clearly asked to delete it. Create presets with \
+         pomodoro_save_preset."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "action": { "type": "string", "enum": ["list", "start", "delete"] },
+                "id": { "type": "integer", "description": "Preset id (from `list`) for start/delete." }
+            },
+            "required": ["action"],
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let action = args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| "missing required field: action".to_string())?;
+        if action == "list" {
+            let presets = self
+                .state
+                .repo
+                .lock()
+                .map_err(|e| e.to_string())?
+                .list_presets()
+                .map_err(|e| e.to_string())?;
+            let items: Vec<Value> = presets
+                .iter()
+                .map(|p| {
+                    json!({
+                        "id": p.id,
+                        "name": p.name,
+                        "kind": p.kind,
+                        "total_sec": p.blocks.iter().map(|b| b.duration_sec).sum::<u32>(),
+                        "blocks": p.blocks.iter().map(|b| json!({
+                            "label": b.name,
+                            "posture": format!("{:?}", b.posture).to_lowercase(),
+                            "duration_sec": b.duration_sec,
+                        })).collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+            return Ok(json!({ "presets": items }));
+        }
+        let id = args
+            .get("id")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| format!("{action} requires `id`"))?;
+        let preset = self
+            .state
+            .repo
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get_preset(id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("preset {id} not found"))?;
+        let app = require_app(ctx, "pomodoro_presets")?;
+        match action {
+            "start" => {
+                let snap = start_session(&app, &self.state, preset.blocks.clone(), Some(preset.id))?;
+                let mut out = pomodoro_snapshot_json(&snap);
+                out["preset"] = json!(preset.name);
+                Ok(out)
+            }
+            "delete" => {
+                self.state
+                    .repo
+                    .lock()
+                    .map_err(|e| e.to_string())?
+                    .delete_preset(id)
+                    .map_err(|e| e.to_string())?;
+                let _ = tauri::Emitter::emit(&app, "pomodoro:presets_changed", id);
+                Ok(json!({ "deleted": true, "id": id, "name": preset.name }))
+            }
+            other => Err(format!("unknown action: {other}")),
+        }
+    }
+}
+
+/// Recent Pomodoro sessions (history log).
+pub struct PomodoroHistory {
+    state: Arc<PomodoroState>,
+}
+
+impl PomodoroHistory {
+    pub fn new(state: Arc<PomodoroState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Tool for PomodoroHistory {
+    fn name(&self) -> &'static str {
+        "pomodoro_history"
+    }
+    fn description(&self) -> &'static str {
+        "Return recent Pomodoro sessions, newest first: start/end unix \
+         seconds, blocks, and how many blocks were completed. Use it to \
+         answer \"how much did I focus today/this week\"."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "limit": { "type": "integer", "minimum": 1, "maximum": 200, "description": "Default 20." }
+            },
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, _ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .clamp(1, 200) as u32;
+        let rows = self
+            .state
+            .repo
+            .lock()
+            .map_err(|e| e.to_string())?
+            .list_sessions(limit)
+            .map_err(|e| e.to_string())?;
+        let items: Vec<Value> = rows
+            .iter()
+            .map(|r| {
+                let done = r.completed_idx.min(r.blocks.len());
+                json!({
+                    "id": r.id,
+                    "preset_id": r.preset_id,
+                    "started_at": r.started_at,
+                    "ended_at": r.ended_at,
+                    "blocks_total": r.blocks.len(),
+                    "blocks_completed": done,
+                    "completed_sec": r.blocks.iter().take(done).map(|b| b.duration_sec).sum::<u32>(),
+                    "blocks": r.blocks.iter().map(|b| json!({
+                        "label": b.name,
+                        "posture": format!("{:?}", b.posture).to_lowercase(),
+                        "duration_sec": b.duration_sec,
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        Ok(json!({ "sessions": items }))
+    }
+}
+
 /// Delegate a typed tool to its slash-command twin so we don't reimplement
 /// the business logic. Runs the registered handler with the stringified
 /// args and returns its text reply. Required by every tool that isn't
@@ -502,17 +823,109 @@ async fn run_slash(ctx: &ToolCtx, cmd: &str, slash_args: &str) -> Result<Value, 
 
 pub struct MetronomeControl;
 
+/// Quote a free-text slash value so names with spaces survive tokenizing.
+fn quote_slash_value(v: &str) -> String {
+    format!("\"{}\"", v.replace('"', ""))
+}
+
+/// Translate the typed `metronome_control` payload into `/metronome` slash
+/// args. Pure so the mapping is unit-testable.
+fn metronome_slash_args(args: &Value) -> Result<String, String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(a) = args.get("action").and_then(|v| v.as_str()) {
+        parts.push(a.to_string());
+    }
+    if let Some(bpm) = args.get("bpm").and_then(|v| v.as_u64()) {
+        parts.push(format!("bpm={bpm}"));
+    }
+    if let Some(d) = args.get("bpm_delta").and_then(|v| v.as_i64()) {
+        if d != 0 {
+            parts.push(format!("bpm={d:+}"));
+        }
+    }
+    let num = args.get("numerator").and_then(|v| v.as_u64());
+    let den = args.get("denominator").and_then(|v| v.as_u64());
+    match (num, den) {
+        (Some(n), Some(d)) => {
+            if !matches!(d, 2 | 4 | 8) {
+                return Err(format!("denominator must be 2, 4, or 8 (got {d})"));
+            }
+            parts.push(format!("sig={n}/{d}"));
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Err("numerator and denominator must be provided together".to_string());
+        }
+        _ => {}
+    }
+    if let Some(sub) = args.get("subdivision").and_then(|v| v.as_u64()) {
+        parts.push(format!("sub={sub}"));
+    }
+    if let Some(sound) = args.get("sound").and_then(|v| v.as_str()) {
+        parts.push(format!("sound={sound}"));
+    }
+    if let Some(v) = args.get("click_volume").and_then(|v| v.as_u64()) {
+        parts.push(format!("vol={}", v.min(100)));
+    }
+    if let Some(v) = args.get("accent_volume").and_then(|v| v.as_u64()) {
+        parts.push(format!("accent_vol={}", v.min(100)));
+    }
+    if let Some(acc) = args.get("beat_accents").and_then(|v| v.as_array()) {
+        let pattern: String = acc
+            .iter()
+            .map(|b| if b.as_bool().unwrap_or(false) { '1' } else { '0' })
+            .collect();
+        if !pattern.is_empty() {
+            parts.push(format!("accents={pattern}"));
+        }
+    }
+    if let Some(t) = args.get("trainer").and_then(|v| v.as_object()) {
+        if let Some(en) = t.get("enabled").and_then(|v| v.as_bool()) {
+            parts.push(format!("trainer={}", if en { "on" } else { "off" }));
+        }
+        if let Some(v) = t.get("step_bpm").and_then(|v| v.as_u64()) {
+            parts.push(format!("trainer_step={v}"));
+        }
+        if let Some(v) = t.get("every_bars").and_then(|v| v.as_u64()) {
+            parts.push(format!("trainer_bars={v}"));
+        }
+        if let Some(v) = t.get("target_bpm").and_then(|v| v.as_u64()) {
+            parts.push(format!("trainer_target={v}"));
+        }
+    }
+    for (field, key) in [
+        ("preset", "preset"),
+        ("save_preset", "save"),
+        ("delete_preset", "delete"),
+    ] {
+        if let Some(v) = args.get(field).and_then(|v| v.as_str()) {
+            let v = v.trim();
+            if !v.is_empty() {
+                parts.push(format!("{key}={}", quote_slash_value(v)));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(
+            "at least one field required — use action:\"status\" to read the state".to_string(),
+        );
+    }
+    Ok(parts.join(" "))
+}
+
 #[async_trait]
 impl Tool for MetronomeControl {
     fn name(&self) -> &'static str {
         "metronome_control"
     }
     fn description(&self) -> &'static str {
-        "Start / stop / adjust the metronome with a fully typed payload \
-         — BPM, time signature, subdivision, sound. Any field you omit is \
-         left untouched. Use `action:\"start\"` to begin playback; \
-         `action:\"stop\"` to halt. The metronome lives in the Valeton \
-         editor tab, which is revealed automatically."
+        "Full control of the metronome tab with a typed payload — playback, \
+         BPM (absolute or relative), time signature, subdivision, sound, click \
+         and accent volume, per-beat accent pattern, the tempo trainer, and \
+         saved presets (apply / save current / delete). Any field you omit is \
+         left untouched; `action:\"status\"` returns the current state \
+         (incl. preset names and whether it's playing). Order of application: \
+         preset → explicit fields → save/delete. The metronome lives in the \
+         Valeton editor tab, which is revealed automatically for start/toggle."
     }
     fn schema(&self) -> Value {
         json!({
@@ -527,6 +940,12 @@ impl Tool for MetronomeControl {
                     "minimum": 40,
                     "maximum": 240
                 },
+                "bpm_delta": {
+                    "type": "integer",
+                    "minimum": -200,
+                    "maximum": 200,
+                    "description": "Relative BPM change, e.g. 5 = faster by 5, -10 = slower by 10. Result clamps to 40..240."
+                },
                 "numerator": {
                     "type": "integer",
                     "minimum": 1,
@@ -540,50 +959,62 @@ impl Tool for MetronomeControl {
                 "subdivision": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 4
+                    "maximum": 4,
+                    "description": "1 = quarters, 2 = eighths, 3 = triplets, 4 = sixteenths."
                 },
                 "sound": {
                     "type": "string",
                     "enum": ["click", "wood", "beep"]
+                },
+                "click_volume": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Volume of regular clicks, percent."
+                },
+                "accent_volume": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100,
+                    "description": "Volume of accented clicks, percent."
+                },
+                "beat_accents": {
+                    "type": "array",
+                    "items": { "type": "boolean" },
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "description": "Per-beat accent flags; length must equal the (resulting) numerator."
+                },
+                "trainer": {
+                    "type": "object",
+                    "description": "Tempo trainer: raises BPM by step_bpm every every_bars bars until target_bpm.",
+                    "properties": {
+                        "enabled": { "type": "boolean" },
+                        "step_bpm": { "type": "integer", "minimum": 1, "maximum": 50 },
+                        "every_bars": { "type": "integer", "minimum": 1, "maximum": 64 },
+                        "target_bpm": { "type": "integer", "minimum": 40, "maximum": 240 }
+                    },
+                    "additionalProperties": false
+                },
+                "preset": {
+                    "type": "string",
+                    "description": "Apply a saved preset by name (case-insensitive) or id."
+                },
+                "save_preset": {
+                    "type": "string",
+                    "description": "Save the resulting settings as a preset with this name (overwrites same name)."
+                },
+                "delete_preset": {
+                    "type": "string",
+                    "description": "Delete a saved preset by name or id."
                 }
             },
             "additionalProperties": false
         })
     }
     async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
-        let mut parts: Vec<String> = Vec::new();
-        if let Some(a) = args.get("action").and_then(|v| v.as_str()) {
-            parts.push(a.to_string());
-        }
-        if let Some(bpm) = args.get("bpm").and_then(|v| v.as_u64()) {
-            parts.push(format!("bpm={bpm}"));
-        }
-        let num = args.get("numerator").and_then(|v| v.as_u64());
-        let den = args.get("denominator").and_then(|v| v.as_u64());
-        match (num, den) {
-            (Some(n), Some(d)) => {
-                if !matches!(d, 2 | 4 | 8) {
-                    return Err(format!("denominator must be 2, 4, or 8 (got {d})"));
-                }
-                parts.push(format!("sig={n}/{d}"));
-            }
-            (Some(_), None) | (None, Some(_)) => {
-                return Err("numerator and denominator must be provided together".to_string());
-            }
-            _ => {}
-        }
-        if let Some(sub) = args.get("subdivision").and_then(|v| v.as_u64()) {
-            parts.push(format!("sub={sub}"));
-        }
-        if let Some(sound) = args.get("sound").and_then(|v| v.as_str()) {
-            parts.push(format!("sound={sound}"));
-        }
-        if parts.is_empty() {
-            return Err(
-                "at least one of action/bpm/numerator/subdivision/sound required".to_string(),
-            );
-        }
-        run_slash(ctx, "metronome", &parts.join(" ")).await
+        let slash = metronome_slash_args(&args)?;
+        run_slash(ctx, "metronome", &slash).await
     }
 }
 
@@ -900,8 +1331,9 @@ impl Tool for MusicControl {
     }
     fn description(&self) -> &'static str {
         "Control the YouTube Music webview inside Stash. `status` returns \
-         the current track; `play` / `pause` / `toggle` / `next` / `prev` \
-         drive playback. `open` reveals the tab without touching playback."
+         the current track and system volume; `play` / `pause` / `toggle` / \
+         `next` / `prev` drive playback; `volup` / `voldown` nudge the system \
+         volume by 10. `open` reveals the tab without touching playback."
     }
     fn schema(&self) -> Value {
         json!({
@@ -909,7 +1341,7 @@ impl Tool for MusicControl {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["status", "play", "pause", "toggle", "next", "prev", "open"]
+                    "enum": ["status", "play", "pause", "toggle", "next", "prev", "volup", "voldown", "open"]
                 }
             },
             "required": ["action"],
@@ -940,9 +1372,10 @@ impl Tool for VolumeControl {
         "volume_control"
     }
     fn description(&self) -> &'static str {
-        "Adjust macOS system output volume. Provide exactly one of: \
-         `level` (absolute 0-100), `step` (\"up\" or \"down\" — 10-point \
-         nudge), or `mute` (boolean). Pass `{}` to return the current \
+        "Adjust macOS system output volume. Provide at most one of: \
+         `level` (absolute 0-100), `delta` (relative change, e.g. 5 or -20), \
+         `step` (\"up\" or \"down\" — 10-point nudge), `mute` (boolean), or \
+         `toggle_mute` (true flips mute). Pass `{}` to return the current \
          level + mute state."
     }
     fn schema(&self) -> Value {
@@ -950,8 +1383,10 @@ impl Tool for VolumeControl {
             "type": "object",
             "properties": {
                 "level": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "delta": { "type": "integer", "minimum": -100, "maximum": 100 },
                 "step":  { "type": "string", "enum": ["up", "down"] },
-                "mute":  { "type": "boolean" }
+                "mute":  { "type": "boolean" },
+                "toggle_mute": { "type": "boolean" }
             },
             "additionalProperties": false
         })
@@ -960,15 +1395,30 @@ impl Tool for VolumeControl {
         let level = args.get("level").and_then(|v| v.as_i64());
         let step = args.get("step").and_then(|v| v.as_str());
         let mute = args.get("mute").and_then(|v| v.as_bool());
-        let count = [level.is_some(), step.is_some(), mute.is_some()]
-            .iter()
-            .filter(|&&b| b)
-            .count();
+        let delta = args.get("delta").and_then(|v| v.as_i64());
+        let toggle = args
+            .get("toggle_mute")
+            .and_then(|v| v.as_bool())
+            .filter(|b| *b);
+        let count = [
+            level.is_some(),
+            step.is_some(),
+            mute.is_some(),
+            delta.is_some(),
+            toggle.is_some(),
+        ]
+        .iter()
+        .filter(|&&b| b)
+        .count();
         if count > 1 {
-            return Err("provide at most one of level/step/mute".to_string());
+            return Err("provide at most one of level/delta/step/mute/toggle_mute".to_string());
         }
         let slash_args = if let Some(n) = level {
             n.clamp(0, 100).to_string()
+        } else if let Some(d) = delta {
+            format!("{:+}", d.clamp(-100, 100))
+        } else if toggle.is_some() {
+            "toggle".to_string()
         } else if let Some(s) = step {
             s.to_string()
         } else if let Some(m) = mute {
@@ -2208,5 +2658,46 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("AppHandle"));
+    }
+}
+
+#[cfg(test)]
+mod metronome_tool_tests {
+    use super::*;
+
+    #[test]
+    fn metronome_slash_args_maps_full_schema() {
+        let args = json!({
+            "action": "start",
+            "bpm_delta": -5,
+            "click_volume": 60,
+            "accent_volume": 90,
+            "beat_accents": [true, false, true],
+            "numerator": 3,
+            "denominator": 4,
+            "trainer": { "enabled": true, "step_bpm": 2, "every_bars": 8, "target_bpm": 150 },
+            "preset": "Slow \"Blues\"",
+            "save_preset": "Mine",
+        });
+        let s = metronome_slash_args(&args).unwrap();
+        assert!(s.starts_with("start"));
+        for part in [
+            "bpm=-5",
+            "sig=3/4",
+            "vol=60",
+            "accent_vol=90",
+            "accents=101",
+            "trainer=on",
+            "trainer_step=2",
+            "trainer_bars=8",
+            "trainer_target=150",
+            "preset=\"Slow Blues\"",
+            "save=\"Mine\"",
+        ] {
+            assert!(s.contains(part), "missing `{part}` in `{s}`");
+        }
+        assert!(metronome_slash_args(&json!({})).is_err());
+        assert_eq!(metronome_slash_args(&json!({ "bpm_delta": 3 })).unwrap(), "bpm=+3");
+        assert!(metronome_slash_args(&json!({ "numerator": 3 })).is_err());
     }
 }

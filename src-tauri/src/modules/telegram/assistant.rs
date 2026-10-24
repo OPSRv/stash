@@ -601,6 +601,12 @@ pub fn build_runtime_assistant(
         tools.register(super::tools::stash::PomodoroSavePreset::new(
             pomo.inner().clone(),
         ));
+        tools.register(super::tools::stash::PomodoroControl::new(pomo.inner().clone()));
+        tools.register(super::tools::stash::PomodoroEditBlocks::new(
+            pomo.inner().clone(),
+        ));
+        tools.register(super::tools::stash::PomodoroPresets::new(pomo.inner().clone()));
+        tools.register(super::tools::stash::PomodoroHistory::new(pomo.inner().clone()));
     }
 
     Ok(Assistant {
