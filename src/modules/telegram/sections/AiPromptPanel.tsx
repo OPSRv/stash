@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 
+import { Badge } from '../../../shared/ui/Badge';
 import { Button } from '../../../shared/ui/Button';
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog';
 import { Textarea } from '../../../shared/ui/Textarea';
@@ -206,12 +207,13 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
         {savedNote && <span className="t-tertiary text-meta">{savedNote}</span>}
       </div>
       <div className="t-tertiary text-meta mb-2">
-        Розмір файлів, які бот зберігає в інбокс. Telegram Bot API сам по
-        собі не віддає &gt;20 MB — підіймати має сенс при власному API-сервері.
+        Size of files the bot saves to the inbox. The Telegram Bot API itself
+        won't serve files over 20 MB, so raising this only makes sense with a
+        self-hosted Bot API server.
       </div>
       <SliderField
         label="Per-file"
-        description="Максимальний розмір одного файлу."
+        description="Maximum size of a single file."
         value={limits.per_file_mb}
         min={1}
         max={2048}
@@ -222,7 +224,7 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
       <div className="h-2" />
       <SliderField
         label="Per-day"
-        description="Скільки байтів за добу бот узагалі завантажує."
+        description="Total bytes the bot downloads per day."
         value={limits.per_day_mb}
         min={10}
         max={10240}
@@ -237,7 +239,7 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
       <div className="h-2" />
       <SliderField
         label="Retention"
-        description="Скільки днів інбокс тримає файл на диску. 0 — ніколи не видаляти."
+        description="How many days the inbox keeps a file on disk. 0 means never delete."
         value={limits.retention_days}
         min={0}
         max={365}
@@ -254,7 +256,7 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
         <div>
           <div className="t-primary text-body font-medium">Clear inbox</div>
           <div className="t-tertiary text-meta">
-            Видалить усі рядки і відповідні файли з диска. Незворотно.
+            Deletes every row and its file from disk. This cannot be undone.
           </div>
         </div>
         <Button
@@ -271,7 +273,7 @@ function InboxLimitsSection({ onError }: InboxLimitsSectionProps) {
       <ConfirmDialog
         open={confirmClear}
         title="Clear all inbox items?"
-        description="Кожен рядок і прив'язаний файл буде видалено з диска. Скасувати неможливо."
+        description="Every row and its attached file will be deleted from disk. This cannot be undone."
         confirmLabel="Clear"
         cancelLabel="Cancel"
         tone="danger"
@@ -353,20 +355,15 @@ function DiarizationRow({ enabled, onChange, onError }: DiarizationRowProps) {
     <div className="py-3 flex items-start justify-between gap-4">
       <div>
         <div className="t-primary text-body font-medium flex items-center gap-2">
-          Розрізняти спікерів
+          Distinguish speakers
           {status?.ready && (
-            <span
-              className="text-meta px-1.5 py-0.5 rounded"
-              style={{ background: 'rgba(95,200,138,0.15)', color: '#5fc88a' }}
-            >
-              ✓ Models ready
-            </span>
+            <Badge tone="success">✓ Models ready</Badge>
           )}
         </div>
         <div className="t-tertiary text-meta">
           {status?.ready
-            ? 'Pyannote + 3D-Speaker, працює локально. Транскрипт буде розмічений «Спікер 1 / 2 / …».'
-            : `Перший раз завантажить близько ${sizeMb} MB (pyannote + 3D-Speaker + sherpa-onnx runtime).`}
+            ? 'Pyannote + 3D-Speaker, runs locally. The transcript will be labelled "Speaker 1 / 2 / ...".'
+            : `First use downloads about ${sizeMb} MB (pyannote + 3D-Speaker + sherpa-onnx runtime).`}
           {downloading && pct !== null && (
             <span className="ml-2 t-secondary">downloading {pct}%</span>
           )}

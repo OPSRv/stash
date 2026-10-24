@@ -8,11 +8,28 @@
 //! single-user traffic is tiny and dropping messages silently is worse than
 //! holding a handful of strings.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use teloxide::prelude::*;
+use teloxide::requests::Request;
+use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode};
+use teloxide::{ApiError, RequestError};
 use tokio::sync::{mpsc, oneshot};
+
+use super::format::{
+    balance_fences, markdown_to_telegram_html, split_message, CAPTION_LIMIT, MESSAGE_LIMIT,
+};
+
+/// Chunk size for long replies — a little under Telegram's 4096 cap so the
+/// fence-balancing markers added by `balance_fences` always fit.
+const CHUNK_LIMIT: usize = MESSAGE_LIMIT - 16;
+/// Replies needing more messages than this are sent as a `.md` file.
+const MAX_TEXT_CHUNKS: usize = 4;
+/// Carrier text for a keyboard-only reply (Telegram rejects empty text).
+const EMPTY_PLACEHOLDER: &str = "👇";
+const LONG_REPLY_CAPTION: &str = "📄 Відповідь задовга для повідомлення — надсилаю файлом.";
 
 /// Minimum gap between `send_message` calls. 1 msg/s per chat is the Telegram
 /// ceiling; with a single-user bot we only ever target one chat at a time.
@@ -21,6 +38,11 @@ const MIN_SEND_GAP: Duration = Duration::from_millis(1_100);
 /// Initial backoff; doubled each attempt up to `MAX_RETRIES`.
 const BACKOFF_START: Duration = Duration::from_millis(200);
 const MAX_RETRIES: u32 = 6;
+/// Cap on a single flood-control wait: Telegram can ask for minutes, but
+/// one message must not stall the whole outbound queue that long.
+const MAX_RETRY_AFTER_WAIT: Duration = Duration::from_secs(30);
+/// Total sleep budget across all retries of one Bot API call.
+const MAX_RETRY_BUDGET: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct Outbound {
@@ -28,10 +50,11 @@ pub struct Outbound {
     pub text: String,
     /// Optional inline keyboard sent alongside the message.
     pub keyboard: Option<super::commands_registry::InlineKeyboard>,
-    /// Document attachments. When non-empty, the first document carries
-    /// `text` as its caption and the remaining are sent as follow-ups
-    /// without captions. Sent via `send_document` (not `send_photo`) so
-    /// PNGs aren't re-encoded. Empty = plain text-only message.
+    /// File attachments. When non-empty, the first file carries `text` as
+    /// its caption (or, past 1024 chars, `text` follows as its own message)
+    /// and the rest are sent without captions. `.jpg/.jpeg/.webp` go via
+    /// `send_photo` with a `send_document` fallback; everything else
+    /// (including lossless `.png`) via `send_document`. Empty = plain text-only message.
     pub documents: Vec<PathBuf>,
 }
 
@@ -92,11 +115,9 @@ impl TelegramSender {
         self.enqueue_full(chat_id, text, keyboard, Vec::new());
     }
 
-    /// Full form: text + optional keyboard + optional document
-    /// attachments. When `documents` is non-empty the send path switches
-    /// from `send_message` to `send_document` (first doc captioned with
-    /// `text`, rest sent plain) — keeps PNGs byte-identical on the
-    /// recipient side, unlike `send_photo` which re-encodes.
+    /// Full form: text + optional keyboard + optional file attachments.
+    /// `text` is Markdown; the drain converts it to Telegram HTML (falling
+    /// back to plain text) and splits it as needed. See `Outbound`.
     pub fn enqueue_full(
         &self,
         chat_id: i64,
@@ -158,85 +179,329 @@ async fn run_drain(
                     tokio::time::sleep(MIN_SEND_GAP - elapsed).await;
                 }
 
-                send_with_retry(&bot, &msg).await;
+                deliver(&bot, &msg).await;
                 last_send = tokio::time::Instant::now();
             }
         }
     }
 }
 
-async fn send_with_retry(bot: &teloxide::Bot, msg: &Outbound) {
-    use teloxide::prelude::*;
-    use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile};
+/// How a failed Bot API request should be handled.
+#[derive(Debug, PartialEq, Eq)]
+enum Failure {
+    /// Transient (network / 5xx / garbled response) — back off and retry.
+    Retry,
+    /// Flood control — wait exactly what Telegram asked for.
+    RetryAfter(Duration),
+    /// 4xx and friends — retrying won't help.
+    Permanent,
+}
 
-    let keyboard = msg.keyboard.as_ref().map(|k| {
-        let rows: Vec<Vec<InlineKeyboardButton>> = k
-            .rows
-            .iter()
-            .map(|r| {
-                r.iter()
-                    .map(|b| {
-                        InlineKeyboardButton::callback(b.text.clone(), b.callback_data.clone())
-                    })
-                    .collect()
-            })
-            .collect();
-        InlineKeyboardMarkup::new(rows)
-    });
+fn classify(e: &RequestError) -> Failure {
+    match e {
+        RequestError::RetryAfter(s) => Failure::RetryAfter(s.duration()),
+        RequestError::Network(_) | RequestError::InvalidJson { .. } => Failure::Retry,
+        RequestError::Api(ApiError::Unknown(m)) if is_server_error(m) => Failure::Retry,
+        _ => Failure::Permanent,
+    }
+}
 
-    let chat = ChatId(msg.chat_id);
+/// Telegram reports 5xx through the generic `description` field, which
+/// teloxide surfaces as `ApiError::Unknown`.
+fn is_server_error(description: &str) -> bool {
+    let l = description.to_ascii_lowercase();
+    [
+        "internal server error",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+        "timed out",
+    ]
+    .iter()
+    .any(|needle| l.contains(needle))
+}
+
+/// Run one Bot API call, retrying transient failures with exponential
+/// backoff and honouring `RetryAfter`. Permanent errors return at once so
+/// a bad request never blocks the queue for half a minute.
+async fn retrying<T, F, Fut>(what: &'static str, mut op: F) -> Result<T, RequestError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, RequestError>>,
+{
     let mut backoff = BACKOFF_START;
-    for attempt in 0..=MAX_RETRIES {
-        let result = if msg.documents.is_empty() {
-            let mut req = bot.send_message(chat, &msg.text);
-            if let Some(k) = keyboard.clone() {
-                req = req.reply_markup(k);
-            }
-            req.await.map(|_| ())
-        } else {
-            // First document carries the caption + keyboard; trailing
-            // documents go out plain. Unrolled instead of using `?` so
-            // retry accounting stays uniform across both branches.
-            let mut last = Ok(());
-            for (i, path) in msg.documents.iter().enumerate() {
-                let mut req = bot.send_document(chat, InputFile::file(path));
-                if i == 0 {
-                    req = req.caption(&msg.text);
-                    if let Some(k) = keyboard.clone() {
-                        req = req.reply_markup(k);
-                    }
-                }
-                match req.await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        last = Err(e);
-                        break;
-                    }
-                }
-            }
-            last.map(|_| ())
+    let mut attempt = 0u32;
+    let mut spent = Duration::ZERO;
+    loop {
+        let e = match op().await {
+            Ok(v) => return Ok(v),
+            Err(e) => e,
         };
-        match result {
-            Ok(_) => return,
+        let failure = classify(&e);
+        if failure == Failure::Permanent {
+            return Err(e);
+        }
+        let Some(wait) = next_wait(&failure, attempt, &mut backoff, spent) else {
+            tracing::warn!(error = %e, what, attempts = attempt + 1, "telegram sender: giving up (retry limit / budget)");
+            return Err(e);
+        };
+        attempt += 1;
+        spent += wait;
+        tracing::debug!(error = %e, what, attempt, wait_ms = wait.as_millis() as u64, "telegram send failed, retrying");
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// Wait before the next retry of a transient failure, or `None` to give
+/// up: attempt limit hit, or the wait would push the total sleep for
+/// this call past `MAX_RETRY_BUDGET`. Flood-control waits are capped at
+/// `MAX_RETRY_AFTER_WAIT`.
+fn next_wait(
+    failure: &Failure,
+    attempt: u32,
+    backoff: &mut Duration,
+    spent: Duration,
+) -> Option<Duration> {
+    if attempt >= MAX_RETRIES {
+        return None;
+    }
+    let wait = match failure {
+        Failure::Permanent => return None,
+        Failure::RetryAfter(d) => (*d).min(MAX_RETRY_AFTER_WAIT),
+        Failure::Retry => {
+            let d = *backoff;
+            *backoff = backoff.saturating_mul(2).min(Duration::from_secs(30));
+            d
+        }
+    };
+    (spent.saturating_add(wait) <= MAX_RETRY_BUDGET).then_some(wait)
+}
+
+/// Only a permanent rejection (bad entities, too-long caption, …) is
+/// worth resending in a different shape. After flood-control or network
+/// exhaustion the same request would just repeat the whole retry cycle.
+fn worth_fallback(e: &RequestError) -> bool {
+    classify(e) == Failure::Permanent
+}
+
+/// What to do with an outbound text body.
+#[derive(Debug, PartialEq, Eq)]
+enum TextPlan {
+    /// Nothing worth sending.
+    Skip,
+    /// Send these Markdown chunks as consecutive messages.
+    Chunks(Vec<String>),
+    /// Too long for a handful of messages — ship it as a `.md` file.
+    File,
+}
+
+fn plan_text(text: &str, has_keyboard: bool) -> TextPlan {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        // Telegram rejects empty text; a keyboard still needs a carrier.
+        return if has_keyboard {
+            TextPlan::Chunks(vec![EMPTY_PLACEHOLDER.to_string()])
+        } else {
+            TextPlan::Skip
+        };
+    }
+    let chunks = balance_fences(split_message(trimmed, CHUNK_LIMIT));
+    if chunks.len() > MAX_TEXT_CHUNKS {
+        TextPlan::File
+    } else {
+        TextPlan::Chunks(chunks)
+    }
+}
+
+pub(super) fn to_markup(k: &super::commands_registry::InlineKeyboard) -> InlineKeyboardMarkup {
+    InlineKeyboardMarkup::new(k.rows.iter().map(|r| {
+        r.iter()
+            .map(|b| InlineKeyboardButton::callback(b.text.clone(), b.callback_data.clone()))
+            .collect::<Vec<_>>()
+    }))
+}
+
+/// PNGs are deliberately excluded: they're screenshots / annotations where
+/// the photo path's re-encode + ≤1280px downscale would defeat the point.
+fn is_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "webp"))
+        .unwrap_or(false)
+}
+
+async fn deliver(bot: &Bot, msg: &Outbound) {
+    let chat = ChatId(msg.chat_id);
+    let markup = msg.keyboard.as_ref().map(to_markup);
+    if msg.documents.is_empty() {
+        send_text(bot, chat, &msg.text, markup).await;
+        return;
+    }
+    // Captions are capped at 1024 chars; longer text goes out as its own
+    // message (carrying the keyboard) after the files.
+    let text = msg.text.trim();
+    let caption_fits = text.chars().count() <= CAPTION_LIMIT;
+    for (i, path) in msg.documents.iter().enumerate() {
+        let first = i == 0;
+        let caption = (first && caption_fits && !text.is_empty()).then_some(text);
+        let kb = if first && caption_fits { markup.clone() } else { None };
+        if let Err(e) = send_file(bot, chat, path, caption, kb).await {
+            tracing::warn!(error = %e, path = %path.display(), "telegram sender: attachment not delivered");
+        }
+    }
+    if !caption_fits {
+        send_text(bot, chat, text, markup).await;
+    }
+}
+
+/// Send Markdown `text` as HTML, split into ≤4096-char messages; the
+/// keyboard rides on the last one. A chunk Telegram refuses permanently
+/// (bad entity parse, etc.) is resent once as plain text.
+async fn send_text(bot: &Bot, chat: ChatId, text: &str, markup: Option<InlineKeyboardMarkup>) {
+    let chunks = match plan_text(text, markup.is_some()) {
+        TextPlan::Skip => {
+            tracing::debug!("telegram sender: skipping empty message");
+            return;
+        }
+        TextPlan::Chunks(c) => c,
+        TextPlan::File => {
+            if send_text_as_file(bot, chat, text, markup.clone()).await {
+                return;
+            }
+            // File upload failed — still deliver the text, chunked.
+            balance_fences(split_message(text.trim(), CHUNK_LIMIT))
+        }
+    };
+    let last = chunks.len().saturating_sub(1);
+    for (i, chunk) in chunks.iter().enumerate() {
+        let kb = if i == last { markup.clone() } else { None };
+        let html = markdown_to_telegram_html(chunk);
+        let res = retrying("sendMessage", || {
+            let mut r = bot.send_message(chat, html.clone()).parse_mode(ParseMode::Html);
+            if let Some(k) = kb.clone() {
+                r = r.reply_markup(k);
+            }
+            r.send()
+        })
+        .await;
+        match res {
+            Ok(_) => {}
+            // Flood control / network exhausted: a plain resend would
+            // just repeat the whole retry cycle.
+            Err(e) if !worth_fallback(&e) => {
+                tracing::warn!(error = %e, "telegram sender: giving up on message chunk");
+            }
             Err(e) => {
-                if attempt == MAX_RETRIES {
-                    tracing::warn!(
-                        error = %e,
-                        attempts = attempt + 1,
-                        "telegram sender: giving up after max retries"
-                    );
-                    return;
+                tracing::warn!(error = %e, "telegram sender: HTML send rejected, retrying as plain text");
+                let plain = retrying("sendMessage(plain)", || {
+                    let mut r = bot.send_message(chat, chunk.clone());
+                    if let Some(k) = kb.clone() {
+                        r = r.reply_markup(k);
+                    }
+                    r.send()
+                })
+                .await;
+                if let Err(e) = plain {
+                    tracing::warn!(error = %e, "telegram sender: giving up on message chunk");
                 }
-                tracing::debug!(
-                    error = %e,
-                    attempt,
-                    backoff_ms = backoff.as_millis() as u64,
-                    "telegram send failed, retrying"
-                );
-                tokio::time::sleep(backoff).await;
-                backoff = backoff.saturating_mul(2).min(Duration::from_secs(30));
             }
         }
+        if i != last {
+            tokio::time::sleep(MIN_SEND_GAP).await;
+        }
+    }
+}
+
+/// Upload a very long reply as `reply-<ts>.md`. Returns `false` when the
+/// upload failed so the caller can fall back to chunked messages.
+async fn send_text_as_file(
+    bot: &Bot,
+    chat: ChatId,
+    text: &str,
+    markup: Option<InlineKeyboardMarkup>,
+) -> bool {
+    let dir = std::env::temp_dir().join("stash-telegram");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let path = dir.join(format!("reply-{ts}.md"));
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, text)) {
+        tracing::warn!(error = %e, "telegram sender: could not stage long reply file");
+        return false;
+    }
+    let res = retrying("sendDocument(md)", || {
+        let mut r = bot
+            .send_document(chat, InputFile::file(path.clone()))
+            .caption(LONG_REPLY_CAPTION);
+        if let Some(k) = markup.clone() {
+            r = r.reply_markup(k);
+        }
+        r.send()
+    })
+    .await;
+    let _ = std::fs::remove_file(&path);
+    match res {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::warn!(error = %e, "telegram sender: long reply upload failed");
+            false
+        }
+    }
+}
+
+/// Images go as photos (inline preview); anything else — or a photo
+/// Telegram refuses (too large / odd dimensions) — goes as a document.
+async fn send_file(
+    bot: &Bot,
+    chat: ChatId,
+    path: &Path,
+    caption: Option<&str>,
+    kb: Option<InlineKeyboardMarkup>,
+) -> Result<(), RequestError> {
+    let caption_html = caption.map(markdown_to_telegram_html);
+    if is_image_path(path) {
+        let res = retrying("sendPhoto", || {
+            let mut r = bot.send_photo(chat, InputFile::file(path.to_path_buf()));
+            if let Some(c) = caption_html.clone() {
+                r = r.caption(c).parse_mode(ParseMode::Html);
+            }
+            if let Some(k) = kb.clone() {
+                r = r.reply_markup(k);
+            }
+            r.send()
+        })
+        .await;
+        match res {
+            Ok(_) => return Ok(()),
+            Err(e) if !worth_fallback(&e) => return Err(e),
+            Err(e) => tracing::info!(error = %e, "sendPhoto failed, falling back to sendDocument"),
+        }
+    }
+    let send_doc = |caption: Option<String>, html: bool| {
+        let kb = kb.clone();
+        retrying("sendDocument", move || {
+            let mut r = bot.send_document(chat, InputFile::file(path.to_path_buf()));
+            if let Some(c) = caption.clone() {
+                r = r.caption(c);
+                if html {
+                    r = r.parse_mode(ParseMode::Html);
+                }
+            }
+            if let Some(k) = kb.clone() {
+                r = r.reply_markup(k);
+            }
+            r.send()
+        })
+    };
+    match send_doc(caption_html.clone(), true).await {
+        Ok(_) => Ok(()),
+        // Caption markup rejected — resend with the raw caption.
+        Err(e) if caption.is_some() && worth_fallback(&e) => {
+            tracing::warn!(error = %e, "sendDocument with HTML caption failed, retrying plain");
+            send_doc(caption.map(str::to_string), false).await.map(|_| ())
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -259,6 +524,121 @@ mod tests {
         // token both calls should succeed and the second be a no-op. We
         // exercise this under a tokio runtime in an async test below.
         assert!(s.slot.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn classify_retries_only_transient_errors() {
+        assert_eq!(
+            classify(&RequestError::RetryAfter(teloxide::types::Seconds::from_seconds(7))),
+            Failure::RetryAfter(Duration::from_secs(7))
+        );
+        assert_eq!(
+            classify(&RequestError::Api(ApiError::Unknown("Internal Server Error".into()))),
+            Failure::Retry
+        );
+        assert_eq!(
+            classify(&RequestError::Api(ApiError::Unknown("Bad Gateway".into()))),
+            Failure::Retry
+        );
+        assert_eq!(
+            classify(&RequestError::Api(ApiError::CantParseEntities(
+                "Bad Request: can't parse entities".into()
+            ))),
+            Failure::Permanent
+        );
+        assert_eq!(
+            classify(&RequestError::Api(ApiError::MessageTextIsEmpty)),
+            Failure::Permanent
+        );
+        assert_eq!(
+            classify(&RequestError::Api(ApiError::ChatNotFound)),
+            Failure::Permanent
+        );
+    }
+
+    #[test]
+    fn retry_after_is_capped_per_wait() {
+        let mut b = BACKOFF_START;
+        let w = next_wait(
+            &Failure::RetryAfter(Duration::from_secs(600)),
+            0,
+            &mut b,
+            Duration::ZERO,
+        );
+        assert_eq!(w, Some(MAX_RETRY_AFTER_WAIT));
+        let w = next_wait(
+            &Failure::RetryAfter(Duration::from_secs(3)),
+            0,
+            &mut b,
+            Duration::ZERO,
+        );
+        assert_eq!(w, Some(Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn retries_stop_at_total_budget() {
+        // Simulate repeated flood-control answers asking for 25 s.
+        let mut b = BACKOFF_START;
+        let mut spent = Duration::ZERO;
+        let mut attempt = 0;
+        while let Some(w) = next_wait(
+            &Failure::RetryAfter(Duration::from_secs(25)),
+            attempt,
+            &mut b,
+            spent,
+        ) {
+            spent += w;
+            attempt += 1;
+        }
+        assert!(spent <= MAX_RETRY_BUDGET, "{spent:?}");
+        assert_eq!(attempt, 2);
+        // Attempt cap still applies to cheap backoffs.
+        let mut b = BACKOFF_START;
+        assert_eq!(
+            next_wait(&Failure::Retry, MAX_RETRIES, &mut b, Duration::ZERO),
+            None
+        );
+        assert_eq!(
+            next_wait(&Failure::Permanent, 0, &mut b, Duration::ZERO),
+            None
+        );
+    }
+
+    #[test]
+    fn plain_fallback_only_after_permanent_errors() {
+        assert!(worth_fallback(&RequestError::Api(
+            ApiError::CantParseEntities("bad".into())
+        )));
+        assert!(!worth_fallback(&RequestError::RetryAfter(
+            teloxide::types::Seconds::from_seconds(7)
+        )));
+        assert!(!worth_fallback(&RequestError::Api(ApiError::Unknown(
+            "Bad Gateway".into()
+        ))));
+    }
+
+    #[test]
+    fn plan_text_skips_blank_and_files_huge() {
+        assert_eq!(plan_text("   \n", false), TextPlan::Skip);
+        assert_eq!(
+            plan_text("", true),
+            TextPlan::Chunks(vec![EMPTY_PLACEHOLDER.to_string()])
+        );
+        assert_eq!(plan_text(" hi ", false), TextPlan::Chunks(vec!["hi".into()]));
+        let para = format!("{}\n\n", "щось ".repeat(150));
+        let medium = para.repeat(8); // ~6k chars → 2 chunks
+        assert!(matches!(plan_text(&medium, false), TextPlan::Chunks(c) if c.len() == 2));
+        let huge = para.repeat(40); // ~30k chars → > 4 chunks
+        assert_eq!(plan_text(&huge, false), TextPlan::File);
+    }
+
+    #[test]
+    fn image_paths_detected_by_extension() {
+        assert!(!is_image_path(Path::new("/tmp/a.PNG")));
+        assert!(is_image_path(Path::new("/tmp/a.jpeg")));
+        assert!(is_image_path(Path::new("x.webp")));
+        assert!(!is_image_path(Path::new("x.pdf")));
+        assert!(!is_image_path(Path::new("noext")));
     }
 
     #[tokio::test(flavor = "current_thread")]

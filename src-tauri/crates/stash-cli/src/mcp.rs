@@ -24,6 +24,12 @@ use crate::{send_request, socket_path, Request, TransportError, BUNDLE_ID};
 /// Must match `LIST_COMMANDS` in the app's `ipc/server.rs`.
 const LIST_COMMANDS: &str = "__commands";
 
+/// Set by the Stash app on the MCP server it attaches to the assistant's
+/// `claude -p` run. Forwarded as `Request::origin` so the app can park
+/// destructive commands behind its Telegram confirmation card. Must
+/// match `confirm::MCP_ORIGIN_ENV` in the app crate.
+const MCP_ORIGIN_ENV: &str = "STASH_MCP_ORIGIN";
+
 /// Newest first. We echo the client's version when we know it,
 /// otherwise answer with the newest and let the client decide.
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
@@ -170,6 +176,7 @@ async fn call_app(cmd: &str, args_text: &str) -> Result<String, String> {
         args_text: args_text.to_string(),
         args: if args_text.is_empty() { vec![] } else { vec![args_text.to_string()] },
         cwd: None,
+        origin: std::env::var(MCP_ORIGIN_ENV).ok().filter(|o| !o.trim().is_empty()),
     };
     let resp = match send_request(&path, &req).await {
         Err(TransportError::NotRunning) => {

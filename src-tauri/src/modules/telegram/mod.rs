@@ -1,13 +1,17 @@
 pub mod assistant;
 pub mod backup;
 pub mod battery_watcher;
+pub mod bot_cmds;
 pub mod calendar;
 pub mod commands;
 pub mod commands_registry;
+pub mod confirm;
 pub mod file_secrets;
+pub mod format;
 pub mod inbox;
 pub mod keyring;
 pub mod llm;
+pub mod menu;
 pub mod module_cmds;
 pub mod notifier;
 pub mod pairing;

@@ -2,18 +2,20 @@
 //! chat. Runs once every `POLL_PERIOD`; a fresh alert fires when the
 //! level is at or below `THRESHOLD_PERCENT` and the Mac isn't charging.
 //!
-//! Alerts are rate-limited by the notifier's per-category cooldown
-//! (1 hour), so a user watching the slider tick 20 → 19 → 18 gets one
-//! ping, not three.
+//! Alerts are rate-limited by a local one-hour cooldown (mirroring the
+//! notifier's `BatteryLow` policy), so a user watching the slider tick
+//! 20 → 19 → 18 gets one ping, not three.
 
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 
-use super::notifier::{notify_if_paired, Category};
+use super::commands_registry::{InlineButton, InlineKeyboard};
+use super::notifier::Category;
 
 const POLL_PERIOD: Duration = Duration::from_secs(5 * 60);
+const ALERT_COOLDOWN: Duration = Duration::from_secs(60 * 60);
 
 /// Spawn the watcher. Idempotent in practice — called once from `lib.rs`
 /// at setup time; repeated calls just add a second harmless ticker.
@@ -23,6 +25,7 @@ pub fn spawn(app: AppHandle) {
         let mut tick = tokio::time::interval(POLL_PERIOD);
         // Skip the instant first tick so rehydrate can finish.
         tick.tick().await;
+        let mut last_alert: Option<Instant> = None;
         loop {
             tick.tick().await;
             let Some((percent, charging)) = read_pmset_percent() else {
@@ -35,14 +38,62 @@ pub fn spawn(app: AppHandle) {
                 .map(|s| super::settings::NotificationSettings::load(&s).battery_threshold_pct)
                 .unwrap_or(20);
             if !charging && percent <= threshold {
-                notify_if_paired(
+                if last_alert.is_some_and(|t| t.elapsed() < ALERT_COOLDOWN) {
+                    continue;
+                }
+                if notify_with_keyboard(
                     &app,
                     Category::BatteryLow,
                     format!("🪫 Battery low: {percent}% — plug in when you can."),
-                );
+                    low_battery_keyboard(),
+                ) {
+                    last_alert = Some(Instant::now());
+                }
             }
         }
     });
+}
+
+/// Quick actions under the low-battery alert.
+fn low_battery_keyboard() -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![
+            vec![
+                InlineButton::new("🔋 Статус", "battery"),
+                InlineButton::new("☕ Keep awake off", "keepawake:off"),
+            ],
+            // Two-tap: opens a confirm card instead of sleeping on one tap.
+            vec![InlineButton::new("💤 Sleep Mac", "sleep:ask")],
+        ],
+    }
+}
+
+/// Like `notifier::notify_if_paired`, but carries an inline keyboard.
+/// Honours pairing + the per-category settings toggle; cooldown/dedup is
+/// the caller's job (each watcher already tracks its own). Returns
+/// whether the message was queued.
+pub(super) fn notify_with_keyboard(
+    app: &AppHandle,
+    category: Category,
+    text: impl Into<String>,
+    keyboard: InlineKeyboard,
+) -> bool {
+    use super::pairing::PairingState;
+    use tauri::Manager;
+    let Some(state) = app.try_state::<std::sync::Arc<super::state::TelegramState>>() else {
+        return false;
+    };
+    let chat_id = match &*state.pairing.lock().unwrap() {
+        PairingState::Paired { chat_id } => *chat_id,
+        _ => return false,
+    };
+    if !super::settings::category_enabled(&state, category) {
+        return false;
+    }
+    state
+        .sender
+        .enqueue_with_keyboard(chat_id, text, Some(keyboard));
+    true
 }
 
 fn read_pmset_percent() -> Option<(u32, bool)> {
@@ -68,4 +119,22 @@ fn read_pmset_percent() -> Option<(u32, bool)> {
         })
         .unwrap_or(false);
     Some((percent, charging))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn low_battery_buttons_route_to_registered_commands() {
+        let kb = low_battery_keyboard();
+        let cbs: Vec<&str> = kb
+            .rows
+            .iter()
+            .flatten()
+            .map(|b| b.callback_data.as_str())
+            .collect();
+        assert_eq!(cbs, vec!["battery", "keepawake:off", "sleep:ask"]);
+        assert!(cbs.iter().all(|c| c.len() <= 64));
+    }
 }

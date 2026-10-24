@@ -1,4 +1,3 @@
-#[cfg(test)]
 use rusqlite::OptionalExtension;
 use rusqlite::{params, Connection, Result};
 
@@ -192,7 +191,6 @@ impl PomodoroRepo {
         rows.collect()
     }
 
-    #[cfg(test)]
     pub fn get_preset(&self, id: i64) -> Result<Option<Preset>> {
         self.conn
             .query_row(

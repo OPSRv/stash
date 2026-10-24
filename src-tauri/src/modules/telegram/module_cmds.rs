@@ -51,22 +51,30 @@ impl CommandHandler for BatteryCmd {
                 };
                 // Below 20% + not plugged in → offer a quick sleep action.
                 let low = percent < 20 && !charging;
+                let mut rows = Vec::new();
+                if low {
+                    rows.push(vec![
+                        InlineButton::new("💤 Sleep Mac", "sleep:ask"),
+                        InlineButton::new("☕ Keep awake off", "keepawake:off"),
+                    ]);
+                }
+                rows.push(super::menu::nav_row("refresh:battery"));
                 Reply {
                     text: format!("{icon} {percent}% — {status}"),
-                    keyboard: if low {
-                        Some(InlineKeyboard {
-                            rows: vec![vec![InlineButton::new("💤 Sleep Mac", "sleep")]],
-                        })
-                    } else {
-                        None
-                    },
+                    keyboard: Some(InlineKeyboard { rows }),
                     ..Default::default()
                 }
             }
-            BatterySnapshot::NoBattery => {
-                Reply::text("🔌 У цього Mac немає батареї (desktop / під'єднано до мережі).")
-            }
-            BatterySnapshot::Unknown => Reply::text("🪫 Не вдалося отримати дані про батарею."),
+            BatterySnapshot::NoBattery => Reply {
+                text: "🔌 У цього Mac немає батареї (desktop / під'єднано до мережі).".into(),
+                keyboard: Some(super::menu::nav_keyboard("refresh:battery")),
+                ..Default::default()
+            },
+            BatterySnapshot::Unknown => Reply {
+                text: "🪫 Не вдалося отримати дані про батарею.".into(),
+                keyboard: Some(super::menu::nav_keyboard("refresh:battery")),
+                ..Default::default()
+            },
         }
     }
 }
@@ -181,30 +189,57 @@ impl CommandHandler for ClipCmd {
         "clip"
     }
     fn description(&self) -> &'static str {
-        "Показати запис буфера обміну №N (1 = найновіший)"
+        "Історія буфера обміну з кнопками; /clip N — повний запис №N (1 = найновіший)"
     }
     fn usage(&self) -> &'static str {
-        "/clip [N]"
+        "/clip [N | page N]"
     }
-    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let trimmed = args.trim();
-        // Subcommand: `restore N` — push item N back onto the system
-        // clipboard. Only text items for now (image restoration needs
-        // the full paste pipeline).
-        if let Some(rest) = trimmed.strip_prefix("restore") {
-            let n: usize = rest.trim().parse().unwrap_or(1).max(1);
-            return match clip_restore_text(&self.state, n) {
-                Ok(preview) => Reply::text(format!("📋 Скопійовано №{n}: {preview}")),
-                Err(e) => Reply::text(format!("⚠️ {e}")),
-            };
-        }
-        let n: usize = trimmed.parse().unwrap_or(1).max(1);
+        let n = match parse_clip_args(trimmed) {
+            ClipAction::Page(page) => return render_clip_page(&self.state, page, None),
+            ClipAction::Copy(id, page) => {
+                let status = clip_copy_to_mac(&ctx.app, id)
+                    .map(|()| "✅ Скопійовано на Mac.".to_string())
+                    .unwrap_or_else(|e| format!("⚠️ {e}"));
+                return render_clip_page(&self.state, page, Some(status));
+            }
+            ClipAction::Pin(id, page) => {
+                let status = self
+                    .state
+                    .repo
+                    .lock()
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut r| {
+                        r.toggle_pin(id).map_err(|e| e.to_string())?;
+                        r.get(id).map_err(|e| e.to_string())
+                    });
+                let status = match status {
+                    Ok(Some(it)) if it.pinned => "📌 Закріплено.".to_string(),
+                    Ok(Some(_)) => "📍 Відкріплено.".to_string(),
+                    Ok(None) => "❓ Запис не знайдено.".to_string(),
+                    Err(e) => format!("⚠️ {e}"),
+                };
+                return render_clip_page(&self.state, page, Some(status));
+            }
+            // Subcommand: `restore N` — push item N back onto the system
+            // clipboard. Only text items for now (image restoration needs
+            // the full paste pipeline).
+            ClipAction::Restore(n) => {
+                return match clip_restore_text(&self.state, n) {
+                    Ok(preview) => Reply::text(format!("📋 Скопійовано №{n}: {preview}")),
+                    Err(e) => Reply::text(format!("⚠️ {e}")),
+                };
+            }
+            ClipAction::Item(n) => n,
+        };
         let items = match self
             .state
             .repo
             .lock()
             .map_err(|e| e.to_string())
-            .and_then(|repo| repo.list(n).map_err(|e| e.to_string()))
+            // One extra row so we know whether a "Next" exists.
+            .and_then(|repo| repo.list(n + 1).map_err(|e| e.to_string()))
         {
             Ok(v) => v,
             Err(e) => return Reply::text(format!("⚠️ помилка буфера: {e}")),
@@ -216,14 +251,26 @@ impl CommandHandler for ClipCmd {
                 let mut row: Vec<InlineButton> =
                     vec![InlineButton::new("📋 Re-copy", format!("clip:restore {n}"))];
                 if total > n {
-                    row.push(InlineButton::new("⏭ Next", format!("clip:{}", n + 1)));
+                    row.push(InlineButton::new("⏭ Next", format!("refresh:clip:{}", n + 1)));
                 }
                 if n > 1 {
-                    row.insert(0, InlineButton::new("⏮ Prev", format!("clip:{}", n - 1)));
+                    row.insert(
+                        0,
+                        InlineButton::new("⏮ Prev", format!("refresh:clip:{}", n - 1)),
+                    );
                 }
+                let page = (n - 1) / CLIP_PAGE_SIZE + 1;
                 Reply {
                     text: content,
-                    keyboard: Some(InlineKeyboard { rows: vec![row] }),
+                    keyboard: Some(InlineKeyboard {
+                        rows: vec![
+                            row,
+                            vec![InlineButton::new(
+                                "📋 Список",
+                                format!("refresh:clip:page:{page}"),
+                            )],
+                        ],
+                    }),
                     ..Default::default()
                 }
             }
@@ -273,6 +320,211 @@ fn truncate_preview(s: &str, max: usize) -> String {
     format!("{truncated}…")
 }
 
+/// Items per page in the `/clip` history card.
+const CLIP_PAGE_SIZE: usize = 5;
+
+#[derive(Debug, PartialEq, Eq)]
+enum ClipAction {
+    /// History card, 1-based page.
+    Page(usize),
+    /// Full view of the Nth newest item (legacy `/clip N`).
+    Item(usize),
+    /// Re-copy the Nth newest text item (legacy `/clip restore N`).
+    Restore(usize),
+    /// Copy item `id` back onto the Mac clipboard, then re-render `page`.
+    Copy(i64, usize),
+    /// Toggle the pin on item `id`, then re-render `page`.
+    Pin(i64, usize),
+}
+
+/// `/clip` args — typed (`page 2`, `copy 41 1`) and button
+/// (`page:2`, `copy:41:1`) forms share one tokenizer.
+fn parse_clip_args(args: &str) -> ClipAction {
+    let toks: Vec<&str> = args
+        .split([':', ' '])
+        .filter(|t| !t.is_empty())
+        .collect();
+    let num = |i: usize| toks.get(i).and_then(|t| t.parse::<usize>().ok());
+    let id = |i: usize| toks.get(i).and_then(|t| t.parse::<i64>().ok());
+    match toks.first().map(|t| t.to_ascii_lowercase()).as_deref() {
+        None => ClipAction::Page(1),
+        Some("page" | "p") => ClipAction::Page(num(1).unwrap_or(1).max(1)),
+        Some("restore") => ClipAction::Restore(num(1).unwrap_or(1).max(1)),
+        Some("copy") => match id(1) {
+            Some(i) => ClipAction::Copy(i, num(2).unwrap_or(1).max(1)),
+            None => ClipAction::Page(1),
+        },
+        Some("pin") => match id(1) {
+            Some(i) => ClipAction::Pin(i, num(2).unwrap_or(1).max(1)),
+            None => ClipAction::Page(1),
+        },
+        Some(other) => match other.parse::<usize>() {
+            Ok(n) => ClipAction::Item(n.max(1)),
+            Err(_) => ClipAction::Page(1),
+        },
+    }
+}
+
+/// Copy a history row (text / image / files) back onto the Mac clipboard
+/// through the same path the Clipboard tab uses.
+pub(crate) fn clip_copy_to_mac(app: &tauri::AppHandle, id: i64) -> Result<(), String> {
+    let state = app
+        .try_state::<Arc<ClipboardState>>()
+        .ok_or_else(|| "clipboard state not initialised".to_string())?;
+    crate::modules::clipboard::commands::clipboard_copy_only(state, id)
+}
+
+fn clip_line(item: &crate::modules::clipboard::repo::ClipboardItem) -> String {
+    let pin = if item.pinned { "📌 " } else { "" };
+    let body = match item.kind.as_str() {
+        "text" => truncate_preview(&item.content.trim().replace('\n', " "), 80),
+        "image" => "🖼 зображення".to_string(),
+        "file" => format!("📎 {}", truncate_preview(&item.content, 60)),
+        other => format!("[{other}]"),
+    };
+    format!("{pin}{body}")
+}
+
+/// Paged history card: numbered items, per-item "copy to Mac" + pin
+/// buttons, and ⬅️/➡️ paging that edits the card in place.
+fn render_clip_page(state: &Arc<ClipboardState>, page: usize, status: Option<String>) -> Reply {
+    let page = page.max(1);
+    let skip = (page - 1) * CLIP_PAGE_SIZE;
+    let items = match state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.list(skip + CLIP_PAGE_SIZE + 1).map_err(|e| e.to_string()))
+    {
+        Ok(v) => v,
+        Err(e) => return Reply::text(format!("⚠️ помилка буфера: {e}")),
+    };
+    let has_next = items.len() > skip + CLIP_PAGE_SIZE;
+    let slice: Vec<_> = items.iter().skip(skip).take(CLIP_PAGE_SIZE).collect();
+    let mut text = status.map(|s| format!("{s}\n\n")).unwrap_or_default();
+    let mut rows: Vec<Vec<InlineButton>> = Vec::new();
+    if slice.is_empty() {
+        text.push_str("📭 Буфер обміну порожній.");
+    } else {
+        text.push_str(&format!("📋 Буфер обміну · сторінка {page}\n"));
+        for (i, item) in slice.iter().enumerate() {
+            let n = skip + i + 1;
+            text.push_str(&format!("{n}. {}\n", clip_line(item)));
+            rows.push(vec![
+                InlineButton::new(format!("📋 {n} на Mac"), clip_cb("copy", item.id, page)),
+                InlineButton::new(
+                    if item.pinned {
+                        format!("📍 {n} відкріпити")
+                    } else {
+                        format!("📌 {n}")
+                    },
+                    clip_cb("pin", item.id, page),
+                ),
+            ]);
+        }
+        text.push_str("\n/clip N — повний текст запису №N");
+    }
+    let mut nav = Vec::new();
+    if page > 1 {
+        nav.push(InlineButton::new("⬅️", format!("refresh:clip:page:{}", page - 1)));
+    }
+    nav.push(InlineButton::new("🔄", format!("refresh:clip:page:{page}")));
+    if has_next {
+        nav.push(InlineButton::new("➡️", format!("refresh:clip:page:{}", page + 1)));
+    }
+    nav.push(super::menu::menu_button());
+    rows.push(nav);
+    Reply {
+        text: text.trim_end().to_string(),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
+fn clip_cb(verb: &str, id: i64, page: usize) -> String {
+    format!("refresh:clip:{verb}:{id}:{page}")
+}
+
+#[cfg(test)]
+mod clip_notes_tests {
+    use super::*;
+
+    #[test]
+    fn clip_args_cover_typed_and_button_forms() {
+        assert_eq!(parse_clip_args(""), ClipAction::Page(1));
+        assert_eq!(parse_clip_args("page:3"), ClipAction::Page(3));
+        assert_eq!(parse_clip_args("page 0"), ClipAction::Page(1));
+        assert_eq!(parse_clip_args("2"), ClipAction::Item(2));
+        assert_eq!(parse_clip_args("restore 4"), ClipAction::Restore(4));
+        assert_eq!(parse_clip_args("copy:41:2"), ClipAction::Copy(41, 2));
+        assert_eq!(parse_clip_args("pin 41"), ClipAction::Pin(41, 1));
+        assert_eq!(parse_clip_args("copy:abc"), ClipAction::Page(1));
+        assert_eq!(parse_clip_args("whatever"), ClipAction::Page(1));
+    }
+
+    #[test]
+    fn memory_args_split_ask_from_delete() {
+        assert_eq!(parse_memory_args(""), MemoryAction::List);
+        assert_eq!(parse_memory_args("ask:5"), MemoryAction::Ask(5));
+        assert_eq!(parse_memory_args("del:5"), MemoryAction::Delete(5));
+        assert_eq!(parse_memory_args("del 5"), MemoryAction::Delete(5));
+        assert_eq!(parse_memory_args("del"), MemoryAction::List);
+        let card = memory_confirm_card(i64::MAX, "x");
+        let kb = card.keyboard.unwrap();
+        assert_eq!(kb.rows[0][0].callback_data, format!("refresh:memory:del:{}", i64::MAX));
+        assert!(memory_ask_cb(i64::MAX).len() <= 64);
+    }
+
+    #[test]
+    fn power_buttons_need_a_second_tap() {
+        for kind in [PowerKind::Sleep, PowerKind::Shutdown] {
+            let kb = power_confirm_card(kind).keyboard.unwrap();
+            let cbs: Vec<_> = kb.rows.iter().flatten().map(|b| b.callback_data.as_str()).collect();
+            let w = kind_word(kind);
+            assert_eq!(cbs, vec![format!("refresh:{w}:now"), format!("refresh:{w}:no")]);
+        }
+    }
+
+    #[test]
+    fn app_open_card_quit_goes_through_confirm() {
+        let r = app_reply("x".into(), &[("🛑 Закрити", "quitask", "Safari")]);
+        assert_eq!(r.keyboard.unwrap().rows[0][0].callback_data, "refresh:app:quitask Safari");
+    }
+
+    #[test]
+    fn notes_args_cover_typed_and_button_forms() {
+        assert_eq!(parse_notes_args(""), NotesAction::Page(1));
+        assert_eq!(parse_notes_args("page:2"), NotesAction::Page(2));
+        assert_eq!(parse_notes_args("open:7"), NotesAction::Open(7));
+        assert_eq!(parse_notes_args("open 7"), NotesAction::Open(7));
+        assert_eq!(parse_notes_args("7"), NotesAction::Open(7));
+        assert_eq!(parse_notes_args("del:7"), NotesAction::AskDelete(7));
+        assert_eq!(parse_notes_args("delok:7"), NotesAction::Delete(7));
+        assert_eq!(parse_notes_args("undo:7"), NotesAction::AskDelete(7));
+        assert_eq!(parse_notes_args("pin:7"), NotesAction::Pin(7));
+        // A destructive verb without an id never deletes anything.
+        assert_eq!(parse_notes_args("delok"), NotesAction::Page(1));
+    }
+
+    #[test]
+    fn clip_notes_app_callbacks_fit_telegram_limit() {
+        let big = i64::MAX;
+        for cb in [
+            clip_cb("copy", big, 9_999),
+            clip_cb("pin", big, 9_999),
+            notes_cb("delok", big),
+            notes_cb("undo", big),
+            format!("refresh:memory:del:{big}"),
+            format!("refresh:clip:page:{}", usize::MAX),
+        ] {
+            assert!(cb.len() <= 64, "{cb} is {} bytes", cb.len());
+        }
+        assert!(app_cb("quit", &"x".repeat(80)).is_none());
+        let r = app_reply("t".into(), &[("🛑", "quit", &"Ж".repeat(26))]);
+        assert!(r.keyboard.is_none(), "over-long refresh payload must be dropped");
+    }
+}
+
 // -------------------- /note --------------------
 
 pub struct NoteCmd {
@@ -317,7 +569,13 @@ impl CommandHandler for NoteCmd {
                 Reply {
                     text: format!("📝 Збережено нотатку №{id}: {title}"),
                     keyboard: Some(InlineKeyboard {
-                        rows: vec![vec![InlineButton::new("📝 Recent", "notes")]],
+                        rows: vec![
+                            vec![
+                                InlineButton::new("📝 Відкрити", notes_cb("open", id)),
+                                InlineButton::new("🗑 Undo", notes_cb("undo", id)),
+                            ],
+                            vec![InlineButton::new("📚 Усі нотатки", "notes")],
+                        ],
                     }),
                     ..Default::default()
                 }
@@ -383,40 +641,223 @@ impl CommandHandler for NotesListCmd {
         "notes"
     }
     fn description(&self) -> &'static str {
-        "Останні нотатки (newest first)"
+        "Останні нотатки з кнопками (newest first); /notes open <id> — відкрити"
     }
     fn usage(&self) -> &'static str {
-        "/notes"
+        "/notes [page N | open <id>]"
     }
-    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
-        let summaries = match self.repo.lock() {
-            Ok(r) => match r.list_summaries(crate::modules::notes::repo::FolderFilter::All) {
-                Ok(v) => v,
-                Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
-            },
-            Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
-        };
-        if summaries.is_empty() {
-            return Reply::text("📭 Нотаток ще немає. Додай `/note <текст>`.");
-        }
-        let mut out = String::from("📝 Останні нотатки:\n");
-        for s in summaries.iter().take(10) {
-            let preview = s.preview.trim().replace('\n', " ");
-            let preview_short: String = preview.chars().take(60).collect();
-            out.push_str(&format!(
-                "• №{} — {}\n",
-                s.id,
-                if preview_short.is_empty() {
-                    s.title.clone()
-                } else {
-                    format!("{} · {}", s.title, preview_short)
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        match parse_notes_args(args) {
+            NotesAction::Page(page) => render_notes_page(&self.repo, page, None),
+            NotesAction::Open(id) => render_note_card(&self.repo, id, false),
+            NotesAction::AskDelete(id) => render_note_card(&self.repo, id, true),
+            NotesAction::Delete(id) => {
+                let status = match delete_note(Some(&ctx.app), &self.repo, id) {
+                    Ok(true) => format!("🗑 Нотатку №{id} видалено."),
+                    Ok(false) => format!("❓ Нотатки №{id} немає."),
+                    Err(e) => format!("⚠️ помилка нотаток: {e}"),
+                };
+                render_notes_page(&self.repo, 1, Some(status))
+            }
+            NotesAction::Pin(id) => {
+                let result = self.repo.lock().map_err(|e| e.to_string()).and_then(|mut r| {
+                    let note = r.get(id).map_err(|e| e.to_string())?;
+                    match note {
+                        Some(n) => r.set_pinned(id, !n.pinned).map_err(|e| e.to_string()),
+                        None => Err(format!("нотатки №{id} немає")),
+                    }
+                });
+                match result {
+                    Ok(()) => {
+                        let _ = ctx.app.emit("notes:changed", id);
+                        render_note_card(&self.repo, id, false)
+                    }
+                    Err(e) => Reply::text(format!("⚠️ {e}")),
                 }
-            ));
+            }
         }
-        if summaries.len() > 10 {
-            out.push_str(&format!("…ще {}\n", summaries.len() - 10));
+    }
+}
+
+/// Notes per page in the `/notes` list card.
+const NOTES_PAGE_SIZE: usize = 8;
+/// Telegram caps a message at 4096 chars; leave room for the header.
+const NOTE_BODY_MAX_CHARS: usize = 3_500;
+
+#[derive(Debug, PartialEq, Eq)]
+enum NotesAction {
+    Page(usize),
+    Open(i64),
+    /// First tap on 🗑 — the card asks for confirmation in place.
+    AskDelete(i64),
+    /// Second tap — actually delete.
+    Delete(i64),
+    Pin(i64),
+}
+
+fn parse_notes_args(args: &str) -> NotesAction {
+    let toks: Vec<&str> = args
+        .split([':', ' '])
+        .filter(|t| !t.is_empty())
+        .collect();
+    let id = toks.get(1).and_then(|t| t.parse::<i64>().ok());
+    let verb = toks.first().map(|t| t.to_ascii_lowercase());
+    match (verb.as_deref(), id) {
+        (Some("open"), Some(i)) => NotesAction::Open(i),
+        (Some("del"), Some(i)) => NotesAction::AskDelete(i),
+        (Some("delok"), Some(i)) => NotesAction::Delete(i),
+        // "🗑 Undo" under a saved `/note` never expires, so it goes
+        // through the same two-tap confirm as 🗑.
+        (Some("undo"), Some(i)) => NotesAction::AskDelete(i),
+        (Some("pin"), Some(i)) => NotesAction::Pin(i),
+        (Some("page" | "p"), _) => NotesAction::Page(
+            toks.get(1)
+                .and_then(|t| t.parse::<usize>().ok())
+                .unwrap_or(1)
+                .max(1),
+        ),
+        // Bare number → open that note, mirroring `/clip N`.
+        (Some(v), None) if v.parse::<i64>().is_ok() => NotesAction::Open(v.parse().unwrap()),
+        _ => NotesAction::Page(1),
+    }
+}
+
+fn notes_cb(verb: &str, id: i64) -> String {
+    format!("refresh:notes:{verb}:{id}")
+}
+
+/// Delete a note with the same file cleanup the Notes tab does (audio +
+/// attachments) when the app handle is available; falls back to a bare
+/// row delete otherwise. Returns `Ok(false)` when the note doesn't exist.
+pub(crate) fn delete_note(
+    app: Option<&tauri::AppHandle>,
+    repo: &Arc<Mutex<NotesRepo>>,
+    id: i64,
+) -> Result<bool, String> {
+    let exists = repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get(id)
+        .map_err(|e| e.to_string())?
+        .is_some();
+    if !exists {
+        return Ok(false);
+    }
+    let notes_state =
+        app.and_then(|a| a.try_state::<crate::modules::notes::commands::NotesState>());
+    match (app, notes_state) {
+        (Some(a), Some(st)) => crate::modules::notes::commands::notes_delete(a.clone(), st, id)?,
+        _ => repo
+            .lock()
+            .map_err(|e| e.to_string())?
+            .delete(id)
+            .map_err(|e| e.to_string())?,
+    }
+    if let Some(a) = app {
+        let _ = a.emit("notes:changed", id);
+    }
+    Ok(true)
+}
+
+fn render_notes_page(repo: &Arc<Mutex<NotesRepo>>, page: usize, status: Option<String>) -> Reply {
+    let summaries = match repo.lock() {
+        Ok(r) => match r.list_summaries(crate::modules::notes::repo::FolderFilter::All) {
+            Ok(v) => v,
+            Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+        },
+        Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+    };
+    let mut out = status.map(|s| format!("{s}\n\n")).unwrap_or_default();
+    if summaries.is_empty() {
+        out.push_str("📭 Нотаток ще немає. Додай `/note <текст>`.");
+        return Reply {
+            text: out,
+            keyboard: Some(InlineKeyboard {
+                rows: vec![vec![super::menu::menu_button()]],
+            }),
+            ..Default::default()
+        };
+    }
+    let pages = summaries.len().div_ceil(NOTES_PAGE_SIZE);
+    let page = page.clamp(1, pages);
+    let skip = (page - 1) * NOTES_PAGE_SIZE;
+    out.push_str(&format!("📝 Нотатки · {page}/{pages}:\n"));
+    let mut rows: Vec<Vec<InlineButton>> = Vec::new();
+    for s in summaries.iter().skip(skip).take(NOTES_PAGE_SIZE) {
+        let preview = s.preview.trim().replace('\n', " ");
+        let preview_short: String = preview.chars().take(60).collect();
+        let pin = if s.pinned { "📌 " } else { "" };
+        out.push_str(&format!(
+            "• {pin}№{} — {}\n",
+            s.id,
+            if preview_short.is_empty() {
+                s.title.clone()
+            } else {
+                format!("{} · {}", s.title, preview_short)
+            }
+        ));
+        rows.push(vec![InlineButton::new(
+            format!("{pin}№{} {}", s.id, truncate_preview(s.title.trim(), 28)),
+            notes_cb("open", s.id),
+        )]);
+    }
+    let mut nav = Vec::new();
+    if page > 1 {
+        nav.push(InlineButton::new("⬅️", format!("refresh:notes:page:{}", page - 1)));
+    }
+    if page < pages {
+        nav.push(InlineButton::new("➡️", format!("refresh:notes:page:{}", page + 1)));
+    }
+    nav.push(super::menu::menu_button());
+    rows.push(nav);
+    Reply {
+        text: out.trim_end().to_string(),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
+/// Full note view. `confirm_delete` swaps the action row for a
+/// second-tap confirmation so a stray tap never deletes anything.
+fn render_note_card(repo: &Arc<Mutex<NotesRepo>>, id: i64, confirm_delete: bool) -> Reply {
+    let note = match repo.lock().map_err(|e| e.to_string()).and_then(|r| r.get(id).map_err(|e| e.to_string())) {
+        Ok(Some(n)) => n,
+        Ok(None) => return render_notes_page(repo, 1, Some(format!("❓ Нотатки №{id} немає."))),
+        Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+    };
+    let pin = if note.pinned { "📌 " } else { "" };
+    let body = note.body.trim();
+    let mut text = format!("{pin}📝 №{} · {}\n\n", note.id, note.title.trim());
+    if body.is_empty() {
+        text.push_str("(порожня нотатка)");
+    } else {
+        text.push_str(&truncate_preview(body, NOTE_BODY_MAX_CHARS));
+        if body.chars().count() > NOTE_BODY_MAX_CHARS {
+            text.push_str("\n\n✂️ Обрізано — повний текст у Stash → Notes.");
         }
-        Reply::text(out.trim_end().to_string())
+    }
+    let rows = if confirm_delete {
+        text.push_str("\n\n⚠️ Видалити цю нотатку? Натисни ще раз, щоб підтвердити.");
+        vec![vec![
+            InlineButton::new("🗑 Так, видалити", notes_cb("delok", id)),
+            InlineButton::new("↩️ Ні", notes_cb("open", id)),
+        ]]
+    } else {
+        vec![
+            vec![
+                InlineButton::new(
+                    if note.pinned { "📍 Відкріпити" } else { "📌 Закріпити" },
+                    notes_cb("pin", id),
+                ),
+                InlineButton::new("🗑 Видалити", notes_cb("del", id)),
+            ],
+            vec![InlineButton::new("⬅️ Назад", "refresh:notes:page:1")],
+        ]
+    };
+    Reply {
+        text,
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
     }
 }
 
@@ -509,7 +950,10 @@ impl CommandHandler for RemindCmd {
                 Reply {
                     text: format!("⏰ №{id} заплановано {when}: {text}\n{tag}"),
                     keyboard: Some(InlineKeyboard {
-                        rows: vec![vec![InlineButton::new("✖ Cancel", format!("forget:{id}"))]],
+                        rows: vec![vec![
+                            InlineButton::new("✖ Скасувати", reminders::cancel_cb(id)),
+                            InlineButton::new("⏰ Усі", "reminders"),
+                        ]],
                     }),
                     ..Default::default()
                 }
@@ -544,44 +988,14 @@ impl CommandHandler for RemindersCmd {
         "reminders"
     }
     fn description(&self) -> &'static str {
-        "Список активних нагадувань"
+        "Список активних нагадувань з кнопками скасування / відкладення"
     }
     fn usage(&self) -> &'static str {
-        "/reminders"
+        "/reminders [cancel <id> | snooze <id> <10m|1h|tomorrow> | done <id>]"
     }
-    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
-        let repo = match self.state.repo.lock() {
-            Ok(r) => r,
-            Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
-        };
-        let items = match repo.list_active_reminders() {
-            Ok(v) => v,
-            Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
-        };
-        if items.is_empty() {
-            return Reply::text("📭 Немає активних нагадувань.");
-        }
-        let now = now_secs();
-        let mut out = String::from("⏰ Активні:\n");
-        for r in items.iter().take(20) {
-            let delta = r.due_at - now;
-            let when = if delta < 0 {
-                "(прострочено)".to_string()
-            } else if delta < 60 {
-                "< 1 хв".to_string()
-            } else if delta < 3600 {
-                format!("{} хв", delta / 60)
-            } else if delta < 86_400 {
-                format!("{} год", delta / 3600)
-            } else {
-                format!("{} дн", delta / 86_400)
-            };
-            out.push_str(&format!("• №{} ({when}) — {}\n", r.id, r.text));
-        }
-        if items.len() > 20 {
-            out.push_str(&format!("…ще {}\n", items.len() - 20));
-        }
-        Reply::text(out.trim_end().to_string())
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        // Card rendering + button actions live in `reminders.rs`.
+        reminders::handle_command(&ctx.app, &self.state, args)
     }
 }
 
@@ -623,7 +1037,13 @@ impl CommandHandler for ForgetCmd {
             Ok(true) => {
                 use tauri::Emitter;
                 let _ = ctx.app.emit("reminders:changed", ());
-                Reply::text(format!("🗑️ Скасовано нагадування №{id}."))
+                Reply {
+                    text: format!("🗑️ Скасовано нагадування №{id}."),
+                    keyboard: Some(InlineKeyboard {
+                        rows: vec![vec![InlineButton::new("⏰ Список", "reminders")]],
+                    }),
+                    ..Default::default()
+                }
             }
             Ok(false) => Reply::text(format!("❓ Немає активного нагадування №{id}.")),
             Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
@@ -651,29 +1071,43 @@ impl CommandHandler for VolumeCmd {
         "/volume [N | up | down | mute | unmute]"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
-        let raw = args.trim().to_lowercase();
-        let action = match raw.as_str() {
-            "" | "status" => VolumeAction::Status,
-            "up" | "+" => VolumeAction::Step(10),
-            "down" | "-" => VolumeAction::Step(-10),
-            "mute" => VolumeAction::Mute(true),
-            "unmute" => VolumeAction::Mute(false),
-            other => match other.parse::<i32>() {
-                Ok(n) => VolumeAction::Set(n.clamp(0, 100) as u32),
-                Err(_) => {
-                    return Reply::text(format!(
-                        "✍️ Usage: /volume [N | up | down | mute | unmute]. Got: {other}"
-                    ));
-                }
-            },
+        let action = match parse_volume_action(args) {
+            Ok(a) => a,
+            Err(other) => {
+                return Reply::text(format!(
+                    "✍️ Usage: /volume [N | +N | -N | up | down | mute | unmute | toggle]. Got: {other}"
+                ));
+            }
         };
         let snap = apply_volume(action);
         Reply {
             text: format_volume(&snap),
-            keyboard: Some(volume_keyboard()),
+            keyboard: Some(volume_keyboard(snap.muted)),
             ..Default::default()
         }
     }
+}
+
+/// `N` sets the level; signed `+N` / `-N` nudge relative to the current
+/// level (so the card's −1/+1 buttons and typed args share one grammar).
+fn parse_volume_action(args: &str) -> Result<VolumeAction, String> {
+    let raw = args.trim().to_lowercase();
+    Ok(match raw.as_str() {
+        "" | "status" => VolumeAction::Status,
+        "up" | "+" => VolumeAction::Step(10),
+        "down" | "-" => VolumeAction::Step(-10),
+        "mute" => VolumeAction::Mute(true),
+        "unmute" => VolumeAction::Mute(false),
+        "toggle" | "togglemute" => VolumeAction::ToggleMute,
+        other if other.starts_with('+') || other.starts_with('-') => match other.parse::<i32>() {
+            Ok(n) => VolumeAction::Step(n.clamp(-100, 100)),
+            Err(_) => return Err(other.to_string()),
+        },
+        other => match other.parse::<i32>() {
+            Ok(n) => VolumeAction::Set(n.clamp(0, 100) as u32),
+            Err(_) => return Err(other.to_string()),
+        },
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -682,6 +1116,7 @@ enum VolumeAction {
     Set(u32),
     Step(i32),
     Mute(bool),
+    ToggleMute,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -701,7 +1136,7 @@ fn apply_volume(action: VolumeAction) -> VolumeSnapshot {
         VolumeAction::Step(delta) => current
             .percent
             .map(|p| (p as i32 + delta).clamp(0, 100) as u32),
-        VolumeAction::Mute(_) => None,
+        VolumeAction::Mute(_) | VolumeAction::ToggleMute => None,
     };
     if let Some(t) = target {
         if let Err(e) = set_volume_percent(t) {
@@ -711,7 +1146,12 @@ fn apply_volume(action: VolumeAction) -> VolumeSnapshot {
             };
         }
     }
-    if let VolumeAction::Mute(on) = action {
+    let mute_target = match action {
+        VolumeAction::Mute(on) => Some(on),
+        VolumeAction::ToggleMute => Some(!current.muted),
+        _ => None,
+    };
+    if let Some(on) = mute_target {
         if let Err(e) = set_mute(on) {
             return VolumeSnapshot {
                 error: Some(e),
@@ -790,44 +1230,22 @@ fn volume_bar(percent: u32) -> String {
     out
 }
 
-fn volume_keyboard() -> InlineKeyboard {
-    // Second row mirrors `music_keyboard()` — callback namespaces route
-    // by first segment, so `music:*` from here hits MusicCmd just like
-    // it would from `/music`. Reply carries its own volume keyboard
-    // back, so the user stays in one message.
+/// Live volume card — every button is `refresh:` so the level line updates
+/// in place. The 🎵 button swaps this card for the player card.
+fn volume_keyboard(muted: bool) -> InlineKeyboard {
+    let b = |text: &str, args: &str| InlineButton::new(text, format!("refresh:volume:{args}"));
     InlineKeyboard {
         rows: vec![
             vec![
-                InlineButton {
-                    text: "➖10".into(),
-                    callback_data: "volume:down".into(),
-                },
-                InlineButton {
-                    text: "🔇".into(),
-                    callback_data: "volume:mute".into(),
-                },
-                InlineButton {
-                    text: "🔊".into(),
-                    callback_data: "volume:unmute".into(),
-                },
-                InlineButton {
-                    text: "➕10".into(),
-                    callback_data: "volume:up".into(),
-                },
+                b("−10", "-10"),
+                b("−1", "-1"),
+                if muted { b("🔊", "unmute") } else { b("🔇", "mute") },
+                b("+1", "+1"),
+                b("+10", "+10"),
             ],
             vec![
-                InlineButton {
-                    text: "⏮️".into(),
-                    callback_data: "music:prev".into(),
-                },
-                InlineButton {
-                    text: "⏯️".into(),
-                    callback_data: "music:toggle".into(),
-                },
-                InlineButton {
-                    text: "⏭️".into(),
-                    callback_data: "music:next".into(),
-                },
+                InlineButton::new("🎵 Плеєр", "refresh:music"),
+                b("🔄", "status"),
             ],
         ],
     }
@@ -846,19 +1264,19 @@ impl CommandHandler for MusicCmd {
         "Показати або керувати плеєром YouTube Music"
     }
     fn usage(&self) -> &'static str {
-        "/music [play|pause|next|prev]"
+        "/music [play|pause|toggle|next|prev|volup|voldown|open]"
     }
     async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let sub = args.trim().to_lowercase();
         match sub.as_str() {
-            "" | "status" => {
-                let snapshot = read_now_playing(&ctx.app);
-                let text = format_now_playing(&snapshot);
-                Reply {
-                    text,
-                    keyboard: Some(music_keyboard()),
-                    ..Default::default()
-                }
+            "" | "status" => music_card(&ctx.app, None),
+            "volup" | "vol+" | "volumeup" => {
+                let snap = apply_volume(VolumeAction::Step(10));
+                music_card(&ctx.app, snap.error.as_deref().map(|e| format!("⚠️ {e}")))
+            }
+            "voldown" | "vol-" | "volumedown" => {
+                let snap = apply_volume(VolumeAction::Step(-10));
+                music_card(&ctx.app, snap.error.as_deref().map(|e| format!("⚠️ {e}")))
             }
             "open" => {
                 reveal_music_tab(&ctx.app);
@@ -897,7 +1315,8 @@ impl CommandHandler for MusicCmd {
                 .await
             }
             _ => Reply::text(format!(
-                "✍️ Використання: /music [play|pause|next|prev]. Отримано: {sub}"
+                "✍️ Використання: {}. Отримано: {sub}",
+                self.usage()
             )),
         }
     }
@@ -1054,29 +1473,37 @@ fn reveal_music_tab(app: &tauri::AppHandle) {
 /// `reveal_music_tab` and swaps back to the full playback keyboard.
 fn music_open_keyboard() -> InlineKeyboard {
     InlineKeyboard {
-        rows: vec![vec![InlineButton {
-            text: "📻 Відкрити Music".into(),
-            callback_data: "music:open".into(),
-        }]],
+        rows: vec![vec![InlineButton::new("📻 Відкрити Music", "refresh:music:open")]],
     }
 }
 
+/// Player card: now-playing + system volume, with the live keyboard.
+fn music_card(app: &tauri::AppHandle, note: Option<String>) -> Reply {
+    let mut text = format_now_playing(&read_now_playing(app));
+    let vol = read_volume();
+    if let Some(p) = vol.percent {
+        let icon = if vol.muted { "🔇" } else { "🔊" };
+        text.push_str(&format!("\n{icon} {p}% {}", volume_bar(p)));
+    }
+    if let Some(n) = note {
+        text = format!("{n}\n\n{text}");
+    }
+    Reply {
+        text,
+        keyboard: Some(music_keyboard()),
+        ..Default::default()
+    }
+}
+
+/// Live player keyboard — `refresh:` so taps edit the card in place.
 fn music_keyboard() -> InlineKeyboard {
+    let b = |text: &str, args: &str| InlineButton::new(text, format!("refresh:music:{args}"));
     InlineKeyboard {
-        rows: vec![vec![
-            InlineButton {
-                text: "⏮️".into(),
-                callback_data: "music:prev".into(),
-            },
-            InlineButton {
-                text: "⏯️".into(),
-                callback_data: "music:toggle".into(),
-            },
-            InlineButton {
-                text: "⏭️".into(),
-                callback_data: "music:next".into(),
-            },
-        ]],
+        rows: vec![
+            vec![b("⏮️", "prev"), b("⏯️", "toggle"), b("⏭️", "next")],
+            vec![b("🔉", "voldown"), b("🔊", "volup")],
+            vec![b("🔄", "status")],
+        ],
     }
 }
 
@@ -1271,8 +1698,7 @@ mod tests {
             bpm: Some(140),
             numerator: Some(6),
             denominator: Some(8),
-            subdivision: None,
-            sound: None,
+            ..Default::default()
         };
         let out = format_metronome_reply(&r);
         assert!(out.contains("140"));
@@ -1412,6 +1838,52 @@ mod tests {
     }
 
     #[test]
+    fn known_tabs_cover_every_frontend_module() {
+        // Every `id: '…'` declared by a frontend module wired into
+        // `registry.ts` (plus Settings, which lives outside src/modules)
+        // must be navigable from Telegram / the assistant.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let registry = std::fs::read_to_string(root.join("src/modules/registry.ts"))
+            .expect("read registry.ts");
+        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("src/modules"))
+            .expect("read src/modules")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().join("index.tsx"))
+            .filter(|p| p.exists())
+            .collect();
+        files.push(root.join("src/settings/index.tsx"));
+        let mut checked = 0;
+        for file in files {
+            let src = std::fs::read_to_string(&file).unwrap();
+            let Some(export) = src
+                .split("export const ")
+                .nth(1)
+                .and_then(|r| r.split(':').next())
+                .map(str::trim)
+            else {
+                continue;
+            };
+            if !registry.contains(export) {
+                continue;
+            }
+            let Some(id) = src
+                .lines()
+                .find_map(|l| l.trim().strip_prefix("id: '"))
+                .and_then(|r| r.split('\'').next())
+            else {
+                continue;
+            };
+            assert!(
+                KNOWN_TABS.contains(&id),
+                "KNOWN_TABS is missing frontend tab `{id}` ({})",
+                file.display()
+            );
+            checked += 1;
+        }
+        assert!(checked >= 15, "parsed only {checked} frontend tab ids");
+    }
+
+    #[test]
     fn known_tabs_include_valeton_and_pomodoro() {
         // The metronome no longer has its own tab — it lives inside the
         // Valeton editor — so `/metronome` reveals `valeton-editor`.
@@ -1475,7 +1947,16 @@ impl CommandHandler for RememberCmd {
             repo.memory_insert(text, now)
         };
         match result {
-            Ok(id) => Reply::text(format!("🧠 Записав. (id {id})")),
+            Ok(id) => Reply {
+                text: format!("🧠 Записав. (id {id})"),
+                keyboard: Some(InlineKeyboard {
+                    rows: vec![vec![
+                        InlineButton::new("↩️ Undo", memory_ask_cb(id)),
+                        InlineButton::new("🧠 Усі факти", "memory"),
+                    ]],
+                }),
+                ..Default::default()
+            },
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
     }
@@ -1501,9 +1982,38 @@ impl CommandHandler for MemoryCmd {
         "Показати все, що я пам'ятаю про тебе"
     }
     fn usage(&self) -> &'static str {
-        "/memory"
+        "/memory [del <id>]"
     }
-    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        // Per-fact 🗑 buttons (and the Undo under `/remember`) send
+        // `ask:<id>` → confirm card; its ✅ sends `del:<id>`. A typed
+        // `/memory del <id>` deletes directly. The card re-renders in
+        // place afterwards.
+        let mut status = String::new();
+        let action = parse_memory_args(args);
+        if let MemoryAction::Ask(id) = action {
+            let fact = match self.state.repo.lock() {
+                Ok(r) => r.memory_list().ok().and_then(|rows| {
+                    rows.into_iter().find(|r| r.id == id).map(|r| r.fact)
+                }),
+                Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
+            };
+            if let Some(fact) = fact {
+                return memory_confirm_card(id, &fact);
+            }
+            status = format!("🤷 Немає факту з id {id}.\n\n");
+        }
+        if let MemoryAction::Delete(id) = action {
+            let result = match self.state.repo.lock() {
+                Ok(mut r) => r.memory_delete(id),
+                Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
+            };
+            status = match result {
+                Ok(true) => format!("🧠 Забув факт {id}.\n\n"),
+                Ok(false) => format!("🤷 Немає факту з id {id}.\n\n"),
+                Err(e) => format!("⚠️ {e}\n\n"),
+            };
+        }
         let rows = {
             let repo = match self.state.repo.lock() {
                 Ok(r) => r,
@@ -1512,19 +2022,82 @@ impl CommandHandler for MemoryCmd {
             repo.memory_list()
         };
         match rows {
-            Ok(rows) if rows.is_empty() => {
-                Reply::text("🗒 Поки що нічого. Почни з `/remember <факт>`.")
-            }
+            Ok(rows) if rows.is_empty() => Reply {
+                text: format!("{status}🗒 Поки що нічого. Почни з `/remember <факт>`."),
+                keyboard: Some(InlineKeyboard {
+                    rows: vec![vec![super::menu::menu_button()]],
+                }),
+                ..Default::default()
+            },
             Ok(rows) => {
                 let body = rows
                     .iter()
                     .map(|r| format!("• {} (id {})", r.fact, r.id))
                     .collect::<Vec<_>>()
                     .join("\n");
-                Reply::text(format!("🗒 Факти:\n{body}"))
+                // Two delete buttons per row, capped so a long memory
+                // doesn't turn into a wall of buttons.
+                let mut kb_rows: Vec<Vec<InlineButton>> = rows
+                    .iter()
+                    .take(12)
+                    .map(|r| {
+                        InlineButton::new(
+                            format!("🗑 {}", truncate_preview(&r.fact, 18)),
+                            memory_ask_cb(r.id),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .chunks(2)
+                    .map(|c| c.to_vec())
+                    .collect();
+                kb_rows.push(super::menu::nav_row("refresh:memory"));
+                Reply {
+                    text: format!("{status}🗒 Факти:\n{body}"),
+                    keyboard: Some(InlineKeyboard { rows: kb_rows }),
+                    ..Default::default()
+                }
             }
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryAction {
+    List,
+    /// First tap on 🗑 — confirm card.
+    Ask(i64),
+    /// Confirmed (or typed) delete.
+    Delete(i64),
+}
+
+fn parse_memory_args(args: &str) -> MemoryAction {
+    let toks: Vec<&str> = args.split([':', ' ']).filter(|t| !t.is_empty()).collect();
+    let id = toks.get(1).and_then(|t| t.parse::<i64>().ok());
+    match (toks.first().copied(), id) {
+        (Some("ask"), Some(i)) => MemoryAction::Ask(i),
+        (Some("del"), Some(i)) => MemoryAction::Delete(i),
+        _ => MemoryAction::List,
+    }
+}
+
+fn memory_ask_cb(id: i64) -> String {
+    format!("refresh:memory:ask:{id}")
+}
+
+fn memory_confirm_card(id: i64, fact: &str) -> Reply {
+    Reply {
+        text: format!(
+            "⚠️ Забути факт (id {id})?\n\n«{}»",
+            truncate_preview(fact, 300)
+        ),
+        keyboard: Some(InlineKeyboard {
+            rows: vec![vec![
+                InlineButton::new("🗑 Так, забути", format!("refresh:memory:del:{id}")),
+                InlineButton::new("↩️ Ні", "refresh:memory"),
+            ]],
+        }),
+        ..Default::default()
     }
 }
 
@@ -1681,7 +2254,13 @@ impl CommandHandler for ScreenshotCmd {
             text: caption,
             documents: files,
             keyboard: Some(InlineKeyboard {
-                rows: vec![vec![InlineButton::new("📸 Again", "screenshot")]],
+                // Plain `menu` (not `refresh:`) — a document message
+                // can't be edited into a text card.
+                rows: vec![vec![
+                    InlineButton::new("📸 Again", "screenshot"),
+                    InlineButton::new("📸 Лише головний", "screenshot:main"),
+                    InlineButton::new("☰ Меню", "menu"),
+                ]],
             }),
         }
     }
@@ -1699,17 +2278,48 @@ impl CommandHandler for DisplayCmd {
         "display"
     }
     fn description(&self) -> &'static str {
-        "Погасити екрани. Mac і фонові задачі (Claude, білди, завантаження) працюють далі."
+        "Погасити екрани (Mac і фонові задачі працюють далі) або змінити яскравість: `up` / `down`."
     }
     fn usage(&self) -> &'static str {
-        "/display"
+        "/display [off|up|down]"
     }
-    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
-        match tokio::task::spawn_blocking(power::display_off).await {
-            Ok(Ok(())) => Reply::text("💤 Екрани погашено (Mac працює далі)."),
-            Ok(Err(e)) => Reply::text(format!("⚠️ display: {e}")),
-            Err(e) => Reply::text(format!("⚠️ display: task join: {e}")),
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let text = match args.trim().to_ascii_lowercase().as_str() {
+            "" | "off" | "sleep" => match tokio::task::spawn_blocking(power::display_off).await {
+                Ok(Ok(())) => "💤 Екрани погашено (Mac працює далі).".to_string(),
+                Ok(Err(e)) => format!("⚠️ display: {e}"),
+                Err(e) => format!("⚠️ display: task join: {e}"),
+            },
+            verb @ ("up" | "+" | "brighter" | "down" | "-" | "dimmer") => {
+                let up = matches!(verb, "up" | "+" | "brighter");
+                let res = tokio::task::spawn_blocking(move || {
+                    crate::modules::system::displays::adjust_brightness(up)
+                })
+                .await;
+                match res {
+                    Ok(Ok(())) if up => "🔆 Яскравість + (вбудований дисплей).".to_string(),
+                    Ok(Ok(())) => "🔅 Яскравість − (вбудований дисплей).".to_string(),
+                    Ok(Err(e)) => format!("⚠️ brightness: {e}"),
+                    Err(e) => format!("⚠️ brightness: task join: {e}"),
+                }
+            }
+            other => format!("❓ Невідомо: `{other}`. Використання: {}", self.usage()),
+        };
+        Reply {
+            text,
+            keyboard: Some(display_keyboard()),
+            ..Default::default()
         }
+    }
+}
+
+fn display_keyboard() -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![vec![
+            InlineButton::new("🔅", "refresh:display:down"),
+            InlineButton::new("🔆", "refresh:display:up"),
+            InlineButton::new("💤 Погасити", "refresh:display:off"),
+        ]],
     }
 }
 
@@ -1783,45 +2393,66 @@ impl CommandHandler for FocusCmd {
         "/focus <on|off|status>"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let text = self.run(args).await;
+        Reply {
+            text,
+            keyboard: Some(focus_keyboard()),
+            ..Default::default()
+        }
+    }
+}
+
+impl FocusCmd {
+    async fn run(&self, args: &str) -> String {
         let sub = args.trim().to_ascii_lowercase();
         let verb = sub.as_str();
         let status = tokio::task::spawn_blocking(focus::check)
             .await
             .unwrap_or(focus::FocusCheck::ListFailed("internal: task join".into()));
         if verb.is_empty() || verb == "status" {
-            return Reply::text(format_focus_status(&status));
+            return format_focus_status(&status);
         }
         match &status {
             focus::FocusCheck::Ready => {}
             focus::FocusCheck::CliMissing => {
-                return Reply::text("⚠️ `shortcuts` CLI не знайдено. Потрібен macOS 12+.");
+                return "⚠️ `shortcuts` CLI не знайдено. Потрібен macOS 12+.".into();
             }
             focus::FocusCheck::ShortcutsMissing { .. } => {
-                return Reply::text(format!(
+                return format!(
                     "⚠️ Не знайдено потрібних ярликів.\n{}",
                     focus::setup_instructions()
-                ));
+                );
             }
             focus::FocusCheck::ListFailed(e) => {
-                return Reply::text(format!("⚠️ shortcuts list: {e}"));
+                return format!("⚠️ shortcuts list: {e}");
             }
         }
         match verb {
             "on" | "enable" => match tokio::task::spawn_blocking(focus::enable).await {
-                Ok(Ok(())) => Reply::text("🔕 Focus увімкнено."),
-                Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
-                Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                Ok(Ok(())) => "🔕 Focus увімкнено.".into(),
+                Ok(Err(e)) => format!("⚠️ {e}"),
+                Err(e) => format!("⚠️ task join: {e}"),
             },
             "off" | "disable" => match tokio::task::spawn_blocking(focus::disable).await {
-                Ok(Ok(())) => Reply::text("🔔 Focus вимкнено."),
-                Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
-                Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                Ok(Ok(())) => "🔔 Focus вимкнено.".into(),
+                Ok(Err(e)) => format!("⚠️ {e}"),
+                Err(e) => format!("⚠️ task join: {e}"),
             },
-            other => Reply::text(format!(
+            other => format!(
                 "❓ Невідомий підкоманда `{other}`.\nВикористання: {}",
                 self.usage()
-            )),
+            ),
         }
+    }
+}
+
+fn focus_keyboard() -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![vec![
+            InlineButton::new("🔕 Увімкнути", "refresh:focus:on"),
+            InlineButton::new("🔔 Вимкнути", "refresh:focus:off"),
+            InlineButton::new("🔄", "refresh:focus:status"),
+        ]],
     }
 }
 
@@ -1892,12 +2523,30 @@ impl CommandHandler for WeatherCmd {
                 }
             }
         } else {
-            arg
+            arg.clone()
         };
         let for_label = city.clone();
-        match weather::fetch_weather(&city).await {
-            Ok(body) => Reply::text(format!("🌦 {for_label}\n{body}")),
-            Err(e) => Reply::text(format!("⚠️ погода: {e}")),
+        // Refresh re-asks for the same city when it was typed explicitly
+        // and fits in the callback payload; otherwise fall back to the
+        // memory-derived default.
+        let refresh = if arg.is_empty() {
+            "refresh:weather".to_string()
+        } else {
+            let cb = format!("refresh:weather:{arg}");
+            if cb.len() <= 64 {
+                cb
+            } else {
+                "refresh:weather".to_string()
+            }
+        };
+        let text = match weather::fetch_weather(&city).await {
+            Ok(body) => format!("🌦 {for_label}\n{body}"),
+            Err(e) => format!("⚠️ погода: {e}"),
+        };
+        Reply {
+            text,
+            keyboard: Some(super::menu::nav_keyboard(&refresh)),
+            ..Default::default()
         }
     }
 }
@@ -1934,7 +2583,7 @@ impl CommandHandler for AppCmd {
                 Ok(Ok(names)) if names.is_empty() => {
                     Reply::text("🪟 Нічого переднього плану не запущено.")
                 }
-                Ok(Ok(names)) => Reply::text(format!("🪟 Запущено: {}", names.join(", "))),
+                Ok(Ok(names)) => app_running_reply(&names),
                 Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
                 Err(e) => Reply::text(format!("⚠️ task join: {e}")),
             };
@@ -1954,16 +2603,26 @@ impl CommandHandler for AppCmd {
                 let n = name.clone();
                 let result = tokio::task::spawn_blocking(move || apps_control::open_app(&n)).await;
                 match result {
-                    Ok(Ok(())) => Reply::text(format!("🚀 Відкрив: {name}")),
+                    Ok(Ok(())) => app_reply(format!("🚀 Відкрив: {name}"), &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quitask", &name)]),
                     Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
                     Err(e) => Reply::text(format!("⚠️ task join: {e}")),
                 }
             }
+            // "🛑 Закрити" button → confirm in the same card first, so a
+            // stray tap can't kill an app with unsaved work.
+            "quitask" => app_reply(
+                format!("🛑 Закрити {name}?"),
+                &[("✅ Так, закрити", "quit", &name), ("✖ Ні", "keep", &name)],
+            ),
+            "keep" => app_reply(
+                format!("🚀 {name}"),
+                &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quitask", &name)],
+            ),
             "hide" | "minimize" => {
                 let n = name.clone();
                 let result = tokio::task::spawn_blocking(move || apps_control::hide_app(&n)).await;
                 match result {
-                    Ok(Ok(())) => Reply::text(format!("👻 Згорнув: {name}")),
+                    Ok(Ok(())) => app_reply(format!("👻 Згорнув: {name}"), &[("🚀 Відкрити", "open", &name)]),
                     Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
                     Err(e) => Reply::text(format!("⚠️ task join: {e}")),
                 }
@@ -1973,7 +2632,7 @@ impl CommandHandler for AppCmd {
                 let result = tokio::task::spawn_blocking(move || apps_control::quit_app(&n)).await;
                 match result {
                     Ok(Ok(apps_control::QuitOutcome::Quit { resolved_name })) => {
-                        Reply::text(format!("🛑 Закрив: {resolved_name}"))
+                        app_reply(format!("🛑 Закрив: {resolved_name}"), &[("🚀 Відкрити", "open", &resolved_name)])
                     }
                     Ok(Ok(apps_control::QuitOutcome::NotRunning)) => {
                         Reply::text(format!("ℹ️ `{name}` не запущений — нема чого закривати."))
@@ -1999,9 +2658,50 @@ impl CommandHandler for AppCmd {
     }
 }
 
+/// `app:<verb> <name>` payload, or `None` when the app name would push
+/// it past Telegram's 64-byte callback limit.
+fn app_cb(verb: &str, name: &str) -> Option<String> {
+    let cb = format!("app:{verb} {name}");
+    (cb.len() <= 64).then_some(cb)
+}
+
+/// Single-app result card with follow-up actions that edit it in place.
+fn app_reply(text: String, actions: &[(&str, &str, &str)]) -> Reply {
+    let row: Vec<InlineButton> = actions
+        .iter()
+        .filter_map(|(label, verb, name)| {
+            app_cb(verb, name).map(|cb| InlineButton::new(*label, format!("refresh:{cb}")))
+        })
+        .filter(|b| b.callback_data.len() <= 64)
+        .collect();
+    Reply {
+        text,
+        keyboard: (!row.is_empty()).then(|| InlineKeyboard { rows: vec![row] }),
+        ..Default::default()
+    }
+}
+
+/// Running-apps list with a "hide" button per app (non-destructive, so a
+/// mis-tap is harmless) plus refresh.
+fn app_running_reply(names: &[String]) -> Reply {
+    let buttons: Vec<InlineButton> = names
+        .iter()
+        .take(12)
+        .filter_map(|n| app_cb("hide", n).map(|cb| InlineButton::new(format!("👻 {n}"), cb)))
+        .collect();
+    let mut rows: Vec<Vec<InlineButton>> = buttons.chunks(3).map(|c| c.to_vec()).collect();
+    rows.push(super::menu::nav_row("refresh:app:running"));
+    Reply {
+        text: format!("🪟 Запущено: {}", names.join(", ")),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
 /// Tab IDs the frontend's module registry currently recognises. Kept in
-/// sync manually with `src/modules/*/index.tsx` — changes there must land
-/// here the same commit (see CLAUDE.md "Agent surface").
+/// sync manually with `src/modules/*/index.tsx` + `src/settings/index.tsx`
+/// — the `known_tabs_cover_every_frontend_module` test fails when a
+/// frontend tab is missing here (see CLAUDE.md "Agent surface").
 pub const KNOWN_TABS: &[&str] = &[
     "clipboard",
     "translator",
@@ -2015,6 +2715,12 @@ pub const KNOWN_TABS: &[&str] = &[
     "terminal",
     "web",
     "system",
+    "canvas",
+    "converter",
+    "separator",
+    "reminders",
+    "dev",
+    "settings",
 ];
 
 pub struct NavigateCmd;
@@ -2062,8 +2768,15 @@ fn reveal_tab(app: &tauri::AppHandle, tab_id: &str) {
 
 // -------------------- /metronome --------------------
 
+use crate::modules::metronome::commands::MetronomeStateHandle;
+use crate::modules::metronome::state::{
+    MetronomeState, Preset as MetronomePreset, TrainerConfig as MetronomeTrainer,
+};
+
 /// Payload for the `metronome:remote` event. Frontend applies the patch
-/// (any `Some` field), then reacts to `action`.
+/// (any `Some` field), then reacts to `action`. Fields are already resolved
+/// against the persisted state (relative BPM, presets, trainer merge), so the
+/// listener only has to copy them in.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct MetronomeRemote {
     pub action: Option<String>,
@@ -2072,6 +2785,43 @@ pub struct MetronomeRemote {
     pub denominator: Option<u8>,
     pub subdivision: Option<u8>,
     pub sound: Option<String>,
+    /// Linear 0..1, same unit as the tab's slider.
+    pub click_volume: Option<f32>,
+    pub accent_volume: Option<f32>,
+    pub beat_accents: Option<Vec<bool>>,
+    /// Full trainer config after merging the requested changes.
+    pub trainer: Option<MetronomeTrainer>,
+    /// Full preset list, sent only when a preset was saved or deleted.
+    pub presets: Option<Vec<MetronomePreset>>,
+}
+
+/// Parsed `/metronome` arguments — raw user intent before it is resolved
+/// against the persisted state (see `resolve_metronome`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MetronomeArgs {
+    pub action: Option<String>,
+    pub bpm: Option<u32>,
+    /// Relative BPM change (`bpm=+5` / `bpm=-1`).
+    pub bpm_delta: Option<i32>,
+    pub numerator: Option<u8>,
+    pub denominator: Option<u8>,
+    pub subdivision: Option<u8>,
+    pub sound: Option<String>,
+    /// Percent 0..100.
+    pub click_volume: Option<u8>,
+    /// Percent 0..100.
+    pub accent_volume: Option<u8>,
+    pub beat_accents: Option<Vec<bool>>,
+    pub trainer_enabled: Option<bool>,
+    pub trainer_step: Option<u32>,
+    pub trainer_bars: Option<u32>,
+    pub trainer_target: Option<u32>,
+    /// Apply a saved preset (by id or case-insensitive name).
+    pub preset: Option<String>,
+    /// Save the resulting state as a preset with this name.
+    pub save_preset: Option<String>,
+    /// Delete a saved preset (by id or case-insensitive name).
+    pub delete_preset: Option<String>,
 }
 
 pub struct MetronomeCmd;
@@ -2082,49 +2832,210 @@ impl CommandHandler for MetronomeCmd {
         "metronome"
     }
     fn description(&self) -> &'static str {
-        "Керувати метрономом. Приклади: `start bpm=140 sig=6/8`, `stop`, `bpm=100`."
+        "Керувати метрономом. Приклади: `start bpm=140 sig=6/8`, `stop`, `bpm=+5`, `vol=60`, `trainer=on`, `preset=\"Slow blues\"`."
     }
     fn usage(&self) -> &'static str {
-        "/metronome [start|stop|toggle] [bpm=N] [sig=N/D] [sub=1..4] [sound=click|wood|beep]"
+        "/metronome [start|stop|toggle|status] [bpm=N|+N|-N] [sig=N/D] [sub=1..4] [sound=click|wood|beep] \
+         [vol=0..100] [accent_vol=0..100] [accents=1000] [trainer=on|off] [trainer_step=N] \
+         [trainer_bars=N] [trainer_target=N] [preset=<name>] [save=<name>] [delete=<name>]"
     }
     async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let parsed = match parse_metronome_args(args) {
             Ok(p) => p,
             Err(e) => return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage())),
         };
-        // Reveal + mount the Valeton editor tab (which now hosts the
-        // metronome shell) so its `metronome:remote` listener is attached by
-        // the time we emit the remote payload. Two pieces of async work but
-        // both are best-effort — `nav:activate` handled by shell; sleep gives
-        // Suspense a moment to resolve the lazy chunk.
-        reveal_tab(&ctx.app, "valeton-editor");
-        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-        let _ = ctx.app.emit("metronome:remote", &parsed);
-        Reply::text(format_metronome_reply(&parsed))
+        let path = metronome_state_path(&ctx.app);
+        let current = path
+            .as_ref()
+            .map(MetronomeState::load)
+            .unwrap_or_default();
+        let (mut remote, next) = match resolve_metronome(&parsed, &current, now_ms()) {
+            Ok(r) => r,
+            Err(e) => {
+                return metronome_card(&current, None, Some(&format!("⚠️ {e}")));
+            }
+        };
+        // Persist first so the change sticks even when the Valeton tab isn't
+        // mounted — the shell hydrates from disk on mount.
+        if next != current {
+            if let Some(p) = &path {
+                if let Err(e) = next.save(p) {
+                    tracing::warn!(error = %e, "metronome: persist failed");
+                }
+            }
+        }
+        // Bare `/metronome` (and the 🔄 button) is a status probe — ask the
+        // shell whether it's playing without touching anything.
+        if remote.action.is_none() && parsed == MetronomeArgs::default() {
+            remote.action = Some("status".into());
+        }
+        // Playback needs the audio engine, which lives in the Valeton tab —
+        // reveal it and keep re-emitting until the lazy chunk mounts and
+        // acks. Pure setting changes are already on disk, so they only need
+        // a short ack window (live apply when the shell is mounted).
+        let needs_ui = matches!(remote.action.as_deref(), Some("start" | "toggle"));
+        if needs_ui {
+            reveal_tab(&ctx.app, "valeton-editor");
+        }
+        let window = if needs_ui {
+            std::time::Duration::from_secs(4)
+        } else {
+            std::time::Duration::from_millis(400)
+        };
+        let payload = serde_json::to_value(&remote).unwrap_or_default();
+        let ack = emit_with_ack(&ctx.app, "metronome:remote", payload, window).await;
+        let playing = ack
+            .as_ref()
+            .and_then(|v| v.get("playing"))
+            .and_then(|v| v.as_bool());
+        let note = if needs_ui && ack.is_none() {
+            Some("⚠️ Метроном не відповів — відкрий Stash → Valeton (вигляд з педалями).".to_string())
+        } else if remote.action.as_deref() == Some("status") {
+            None
+        } else {
+            Some(format_metronome_reply(&remote))
+        };
+        metronome_card(&next, playing, note.as_deref())
     }
 }
 
-fn parse_metronome_args(args: &str) -> Result<MetronomeRemote, String> {
-    let mut out = MetronomeRemote::default();
-    for tok in args.split_whitespace() {
-        match tok.to_ascii_lowercase().as_str() {
+/// Same path resolution as `metronome::commands` (app-data dir, falling back
+/// to the path captured at setup).
+fn metronome_state_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    let fallback = app
+        .try_state::<MetronomeStateHandle>()
+        .map(|h| h.path.lock().unwrap().clone());
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("metronome.json"))
+        .ok()
+        .or(fallback)
+}
+
+static REMOTE_ACK_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Emit `event` tagged with a fresh `ack_id` and wait for the frontend to
+/// echo it on `<event>:ack`. Re-emits every 250 ms until `window` elapses so
+/// a lazy tab that mounts mid-wait still receives the payload (replaces the
+/// old blind "sleep 350 ms then emit"). The listener dedupes by `ack_id`, so
+/// a re-emit never applies the same command twice. Returns the ack payload,
+/// or `None` when nothing answered in time.
+async fn emit_with_ack(
+    app: &tauri::AppHandle,
+    event: &str,
+    mut payload: serde_json::Value,
+    window: std::time::Duration,
+) -> Option<serde_json::Value> {
+    use tauri::Listener;
+    let ack_id = REMOTE_ACK_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("ack_id".into(), serde_json::json!(ack_id));
+    }
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<serde_json::Value>();
+    let listener = app.listen(format!("{event}:ack"), move |e| {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(e.payload()) {
+            if v.get("ack_id").and_then(|x| x.as_u64()) == Some(ack_id) {
+                let _ = tx.send(v);
+            }
+        }
+    });
+    let deadline = std::time::Instant::now() + window;
+    let mut result = None;
+    loop {
+        let _ = app.emit(event, &payload);
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let wait = (deadline - now).min(std::time::Duration::from_millis(250));
+        if let Ok(Some(v)) = tokio::time::timeout(wait, rx.recv()).await {
+            result = Some(v);
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+    }
+    app.unlisten(listener);
+    result
+}
+
+/// Split on whitespace but keep `key="quoted value"` together (quotes
+/// stripped) so preset names with spaces survive the slash syntax.
+fn tokenize_quoted(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    for ch in s.chars() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            c if c.is_whitespace() && !in_quotes => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+fn parse_percent(key: &str, val: &str) -> Result<u8, String> {
+    let n: u32 = val
+        .trim_end_matches('%')
+        .parse()
+        .map_err(|_| format!("{key} має бути числом 0–100, отримано `{val}`"))?;
+    if n > 100 {
+        return Err(format!("{key} поза межами 0–100: {n}"));
+    }
+    Ok(n as u8)
+}
+
+fn parse_ranged_u32(key: &str, val: &str, min: u32, max: u32) -> Result<u32, String> {
+    let n: u32 = val
+        .parse()
+        .map_err(|_| format!("{key} має бути числом, отримано `{val}`"))?;
+    if !(min..=max).contains(&n) {
+        return Err(format!("{key} поза межами {min}–{max}: {n}"));
+    }
+    Ok(n)
+}
+
+fn parse_metronome_args(args: &str) -> Result<MetronomeArgs, String> {
+    let mut out = MetronomeArgs::default();
+    for raw in tokenize_quoted(args) {
+        let lower = raw.to_ascii_lowercase();
+        match lower.as_str() {
             "start" | "play" => out.action = Some("start".into()),
             "stop" | "pause" => out.action = Some("stop".into()),
             "toggle" => out.action = Some("toggle".into()),
             "status" => out.action = Some("status".into()),
             other => {
-                let (key, val) = other
+                let (key, _) = other
                     .split_once('=')
                     .ok_or_else(|| format!("незрозумілий токен: `{other}`"))?;
+                // Keep the original casing for free-text values (preset names).
+                let val_raw = raw.split_once('=').map(|(_, v)| v).unwrap_or("");
+                let val = val_raw.to_ascii_lowercase();
+                let val = val.as_str();
                 match key {
                     "bpm" => {
-                        let n: u32 = val
-                            .parse()
-                            .map_err(|_| format!("bpm має бути числом, отримано `{val}`"))?;
-                        if !(40..=240).contains(&n) {
-                            return Err(format!("bpm поза межами 40–240: {n}"));
+                        if let Some(rest) = val.strip_prefix('+') {
+                            let n: i32 = rest
+                                .parse()
+                                .map_err(|_| format!("bpm має бути числом, отримано `{val}`"))?;
+                            out.bpm_delta = Some(n.clamp(0, 200));
+                        } else if val.starts_with('-') {
+                            let n: i32 = val
+                                .parse()
+                                .map_err(|_| format!("bpm має бути числом, отримано `{val}`"))?;
+                            out.bpm_delta = Some(n.clamp(-200, 0));
+                        } else {
+                            out.bpm = Some(parse_ranged_u32("bpm", val, 40, 240)?);
                         }
-                        out.bpm = Some(n);
                     }
                     "sig" | "time" => {
                         let (num, den) = val
@@ -2153,13 +3064,57 @@ fn parse_metronome_args(args: &str) -> Result<MetronomeRemote, String> {
                         out.subdivision = Some(n);
                     }
                     "sound" => {
-                        let v = val.to_ascii_lowercase();
-                        if !matches!(v.as_str(), "click" | "wood" | "beep") {
+                        if !matches!(val, "click" | "wood" | "beep") {
                             return Err(format!(
                                 "sound має бути click|wood|beep, отримано `{val}`"
                             ));
                         }
-                        out.sound = Some(v);
+                        out.sound = Some(val.to_string());
+                    }
+                    "vol" | "volume" | "click_vol" | "click_volume" => {
+                        out.click_volume = Some(parse_percent("vol", val)?);
+                    }
+                    "accent_vol" | "accentvol" | "accent_volume" => {
+                        out.accent_volume = Some(parse_percent("accent_vol", val)?);
+                    }
+                    "accents" => {
+                        let pattern: Result<Vec<bool>, String> = val
+                            .chars()
+                            .filter(|c| !matches!(c, ',' | ' '))
+                            .map(|c| match c {
+                                '1' | 'x' | '>' => Ok(true),
+                                '0' | '.' | '-' => Ok(false),
+                                other => Err(format!(
+                                    "accents: незрозумілий символ `{other}` (1/x = акцент, 0/. = ні)"
+                                )),
+                            })
+                            .collect();
+                        let pattern = pattern?;
+                        if pattern.is_empty() || pattern.len() > 16 {
+                            return Err("accents: від 1 до 16 долей".into());
+                        }
+                        out.beat_accents = Some(pattern);
+                    }
+                    "trainer" => {
+                        out.trainer_enabled = Some(match val {
+                            "on" | "1" | "true" | "yes" => true,
+                            "off" | "0" | "false" | "no" => false,
+                            other => return Err(format!("trainer має бути on|off, отримано `{other}`")),
+                        });
+                    }
+                    "trainer_step" | "step" => {
+                        out.trainer_step = Some(parse_ranged_u32("trainer_step", val, 1, 50)?);
+                    }
+                    "trainer_bars" | "bars" => {
+                        out.trainer_bars = Some(parse_ranged_u32("trainer_bars", val, 1, 64)?);
+                    }
+                    "trainer_target" | "target" => {
+                        out.trainer_target = Some(parse_ranged_u32("trainer_target", val, 40, 240)?);
+                    }
+                    "preset" | "load" => out.preset = Some(non_empty("preset", val_raw)?),
+                    "save" | "save_preset" => out.save_preset = Some(non_empty("save", val_raw)?),
+                    "delete" | "delete_preset" => {
+                        out.delete_preset = Some(non_empty("delete", val_raw)?)
                     }
                     _ => return Err(format!("невідомий параметр: `{key}`")),
                 }
@@ -2167,6 +3122,168 @@ fn parse_metronome_args(args: &str) -> Result<MetronomeRemote, String> {
         }
     }
     Ok(out)
+}
+
+fn non_empty(key: &str, v: &str) -> Result<String, String> {
+    let t = v.trim();
+    if t.is_empty() {
+        return Err(format!("{key}: порожнє значення"));
+    }
+    Ok(t.chars().take(60).collect())
+}
+
+fn find_metronome_preset<'a>(presets: &'a [MetronomePreset], key: &str) -> Option<&'a MetronomePreset> {
+    presets
+        .iter()
+        .find(|p| p.id == key)
+        .or_else(|| presets.iter().find(|p| p.name.eq_ignore_ascii_case(key)))
+}
+
+/// Resolve parsed args against the persisted state. Returns the payload to
+/// emit (only changed fields) and the full next state to persist. Order:
+/// preset → explicit fields → save/delete, so `preset=x bpm=+5 save=y`
+/// does what it reads like.
+fn resolve_metronome(
+    args: &MetronomeArgs,
+    cur: &MetronomeState,
+    id_seed: i64,
+) -> Result<(MetronomeRemote, MetronomeState), String> {
+    let mut next = cur.clone();
+    let mut remote = MetronomeRemote {
+        action: args.action.clone(),
+        ..Default::default()
+    };
+
+    if let Some(key) = &args.preset {
+        let p = find_metronome_preset(&cur.presets, key)
+            .ok_or_else(|| format!("пресет `{key}` не знайдено"))?
+            .clone();
+        next.bpm = p.bpm;
+        next.numerator = p.numerator;
+        next.denominator = p.denominator;
+        next.subdivision = p.subdivision;
+        next.sound = p.sound.clone();
+        next.beat_accents = p.beat_accents.clone();
+        remote.bpm = Some(p.bpm);
+        remote.numerator = Some(p.numerator);
+        remote.denominator = Some(p.denominator);
+        remote.subdivision = Some(p.subdivision);
+        remote.sound = Some(p.sound);
+        remote.beat_accents = Some(p.beat_accents);
+    }
+
+    if let Some(bpm) = args.bpm {
+        next.bpm = bpm;
+        remote.bpm = Some(bpm);
+    }
+    if let Some(delta) = args.bpm_delta {
+        let bpm = (next.bpm as i32 + delta).clamp(40, 240) as u32;
+        next.bpm = bpm;
+        remote.bpm = Some(bpm);
+    }
+    if let (Some(n), Some(d)) = (args.numerator, args.denominator) {
+        if n != next.numerator {
+            // Same reshape rule as the tab: keep the prefix, pad with downbeat.
+            next.beat_accents = (0..n as usize)
+                .map(|i| next.beat_accents.get(i).copied().unwrap_or(i == 0))
+                .collect();
+        }
+        next.numerator = n;
+        next.denominator = d;
+        remote.numerator = Some(n);
+        remote.denominator = Some(d);
+    }
+    if let Some(s) = args.subdivision {
+        next.subdivision = s;
+        remote.subdivision = Some(s);
+    }
+    if let Some(s) = &args.sound {
+        next.sound = s.clone();
+        remote.sound = Some(s.clone());
+    }
+    if let Some(v) = args.click_volume {
+        next.click_volume = v as f32 / 100.0;
+        remote.click_volume = Some(next.click_volume);
+    }
+    if let Some(v) = args.accent_volume {
+        next.accent_volume = v as f32 / 100.0;
+        remote.accent_volume = Some(next.accent_volume);
+    }
+    if let Some(acc) = &args.beat_accents {
+        if acc.len() != next.numerator as usize {
+            return Err(format!(
+                "accents має {} долей, а розмір {}/{} — потрібно {}",
+                acc.len(),
+                next.numerator,
+                next.denominator,
+                next.numerator
+            ));
+        }
+        next.beat_accents = acc.clone();
+        remote.beat_accents = Some(acc.clone());
+    }
+    let trainer_touched = args.trainer_enabled.is_some()
+        || args.trainer_step.is_some()
+        || args.trainer_bars.is_some()
+        || args.trainer_target.is_some();
+    if trainer_touched {
+        if let Some(v) = args.trainer_enabled {
+            next.trainer.enabled = v;
+        }
+        if let Some(v) = args.trainer_step {
+            next.trainer.step_bpm = v;
+        }
+        if let Some(v) = args.trainer_bars {
+            next.trainer.every_bars = v;
+        }
+        if let Some(v) = args.trainer_target {
+            next.trainer.target_bpm = v;
+        }
+        remote.trainer = Some(next.trainer.clone());
+    }
+
+    let mut presets_changed = false;
+    if let Some(key) = &args.delete_preset {
+        let id = find_metronome_preset(&next.presets, key)
+            .map(|p| p.id.clone())
+            .ok_or_else(|| format!("пресет `{key}` не знайдено"))?;
+        next.presets.retain(|p| p.id != id);
+        presets_changed = true;
+    }
+    if let Some(name) = &args.save_preset {
+        let snapshot = |id: String| MetronomePreset {
+            id,
+            name: name.clone(),
+            bpm: next.bpm,
+            numerator: next.numerator,
+            denominator: next.denominator,
+            subdivision: next.subdivision,
+            sound: next.sound.clone(),
+            beat_accents: next.beat_accents.clone(),
+        };
+        // Re-using a name overwrites that preset in place (keeps its id).
+        let existing = next
+            .presets
+            .iter()
+            .position(|p| p.name.eq_ignore_ascii_case(name));
+        match existing {
+            Some(i) => {
+                let id = next.presets[i].id.clone();
+                next.presets[i] = snapshot(id);
+            }
+            None => {
+                let id = format!("p_tg{}", id_seed.rem_euclid(36_i64.pow(8)));
+                let p = snapshot(id);
+                next.presets.push(p);
+            }
+        }
+        presets_changed = true;
+    }
+    if presets_changed {
+        remote.presets = Some(next.presets.clone());
+    }
+    next.normalize();
+    Ok((remote, next))
 }
 
 fn format_metronome_reply(r: &MetronomeRemote) -> String {
@@ -2192,10 +3309,145 @@ fn format_metronome_reply(r: &MetronomeRemote) -> String {
     if let Some(sound) = &r.sound {
         parts.push(format!("звук={sound}"));
     }
+    if let Some(v) = r.click_volume {
+        parts.push(format!("гучність {}%", (v * 100.0).round() as u32));
+    }
+    if let Some(v) = r.accent_volume {
+        parts.push(format!("акцент {}%", (v * 100.0).round() as u32));
+    }
+    if r.beat_accents.is_some() {
+        parts.push("акценти".into());
+    }
+    if let Some(t) = &r.trainer {
+        parts.push(format!("тренер {}", if t.enabled { "on" } else { "off" }));
+    }
+    if r.presets.is_some() {
+        parts.push("пресети оновлено".into());
+    }
     if parts.is_empty() {
         "🥁 Метроном без змін.".to_string()
     } else {
         format!("🥁 Метроном: {}", parts.join(", "))
+    }
+}
+
+fn subdivision_glyph(sub: u8) -> &'static str {
+    match sub {
+        2 => "♪♪",
+        3 => "♪♪♪",
+        4 => "♬",
+        _ => "♩",
+    }
+}
+
+/// Live card text: state line first so taps visibly change it.
+fn format_metronome_card(st: &MetronomeState, playing: Option<bool>) -> String {
+    let icon = if playing == Some(true) { "▶️" } else { "⏹" };
+    let mut lines = vec![format!(
+        "{icon} {} BPM · {}/{} · {} · {}",
+        st.bpm,
+        st.numerator,
+        st.denominator,
+        subdivision_glyph(st.subdivision),
+        st.sound
+    )];
+    lines.push(format!(
+        "🔊 клік {}% · акцент {}%",
+        (st.click_volume * 100.0).round() as u32,
+        (st.accent_volume * 100.0).round() as u32
+    ));
+    let accents: String = st
+        .beat_accents
+        .iter()
+        .map(|a| if *a { '●' } else { '○' })
+        .collect();
+    lines.push(format!("🥁 {accents}"));
+    if st.trainer.enabled {
+        lines.push(format!(
+            "🎯 тренер: +{} BPM кожні {} такт. → {}",
+            st.trainer.step_bpm, st.trainer.every_bars, st.trainer.target_bpm
+        ));
+    }
+    if !st.presets.is_empty() {
+        let names: Vec<&str> = st.presets.iter().map(|p| p.name.as_str()).collect();
+        lines.push(format!("🎼 пресети: {}", names.join(", ")));
+    }
+    if playing.is_none() {
+        lines.push("💤 Вкладка Valeton не відкрита — зміни збережено й застосуються при відкритті.".into());
+    }
+    lines.join("\n")
+}
+
+fn metronome_keyboard(st: &MetronomeState, playing: Option<bool>) -> InlineKeyboard {
+    let b = |text: &str, args: &str| InlineButton::new(text, format!("refresh:metronome:{args}"));
+    let transport = if playing == Some(true) {
+        b("⏹ Стоп", "stop")
+    } else {
+        b("▶️ Старт", "start")
+    };
+    let mut rows = vec![
+        vec![transport, b("🔄", "")],
+        vec![
+            b("−5", "bpm=-5"),
+            b("−1", "bpm=-1"),
+            b("+1", "bpm=+1"),
+            b("+5", "bpm=+5"),
+        ],
+        [(2u8, 4u8), (3, 4), (4, 4), (6, 8)]
+            .iter()
+            .map(|&(n, d)| {
+                let label = if st.numerator == n && st.denominator == d {
+                    format!("• {n}/{d}")
+                } else {
+                    format!("{n}/{d}")
+                };
+                b(&label, &format!("sig={n}/{d}"))
+            })
+            .collect(),
+        (1u8..=4)
+            .map(|s| {
+                let glyph = subdivision_glyph(s);
+                let label = if st.subdivision == s {
+                    format!("• {glyph}")
+                } else {
+                    glyph.to_string()
+                };
+                b(&label, &format!("sub={s}"))
+            })
+            .collect(),
+        vec![if st.trainer.enabled {
+            b("🎯 Тренер: on", "trainer=off")
+        } else {
+            b("🎯 Тренер: off", "trainer=on")
+        }],
+    ];
+    // Presets by id — names may be long or contain spaces; ids are short.
+    let presets: Vec<InlineButton> = st
+        .presets
+        .iter()
+        .map(|p| {
+            let name: String = p.name.chars().take(16).collect();
+            b(&format!("🎼 {name}"), &format!("preset={}", p.id))
+        })
+        .filter(|btn| btn.callback_data.len() <= 64)
+        .take(4)
+        .collect();
+    for chunk in presets.chunks(2) {
+        rows.push(chunk.to_vec());
+    }
+    InlineKeyboard { rows }
+}
+
+fn metronome_card(st: &MetronomeState, playing: Option<bool>, note: Option<&str>) -> Reply {
+    let body = format_metronome_card(st, playing);
+    let text = match note {
+        Some(n) => format!("{n}\n\n{body}"),
+        None => body,
+    };
+    Reply {
+        text,
+        keyboard: Some(metronome_keyboard(st, playing)),
+        ..Default::default()
     }
 }
 
@@ -2251,7 +3503,7 @@ impl CommandHandler for RecordCmd {
                     ..Default::default()
                 },
             );
-            return Reply::text(format!("🎚 Підсилення → {}%.", (gain * 100.0).round() as i64));
+            return record_card(format!("🎚 Підсилення → {}%.", (gain * 100.0).round() as i64));
         }
 
         let action = match first {
@@ -2278,11 +3530,31 @@ impl CommandHandler for RecordCmd {
             ..Default::default()
         };
         let _ = ctx.app.emit("recorder:remote", &payload);
-        Reply::text(match action.as_str() {
+        record_card(match action.as_str() {
             "start" => "🔴 Запис почато.".to_string(),
             "stop" => "⏹ Запис зупинено й збережено.".to_string(),
             _ => "⏯ Рекордер перемкнуто.".to_string(),
         })
+    }
+}
+
+/// Explicit start/stop (idempotent) rather than toggle, since the bot can't
+/// read the recorder's phase back — a stale card must never flip it.
+fn record_card(text: String) -> Reply {
+    let b = |text: &str, args: &str| InlineButton::new(text, format!("refresh:record:{args}"));
+    Reply {
+        text,
+        keyboard: Some(InlineKeyboard {
+            rows: vec![
+                vec![b("🔴 Запис", "start"), b("⏹ Стоп", "stop")],
+                vec![
+                    b("🎚 50%", "gain 0.5"),
+                    b("🎚 100%", "gain 1"),
+                    b("🎚 150%", "gain 1.5"),
+                ],
+            ],
+        }),
+        ..Default::default()
     }
 }
 
@@ -2582,17 +3854,62 @@ impl CommandHandler for TunerCmd {
                 tuning_id: tuning_id.clone(),
             },
         );
-        Reply::text(match &tuning_id {
-            Some(id) => format!("🎸 Тюнер відкрито · стрій {id}"),
-            None => "🎸 Тюнер відкрито.".to_string(),
-        })
+        let current = tuning_id.clone().unwrap_or_else(|| read_tuner_tuning(&ctx.app));
+        Reply {
+            text: format!("🎸 Тюнер відкрито · стрій {current}"),
+            keyboard: Some(tuner_keyboard(&current)),
+            ..Default::default()
+        }
+    }
+}
+
+fn read_tuner_tuning(app: &tauri::AppHandle) -> String {
+    let Some(handle) = app.try_state::<TunerStateHandle>() else {
+        return crate::modules::tuner::state::DEFAULT_TUNING_ID.to_string();
+    };
+    let fallback = handle.path.lock().unwrap().clone();
+    let path = app
+        .path()
+        .app_data_dir()
+        .map(|d| d.join("tuner.json"))
+        .unwrap_or(fallback);
+    TunerState::load(&path).tuning_id
+}
+
+/// Common tunings as one-tap picks; the current one is marked with `•`.
+fn tuner_keyboard(current: &str) -> InlineKeyboard {
+    let b = |label: &str, id: &str| {
+        let text = if id == current {
+            format!("• {label}")
+        } else {
+            label.to_string()
+        };
+        InlineButton::new(text, format!("refresh:tuner:{id}"))
+    };
+    InlineKeyboard {
+        rows: vec![
+            vec![
+                b("E std", "standard-e"),
+                b("E♭ std", "standard-dsharp"),
+                b("D std", "standard-d"),
+            ],
+            vec![
+                b("Drop D", "drop-d"),
+                b("Drop C♯", "drop-csharp"),
+                b("Drop C", "drop-c"),
+            ],
+            vec![InlineButton::new("🔄 Відкрити знову", "refresh:tuner")],
+        ],
     }
 }
 
 // -------------------- /pomodoro --------------------
 
-use crate::modules::pomodoro::commands::{start_session, stop_session};
-use crate::modules::pomodoro::engine::SessionStatus;
+use crate::modules::pomodoro::commands::{
+    edit_blocks_session, pause_session, resume_session, skip_to_session, start_session,
+    stop_session,
+};
+use crate::modules::pomodoro::engine::{SessionSnapshot, SessionStatus};
 use crate::modules::pomodoro::model::{Block, Posture};
 use crate::modules::pomodoro::state::PomodoroState;
 
@@ -2606,50 +3923,199 @@ impl PomodoroCmd {
     }
 }
 
+/// Parsed `/pomodoro` sub-command. Typed slash args and inline-button
+/// callbacks share this grammar.
+#[derive(Debug, Clone, PartialEq)]
+enum PomodoroAction {
+    Status,
+    /// Raw block spec, e.g. `25/sit 5/walk`.
+    Start(String),
+    /// Start a saved preset by id.
+    Preset(i64),
+    Pause,
+    Resume,
+    /// Pause when running, resume when paused.
+    Toggle,
+    /// `None` = next block; `Some(n)` = 1-based block number.
+    Skip(Option<usize>),
+    Stop,
+    Presets,
+    Delete { id: i64, confirmed: bool },
+    History(u32),
+    /// Replace the blocks of the running session.
+    Edit(String),
+}
+
+fn parse_pomodoro_action(args: &str) -> Result<PomodoroAction, String> {
+    let sub = args.trim();
+    let mut parts = sub.splitn(2, char::is_whitespace);
+    let verb = parts.next().unwrap_or("").to_ascii_lowercase();
+    let rest = parts.next().unwrap_or("").trim();
+    let parse_id = |s: &str| -> Result<i64, String> {
+        s.trim_start_matches('#')
+            .parse::<i64>()
+            .map_err(|_| format!("очікую id пресета (число), отримано `{s}`"))
+    };
+    Ok(match verb.as_str() {
+        "" | "status" => PomodoroAction::Status,
+        "start" | "begin" | "go" => PomodoroAction::Start(rest.to_string()),
+        "preset" | "run" => PomodoroAction::Preset(parse_id(rest)?),
+        "pause" => PomodoroAction::Pause,
+        "resume" | "continue" => PomodoroAction::Resume,
+        "toggle" => PomodoroAction::Toggle,
+        "skip" | "next" => {
+            if rest.is_empty() {
+                PomodoroAction::Skip(None)
+            } else {
+                let n: usize = rest
+                    .parse()
+                    .map_err(|_| format!("skip очікує номер блоку, отримано `{rest}`"))?;
+                if n == 0 {
+                    return Err("номер блоку починається з 1".into());
+                }
+                PomodoroAction::Skip(Some(n))
+            }
+        }
+        "stop" | "cancel" | "end" => PomodoroAction::Stop,
+        "presets" | "list" => PomodoroAction::Presets,
+        "delete" | "del" | "rm" => {
+            let mut it = rest.split_whitespace();
+            let id = parse_id(it.next().unwrap_or(""))?;
+            let confirmed = it
+                .next()
+                .is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "yes" | "y" | "confirm" | "так"));
+            PomodoroAction::Delete { id, confirmed }
+        }
+        "history" | "log" => {
+            let n = if rest.is_empty() {
+                10
+            } else {
+                rest.parse::<u32>()
+                    .map_err(|_| format!("history очікує число, отримано `{rest}`"))?
+            };
+            PomodoroAction::History(n.clamp(1, 30))
+        }
+        "edit" => PomodoroAction::Edit(rest.to_string()),
+        other => return Err(format!("невідома підкоманда `{other}`")),
+    })
+}
+
+/// Carry block ids over by position so the engine's id-based cursor
+/// preservation (`edit_blocks`) keeps the current block and its remaining
+/// time when the user edits a running session.
+pub(crate) fn reuse_block_ids(mut new_blocks: Vec<Block>, old: &[Block]) -> Vec<Block> {
+    for (nb, ob) in new_blocks.iter_mut().zip(old.iter()) {
+        nb.id = ob.id.clone();
+    }
+    new_blocks
+}
+
+/// Skip to the block after the current one (finishes the session when the
+/// current block is the last).
+pub(crate) fn pomodoro_skip_next(app: &tauri::AppHandle, state: &Arc<PomodoroState>) -> SessionSnapshot {
+    let idx = state
+        .core
+        .lock()
+        .map(|c| c.snapshot().current_idx)
+        .unwrap_or(0);
+    skip_to_session(app, state, idx + 1)
+}
+
+fn pomodoro_snapshot(state: &Arc<PomodoroState>) -> Option<SessionSnapshot> {
+    state.core.lock().ok().map(|c| c.snapshot())
+}
+
 #[async_trait]
 impl CommandHandler for PomodoroCmd {
     fn name(&self) -> &'static str {
         "pomodoro"
     }
     fn description(&self) -> &'static str {
-        "Керувати таймером Pomodoro. Приклади: `start 25/sit 5/walk`, `stop`, `status`."
+        "Керувати таймером Pomodoro. Приклади: `start 25/sit 5/walk`, `pause`, `resume`, `skip`, `stop`, `presets`, `history`."
     }
     fn usage(&self) -> &'static str {
-        "/pomodoro [start <min>/<posture> …|stop|status]"
+        "/pomodoro [status|start <min>/<posture> …|preset <id>|pause|resume|toggle|skip [n]|stop|edit <blocks>|presets|delete <id>|history [n]]"
     }
     async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
-        let sub = args.trim();
-        // No args OR "status" → read-only snapshot. Safe without AppHandle.
-        if sub.is_empty() || sub.eq_ignore_ascii_case("status") {
-            return Reply::text(format_pomodoro_status(&self.state));
-        }
-        let mut parts = sub.splitn(2, char::is_whitespace);
-        let verb = parts.next().unwrap_or("").to_ascii_lowercase();
-        let rest = parts.next().unwrap_or("").trim();
-        match verb.as_str() {
-            "stop" | "cancel" | "end" => {
-                let was_running = {
-                    let core = match self.state.core.lock() {
-                        Ok(c) => c,
-                        Err(e) => return Reply::text(format!("⚠️ pomodoro: {e}")),
-                    };
-                    !core.is_idle()
-                };
-                if !was_running {
-                    return Reply::text("ℹ️ Pomodoro не запущено.");
+        let action = match parse_pomodoro_action(args) {
+            Ok(a) => a,
+            Err(e) => return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage())),
+        };
+        let st = &self.state;
+        let status = pomodoro_snapshot(st).map(|s| s.status);
+        let is_idle = matches!(status, None | Some(SessionStatus::Idle));
+        match action {
+            PomodoroAction::Status => pomodoro_card(st, None),
+            PomodoroAction::Stop => {
+                if is_idle {
+                    return pomodoro_card(st, Some("ℹ️ Pomodoro не запущено."));
                 }
-                let _ = stop_session(&ctx.app, &self.state);
-                Reply::text("⏹ Pomodoro зупинено.")
+                let _ = stop_session(&ctx.app, st);
+                pomodoro_card(st, Some("⏹ Pomodoro зупинено."))
             }
-            "start" | "begin" | "go" => {
-                let blocks = match parse_pomodoro_blocks(rest, now_ms()) {
+            PomodoroAction::Pause => {
+                if status != Some(SessionStatus::Running) {
+                    return pomodoro_card(st, Some("ℹ️ Нема що ставити на паузу."));
+                }
+                let _ = pause_session(&ctx.app, st);
+                pomodoro_card(st, Some("⏸ Пауза."))
+            }
+            PomodoroAction::Resume => {
+                if status != Some(SessionStatus::Paused) {
+                    return pomodoro_card(st, Some("ℹ️ Pomodoro не на паузі."));
+                }
+                let _ = resume_session(&ctx.app, st);
+                pomodoro_card(st, Some("▶️ Продовжуємо."))
+            }
+            PomodoroAction::Toggle => match status {
+                Some(SessionStatus::Running) => {
+                    let _ = pause_session(&ctx.app, st);
+                    pomodoro_card(st, Some("⏸ Пауза."))
+                }
+                Some(SessionStatus::Paused) => {
+                    let _ = resume_session(&ctx.app, st);
+                    pomodoro_card(st, Some("▶️ Продовжуємо."))
+                }
+                _ => pomodoro_card(st, Some("ℹ️ Pomodoro не запущено.")),
+            },
+            PomodoroAction::Skip(target) => {
+                if is_idle {
+                    return pomodoro_card(st, Some("ℹ️ Pomodoro не запущено."));
+                }
+                let snap = match target {
+                    None => pomodoro_skip_next(&ctx.app, st),
+                    Some(n) => {
+                        let len = pomodoro_snapshot(st).map(|s| s.blocks.len()).unwrap_or(0);
+                        if n > len {
+                            return pomodoro_card(
+                                st,
+                                Some(&format!("⚠️ У сесії лише {len} блок(ів).")),
+                            );
+                        }
+                        skip_to_session(&ctx.app, st, n - 1)
+                    }
+                };
+                let note = if snap.status == SessionStatus::Idle {
+                    "🏁 Сесію завершено.".to_string()
+                } else {
+                    let name = snap
+                        .blocks
+                        .get(snap.current_idx)
+                        .map(|b| b.name.clone())
+                        .unwrap_or_default();
+                    format!("⏭ Перейшли до «{name}».")
+                };
+                pomodoro_card(st, Some(&note))
+            }
+            PomodoroAction::Start(spec) => {
+                let blocks = match parse_pomodoro_blocks(&spec, now_ms()) {
                     Ok(b) => b,
                     Err(e) => {
                         return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage()))
                     }
                 };
                 reveal_tab(&ctx.app, "pomodoro");
-                match start_session(&ctx.app, &self.state, blocks.clone(), None) {
+                match start_session(&ctx.app, st, blocks, None) {
                     Ok(snap) => {
                         let total_min: u32 = snap.blocks.iter().map(|b| b.duration_sec / 60).sum();
                         let summary = snap
@@ -2660,15 +4126,77 @@ impl CommandHandler for PomodoroCmd {
                             })
                             .collect::<Vec<_>>()
                             .join(" ");
-                        Reply::text(format!("🍅 Стартував Pomodoro ({total_min} хв): {summary}"))
+                        pomodoro_card(
+                            st,
+                            Some(&format!("🍅 Стартував Pomodoro ({total_min} хв): {summary}")),
+                        )
                     }
                     Err(e) => Reply::text(format!("⚠️ pomodoro: {e}")),
                 }
             }
-            other => Reply::text(format!(
-                "❓ Невідомий підкоманда `{other}`.\nВикористання: {}",
-                self.usage()
-            )),
+            PomodoroAction::Preset(id) => {
+                let preset = st.repo.lock().ok().and_then(|r| r.get_preset(id).ok().flatten());
+                let Some(preset) = preset else {
+                    return pomodoro_card(st, Some(&format!("⚠️ Пресет #{id} не знайдено.")));
+                };
+                reveal_tab(&ctx.app, "pomodoro");
+                match start_session(&ctx.app, st, preset.blocks.clone(), Some(preset.id)) {
+                    Ok(_) => pomodoro_card(st, Some(&format!("🍅 Стартував пресет «{}».", preset.name))),
+                    Err(e) => Reply::text(format!("⚠️ pomodoro: {e}")),
+                }
+            }
+            PomodoroAction::Edit(spec) => {
+                if is_idle {
+                    return pomodoro_card(
+                        st,
+                        Some("ℹ️ Pomodoro не запущено — використай `start`."),
+                    );
+                }
+                let blocks = match parse_pomodoro_blocks(&spec, now_ms()) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Reply::text(format!("⚠️ {e}\nВикористання: {}", self.usage()))
+                    }
+                };
+                let old = pomodoro_snapshot(st).map(|s| s.blocks).unwrap_or_default();
+                let _ = edit_blocks_session(&ctx.app, st, reuse_block_ids(blocks, &old));
+                pomodoro_card(st, Some("✏️ Блоки оновлено."))
+            }
+            PomodoroAction::Presets => pomodoro_presets_card(st, None),
+            PomodoroAction::Delete { id, confirmed } => {
+                let preset = st.repo.lock().ok().and_then(|r| r.get_preset(id).ok().flatten());
+                let Some(preset) = preset else {
+                    return pomodoro_presets_card(st, Some(&format!("⚠️ Пресет #{id} не знайдено.")));
+                };
+                if !confirmed {
+                    return Reply {
+                        text: format!("🗑 Видалити пресет «{}» (#{id})?", preset.name),
+                        keyboard: Some(InlineKeyboard {
+                            rows: vec![vec![
+                                InlineButton::new(
+                                    "✅ Так, видалити",
+                                    format!("refresh:pomodoro:delete {id} yes"),
+                                ),
+                                InlineButton::new("↩️ Скасувати", "refresh:pomodoro:presets"),
+                            ]],
+                        }),
+                        ..Default::default()
+                    };
+                }
+                let res = st
+                    .repo
+                    .lock()
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut r| r.delete_preset(id).map_err(|e| e.to_string()));
+                match res {
+                    Ok(()) => {
+                        let _ = ctx.app.emit("pomodoro:presets_changed", id);
+                        pomodoro_presets_card(st, Some(&format!("🗑 Пресет «{}» видалено.", preset.name)))
+                    }
+                    Err(e) => pomodoro_presets_card(st, Some(&format!("⚠️ {e}"))),
+                }
+            }
+            PomodoroAction::History(limit) => pomodoro_history_card(st, limit),
         }
     }
 }
@@ -2704,6 +4232,204 @@ fn format_pomodoro_status(state: &Arc<PomodoroState>) -> String {
             };
             format!("{verb} {phase} — лишилось {mins:02}:{secs:02}")
         }
+    }
+}
+
+/// Quick-start presets offered on the idle card (label, block spec).
+const POMODORO_QUICK_STARTS: &[(&str, &str)] = &[
+    ("⚡ 25/5", "25/sit 5/walk"),
+    ("⚡ 50/10", "50/sit 10/walk"),
+    ("⚡ 3×25", "25/sit 5/walk 25/sit 5/walk 25/sit 5/walk"),
+];
+
+/// Live control card. Buttons use `refresh:` so taps edit this message.
+fn pomodoro_keyboard(status: SessionStatus, presets: &[(i64, String)]) -> InlineKeyboard {
+    let b = |text: &str, args: &str| InlineButton::new(text, format!("refresh:pomodoro:{args}"));
+    let rows = match status {
+        SessionStatus::Running | SessionStatus::Paused => {
+            let transport = if status == SessionStatus::Running {
+                b("⏸ Пауза", "pause")
+            } else {
+                b("▶️ Далі", "resume")
+            };
+            vec![
+                vec![transport, b("⏭ Skip", "skip"), b("⏹ Стоп", "stop")],
+                vec![b("🔄", "status")],
+            ]
+        }
+        SessionStatus::Idle => {
+            let mut rows: Vec<Vec<InlineButton>> = Vec::new();
+            let preset_btns: Vec<InlineButton> = presets
+                .iter()
+                .take(6)
+                .map(|(id, name)| {
+                    let short: String = name.chars().take(18).collect();
+                    b(&format!("🍅 {short}"), &format!("preset {id}"))
+                })
+                .collect();
+            for chunk in preset_btns.chunks(2) {
+                rows.push(chunk.to_vec());
+            }
+            rows.push(
+                POMODORO_QUICK_STARTS
+                    .iter()
+                    .map(|(label, spec)| b(label, &format!("start {spec}")))
+                    .filter(|btn| btn.callback_data.len() <= 64)
+                    .collect(),
+            );
+            rows.push(vec![
+                b("📚 Пресети", "presets"),
+                b("📜 Історія", "history"),
+                b("🔄", "status"),
+            ]);
+            rows
+        }
+    };
+    InlineKeyboard { rows }
+}
+
+fn pomodoro_card(state: &Arc<PomodoroState>, note: Option<&str>) -> Reply {
+    let snap = pomodoro_snapshot(state);
+    let status = snap.as_ref().map(|s| s.status).unwrap_or(SessionStatus::Idle);
+    let mut text = format_pomodoro_status(state);
+    if let Some(s) = &snap {
+        if status != SessionStatus::Idle {
+            if let Some(nb) = s.blocks.get(s.current_idx + 1) {
+                text.push_str(&format!(
+                    "\n⏭ Далі: {} · {} хв",
+                    nb.name,
+                    (nb.duration_sec + 59) / 60
+                ));
+            } else {
+                text.push_str("\n🏁 Останній блок");
+            }
+            if status == SessionStatus::Paused {
+                text.push_str("\n⏸ На паузі");
+            }
+        } else {
+            text.push_str("\nОбери пресет або швидкий старт:");
+        }
+    }
+    let presets = pomodoro_preset_names(state);
+    let text = match note {
+        Some(n) => format!("{n}\n\n{text}"),
+        None => text,
+    };
+    Reply {
+        text,
+        keyboard: Some(pomodoro_keyboard(status, &presets)),
+        ..Default::default()
+    }
+}
+
+fn pomodoro_preset_names(state: &Arc<PomodoroState>) -> Vec<(i64, String)> {
+    state
+        .repo
+        .lock()
+        .ok()
+        .and_then(|r| r.list_presets().ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| (p.id, p.name))
+        .collect()
+}
+
+fn pomodoro_presets_card(state: &Arc<PomodoroState>, note: Option<&str>) -> Reply {
+    let presets = state
+        .repo
+        .lock()
+        .ok()
+        .and_then(|r| r.list_presets().ok())
+        .unwrap_or_default();
+    let mut lines: Vec<String> = Vec::new();
+    if let Some(n) = note {
+        lines.push(n.to_string());
+        lines.push(String::new());
+    }
+    if presets.is_empty() {
+        lines.push("📚 Збережених пресетів нема. Створи у вкладці Pomodoro або попроси асистента.".into());
+    } else {
+        lines.push("📚 Пресети Pomodoro:".into());
+    }
+    let mut rows: Vec<Vec<InlineButton>> = Vec::new();
+    for p in presets.iter().take(10) {
+        let total_min: u32 = p.blocks.iter().map(|b| b.duration_sec).sum::<u32>() / 60;
+        let spec = p
+            .blocks
+            .iter()
+            .map(|b| format!("{}/{}", (b.duration_sec + 59) / 60, posture_word(&b.posture)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        lines.push(format!("#{} {} — {total_min} хв · {spec}", p.id, p.name));
+        let short: String = p.name.chars().take(20).collect();
+        rows.push(vec![
+            InlineButton::new(format!("▶️ {short}"), format!("refresh:pomodoro:preset {}", p.id)),
+            InlineButton::new("🗑", format!("refresh:pomodoro:delete {}", p.id)),
+        ]);
+    }
+    rows.push(vec![InlineButton::new("⬅️ Назад", "refresh:pomodoro:status")]);
+    Reply {
+        text: lines.join("\n"),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
+/// "5 хв тому" / "3 год тому" / "2 дн тому" — no chrono in the tree.
+fn format_ago(secs: i64) -> String {
+    let s = secs.max(0);
+    if s < 3600 {
+        format!("{} хв тому", s / 60)
+    } else if s < 86_400 {
+        format!("{} год тому", s / 3600)
+    } else {
+        format!("{} дн тому", s / 86_400)
+    }
+}
+
+fn pomodoro_history_card(state: &Arc<PomodoroState>, limit: u32) -> Reply {
+    let rows = state
+        .repo
+        .lock()
+        .ok()
+        .and_then(|r| r.list_sessions(limit).ok())
+        .unwrap_or_default();
+    let now = now_secs();
+    let mut lines = vec![format!("📜 Останні сесії ({}):", rows.len())];
+    if rows.is_empty() {
+        lines = vec!["📜 Історія порожня.".into()];
+    }
+    for r in &rows {
+        let total = r.blocks.len();
+        let done = r.completed_idx.min(total);
+        let focus_min: u32 = r
+            .blocks
+            .iter()
+            .take(done)
+            .map(|b| b.duration_sec)
+            .sum::<u32>()
+            / 60;
+        let state_icon = if r.ended_at.is_none() {
+            "▶️"
+        } else if done >= total {
+            "✅"
+        } else {
+            "⏹"
+        };
+        lines.push(format!(
+            "{state_icon} {} — {done}/{total} блоків · {focus_min} хв",
+            format_ago(now - r.started_at)
+        ));
+    }
+    Reply {
+        text: lines.join("\n"),
+        keyboard: Some(InlineKeyboard {
+            rows: vec![vec![
+                InlineButton::new("⬅️ Назад", "refresh:pomodoro:status"),
+                InlineButton::new("🔄", format!("refresh:pomodoro:history {limit}")),
+            ]],
+        }),
+        ..Default::default()
     }
 }
 
@@ -2857,7 +4583,10 @@ async fn handle_power_cmd(timers: &Arc<PowerTimers>, kind: PowerKind, args: &str
             }
             None => Reply::text(format!("ℹ️ Немає запланованого {}.", label(kind, false))),
         },
-        "" => immediate(kind).await,
+        // Typed `/sleep` stays immediate; buttons go through `ask` → `now`.
+        "" | "now" => immediate(kind).await,
+        "ask" => power_confirm_card(kind),
+        "no" => Reply::text(format!("👌 {} скасовано.", label(kind, true))),
         other => match power::parse_duration(other) {
             Ok(delay) => {
                 timers.schedule(kind, delay);
@@ -2869,6 +4598,26 @@ async fn handle_power_cmd(timers: &Arc<PowerTimers>, kind: PowerKind, args: &str
             }
             Err(e) => Reply::text(format!("⚠️ {}: {e}", kind_word(kind))),
         },
+    }
+}
+
+/// Second-tap confirmation for the one-tap power buttons (battery alert,
+/// dashboard). Both answers edit this card in place.
+fn power_confirm_card(kind: PowerKind) -> Reply {
+    let (text, yes) = match kind {
+        PowerKind::Sleep => ("💤 Приспати Mac зараз?", "✅ Так, приспати"),
+        PowerKind::Shutdown => ("⏻ Вимкнути Mac зараз?", "✅ Так, вимкнути"),
+    };
+    let cmd = kind_word(kind);
+    Reply {
+        text: text.to_string(),
+        keyboard: Some(InlineKeyboard {
+            rows: vec![vec![
+                InlineButton::new(yes, format!("refresh:{cmd}:now")),
+                InlineButton::new("✖ Ні", format!("refresh:{cmd}:no")),
+            ]],
+        }),
+        ..Default::default()
     }
 }
 
@@ -3040,12 +4789,12 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
                 InlineButton::new("📸 Shot", "screenshot"),
             ],
             vec![
-                InlineButton::new("💤 Sleep", "sleep"),
+                InlineButton::new("💤 Sleep", "sleep:ask"),
                 InlineButton::new("🌙 Display off", "display"),
                 InlineButton::new("❓ Help", "help"),
             ],
         ],
-        // Page 3 — jump to any of the 13 app tabs.
+        // Page 3 — jump to any app tab.
         _ => vec![
             vec![
                 InlineButton::new("📋 Clipboard", "navigate:clipboard"),
@@ -3067,13 +4816,23 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
                 InlineButton::new("🌐 Web", "navigate:web"),
                 InlineButton::new("⚙️ System", "navigate:system"),
             ],
-            vec![InlineButton::new("🎙 Voice", "navigate:voice")],
+            vec![
+                InlineButton::new("🖼 Canvas", "navigate:canvas"),
+                InlineButton::new("🔄 Converter", "navigate:converter"),
+                InlineButton::new("🎚 Stems", "navigate:separator"),
+            ],
+            vec![
+                InlineButton::new("⏰ Reminders", "navigate:reminders"),
+                InlineButton::new("🛠 Dev", "navigate:dev"),
+                InlineButton::new("🔧 Settings", "navigate:settings"),
+            ],
         ],
     };
     // Footer row is shared: Refresh self + paginate. Arrows wrap around
     // so you can tap Next on the last page and land on page 1.
     let prev_page = if page == 1 { DASHBOARD_PAGES } else { page - 1 };
     let next_page = if page == DASHBOARD_PAGES { 1 } else { page + 1 };
+    rows.push(vec![super::menu::menu_button()]);
     rows.push(vec![
         InlineButton::new("◀", format!("refresh:dashboard:page={prev_page}")),
         InlineButton::new(
@@ -3448,15 +5207,34 @@ impl CommandHandler for KeepAwakeCmd {
                 .unwrap_or(0);
             let h = elapsed / 3600;
             let m = (elapsed % 3600) / 60;
-            Reply::text(format!(
-                "☕ Mac не засинає (≈{h} год {m:02} хв). \
-                 Нагадування — щогодини. Вимкнути: /keepawake off"
-            ))
+            keepawake_card(
+                format!(
+                    "☕ Mac не засинає (≈{h} год {m:02} хв). \
+                     Нагадування — щогодини. Вимкнути: /keepawake off"
+                ),
+                true,
+            )
         } else {
-            Reply::text(
-                "💤 Mac засинає як зазвичай. Увімкнути keep-awake: /keepawake on",
+            keepawake_card(
+                "💤 Mac засинає як зазвичай. Увімкнути keep-awake: /keepawake on".into(),
+                false,
             )
         }
+    }
+}
+
+fn keepawake_card(text: String, active: bool) -> Reply {
+    let toggle = if active {
+        InlineButton::new("💤 Вимкнути", "refresh:keepawake:off")
+    } else {
+        InlineButton::new("☕ Увімкнути", "refresh:keepawake:on")
+    };
+    Reply {
+        text,
+        keyboard: Some(InlineKeyboard {
+            rows: vec![vec![toggle, InlineButton::new("🔄", "refresh:keepawake:status")]],
+        }),
+        ..Default::default()
     }
 }
 
@@ -3549,5 +5327,305 @@ impl CommandHandler for UpdateCmd {
         Reply::text(format!(
             "⬇️ Встановлюю v{latest} (зараз v{current}). Stash перезапуститься сам за хвилину."
         ))
+    }
+}
+
+#[cfg(test)]
+mod cockpit_tests {
+    use super::*;
+
+    fn all_callbacks(kb: &InlineKeyboard) -> Vec<String> {
+        kb.rows
+            .iter()
+            .flatten()
+            .map(|b| b.callback_data.clone())
+            .collect()
+    }
+
+    fn assert_fits(kb: &InlineKeyboard) {
+        for data in all_callbacks(kb) {
+            assert!(data.len() <= 64, "callback too long ({}): {data}", data.len());
+        }
+    }
+
+    fn preset(id: &str, name: &str, n: u8) -> MetronomePreset {
+        MetronomePreset {
+            id: id.into(),
+            name: name.into(),
+            bpm: 90,
+            numerator: n,
+            denominator: 4,
+            subdivision: 2,
+            sound: "wood".into(),
+            beat_accents: (0..n).map(|i| i == 0).collect(),
+        }
+    }
+
+    // ---- metronome ----
+
+    #[test]
+    fn metronome_parses_relative_bpm_and_new_knobs() {
+        let r = parse_metronome_args(
+            "bpm=+5 vol=60 accent_vol=85% accents=x.x. trainer=on trainer_step=2 trainer_bars=8 trainer_target=180",
+        )
+        .unwrap();
+        assert_eq!(r.bpm, None);
+        assert_eq!(r.bpm_delta, Some(5));
+        assert_eq!(r.click_volume, Some(60));
+        assert_eq!(r.accent_volume, Some(85));
+        assert_eq!(r.beat_accents, Some(vec![true, false, true, false]));
+        assert_eq!(r.trainer_enabled, Some(true));
+        assert_eq!(r.trainer_step, Some(2));
+        assert_eq!(r.trainer_bars, Some(8));
+        assert_eq!(r.trainer_target, Some(180));
+        assert_eq!(parse_metronome_args("bpm=-1").unwrap().bpm_delta, Some(-1));
+    }
+
+    #[test]
+    fn metronome_rejects_bad_new_knobs() {
+        assert!(parse_metronome_args("vol=150").unwrap_err().contains("vol"));
+        assert!(parse_metronome_args("accents=1z0").unwrap_err().contains("accents"));
+        assert!(parse_metronome_args("trainer=maybe").unwrap_err().contains("trainer"));
+        assert!(parse_metronome_args("trainer_step=99").unwrap_err().contains("trainer_step"));
+        assert!(parse_metronome_args("save=").unwrap_err().contains("save"));
+    }
+
+    #[test]
+    fn metronome_quoted_preset_names_keep_case_and_spaces() {
+        assert_eq!(
+            tokenize_quoted(r#"start save="Slow Blues" bpm=80"#),
+            vec!["start", "save=Slow Blues", "bpm=80"]
+        );
+        let r = parse_metronome_args(r#"preset="Slow Blues""#).unwrap();
+        assert_eq!(r.preset.as_deref(), Some("Slow Blues"));
+    }
+
+    #[test]
+    fn metronome_resolve_relative_bpm_clamps() {
+        let cur = MetronomeState {
+            bpm: 238,
+            ..Default::default()
+        };
+        let args = parse_metronome_args("bpm=+5").unwrap();
+        let (remote, next) = resolve_metronome(&args, &cur, 1).unwrap();
+        assert_eq!(remote.bpm, Some(240));
+        assert_eq!(next.bpm, 240);
+        assert!(remote.numerator.is_none(), "untouched fields stay None");
+    }
+
+    #[test]
+    fn metronome_resolve_applies_preset_then_explicit_fields() {
+        let mut cur = MetronomeState::default();
+        cur.presets.push(preset("p_a", "Waltz", 3));
+        let args = parse_metronome_args("preset=waltz bpm=+10").unwrap();
+        let (remote, next) = resolve_metronome(&args, &cur, 1).unwrap();
+        assert_eq!(next.bpm, 100);
+        assert_eq!(next.numerator, 3);
+        assert_eq!(next.sound, "wood");
+        assert_eq!(remote.beat_accents, Some(vec![true, false, false]));
+        assert!(resolve_metronome(&parse_metronome_args("preset=nope").unwrap(), &cur, 1).is_err());
+    }
+
+    #[test]
+    fn metronome_resolve_saves_overwrites_and_deletes_presets() {
+        let cur = MetronomeState::default();
+        let (remote, next) =
+            resolve_metronome(&parse_metronome_args("bpm=120 save=Mine").unwrap(), &cur, 42).unwrap();
+        assert_eq!(next.presets.len(), 1);
+        assert_eq!(next.presets[0].bpm, 120);
+        assert_eq!(remote.presets.as_ref().map(|p| p.len()), Some(1));
+        let id = next.presets[0].id.clone();
+        // Same name (different case) overwrites in place, keeping the id.
+        let (_, next2) =
+            resolve_metronome(&parse_metronome_args("bpm=130 save=mine").unwrap(), &next, 43).unwrap();
+        assert_eq!(next2.presets.len(), 1);
+        assert_eq!(next2.presets[0].id, id);
+        assert_eq!(next2.presets[0].bpm, 130);
+        let (remote3, next3) =
+            resolve_metronome(&parse_metronome_args(&format!("delete={id}")).unwrap(), &next2, 44)
+                .unwrap();
+        assert!(next3.presets.is_empty());
+        assert_eq!(remote3.presets, Some(vec![]));
+    }
+
+    #[test]
+    fn metronome_resolve_validates_accents_against_resulting_numerator() {
+        let cur = MetronomeState::default(); // 4/4
+        let err = resolve_metronome(&parse_metronome_args("accents=101").unwrap(), &cur, 1)
+            .unwrap_err();
+        assert!(err.contains("accents"));
+        let (_, next) =
+            resolve_metronome(&parse_metronome_args("sig=3/4 accents=101").unwrap(), &cur, 1)
+                .unwrap();
+        assert_eq!(next.beat_accents, vec![true, false, true]);
+        // Signature change alone reshapes like the tab does.
+        let (_, next) =
+            resolve_metronome(&parse_metronome_args("sig=6/8").unwrap(), &cur, 1).unwrap();
+        assert_eq!(next.beat_accents.len(), 6);
+        assert!(next.beat_accents[0]);
+    }
+
+    #[test]
+    fn metronome_resolve_merges_trainer_and_volumes() {
+        let cur = MetronomeState::default();
+        let (remote, next) =
+            resolve_metronome(&parse_metronome_args("trainer=on vol=50").unwrap(), &cur, 1).unwrap();
+        let t = remote.trainer.unwrap();
+        assert!(t.enabled);
+        assert_eq!(t.step_bpm, cur.trainer.step_bpm, "unset trainer fields preserved");
+        assert!((next.click_volume - 0.5).abs() < 1e-6);
+        assert_eq!(remote.click_volume, Some(0.5));
+    }
+
+    #[test]
+    fn metronome_card_reflects_state_and_buttons_fit() {
+        let mut st = MetronomeState::default();
+        st.presets
+            .push(preset("p_lzx9k2q1_ab12", "A very long preset name indeed", 4));
+        st.presets.push(preset(&"x".repeat(60), "Too long id", 4));
+        let text = format_metronome_card(&st, Some(true));
+        assert!(text.starts_with("▶️ 100 BPM · 4/4"));
+        let kb = metronome_keyboard(&st, Some(true));
+        assert_fits(&kb);
+        let data = all_callbacks(&kb);
+        assert!(data.contains(&"refresh:metronome:stop".to_string()));
+        assert!(data.contains(&"refresh:metronome:bpm=+5".to_string()));
+        assert!(data.contains(&"refresh:metronome:preset=p_lzx9k2q1_ab12".to_string()));
+        // Over-long preset ids are dropped rather than sent as broken buttons.
+        assert!(!data.iter().any(|d| d.contains(&"x".repeat(60))));
+        let idle = metronome_keyboard(&st, None);
+        assert!(all_callbacks(&idle).contains(&"refresh:metronome:start".to_string()));
+        // Every metronome button arg must parse back through the slash grammar.
+        for d in data {
+            let args = d.strip_prefix("refresh:metronome:").unwrap();
+            assert!(parse_metronome_args(args).is_ok(), "unparseable button arg: {args}");
+        }
+    }
+
+    // ---- pomodoro ----
+
+    #[test]
+    fn pomodoro_action_parser_covers_all_verbs() {
+        use PomodoroAction::*;
+        assert_eq!(parse_pomodoro_action("").unwrap(), Status);
+        assert_eq!(parse_pomodoro_action("pause").unwrap(), Pause);
+        assert_eq!(parse_pomodoro_action("resume").unwrap(), Resume);
+        assert_eq!(parse_pomodoro_action("toggle").unwrap(), Toggle);
+        assert_eq!(parse_pomodoro_action("skip").unwrap(), Skip(None));
+        assert_eq!(parse_pomodoro_action("skip 3").unwrap(), Skip(Some(3)));
+        assert!(parse_pomodoro_action("skip 0").is_err());
+        assert_eq!(parse_pomodoro_action("stop").unwrap(), Stop);
+        assert_eq!(parse_pomodoro_action("preset 7").unwrap(), Preset(7));
+        assert_eq!(parse_pomodoro_action("preset #7").unwrap(), Preset(7));
+        assert_eq!(parse_pomodoro_action("presets").unwrap(), Presets);
+        assert_eq!(
+            parse_pomodoro_action("delete 4").unwrap(),
+            Delete { id: 4, confirmed: false }
+        );
+        assert_eq!(
+            parse_pomodoro_action("delete 4 yes").unwrap(),
+            Delete { id: 4, confirmed: true }
+        );
+        assert_eq!(parse_pomodoro_action("history").unwrap(), History(10));
+        assert_eq!(parse_pomodoro_action("history 99").unwrap(), History(30));
+        assert_eq!(
+            parse_pomodoro_action("start 25/sit 5/walk").unwrap(),
+            Start("25/sit 5/walk".into())
+        );
+        assert_eq!(
+            parse_pomodoro_action("edit 30/sit").unwrap(),
+            Edit("30/sit".into())
+        );
+        assert!(parse_pomodoro_action("fly").is_err());
+        assert!(parse_pomodoro_action("preset abc").is_err());
+    }
+
+    #[test]
+    fn pomodoro_reuse_block_ids_preserves_cursor_ids_by_position() {
+        let old = parse_pomodoro_blocks("25/sit 5/walk", 1).unwrap();
+        let new = parse_pomodoro_blocks("30/sit 5/walk 10/stand", 2).unwrap();
+        let merged = reuse_block_ids(new, &old);
+        assert_eq!(merged[0].id, old[0].id);
+        assert_eq!(merged[1].id, old[1].id);
+        assert_eq!(merged[2].id, "cli-2-2");
+        assert_eq!(merged[0].duration_sec, 1800);
+    }
+
+    #[test]
+    fn pomodoro_keyboards_fit_and_parse_back() {
+        let presets = vec![
+            (i64::MAX, "Very long preset name that goes on".to_string()),
+            (2, "Deep work".to_string()),
+        ];
+        for status in [SessionStatus::Idle, SessionStatus::Running, SessionStatus::Paused] {
+            let kb = pomodoro_keyboard(status, &presets);
+            assert_fits(&kb);
+            for d in all_callbacks(&kb) {
+                let args = d.strip_prefix("refresh:pomodoro:").unwrap();
+                assert!(parse_pomodoro_action(args).is_ok(), "unparseable: {args}");
+            }
+        }
+        // All quick starts survive the 64-byte filter and parse as blocks.
+        let idle = all_callbacks(&pomodoro_keyboard(SessionStatus::Idle, &[]));
+        for (_, spec) in POMODORO_QUICK_STARTS {
+            assert!(idle.contains(&format!("refresh:pomodoro:start {spec}")));
+            assert!(parse_pomodoro_blocks(spec, 0).is_ok());
+        }
+        let running = all_callbacks(&pomodoro_keyboard(SessionStatus::Running, &[]));
+        assert!(running.contains(&"refresh:pomodoro:pause".to_string()));
+        let paused = all_callbacks(&pomodoro_keyboard(SessionStatus::Paused, &[]));
+        assert!(paused.contains(&"refresh:pomodoro:resume".to_string()));
+        assert!(format!("refresh:pomodoro:delete {} yes", i64::MAX).len() <= 64);
+    }
+
+    #[test]
+    fn format_ago_buckets() {
+        assert_eq!(format_ago(120), "2 хв тому");
+        assert_eq!(format_ago(7200), "2 год тому");
+        assert_eq!(format_ago(2 * 86_400), "2 дн тому");
+        assert_eq!(format_ago(-5), "0 хв тому");
+    }
+
+    // ---- volume / music / misc cards ----
+
+    #[test]
+    fn volume_action_parser_handles_relative_and_toggle() {
+        assert!(matches!(parse_volume_action("").unwrap(), VolumeAction::Status));
+        assert!(matches!(parse_volume_action("+1").unwrap(), VolumeAction::Step(1)));
+        assert!(matches!(parse_volume_action("-10").unwrap(), VolumeAction::Step(-10)));
+        assert!(matches!(parse_volume_action("+").unwrap(), VolumeAction::Step(10)));
+        assert!(matches!(parse_volume_action("55").unwrap(), VolumeAction::Set(55)));
+        assert!(matches!(parse_volume_action("500").unwrap(), VolumeAction::Set(100)));
+        assert!(matches!(parse_volume_action("toggle").unwrap(), VolumeAction::ToggleMute));
+        assert!(parse_volume_action("loud").is_err());
+    }
+
+    #[test]
+    fn misc_cockpit_keyboards_fit() {
+        for kb in [
+            volume_keyboard(false),
+            volume_keyboard(true),
+            music_keyboard(),
+            music_open_keyboard(),
+            tuner_keyboard("drop-csharp"),
+            display_keyboard(),
+            focus_keyboard(),
+        ] {
+            assert_fits(&kb);
+            assert!(all_callbacks(&kb).iter().all(|d| d.starts_with("refresh:")));
+        }
+        for d in all_callbacks(&volume_keyboard(false)) {
+            let args = d.strip_prefix("refresh:volume:").unwrap_or("");
+            assert!(parse_volume_action(args).is_ok(), "unparseable: {args}");
+        }
+        for d in all_callbacks(&tuner_keyboard("standard-e")) {
+            if let Some(id) = d.strip_prefix("refresh:tuner:") {
+                assert!(is_valid_tuning(id), "bad tuning id: {id}");
+            }
+        }
+        let rec = record_card("x".into()).keyboard.unwrap();
+        assert_fits(&rec);
+        let ka = keepawake_card("x".into(), true).keyboard.unwrap();
+        assert_eq!(ka.rows[0][0].callback_data, "refresh:keepawake:off");
     }
 }

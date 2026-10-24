@@ -81,7 +81,7 @@ describe('<ConnectionPanel />', () => {
     );
     expect(
       await screen.findByRole('status'),
-    ).toHaveTextContent(/Скопійовано/);
+    ).toHaveTextContent(/Copied/);
   });
 
   it('offers a Start Pairing button when token-only and starts on click', async () => {

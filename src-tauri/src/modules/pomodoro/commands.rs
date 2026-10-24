@@ -122,14 +122,19 @@ pub fn pomodoro_pause(
     app: AppHandle,
     state: State<'_, Arc<PomodoroState>>,
 ) -> Result<SessionSnapshot, String> {
+    Ok(pause_session(&app, state.inner()))
+}
+
+/// Shared pause path used by the Tauri command and the Telegram surface.
+pub fn pause_session(app: &AppHandle, state: &Arc<PomodoroState>) -> SessionSnapshot {
     let now = now_ms();
     let snap = {
         let mut core = state.core.lock().unwrap();
         core.pause(now);
         core.snapshot()
     };
-    emit_snapshot(&app, &snap);
-    Ok(snap)
+    emit_snapshot(app, &snap);
+    snap
 }
 
 #[tauri::command]
@@ -137,14 +142,19 @@ pub fn pomodoro_resume(
     app: AppHandle,
     state: State<'_, Arc<PomodoroState>>,
 ) -> Result<SessionSnapshot, String> {
+    Ok(resume_session(&app, state.inner()))
+}
+
+/// Shared resume path used by the Tauri command and the Telegram surface.
+pub fn resume_session(app: &AppHandle, state: &Arc<PomodoroState>) -> SessionSnapshot {
     let now = now_ms();
     let snap = {
         let mut core = state.core.lock().unwrap();
         core.resume(now);
         core.snapshot()
     };
-    emit_snapshot(&app, &snap);
-    Ok(snap)
+    emit_snapshot(app, &snap);
+    snap
 }
 
 /// Called from the tray menu event handler — no Tauri `State` available
@@ -190,6 +200,12 @@ pub fn pomodoro_skip_to(
     state: State<'_, Arc<PomodoroState>>,
     idx: usize,
 ) -> Result<SessionSnapshot, String> {
+    Ok(skip_to_session(&app, state.inner(), idx))
+}
+
+/// Shared skip path used by the Tauri command and the Telegram surface.
+/// `idx` past the last block finishes the session.
+pub fn skip_to_session(app: &AppHandle, state: &Arc<PomodoroState>, idx: usize) -> SessionSnapshot {
     let now = now_ms();
     let (snap, events) = {
         let mut core = state.core.lock().unwrap();
@@ -197,16 +213,16 @@ pub fn pomodoro_skip_to(
         (core.snapshot(), ev)
     };
     // Run fanout so the webview gets transition banners for manual skips too.
-    emit_events(&app, &events);
+    emit_events(app, &events);
     // SessionDone from skip-past-end clears active session.
     if events
         .iter()
         .any(|e| matches!(e, EngineEvent::SessionDone { .. }))
     {
-        finalize_active(&state, snap.blocks.len());
+        finalize_active(state, snap.blocks.len());
     }
-    emit_snapshot(&app, &snap);
-    Ok(snap)
+    emit_snapshot(app, &snap);
+    snap
 }
 
 #[tauri::command]
@@ -215,14 +231,23 @@ pub fn pomodoro_edit_blocks(
     state: State<'_, Arc<PomodoroState>>,
     blocks: Vec<Block>,
 ) -> Result<SessionSnapshot, String> {
+    Ok(edit_blocks_session(&app, state.inner(), blocks))
+}
+
+/// Shared edit path used by the Tauri command and the Telegram surface.
+pub fn edit_blocks_session(
+    app: &AppHandle,
+    state: &Arc<PomodoroState>,
+    blocks: Vec<Block>,
+) -> SessionSnapshot {
     let now = now_ms();
     let snap = {
         let mut core = state.core.lock().unwrap();
         core.edit_blocks(blocks, now);
         core.snapshot()
     };
-    emit_snapshot(&app, &snap);
-    Ok(snap)
+    emit_snapshot(app, &snap);
+    snap
 }
 
 // --- Internal helpers -------------------------------------------------

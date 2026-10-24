@@ -166,8 +166,57 @@ pub fn extract_media(msg: &Message) -> Option<MediaIntent> {
             caption: None,
             extension: "mp4",
         }),
+        // Music / audio files (mp3, m4a, …) ride the voice pipeline so they
+        // get transcribed too. Stored under the `voice` kind because the
+        // inbox table's CHECK constraint has no `audio` value.
+        MediaKind::Audio(a) => Some(MediaIntent {
+            kind: "voice",
+            file_id: a.audio.file.id.clone(),
+            declared_size: Some(a.audio.file.size as u64),
+            mime: a.audio.mime_type.as_ref().map(|m| m.to_string()),
+            duration_sec: Some(a.audio.duration.seconds() as i64),
+            caption,
+            extension: audio_extension(
+                a.audio.file_name.as_deref(),
+                a.audio.mime_type.as_ref().map(|m| m.essence_str()),
+            ),
+        }),
         _ => None,
     }
+}
+
+/// Pick a `'static` extension for an audio file from its name, then its
+/// MIME type; defaults to `mp3` (the most common Telegram audio upload).
+fn audio_extension(file_name: Option<&str>, mime: Option<&str>) -> &'static str {
+    let from_name = file_name
+        .and_then(|n| Path::new(n).extension().and_then(|e| e.to_str()))
+        .map(|e| e.to_ascii_lowercase());
+    match from_name.as_deref() {
+        Some("mp3") => return "mp3",
+        Some("m4a") | Some("mp4") | Some("aac") => return "m4a",
+        Some("ogg") | Some("oga") | Some("opus") => return "ogg",
+        Some("wav") => return "wav",
+        Some("flac") => return "flac",
+        _ => {}
+    }
+    match mime.unwrap_or("") {
+        "audio/mp4" | "audio/x-m4a" | "audio/aac" => "m4a",
+        "audio/ogg" | "audio/opus" => "ogg",
+        "audio/wav" | "audio/x-wav" | "audio/wave" => "wav",
+        "audio/flac" | "audio/x-flac" => "flac",
+        _ => "mp3",
+    }
+}
+
+/// `true` for a regular user message carrying content we don't handle
+/// (sticker, location, contact, animation, poll, …) — the transport
+/// answers those with a short "not supported yet" note instead of
+/// silently dropping them. Service messages (pins, joins) are excluded.
+pub fn is_unsupported_media(msg: &Message) -> bool {
+    let MessageKind::Common(common) = &msg.kind else {
+        return false;
+    };
+    !matches!(common.media_kind, MediaKind::Text(_)) && extract_media(msg).is_none()
 }
 
 /// Whisper handles these kinds: voice notes, regular videos and
@@ -496,6 +545,14 @@ mod tests {
     #[test]
     fn caps_allow_small_within_day() {
         assert!(matches!(check_caps(Some(1024), 0, PF, PD), CapVerdict::Ok));
+    }
+
+    #[test]
+    fn audio_extension_prefers_name_then_mime() {
+        assert_eq!(audio_extension(Some("Song.M4A"), Some("audio/mpeg")), "m4a");
+        assert_eq!(audio_extension(Some("track"), Some("audio/ogg")), "ogg");
+        assert_eq!(audio_extension(None, Some("audio/x-wav")), "wav");
+        assert_eq!(audio_extension(None, None), "mp3");
     }
 
     #[test]

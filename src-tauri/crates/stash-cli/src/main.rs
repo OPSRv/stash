@@ -34,6 +34,11 @@ struct Request {
     args: Vec<String>,
     #[serde(default)]
     cwd: Option<String>,
+    /// `Some("assistant")` when sent by the MCP server the assistant's
+    /// own `claude -p` run spawned (see `mcp::MCP_ORIGIN_ENV`); the app
+    /// then gates destructive commands behind a confirmation card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +182,7 @@ async fn main() -> ExitCode {
         args_text: args_text.clone(),
         args: rest.clone(),
         cwd: cwd.clone(),
+        origin: None,
     };
 
     // First attempt: dispatch as a slash-command.
@@ -213,6 +219,7 @@ async fn main() -> ExitCode {
             args_text: prompt,
             args: ai_args,
             cwd,
+            origin: None,
         };
         match round_trip(&path, &ai_req).await {
             Ok(r) => r,

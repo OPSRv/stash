@@ -16,6 +16,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 
+use super::super::confirm::{ASSISTANT_ORIGIN, MCP_ORIGIN_ENV};
 use super::{ChatMessage, LlmClient, LlmError, LlmRequest, LlmResponse, Role};
 
 /// Hard cap on one `claude -p` run (agent loop + MCP tool calls).
@@ -23,14 +24,18 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(180);
 /// Cap on the login-shell `command -v claude` probe.
 const SHELL_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// MCP tools that call back into the assistant. Exposing them to the
-/// CLI would let Claude re-enter `handle_user_text`, which would spawn
-/// another `claude -p`, and so on — infinite recursion.
-const RECURSIVE_TOOLS: &[&str] = &[
-    "mcp__stash__ai",
-    "mcp__stash__summarize",
-    "mcp__stash__voice",
-];
+/// MCP tool names hidden from the CLI: every command in
+/// `tools::LLM_EXCLUDED_COMMANDS` (single source of truth — `ai` /
+/// `summarize` / `voice` would re-enter `handle_user_text` and recurse,
+/// the rest are internal plumbing). Destructive commands stay visible:
+/// the IPC dispatcher parks them behind the Telegram confirmation card
+/// because the MCP server is tagged with `confirm::MCP_ORIGIN_ENV`.
+fn disallowed_mcp_tools() -> Vec<String> {
+    super::super::tools::LLM_EXCLUDED_COMMANDS
+        .iter()
+        .map(|c| format!("mcp__stash__{c}"))
+        .collect()
+}
 
 /// Appended to the system prompt when the Stash MCP server is attached.
 const MCP_TOOLS_NOTE: &str = "Stash commands are available as MCP tools named \
@@ -81,7 +86,9 @@ pub(crate) struct RenderedPrompt {
 pub(crate) fn render_prompt(messages: &[ChatMessage]) -> RenderedPrompt {
     let system = messages
         .iter()
-        .filter(|m| m.role == Role::System && !m.content.trim().is_empty())
+        .filter(|m| {
+            m.role == Role::System && !m.is_cache_breakpoint() && !m.content.trim().is_empty()
+        })
         .map(|m| m.content.trim())
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -122,7 +129,11 @@ pub(crate) fn render_prompt(messages: &[ChatMessage]) -> RenderedPrompt {
 pub(crate) fn mcp_config_json(stash_bin: &Path) -> String {
     serde_json::json!({
         "mcpServers": {
-            "stash": { "command": stash_bin.to_string_lossy(), "args": ["mcp"] }
+            "stash": {
+                "command": stash_bin.to_string_lossy(),
+                "args": ["mcp"],
+                "env": { MCP_ORIGIN_ENV: ASSISTANT_ORIGIN }
+            }
         }
     })
     .to_string()
@@ -159,7 +170,7 @@ pub(crate) fn build_args(
         args.push("--allowedTools".into());
         args.push("mcp__stash".into());
         args.push("--disallowedTools".into());
-        args.extend(RECURSIVE_TOOLS.iter().map(|s| s.to_string()));
+        args.extend(disallowed_mcp_tools());
         if system.is_empty() {
             system = MCP_TOOLS_NOTE.to_string();
         } else {
@@ -395,6 +406,10 @@ impl LlmClient for ClaudeCodeClient {
             // Neutral cwd so the CLI doesn't pick up a project CLAUDE.md.
             .current_dir(std::env::temp_dir())
             .env("PATH", path_env)
+            // Inherited by the `stash mcp` child (also set in its
+            // `--mcp-config` env): tags its IPC requests as coming from
+            // the assistant so destructive commands get the confirm card.
+            .env(MCP_ORIGIN_ENV, ASSISTANT_ORIGIN)
             // Set when Stash itself was launched from a Claude Code
             // terminal (dev loop); the CLI refuses to nest under it.
             .env_remove("CLAUDECODE")
@@ -485,14 +500,21 @@ mod tests {
         let joined = args.join(" ");
         assert!(joined.contains("--strict-mcp-config"));
         let dis = args.iter().position(|a| a == "--disallowedTools").unwrap();
+        let expected = disallowed_mcp_tools();
         assert_eq!(
-            &args[dis + 1..dis + 4],
-            RECURSIVE_TOOLS
-                .iter()
-                .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-                .as_slice()
+            &args[dis + 1..dis + 1 + expected.len()],
+            expected.as_slice()
         );
+        for t in [
+            "mcp__stash__ai",
+            "mcp__stash__summarize",
+            "mcp__stash__voice",
+            "mcp__stash__confirm",
+        ] {
+            assert!(expected.iter().any(|e| e == t), "{t}");
+        }
+        // Next arg after the variadic list must be a flag.
+        assert!(args[dis + 1 + expected.len()].starts_with("--"));
         let m = args.iter().position(|a| a == "--model").unwrap();
         assert_eq!(args[m + 1], "sonnet");
         let sp = args
@@ -505,6 +527,10 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&args[cfg + 1]).unwrap();
         assert_eq!(v["mcpServers"]["stash"]["command"], "/x/stash");
         assert_eq!(v["mcpServers"]["stash"]["args"][0], "mcp");
+        assert_eq!(
+            v["mcpServers"]["stash"]["env"][MCP_ORIGIN_ENV],
+            ASSISTANT_ORIGIN
+        );
     }
 
     #[test]

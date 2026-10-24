@@ -1228,6 +1228,21 @@ pub fn run() {
             telegram_state.register_command(modules::telegram::module_cmds::SeparateStemsCmd);
             telegram_state.register_command(modules::telegram::module_cmds::DetectBpmCmd);
             telegram_state.register_command(modules::telegram::module_cmds::UpdateCmd);
+            telegram_state.register_command(
+                modules::telegram::confirm::ConfirmCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::menu::MenuCmd::new(Arc::clone(&telegram_state)),
+            );
+            modules::downloader::agent::register_commands(&telegram_state);
+            modules::translator::agent::register_commands(&telegram_state);
+            telegram_state.register_command(modules::telegram::bot_cmds::StartCmd);
+            telegram_state.register_command(
+                modules::telegram::bot_cmds::RetryCmd::new(Arc::clone(&telegram_state)),
+            );
+            telegram_state.register_command(
+                modules::telegram::bot_cmds::AskCmd::new(Arc::clone(&telegram_state)),
+            );
 
             // Outbound watchers — battery + calendar + reminders ticker.
             modules::telegram::battery_watcher::spawn(app.handle().clone());

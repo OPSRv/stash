@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { requestSettingsSection } from '../../../settings/pendingSettingsSection';
 import { accent } from '../../../shared/theme/accent';
 import { Badge } from '../../../shared/ui/Badge';
+import { TelegramKindBadge } from '../TelegramKindBadge';
 import { IconButton } from '../../../shared/ui/IconButton';
 import { SearchInput } from '../../../shared/ui/SearchInput';
 import { Button } from '../../../shared/ui/Button';
@@ -335,7 +336,7 @@ export function InboxPanel() {
             </div>
           ) : (
             <div className="flex items-center gap-2 px-3 py-2 flex-1">
-              <span className="text-meta text-white/70 font-medium">
+              <span className="text-meta t-secondary font-medium">
                 {selCount} selected
               </span>
               <div className="ml-auto flex items-center gap-1">
@@ -377,7 +378,7 @@ export function InboxPanel() {
         </div>
       ) : noMatches ? (
         <div className="flex-1 overflow-y-auto nice-scroll">
-          <div className="px-8 py-12 text-center text-meta text-white/45">
+          <div className="px-8 py-12 text-center text-meta t-secondary">
             Nothing matches “{query}”.
           </div>
         </div>
@@ -397,7 +398,7 @@ export function InboxPanel() {
             {groups.map((group) => (
               <div key={group.label} className="flex flex-col">
                 <div className="px-4 pt-4 pb-1.5 flex items-center gap-2">
-                  <span className="text-meta font-semibold uppercase tracking-wider text-white/35">
+                  <span className="text-meta font-semibold uppercase tracking-wider t-tertiary">
                     {group.label}
                   </span>
                   <span className="h-px flex-1 [background:var(--bg-hover)]" />
@@ -509,7 +510,7 @@ const VirtualInboxList = ({
             >
               {entry.kind === 'header' ? (
                 <div className="px-4 pt-4 pb-1.5 flex items-center gap-2">
-                  <span className="text-meta font-semibold uppercase tracking-wider text-white/35">
+                  <span className="text-meta font-semibold uppercase tracking-wider t-tertiary">
                     {entry.label}
                   </span>
                   <span className="h-px flex-1 [background:var(--bg-hover)]" />
@@ -584,7 +585,7 @@ const InboxRow = ({
         : '[background:var(--bg-hover)] [.light_&]:bg-black/[0.02] hover:[background:var(--bg-row-active)] [.light_&]:hover:bg-black/[0.04]'
     }`}
   >
-    <div className="flex items-center gap-2 text-meta text-white/40">
+    <div className="flex items-center gap-2 text-meta t-tertiary">
       {/* Hidden checkbox kept purely for assistive tech + form
           semantics — the visible "click anywhere on the row" affordance
           is the li itself. `sr-only` removes it from the layout while
@@ -596,7 +597,7 @@ const InboxRow = ({
         className="sr-only"
         aria-label={`Select item ${item.id}`}
       />
-      <KindBadge kind={item.kind} />
+      <TelegramKindBadge kind={item.kind} />
       <span className="font-mono tabular-nums">{formatTime(item.received_at)}</span>
       {item.routed_to && <Badge tone="neutral">→ {item.routed_to}</Badge>}
       <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -809,10 +810,10 @@ const EmptyState = ({ connection }: { connection: ConnectionStatus | null }) => 
           <path d="M21.5 4.5 2.5 11.5l6 2m13-9-10 14-3-5m13-9-10 7" />
         </svg>
       </div>
-      <h3 className="text-title font-medium text-white/90">
+      <h3 className="text-title font-medium t-primary">
         {paired ? 'Inbox is empty' : 'Connect Telegram first'}
       </h3>
-      <p className="text-meta text-white/50 max-w-xs">
+      <p className="text-meta t-secondary max-w-xs">
         {paired
           ? 'Send the bot a message, voice note, photo, video, or document and it will land here.'
           : 'Pair a Telegram bot in Settings to start receiving messages in Stash.'}
@@ -823,28 +824,6 @@ const EmptyState = ({ connection }: { connection: ConnectionStatus | null }) => 
         </Button>
       )}
     </div>
-  );
-};
-
-const KIND_META: Record<
-  string,
-  { label: string; color: string }
-> = {
-  text: { label: 'Text', color: 'rgba(255,255,255,0.45)' },
-  voice: { label: 'Voice', color: '#4A8BEA' },
-  photo: { label: 'Photo', color: '#7B54E8' },
-  video: { label: 'Video', color: '#EA8B4A' },
-  video_note: { label: 'Кружечок', color: '#EA4A8B' },
-  document: { label: 'Doc', color: '#5BC88A' },
-  sticker: { label: 'Sticker', color: '#EAD24A' },
-};
-
-const KindBadge = ({ kind }: { kind: string }) => {
-  const meta = KIND_META[kind] ?? { label: kind, color: 'rgba(255,255,255,0.45)' };
-  return (
-    <Badge color={meta.color} bg={`${meta.color}1a`} className="uppercase tracking-wider">
-      {meta.label}
-    </Badge>
   );
 };
 

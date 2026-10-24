@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use tauri::AppHandle;
 
-use super::notifier::{notify_if_paired, Category};
+use super::battery_watcher::notify_with_keyboard;
+use super::commands_registry::{InlineButton, InlineKeyboard};
+use super::notifier::Category;
 use super::settings::NotificationSettings;
 
 const POLL_PERIOD: Duration = Duration::from_secs(60);
@@ -74,13 +76,55 @@ async fn run_once(app: &AppHandle, seen: &Mutex<HashSet<String>>) -> Result<(), 
             .filter(|s| !s.is_empty())
             .map(|s| format!("\n📍 {s}"))
             .unwrap_or_default();
-        notify_if_paired(
+        // UID dedup above replaces the notifier's cooldown here.
+        notify_with_keyboard(
             app,
             Category::Calendar,
             format!("📅 {} in {minutes} {minute_word}{loc}", ev.title.trim()),
+            event_keyboard(ev.starts_at, ev.title.trim(), now),
         );
     }
     Ok(())
+}
+
+/// "Remind me 5 minutes before" — or at the start when the event is
+/// already closer than that. Routed through `/reminders at`.
+fn event_keyboard(starts_at: i64, title: &str, now: i64) -> InlineKeyboard {
+    let five_before = starts_at - 5 * 60;
+    let (label, due) = if five_before > now {
+        ("⏰ Нагадати за 5 хв", five_before)
+    } else {
+        ("⏰ Нагадати на старті", starts_at)
+    };
+    InlineKeyboard {
+        rows: vec![vec![
+            InlineButton::new(label, super::reminders::at_cb(due, &format!("📅 {title}"))),
+            InlineButton::new("⏰ Нагадування", "reminders"),
+        ]],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_keyboard_picks_five_minutes_before_when_possible() {
+        let kb = event_keyboard(10_000, "Standup", 9_000);
+        assert_eq!(kb.rows[0][0].callback_data, "refresh:reminders:at:9700:📅 Standup");
+        // Event in 2 minutes → fall back to the start time.
+        let kb = event_keyboard(10_000, "Standup", 9_880);
+        assert_eq!(kb.rows[0][0].callback_data, "refresh:reminders:at:10000:📅 Standup");
+    }
+
+    #[test]
+    fn event_keyboard_payload_fits_telegram_limit() {
+        let title = "Дуже-дуже довга назва зустрічі з купою учасників".repeat(3);
+        let kb = event_keyboard(i64::MAX / 2, &title, 0);
+        for b in kb.rows.iter().flatten() {
+            assert!(b.callback_data.len() <= 64, "{}", b.callback_data);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

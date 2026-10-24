@@ -1,7 +1,7 @@
 //! Google Gemini (`generativelanguage.googleapis.com`) adapter.
 //!
 //! Wire differences vs. OpenAI/Anthropic we translate for here:
-//! - API key travels as a `?key=` query string, not a header.
+//! - API key travels in the `x-goog-api-key` header (never the URL).
 //! - `system` lifts to a `systemInstruction` field (similar shape
 //!   to Anthropic — a separate `parts` block).
 //! - Messages are called `contents`; assistant role is `model`;
@@ -17,7 +17,9 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{ChatMessage, LlmClient, LlmError, LlmRequest, LlmResponse, Role, ToolCall};
+use super::{
+    http, truncate_chars, ChatMessage, LlmClient, LlmError, LlmRequest, LlmResponse, Role, ToolCall,
+};
 
 pub struct GoogleClient {
     http: reqwest::Client,
@@ -33,7 +35,7 @@ impl GoogleClient {
         model: impl Into<String>,
     ) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: http::build_client(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
             model: model.into(),
@@ -44,64 +46,26 @@ impl GoogleClient {
 #[async_trait]
 impl LlmClient for GoogleClient {
     async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-        let body = to_wire(&req);
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            self.base_url, self.model, self.api_key
-        );
-
-        let mut attempt = 0;
-        let response = loop {
-            let resp = self
-                .http
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .body(body.to_string())
-                .send()
-                .await;
-            match resp {
-                Ok(r) => {
-                    if r.status().is_server_error() && attempt == 0 {
-                        attempt += 1;
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
-                    break r;
-                }
-                Err(e) => return Err(LlmError::Network(e.to_string())),
-            }
-        };
-
-        let status = response.status();
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err(LlmError::Auth);
-        }
-        if status.as_u16() == 429 {
-            return Err(LlmError::RateLimit);
-        }
-
-        let text = response
-            .text()
-            .await
-            .map_err(|e| LlmError::Network(e.to_string()))?;
-
-        // Gemini often returns a 400 with `API_KEY_INVALID` for
-        // unusable keys; surface that as Auth so the dispatcher
-        // falls back to inbox + shows a clear banner.
-        if status.as_u16() == 400 && text.contains("API_KEY_INVALID") {
-            return Err(LlmError::Auth);
-        }
-
-        if !status.is_success() {
-            return Err(LlmError::BadResponse(format!(
-                "status {}: {}",
-                status.as_u16(),
-                truncate(&text, 200)
-            )));
-        }
-
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|e| LlmError::BadResponse(format!("json parse: {e}")))?;
+        let body = to_wire(&req).to_string();
+        // Key goes in a header, never the URL: reqwest error strings
+        // embed the URL and those reach logs and Telegram.
+        let url = format!("{}/models/{}:generateContent", self.base_url, self.model);
+        let value = http::post_json_with_retry(
+            || {
+                self.http
+                    .post(&url)
+                    .header("x-goog-api-key", &self.api_key)
+                    .header("Content-Type", "application/json")
+                    .body(body.clone())
+            },
+            // Gemini often returns a 400 with `API_KEY_INVALID` for
+            // unusable keys; surface that as Auth so the dispatcher
+            // falls back to inbox + shows a clear banner.
+            |status, text| {
+                (status == 400 && text.contains("API_KEY_INVALID")).then_some(LlmError::Auth)
+            },
+        )
+        .await?;
         from_wire(&value)
     }
 }
@@ -109,8 +73,16 @@ impl LlmClient for GoogleClient {
 pub fn to_wire(req: &LlmRequest) -> Value {
     let mut system_txt = String::new();
     let mut contents: Vec<Value> = Vec::new();
+    // Gemini correlates tool results by function *name*; our ids are
+    // synthetic, so remember which name each id belongs to.
+    let mut call_names: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    // Gemini wants every functionResponse answering one model turn in a
+    // single `user` content; consecutive tool messages are merged.
+    let mut last_was_tool = false;
     for m in &req.messages {
+        let is_tool = m.role == Role::Tool;
         match m.role {
+            Role::System if m.is_cache_breakpoint() => {}
             Role::System => {
                 if !system_txt.is_empty() {
                     system_txt.push_str("\n\n");
@@ -121,8 +93,34 @@ pub fn to_wire(req: &LlmRequest) -> Value {
                 "role": "user",
                 "parts": [{ "text": m.content }],
             })),
-            Role::Assistant => contents.push(assistant_to_wire(m)),
-            Role::Tool => contents.push(tool_result_to_wire(m)),
+            Role::Assistant => {
+                for c in &m.tool_calls {
+                    call_names.insert(&c.id, &c.name);
+                }
+                contents.push(assistant_to_wire(m));
+            }
+            Role::Tool => {
+                let id = m.tool_call_id.as_deref().unwrap_or_default();
+                let name = call_names
+                    .get(id)
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| name_from_call_id(id));
+                let wire = tool_result_to_wire(&name, m);
+                let merged = last_was_tool
+                    && contents
+                        .last_mut()
+                        .and_then(|c| c["parts"].as_array_mut())
+                        .map(|parts| {
+                            parts.extend(wire["parts"].as_array().cloned().unwrap_or_default())
+                        })
+                        .is_some();
+                if !merged {
+                    contents.push(wire);
+                }
+            }
+        }
+        if !(m.role == Role::System) {
+            last_was_tool = is_tool;
         }
     }
 
@@ -209,16 +207,31 @@ fn assistant_to_wire(msg: &ChatMessage) -> Value {
     json!({ "role": "model", "parts": parts })
 }
 
-fn tool_result_to_wire(msg: &ChatMessage) -> Value {
-    // Gemini correlates by function name, not by id. When the
-    // orchestrator already passed us a tool row we rely on the
-    // matching assistant turn right above to carry the same name;
-    // if the tool result JSON is itself an object we splat it as
-    // `response`, otherwise wrap it under `{content: "…"}` so the
-    // wire shape stays valid.
-    let name = msg.tool_call_id.clone().unwrap_or_default();
-    let response: Value =
-        serde_json::from_str(&msg.content).unwrap_or_else(|_| json!({ "content": msg.content }));
+/// Synthesise the call id for the `idx`-th functionCall of a turn.
+fn call_id(name: &str, idx: usize) -> String {
+    format!("google-{name}-{idx}")
+}
+
+/// Inverse of `call_id`, used when the originating assistant turn is
+/// not in the request. Ids that don't match the scheme pass through.
+fn name_from_call_id(id: &str) -> String {
+    id.strip_prefix("google-")
+        .and_then(|rest| rest.rsplit_once('-'))
+        .filter(|(_, idx)| !idx.is_empty() && idx.bytes().all(|b| b.is_ascii_digit()))
+        .map(|(name, _)| name.to_string())
+        .unwrap_or_else(|| id.to_string())
+}
+
+fn tool_result_to_wire(name: &str, msg: &ChatMessage) -> Value {
+    // Gemini correlates by function name, not by id — `name` is the
+    // real function name resolved by `to_wire`. If the tool result
+    // JSON is itself an object we splat it as `response`, otherwise
+    // wrap it under `{content: "…"}` so the wire shape stays valid
+    // (`response` must be an object).
+    let response: Value = match serde_json::from_str::<Value>(&msg.content) {
+        Ok(v) if v.is_object() => v,
+        _ => json!({ "content": msg.content }),
+    };
     json!({
         "role": "user",
         "parts": [
@@ -265,7 +278,7 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
                 (Some(r), _) => format!("Gemini returned no content (finishReason: {r})"),
                 (None, None) => format!(
                     "Gemini returned an unrecognised response shape: {}",
-                    truncate(&value.to_string(), 400)
+                    truncate_chars(&value.to_string(), 400, "…")
                 ),
             };
             return Err(LlmError::BadResponse(msg));
@@ -299,7 +312,7 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
                 .get("thoughtSignature")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let id = format!("google-{}-{}", name, tool_calls.len());
+            let id = call_id(&name, tool_calls.len());
             tool_calls.push(ToolCall {
                 id,
                 name,
@@ -310,14 +323,6 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
     }
 
     Ok(LlmResponse { text, tool_calls })
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max])
-    }
 }
 
 #[cfg(test)]
@@ -466,13 +471,118 @@ mod tests {
 
     #[test]
     fn tool_result_wraps_non_json_content() {
-        let wire = tool_result_to_wire(&ChatMessage::tool("get_battery", "just a string"));
+        let wire = tool_result_to_wire(
+            "get_battery",
+            &ChatMessage::tool("google-get_battery-0", "just a string"),
+        );
         assert_eq!(wire["role"], "user");
         assert_eq!(wire["parts"][0]["functionResponse"]["name"], "get_battery");
         assert_eq!(
             wire["parts"][0]["functionResponse"]["response"]["content"],
             "just a string"
         );
+    }
+
+    #[test]
+    fn tool_result_uses_real_function_name_not_call_id() {
+        // Round-trip: parse functionCalls, replay them with results.
+        let body = json!({
+            "candidates": [{ "content": { "role": "model", "parts": [
+                { "functionCall": { "name": "get_battery", "args": {} } },
+                { "functionCall": { "name": "list_facts", "args": {} } }
+            ] } }]
+        });
+        let resp = from_wire(&body).unwrap();
+        let mut assistant = ChatMessage::assistant("");
+        assistant.tool_calls = resp.tool_calls.clone();
+        let req = LlmRequest {
+            messages: vec![
+                ChatMessage::user("x"),
+                assistant,
+                ChatMessage::tool(resp.tool_calls[0].id.clone(), "{\"pct\":72}"),
+                ChatMessage::tool(resp.tool_calls[1].id.clone(), "[]"),
+            ],
+            ..Default::default()
+        };
+        let wire = to_wire(&req);
+        // Parallel calls → both responses in ONE user content.
+        assert_eq!(wire["contents"].as_array().unwrap().len(), 3);
+        assert_eq!(wire["contents"][2]["role"], "user");
+        assert_eq!(wire["contents"][2]["parts"].as_array().unwrap().len(), 2);
+        let fr0 = &wire["contents"][2]["parts"][0]["functionResponse"];
+        assert_eq!(fr0["name"], "get_battery");
+        assert_eq!(fr0["response"]["pct"], 72);
+        let fr1 = &wire["contents"][2]["parts"][1]["functionResponse"];
+        assert_eq!(fr1["name"], "list_facts");
+        // Non-object JSON is wrapped so `response` stays an object.
+        assert_eq!(fr1["response"]["content"], "[]");
+    }
+
+    #[test]
+    fn tool_results_of_separate_turns_are_not_merged() {
+        let mut a1 = ChatMessage::assistant("");
+        a1.tool_calls = vec![super::super::ToolCall {
+            id: "google-get_battery-0".into(),
+            name: "get_battery".into(),
+            args_json: "{}".into(),
+            ..Default::default()
+        }];
+        let mut a2 = ChatMessage::assistant("");
+        a2.tool_calls = vec![super::super::ToolCall {
+            id: "google-list_facts-0".into(),
+            name: "list_facts".into(),
+            args_json: "{}".into(),
+            ..Default::default()
+        }];
+        let req = LlmRequest {
+            messages: vec![
+                ChatMessage::user("x"),
+                a1,
+                ChatMessage::tool("google-get_battery-0", "{}"),
+                a2,
+                ChatMessage::tool("google-list_facts-0", "{}"),
+                ChatMessage::user("y"),
+            ],
+            ..Default::default()
+        };
+        let wire = to_wire(&req);
+        let contents = wire["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 6);
+        assert_eq!(contents[2]["parts"].as_array().unwrap().len(), 1);
+        assert_eq!(contents[4]["parts"].as_array().unwrap().len(), 1);
+        assert_eq!(contents[5]["parts"][0]["text"], "y");
+    }
+
+    #[test]
+    fn name_from_call_id_falls_back_to_parsing() {
+        assert_eq!(name_from_call_id("google-get_battery-0"), "get_battery");
+        assert_eq!(
+            name_from_call_id("google-convert-media-12"),
+            "convert-media"
+        );
+        assert_eq!(name_from_call_id("call_abc"), "call_abc");
+        assert_eq!(name_from_call_id("google-nodigits-x"), "google-nodigits-x");
+    }
+
+    #[test]
+    fn cache_breakpoint_is_not_sent() {
+        let req = LlmRequest {
+            messages: vec![
+                ChatMessage::system("a"),
+                ChatMessage::cache_breakpoint(),
+                ChatMessage::system("b"),
+                ChatMessage::user("hi"),
+            ],
+            ..Default::default()
+        };
+        let wire = to_wire(&req);
+        assert_eq!(wire["systemInstruction"]["parts"][0]["text"], "a\n\nb");
+    }
+
+    #[test]
+    fn from_wire_unrecognised_shape_truncates_utf8_safely() {
+        let body = json!({ "weird": "й".repeat(1000) });
+        assert!(matches!(from_wire(&body), Err(LlmError::BadResponse(_))));
     }
 
     #[test]

@@ -12,7 +12,9 @@
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{ChatMessage, LlmClient, LlmError, LlmRequest, LlmResponse, Role, ToolCall, ToolSpec};
+use super::{
+    http, ChatMessage, LlmClient, LlmError, LlmRequest, LlmResponse, Role, ToolCall, ToolSpec,
+};
 
 pub struct OpenAiClient {
     http: reqwest::Client,
@@ -28,7 +30,7 @@ impl OpenAiClient {
         model: impl Into<String>,
     ) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: http::build_client(),
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key: api_key.into(),
             model: model.into(),
@@ -39,75 +41,56 @@ impl OpenAiClient {
 #[async_trait]
 impl LlmClient for OpenAiClient {
     async fn chat(&self, req: LlmRequest) -> Result<LlmResponse, LlmError> {
-        let body = to_wire(&self.model, &req);
+        let body = to_wire(&self.model, &req).to_string();
         let url = format!("{}/chat/completions", self.base_url);
-
-        // 5xx retry — single shot with a 1s back-off. Captures the
-        // common "provider is warming up a new replica" case without
-        // amplifying rate-limit storms.
-        let mut attempt = 0;
-        let response = loop {
-            let resp = self
-                .http
-                .post(&url)
-                .bearer_auth(&self.api_key)
-                .header("Content-Type", "application/json")
-                .body(body.to_string())
-                .send()
-                .await;
-            match resp {
-                Ok(r) => {
-                    let status = r.status();
-                    if status.is_server_error() && attempt == 0 {
-                        attempt += 1;
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        continue;
-                    }
-                    break r;
-                }
-                Err(e) => return Err(LlmError::Network(e.to_string())),
-            }
-        };
-
-        let status = response.status();
-        if status.as_u16() == 401 || status.as_u16() == 403 {
-            return Err(LlmError::Auth);
-        }
-        if status.as_u16() == 429 {
-            return Err(LlmError::RateLimit);
-        }
-
-        // The repo's `reqwest` is compiled without the `json` feature;
-        // parse as text + serde_json per existing convention.
-        let text = response
-            .text()
-            .await
-            .map_err(|e| LlmError::Network(e.to_string()))?;
-
-        if !status.is_success() {
-            return Err(LlmError::BadResponse(format!(
-                "status {}: {}",
-                status.as_u16(),
-                truncate(&text, 200)
-            )));
-        }
-
-        let value: Value = serde_json::from_str(&text)
-            .map_err(|e| LlmError::BadResponse(format!("json parse: {e}")))?;
+        let value = http::post_json_with_retry(
+            || {
+                self.http
+                    .post(&url)
+                    .bearer_auth(&self.api_key)
+                    .header("Content-Type", "application/json")
+                    .body(body.clone())
+            },
+            |_, _| None,
+        )
+        .await?;
         from_wire(&value)
     }
+}
+
+/// Reasoning model families (o-series, GPT-5) reject `max_tokens` and
+/// any non-default `temperature`; they take `max_completion_tokens`
+/// instead. Router prefixes like `openai/o3-mini` are tolerated.
+fn is_reasoning_model(model: &str) -> bool {
+    let id = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(model)
+        .to_ascii_lowercase();
+    ["o1", "o3", "o4", "gpt-5"]
+        .iter()
+        .any(|p| id.starts_with(p))
 }
 
 /// Build the JSON payload sent to `/chat/completions`. Separated out
 /// so tests assert on a `serde_json::Value` without touching HTTP.
 pub fn to_wire(model: &str, req: &LlmRequest) -> Value {
-    let messages: Vec<Value> = req.messages.iter().map(message_to_wire).collect();
+    let messages: Vec<Value> = req
+        .messages
+        .iter()
+        .filter(|m| !m.is_cache_breakpoint())
+        .map(message_to_wire)
+        .collect();
     let mut body = json!({
         "model": model,
         "messages": messages,
-        "temperature": req.temperature,
-        "max_tokens": req.max_tokens,
     });
+    if is_reasoning_model(model) {
+        body["max_completion_tokens"] = json!(req.max_tokens);
+    } else {
+        body["temperature"] = json!(req.temperature);
+        body["max_tokens"] = json!(req.max_tokens);
+    }
     if !req.tools.is_empty() {
         body["tools"] = tools_to_wire(&req.tools);
     }
@@ -212,14 +195,6 @@ pub fn from_wire(value: &Value) -> Result<LlmResponse, LlmError> {
     Ok(LlmResponse { text, tool_calls })
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max])
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +220,69 @@ mod tests {
         // `tools` omitted when empty.
         let empty = to_wire("m", &LlmRequest::default());
         assert!(empty.get("tools").is_none());
+    }
+
+    #[test]
+    fn reasoning_model_selector() {
+        for m in [
+            "o1",
+            "o1-mini",
+            "o3-mini",
+            "o4-mini",
+            "gpt-5",
+            "gpt-5-mini",
+            "openai/o3",
+            "GPT-5.1",
+        ] {
+            assert!(is_reasoning_model(m), "{m} should be a reasoning model");
+        }
+        for m in [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4.1",
+            "llama3",
+            "deepseek-chat",
+            "omni",
+        ] {
+            assert!(
+                !is_reasoning_model(m),
+                "{m} should not be a reasoning model"
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_models_get_max_completion_tokens_and_no_temperature() {
+        let req = LlmRequest {
+            messages: vec![ChatMessage::user("hi")],
+            ..Default::default()
+        };
+        let wire = to_wire("o3-mini", &req);
+        assert_eq!(wire["max_completion_tokens"], 8192);
+        assert!(wire.get("max_tokens").is_none());
+        assert!(wire.get("temperature").is_none());
+
+        let wire = to_wire("gpt-4o", &req);
+        assert_eq!(wire["max_tokens"], 8192);
+        assert!(wire.get("temperature").is_some());
+        assert!(wire.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn cache_breakpoint_is_not_sent() {
+        let req = LlmRequest {
+            messages: vec![
+                ChatMessage::system("static"),
+                ChatMessage::cache_breakpoint(),
+                ChatMessage::system("dynamic"),
+                ChatMessage::user("hi"),
+            ],
+            ..Default::default()
+        };
+        let wire = to_wire("gpt-4o", &req);
+        let msgs = wire["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[1]["content"], "dynamic");
     }
 
     #[test]

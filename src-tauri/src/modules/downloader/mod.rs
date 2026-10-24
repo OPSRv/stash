@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod arc_cookies;
 pub mod backup;
 pub mod commands;
