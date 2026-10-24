@@ -1,11 +1,15 @@
-//! teloxide long-polling driver. Phase 0 only understands `/pair <code>` —
-//! anything else is silently dropped. Later phases extend the dispatcher but
-//! do not change this transport shape.
+//! teloxide long-polling driver. Before pairing it only understands
+//! `/pair <code>` (and answers `/start` with a pairing hint); once paired it
+//! routes commands, free text, media and button presses. Polling runs under
+//! a supervisor; updates are handled off the polling loop (messages in
+//! order on one worker, callbacks concurrently), each on its own task.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 use super::keyring::{SecretStore, ACCOUNT_CHAT_ID};
 use super::pairing::{self, PairOutcome, PairingState};
@@ -31,6 +35,10 @@ pub enum DispatchAction {
         chat_id: i64,
     },
     ReplyAborted {
+        chat_id: i64,
+    },
+    /// `/start` before pairing — answer with a one-line pairing hint.
+    ReplyStartUnpaired {
         chat_id: i64,
     },
     /// Paired user sent a slash-command. Dispatcher couldn't call the
@@ -70,8 +78,19 @@ pub fn dispatch_text(
     }
 
     match pairing_state {
-        PairingState::Unconfigured => DispatchAction::Drop,
-        PairingState::Pairing { .. } => DispatchAction::Drop,
+        PairingState::Unconfigured | PairingState::Pairing { .. } => {
+            // Telegram clients send `/start` when the user first opens the
+            // bot; tell them where to pair instead of staying silent.
+            let is_start = text
+                .strip_prefix('/')
+                .map(|rest| command_name(split_command(rest).0) == "start")
+                .unwrap_or(false);
+            if is_start {
+                DispatchAction::ReplyStartUnpaired { chat_id }
+            } else {
+                DispatchAction::Drop
+            }
+        }
         PairingState::Paired { chat_id: allowed } => {
             if *allowed != chat_id {
                 // Allowlist: messages from any other chat are silently
@@ -80,12 +99,13 @@ pub fn dispatch_text(
             }
             if let Some(rest) = text.strip_prefix('/') {
                 let (name, args) = split_command(rest);
+                let name = command_name(name);
                 if name.is_empty() {
                     return DispatchAction::Drop;
                 }
                 DispatchAction::RunCommand {
                     chat_id,
-                    name: name.to_lowercase(),
+                    name,
                     args: args.to_string(),
                 }
             } else {
@@ -135,6 +155,17 @@ fn split_command(s: &str) -> (&str, &str) {
     }
 }
 
+/// Normalise a command token: lowercase and drop the `@BotName` suffix
+/// Telegram appends when a command is picked from the menu in groups.
+fn command_name(token: &str) -> String {
+    token
+        .split('@')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_lowercase()
+}
+
 /// Heuristic: does `s` contain at least one URL worth storing in the
 /// inbox? Matches `http(s)://…` and bare `www.…` hosts — same rules
 /// the frontend LinkifiedText uses, kept simple (regex-free) on
@@ -172,16 +203,46 @@ pub(crate) fn contains_url(s: &str) -> bool {
 
 // -------------------- Live transport (teloxide) --------------------
 
-/// Spawned tokio task that long-polls Telegram until cancelled. Phase 0
-/// starts it inside `telegram_start_pairing` and stops it on unpair/cancel.
+/// Upper bound for one queued message handler before the ordered worker
+/// moves on to the next update. The slow handler keeps running detached —
+/// this only stops one hung LLM call from freezing the whole bot.
+const MESSAGE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Same guard for button presses (they run concurrently, so it only
+/// bounds how long we keep the JoinHandle around).
+const CALLBACK_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// getUpdates retry backoff: doubles from START up to MAX.
+const POLL_BACKOFF_START: Duration = Duration::from_secs(1);
+const POLL_BACKOFF_MAX: Duration = Duration::from_secs(60);
+/// Pause before the supervisor restarts a polling task that died.
+const RESTART_DELAY: Duration = Duration::from_secs(5);
+/// Telegram drops "typing…" after ~5s; refresh a bit sooner.
+const TYPING_REFRESH: Duration = Duration::from_secs(4);
+/// Hard stop for a forgotten typing guard (~10 minutes).
+const TYPING_MAX_TICKS: u32 = 150;
+
+/// Commands that work but stay out of Telegram's `/` menu: `/pair` only
+/// matters during pairing, `/start` is sent by the client itself, and
+/// `voice` / `confirm` / `retry` / `ask` are driven by inline buttons.
+const HIDDEN_COMMANDS: &[&str] = &["pair", "start", "voice", "confirm", "retry", "ask"];
+
+const UNSUPPORTED_MESSAGE: &str = "🤷 Цей тип повідомлень поки не підтримується.";
+
+type ShutdownSlot = Arc<Mutex<Option<(u64, oneshot::Sender<()>)>>>;
+
+/// Supervised long-polling task. Started on pairing / app launch and
+/// stopped on unpair/cancel. If the polling task panics it is restarted;
+/// if it exits for good (revoked token) the slot is cleared so a later
+/// `start` can bring it back.
 pub struct TransportHandle {
-    shutdown: Mutex<Option<oneshot::Sender<()>>>,
+    shutdown: ShutdownSlot,
+    generation: AtomicU64,
 }
 
 impl TransportHandle {
     pub fn new() -> Self {
         Self {
-            shutdown: Mutex::new(None),
+            shutdown: Arc::new(Mutex::new(None)),
+            generation: AtomicU64::new(0),
         }
     }
 
@@ -202,18 +263,20 @@ impl TransportHandle {
         if slot.is_some() {
             return Ok(());
         }
+        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = oneshot::channel::<()>();
-        *slot = Some(tx);
+        *slot = Some((generation, tx));
         drop(slot);
 
+        let slot = Arc::clone(&self.shutdown);
         tokio::spawn(async move {
-            run_polling(token, app, state, rx).await;
+            supervise(token, app, state, rx, slot, generation).await;
         });
         Ok(())
     }
 
     pub async fn stop(&self) {
-        if let Some(tx) = self.shutdown.lock().await.take() {
+        if let Some((_, tx)) = self.shutdown.lock().await.take() {
             let _ = tx.send(());
         }
     }
@@ -225,22 +288,108 @@ impl Default for TransportHandle {
     }
 }
 
-async fn run_polling(
+/// Keep `run_polling` alive until shutdown: restart it after a panic,
+/// give up (and free the slot) when it returns on a fatal error.
+async fn supervise(
     token: String,
     app: AppHandle,
     state: Arc<TelegramState>,
     mut shutdown: oneshot::Receiver<()>,
+    slot: ShutdownSlot,
+    generation: u64,
 ) {
+    loop {
+        let mut task = tokio::spawn(run_polling(token.clone(), app.clone(), Arc::clone(&state)));
+        tokio::select! {
+            _ = &mut shutdown => {
+                task.abort();
+                tracing::info!("telegram transport stopping");
+                return;
+            }
+            res = &mut task => {
+                match res {
+                    Ok(()) => {
+                        // Fatal exit (e.g. revoked token): free the slot
+                        // unless a newer transport already took it.
+                        let mut s = slot.lock().await;
+                        if matches!(&*s, Some((g, _)) if *g == generation) {
+                            *s = None;
+                        }
+                        tracing::warn!("telegram transport stopped after a fatal error");
+                        return;
+                    }
+                    Err(e) if e.is_panic() => {
+                        tracing::error!("telegram polling task panicked — restarting");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "telegram polling task ended unexpectedly — restarting");
+                    }
+                }
+            }
+        }
+        tokio::select! {
+            _ = &mut shutdown => return,
+            _ = tokio::time::sleep(RESTART_DELAY) => {}
+        }
+    }
+}
+
+/// How the poll loop reacts to a getUpdates failure.
+#[derive(Debug, PartialEq, Eq)]
+enum PollError {
+    /// 401 — token revoked/invalid. Retrying is pointless.
+    InvalidToken,
+    /// 409 — another process is polling with the same token.
+    Conflict,
+    /// Flood control with an explicit wait.
+    RetryAfter(Duration),
+    /// Network blips, 5xx — exponential backoff.
+    Transient,
+}
+
+fn classify_poll_error(e: &teloxide::RequestError) -> PollError {
+    use teloxide::{ApiError, RequestError};
+    match e {
+        RequestError::Api(ApiError::InvalidToken) => PollError::InvalidToken,
+        RequestError::Api(ApiError::TerminatedByOtherGetUpdates) => PollError::Conflict,
+        RequestError::RetryAfter(s) => PollError::RetryAfter(s.duration()),
+        _ => PollError::Transient,
+    }
+}
+
+fn next_backoff(current: Duration) -> Duration {
+    current.saturating_mul(2).min(POLL_BACKOFF_MAX)
+}
+
+/// Tell the UI about transport health. `None` = healthy again.
+fn emit_status(app: &AppHandle, error: Option<&str>) {
+    let _ = app.emit("telegram:status", serde_json::json!({ "error": error }));
+    let _ = app.emit("telegram:status_changed", ());
+}
+
+fn command_count(state: &TelegramState) -> usize {
+    state
+        .commands
+        .read()
+        .map(|r| r.enumerate().len())
+        .unwrap_or(0)
+}
+
+/// Long-poll loop. Returns only on a fatal error; the supervisor aborts it
+/// on shutdown.
+async fn run_polling(token: String, app: AppHandle, state: Arc<TelegramState>) {
     use teloxide::prelude::*;
+    use teloxide::types::UpdateKind;
 
     let bot = Bot::new(token);
     tracing::info!("telegram transport started");
 
     // Publish slash commands so they show up in Telegram's / autocomplete.
     publish_bot_commands(&bot, &state).await;
+    let mut published_count = command_count(&state);
 
     // Resume from last seen update_id so we don't re-process messages after
-    // restart. Stored in the kv table (written below on every successful batch).
+    // restart. Stored in the kv table (written below before each update runs).
     let mut offset: i32 = state
         .repo
         .lock()
@@ -249,83 +398,181 @@ async fn run_polling(
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(0);
 
-    loop {
-        tokio::select! {
-            _ = &mut shutdown => {
-                tracing::info!("telegram transport stopping");
-                break;
+    // Messages go through one ordered worker so replies keep the order the
+    // user typed them in; button presses run concurrently. Every handler is
+    // spawned on its own task, so a panic is logged instead of killing the
+    // poller. The worker exits when this function's sender is dropped.
+    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<teloxide::types::Update>();
+    {
+        let bot = bot.clone();
+        let app = app.clone();
+        let state = Arc::clone(&state);
+        tokio::spawn(async move {
+            while let Some(u) = msg_rx.recv().await {
+                let fut = handle_update(bot.clone(), app.clone(), Arc::clone(&state), u);
+                run_guarded("message", MESSAGE_TIMEOUT, fut).await;
             }
-            // 10s long-poll: short enough that flaky NATs / captive portals
-            // don't reap the idle connection, still long enough to avoid
-            // hot-looping.
-            result = bot.get_updates().offset(offset).timeout(10) => {
-                match result {
-                    Ok(list) => {
-                        for u in list {
-                            offset = (u.id.0 as i32).saturating_add(1);
-                            handle_update(&bot, &app, &state, u).await;
-                        }
-                        if let Ok(mut repo) = state.repo.lock() {
-                            let _ = repo.kv_set("last_update_id", &offset.to_string());
-                        }
+        });
+    }
+
+    let mut backoff = POLL_BACKOFF_START;
+    let mut reported_error = false;
+    loop {
+        // 10s long-poll: short enough that flaky NATs / captive portals
+        // don't reap the idle connection, still long enough to avoid
+        // hot-looping.
+        match bot.get_updates().offset(offset).timeout(10).await {
+            Ok(list) => {
+                backoff = POLL_BACKOFF_START;
+                if std::mem::take(&mut reported_error) {
+                    emit_status(&app, None);
+                }
+                for u in list {
+                    offset = (u.id.0 as i32).saturating_add(1);
+                    // Persist before handling: a crash mid-handler must not
+                    // replay the update (and its side effects) on restart.
+                    if let Ok(mut repo) = state.repo.lock() {
+                        let _ = repo.kv_set("last_update_id", &offset.to_string());
                     }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "getUpdates failed");
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    if matches!(u.kind, UpdateKind::CallbackQuery(_)) {
+                        let fut = handle_update(bot.clone(), app.clone(), Arc::clone(&state), u);
+                        tokio::spawn(run_guarded("callback", CALLBACK_TIMEOUT, fut));
+                    } else if msg_tx.send(u).is_err() {
+                        tracing::error!("telegram message worker is gone");
                     }
                 }
+                // Commands registered after start (late module wiring) get
+                // pushed to the `/` menu on the next poll cycle.
+                let count = command_count(&state);
+                if count != published_count {
+                    published_count = count;
+                    publish_bot_commands(&bot, &state).await;
+                }
             }
+            Err(e) => match classify_poll_error(&e) {
+                PollError::InvalidToken => {
+                    tracing::error!(error = %e, "getUpdates: bot token rejected (401) — stopping transport");
+                    emit_status(
+                        &app,
+                        Some("Telegram rejected the bot token (401). Re-pair the bot in Stash → Telegram."),
+                    );
+                    return;
+                }
+                PollError::Conflict => {
+                    tracing::error!(
+                        error = %e,
+                        "getUpdates: another instance is polling this bot (409) — retrying in {}s",
+                        POLL_BACKOFF_MAX.as_secs()
+                    );
+                    if !reported_error {
+                        reported_error = true;
+                        emit_status(
+                            &app,
+                            Some("Another app instance is polling this bot (409 Conflict)."),
+                        );
+                    }
+                    tokio::time::sleep(POLL_BACKOFF_MAX).await;
+                }
+                PollError::RetryAfter(wait) => {
+                    tracing::warn!(wait_s = wait.as_secs(), "getUpdates: flood control");
+                    tokio::time::sleep(wait).await;
+                }
+                PollError::Transient => {
+                    tracing::warn!(error = %e, backoff_s = backoff.as_secs(), "getUpdates failed");
+                    tokio::time::sleep(backoff).await;
+                    backoff = next_backoff(backoff);
+                }
+            },
         }
     }
 }
 
+/// Run one update handler on its own task: panics are logged, and a
+/// handler that outlives `limit` is left running detached while the
+/// caller moves on.
+async fn run_guarded<F>(what: &'static str, limit: Duration, fut: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let handle = tokio::spawn(fut);
+    match tokio::time::timeout(limit, handle).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) if e.is_panic() => tracing::error!(what, "telegram update handler panicked"),
+        Ok(Err(e)) => tracing::warn!(what, error = %e, "telegram update handler cancelled"),
+        Err(_) => tracing::warn!(
+            what,
+            "telegram update handler still running after timeout — moving on"
+        ),
+    }
+}
+
+/// Poison-tolerant check that `chat_id` is the paired chat.
+fn is_paired_chat(state: &TelegramState, chat_id: i64) -> bool {
+    matches!(
+        &*state.pairing.lock().unwrap_or_else(|e| e.into_inner()),
+        PairingState::Paired { chat_id: allowed } if *allowed == chat_id
+    )
+}
+
 async fn handle_update(
-    bot: &teloxide::Bot,
-    app: &AppHandle,
-    state: &Arc<TelegramState>,
+    bot: teloxide::Bot,
+    app: AppHandle,
+    state: Arc<TelegramState>,
     update: teloxide::types::Update,
 ) {
     use teloxide::types::UpdateKind;
 
     // Button presses on inline keyboards arrive as CallbackQuery. Treated
     // exactly like a typed slash command after allowlist verification.
-    if let UpdateKind::CallbackQuery(q) = update.kind {
-        handle_callback(bot, app, state, q).await;
-        return;
-    }
-
-    let UpdateKind::Message(msg) = update.kind else {
-        return;
+    // Edited text messages are handled like fresh ones (the user fixed a
+    // typo and expects an answer to the corrected text).
+    let (msg, edited) = match update.kind {
+        UpdateKind::CallbackQuery(q) => {
+            handle_callback(&bot, &app, &state, q).await;
+            return;
+        }
+        UpdateKind::Message(m) => (m, false),
+        UpdateKind::EditedMessage(m) => (m, true),
+        _ => return,
     };
+    let (bot, app, state) = (&bot, &app, &state);
     let chat_id = msg.chat.id.0;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    // Media path — voice / photo / document / video. Only persisted when
-    // the sender is on the allowlist (Paired.chat_id == msg.chat_id).
-    if let Some(intent) = super::inbox::extract_media(&msg) {
-        let is_allowed = matches!(
-            &*state.pairing.lock().unwrap(),
-            super::pairing::PairingState::Paired { chat_id: allowed } if *allowed == chat_id
-        );
-        if !is_allowed {
-            return; // allowlist drop
+    // Media path — voice / audio / photo / document / video. Only persisted
+    // when the sender is on the allowlist (Paired.chat_id == msg.chat_id).
+    // Edits of media messages (caption tweaks) are ignored so the file
+    // isn't downloaded twice.
+    if !edited {
+        if let Some(intent) = super::inbox::extract_media(&msg) {
+            if !is_paired_chat(state, chat_id) {
+                return; // allowlist drop
+            }
+            handle_media(bot, app, state, &msg, intent, now).await;
+            return;
         }
-        handle_media(bot, app, state, &msg, intent, now).await;
-        return;
     }
 
-    let Some(text) = msg.text() else { return };
+    let Some(text) = msg.text() else {
+        if !edited && super::inbox::is_unsupported_media(&msg) && is_paired_chat(state, chat_id) {
+            state.sender.enqueue(chat_id, UNSUPPORTED_MESSAGE);
+        }
+        return;
+    };
 
     let action = {
-        let mut p = state.pairing.lock().unwrap();
+        let mut p = state.pairing.lock().unwrap_or_else(|e| e.into_inner());
         dispatch_text(&mut p, state.secrets.as_ref(), text, chat_id, now)
     };
 
     match action {
         DispatchAction::Drop => return,
+        DispatchAction::ReplyStartUnpaired { .. } => {
+            state.sender.enqueue(chat_id, super::bot_cmds::UNPAIRED_START_HINT);
+        }
         DispatchAction::ReplyPaired { .. } => {
             let _ = app.emit("telegram:paired", chat_id);
             let welcome = build_welcome_message(app);
@@ -355,10 +602,9 @@ async fn handle_update(
         }
         DispatchAction::RunCommand { name, args, .. } => {
             if let Some(handler) = state.find_command(&name) {
-                // Best-effort "typing…" for the 5s Telegram window. Fast
-                // commands clear it as soon as the reply lands; slow ones
-                // (/screenshot, /summarize) get a visible indicator.
-                send_typing(bot, chat_id).await;
+                // "typing…" stays visible until the reply is queued, so
+                // slow commands (/screenshot, /summarize) show progress.
+                let _typing = TypingGuard::start(bot, chat_id);
                 let reply = handler
                     .handle(
                         crate::modules::telegram::commands_registry::Ctx { app: app.clone() },
@@ -374,6 +620,10 @@ async fn handle_update(
             }
         }
         DispatchAction::IngestText { text, .. } => {
+            use super::bot_cmds::{
+                assistant_text, friendly_llm_error, remember_prompt, retry_keyboard,
+                with_reply_context,
+            };
             // URLs always land in the inbox, even when the AI path
             // succeeds — that's the surface where the user expects to
             // see shareable links ("download this mp3", "save this
@@ -392,33 +642,43 @@ async fn handle_update(
                 }
             }
 
+            // Replying to a message quotes it for the assistant so "this"
+            // / "translate it" have a referent.
+            let quote = reply_quote(state, &msg);
+            let prompt = with_reply_context(quote.as_deref(), &text);
+            remember_prompt(&prompt);
+
             // Phase 3: free text goes to the AI assistant when one is
             // configured. Any missing-piece error (no key, no model,
             // provider not supported) falls back to the inbox so the
             // message isn't silently swallowed.
-            send_typing(bot, chat_id).await;
-            match super::assistant::handle_user_text_at(app, state, &text, Some(msg.date.timestamp())).await {
+            let typing = TypingGuard::start(bot, chat_id);
+            let result = super::assistant::handle_user_text_at(
+                app,
+                state,
+                &prompt,
+                Some(msg.date.timestamp()),
+            )
+            .await;
+            drop(typing);
+            match result {
                 Ok(reply) => {
-                    let suffix = if reply.truncated {
-                        "\n\n_(спрощено — досягнуто ліміту ланцюжка інструментів)_"
-                    } else {
-                        ""
-                    };
-                    state
-                        .sender
-                        .enqueue(chat_id, format!("{}{suffix}", reply.text));
+                    state.sender.enqueue(chat_id, assistant_text(&reply));
                 }
                 Err(e) => {
                     tracing::info!(error = %e, "assistant unavailable, falling back to inbox");
+                    let friendly = friendly_llm_error(&e);
                     if inbox_already {
                         // The URL-detect path already persisted this
                         // message — avoid a duplicate row. Surface the
                         // assistant failure so the user knows why
                         // there's no AI reply, but don't pretend we're
                         // "saving" something twice.
-                        state
-                            .sender
-                            .enqueue(chat_id, format!("🤖 ⚠️ Асистент недоступний ({e})."));
+                        state.sender.enqueue_with_keyboard(
+                            chat_id,
+                            friendly,
+                            Some(retry_keyboard()),
+                        );
                     } else {
                         let msg_id = msg.id.0 as i64;
                         let received_at = now;
@@ -432,9 +692,10 @@ async fn handle_update(
                             Ok(id) => {
                                 tracing::debug!(id, text_len = text.len(), "inbox text ingested");
                                 let _ = app.emit("telegram:inbox_added", id);
-                                state.sender.enqueue(
+                                state.sender.enqueue_with_keyboard(
                                     chat_id,
-                                    format!("📥 Збережено в інбокс (асистент: {e})."),
+                                    format!("📥 Збережено в інбокс.\n{friendly}"),
+                                    Some(retry_keyboard()),
                                 );
                             }
                             Err(e2) => {
@@ -451,6 +712,29 @@ async fn handle_update(
         }
     }
     let _ = app.emit("telegram:status_changed", ());
+}
+
+/// Text of the message the user replied to: its text/caption, plus the
+/// inbox transcript (Whisper / OCR) when the quoted message was media.
+fn reply_quote(state: &TelegramState, msg: &teloxide::types::Message) -> Option<String> {
+    let q = msg.reply_to_message()?;
+    if let Some(t) = q.text().filter(|t| !t.trim().is_empty()) {
+        return Some(t.to_string());
+    }
+    let transcript = state.repo.lock().ok().and_then(|repo| {
+        let qid = q.id.0 as i64;
+        repo.list_inbox(200)
+            .ok()?
+            .into_iter()
+            .find(|i| i.telegram_message_id == qid)
+            .and_then(|i| i.transcript)
+    });
+    let parts: Vec<String> = [q.caption().map(str::to_string), transcript]
+        .into_iter()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n"))
 }
 
 async fn handle_media(
@@ -601,16 +885,17 @@ async fn handle_media(
         state.sender.enqueue(chat_id, reply);
     }
 
-    // Voice / video / video_note all trigger Whisper transcription in
-    // the background. Symphonia demuxes the mp4 container so the same
-    // pipeline handles all three. Keeping this off the request path
-    // means a bad model config never blocks the inbox write — the row
-    // is already persisted above.
+    // OCR runs in the background; the recognised text comes back with an
+    // "🤖 Спитати AI" button, or — when the caption already reads like a
+    // question/instruction — goes straight to the assistant together with
+    // the caption.
     if will_ocr {
         let file_abs = abs.clone();
         let mime_owned = intent.mime.clone();
+        let caption = intent.caption.clone();
         let app_for_task = app.clone();
         let state_for_task = Arc::clone(state);
+        let bot_for_task = bot.clone();
         let chat_for_task = chat_id;
         use tauri::Emitter;
         let _ = app.emit("telegram:transcribing", inbox_id);
@@ -631,9 +916,29 @@ async fn handle_media(
                         let _ = repo.set_inbox_transcript(inbox_id, &text);
                     }
                     let _ = app_for_task.emit("telegram:inbox_updated", inbox_id);
-                    state_for_task
-                        .sender
-                        .enqueue(chat_for_task, format!("📝 {text}"));
+                    let wants_ai = caption
+                        .as_deref()
+                        .map(super::bot_cmds::looks_like_prompt)
+                        .unwrap_or(false);
+                    if wants_ai {
+                        let _typing = TypingGuard::start(&bot_for_task, chat_for_task);
+                        let prompt = super::bot_cmds::ocr_prompt(caption.as_deref(), &text);
+                        let reply =
+                            super::bot_cmds::ask_assistant(&app_for_task, &state_for_task, &prompt)
+                                .await;
+                        state_for_task.sender.enqueue_full(
+                            chat_for_task,
+                            reply.text,
+                            reply.keyboard,
+                            reply.documents,
+                        );
+                    } else {
+                        state_for_task.sender.enqueue_with_keyboard(
+                            chat_for_task,
+                            format!("📝 {text}"),
+                            Some(super::bot_cmds::ask_keyboard(inbox_id)),
+                        );
+                    }
                 }
                 Ok(_) => {
                     // Vision found no text — surface that as a failure
@@ -644,14 +949,20 @@ async fn handle_media(
                 Err(e) => {
                     tracing::warn!(error = %e, "ocr failed");
                     let _ = app_for_task.emit("telegram:transcribe_failed", inbox_id);
-                    state_for_task
-                        .sender
-                        .enqueue(chat_for_task, format!("⚠️ OCR не впорався: {e}"));
+                    state_for_task.sender.enqueue(
+                        chat_for_task,
+                        "⚠️ Не вдалося розпізнати текст на зображенні — деталі в лозі Stash.",
+                    );
                 }
             }
         });
     }
 
+    // Voice / audio / video / video_note all trigger Whisper transcription
+    // in the background. Symphonia demuxes the mp4 container so the same
+    // pipeline handles all of them. Keeping this off the request path
+    // means a bad model config never blocks the inbox write — the row
+    // is already persisted above.
     if will_transcribe {
         let audio_abs = abs.clone();
         let app_for_task = app.clone();
@@ -705,9 +1016,10 @@ async fn handle_media(
                 Err(e) => {
                     tracing::warn!(error = %e, "whisper transcription failed");
                     let _ = app_for_task.emit("telegram:transcribe_failed", inbox_id);
-                    state_for_task
-                        .sender
-                        .enqueue(chat_for_task, format!("⚠️ Whisper не впорався: {e}"));
+                    state_for_task.sender.enqueue(
+                        chat_for_task,
+                        "⚠️ Не вдалося розшифрувати аудіо — перевір модель Whisper у налаштуваннях Stash.",
+                    );
                 }
             }
         });
@@ -723,18 +1035,16 @@ async fn handle_callback(
     use teloxide::prelude::*;
 
     let Some(data) = q.data.clone() else {
+        let _ = bot.answer_callback_query(q.id.clone()).await;
         return;
     };
     // Allowlist: only the paired chat's user can drive buttons.
     let user_id = q.from.id.0 as i64;
-    let allowed = matches!(
-        &*state.pairing.lock().unwrap(),
-        PairingState::Paired { chat_id } if *chat_id == user_id
-    );
-    if !allowed {
-        // Best-effort acknowledgement so Telegram doesn't keep the button
-        // spinning on the foreign user's side.
-        let _ = bot.answer_callback_query(q.id.clone()).await;
+    // Answer right away so the button's spinner stops even when the
+    // handler is slow (LLM turns, screenshots). Foreign users get the
+    // same silent ack and nothing else.
+    let _ = bot.answer_callback_query(q.id.clone()).await;
+    if !is_paired_chat(state, user_id) {
         return;
     }
 
@@ -753,40 +1063,34 @@ async fn handle_callback(
         None => (dispatch_data.clone(), String::new()),
     };
 
-    let reply = if let Some(handler) = state.find_command(&ns) {
-        Some(
-            handler
-                .handle(
-                    crate::modules::telegram::commands_registry::Ctx { app: app.clone() },
-                    &action,
-                )
-                .await,
-        )
-    } else {
-        None
+    let Some(handler) = state.find_command(&ns) else {
+        return;
     };
+    let typing = TypingGuard::start(bot, user_id);
+    let reply = handler
+        .handle(
+            crate::modules::telegram::commands_registry::Ctx { app: app.clone() },
+            &action,
+        )
+        .await;
+    drop(typing);
 
-    // Always answer the callback (dismiss the loading indicator).
-    let _ = bot.answer_callback_query(q.id).await;
-
-    if let Some(reply) = reply {
-        // Edit-in-place path: reuse the originating message instead of
-        // sending a new one. Only applies when the callback asked for it
-        // AND we actually know which message to edit (q.message is present).
-        if is_refresh && reply.documents.is_empty() {
-            if let Some(src) = q.message.as_ref() {
-                let msg_id = src.id();
-                edit_message(bot, user_id, msg_id, &reply.text, &reply.keyboard).await;
-                return;
-            }
+    // Edit-in-place path: reuse the originating message instead of
+    // sending a new one. Only applies when the callback asked for it
+    // AND we actually know which message to edit (q.message is present).
+    if is_refresh && reply.documents.is_empty() {
+        if let Some(src) = q.message.as_ref() {
+            let msg_id = src.id();
+            edit_message(bot, user_id, msg_id, &reply.text, &reply.keyboard).await;
+            return;
         }
-        // Forward any attachments a handler emits (e.g. /screenshot)
-        // so the "Again" button actually delivers the PNG, not just the
-        // text caption.
-        state
-            .sender
-            .enqueue_full(user_id, reply.text, reply.keyboard, reply.documents);
     }
+    // Forward any attachments a handler emits (e.g. /screenshot)
+    // so the "Again" button actually delivers the PNG, not just the
+    // text caption.
+    state
+        .sender
+        .enqueue_full(user_id, reply.text, reply.keyboard, reply.documents);
 }
 
 /// Publish the command list to Telegram's Bot API so the native client
@@ -796,11 +1100,10 @@ pub async fn publish_bot_commands(bot: &teloxide::Bot, state: &TelegramState) {
     use teloxide::prelude::*;
     use teloxide::types::BotCommand;
     let cmds: Vec<BotCommand> = {
-        let reg = state.commands.read().unwrap();
+        let reg = state.commands.read().unwrap_or_else(|e| e.into_inner());
         reg.enumerate()
             .into_iter()
-            // `/pair` is meaningless outside the pairing window.
-            .filter(|h| h.name() != "pair")
+            .filter(|h| !HIDDEN_COMMANDS.contains(&h.name()))
             .map(|h| BotCommand::new(h.name(), h.description()))
             .collect()
     };
@@ -813,9 +1116,10 @@ pub async fn publish_bot_commands(bot: &teloxide::Bot, state: &TelegramState) {
 
 /// Edit an existing bot message in place — used by `refresh:*` callbacks so
 /// a Dashboard card updates itself rather than stacking stale snapshots.
-/// Best-effort: a network error or a message Telegram rejects (too old /
-/// from a different bot) falls through to a log line; we'd rather leave
-/// the old card visible than spam a fresh one without asking.
+/// Renders Markdown as HTML like the sender does (plain-text retry when
+/// Telegram rejects the markup). Best-effort: a message Telegram refuses
+/// to edit (too old / from a different bot) falls through to a log line;
+/// we'd rather leave the old card visible than spam a fresh one.
 async fn edit_message(
     bot: &teloxide::Bot,
     chat_id: i64,
@@ -823,37 +1127,58 @@ async fn edit_message(
     text: &str,
     keyboard: &Option<super::commands_registry::InlineKeyboard>,
 ) {
+    use super::format::{markdown_to_telegram_html, split_message, MESSAGE_LIMIT};
     use teloxide::prelude::*;
-    use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
-    // Plain text to match how `sender` posts fresh messages — neither
-    // uses parse_mode, so edits render identically to the original.
-    if let Err(e) = bot
-        .edit_message_text(ChatId(chat_id), message_id, text)
-        .await
-    {
-        tracing::debug!(error = %e, "editMessageText failed");
-        return;
+    use teloxide::types::{ChatId, ParseMode};
+    use teloxide::{ApiError, RequestError};
+
+    // An edit is a single message: keep the first chunk only.
+    let chunk = split_message(text, MESSAGE_LIMIT - 16)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| "👇".to_string());
+    let markup = keyboard.as_ref().map(super::sender::to_markup);
+
+    let mut req = bot
+        .edit_message_text(ChatId(chat_id), message_id, markdown_to_telegram_html(&chunk))
+        .parse_mode(ParseMode::Html);
+    if let Some(m) = markup.clone() {
+        req = req.reply_markup(m);
     }
-    if let Some(kb) = keyboard {
-        let rows: Vec<Vec<InlineKeyboardButton>> = kb
-            .rows
-            .iter()
-            .map(|row| {
-                row.iter()
-                    .map(|b| {
-                        InlineKeyboardButton::callback(b.text.clone(), b.callback_data.clone())
-                    })
-                    .collect()
-            })
-            .collect();
-        let markup = InlineKeyboardMarkup::new(rows);
-        if let Err(e) = bot
-            .edit_message_reply_markup(ChatId(chat_id), message_id)
-            .reply_markup(markup)
-            .await
-        {
-            tracing::debug!(error = %e, "editMessageReplyMarkup failed");
+    match req.await {
+        Ok(_) | Err(RequestError::Api(ApiError::MessageNotModified)) => {}
+        Err(e) => {
+            tracing::debug!(error = %e, "editMessageText (HTML) failed, retrying plain");
+            let mut plain = bot.edit_message_text(ChatId(chat_id), message_id, chunk);
+            if let Some(m) = markup {
+                plain = plain.reply_markup(m);
+            }
+            if let Err(e) = plain.await {
+                tracing::debug!(error = %e, "editMessageText failed");
+            }
         }
+    }
+}
+
+/// Keeps Telegram's "typing…" indicator alive (it expires after ~5s)
+/// until dropped — i.e. until the reply has been queued.
+struct TypingGuard(tokio::task::JoinHandle<()>);
+
+impl TypingGuard {
+    fn start(bot: &teloxide::Bot, chat_id: i64) -> Self {
+        let bot = bot.clone();
+        Self(tokio::spawn(async move {
+            for _ in 0..TYPING_MAX_TICKS {
+                send_typing(&bot, chat_id).await;
+                tokio::time::sleep(TYPING_REFRESH).await;
+            }
+        }))
+    }
+}
+
+impl Drop for TypingGuard {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 
@@ -909,7 +1234,7 @@ fn build_unknown_command_reply(
 /// Compose the post-pairing welcome: a snapshot line for "look, Stash is
 /// alive and here's what I already know" + a nudge toward /help. The
 /// quick-actions keyboard is attached separately at the call site.
-fn build_welcome_message(app: &AppHandle) -> String {
+pub(crate) fn build_welcome_message(app: &AppHandle) -> String {
     use super::module_cmds::{read_battery, BatterySnapshot};
     let battery = match read_battery() {
         BatterySnapshot::Present { percent, charging } => {
@@ -1101,6 +1426,93 @@ mod tests {
             dispatch_text(&mut p, &s, "/pair 123456", 42, 0),
             DispatchAction::ReplyAlreadyPaired { chat_id: 42 }
         );
+    }
+
+    #[test]
+    fn start_before_pairing_gets_hint() {
+        let s = store();
+        let mut p = active_pairing();
+        assert_eq!(
+            dispatch_text(&mut p, &s, "/start", 5, 0),
+            DispatchAction::ReplyStartUnpaired { chat_id: 5 }
+        );
+        assert_eq!(
+            dispatch_text(&mut p, &s, "/START@StashBot", 5, 0),
+            DispatchAction::ReplyStartUnpaired { chat_id: 5 }
+        );
+        let mut u = PairingState::Unconfigured;
+        assert_eq!(
+            dispatch_text(&mut u, &s, "/start deeplink", 5, 0),
+            DispatchAction::ReplyStartUnpaired { chat_id: 5 }
+        );
+        // Anything else is still dropped, and pairing state is untouched.
+        assert_eq!(dispatch_text(&mut p, &s, "/help", 5, 0), DispatchAction::Drop);
+        assert_eq!(dispatch_text(&mut p, &s, "start", 5, 0), DispatchAction::Drop);
+        assert_eq!(p, active_pairing());
+    }
+
+    #[test]
+    fn start_from_foreign_chat_after_pairing_is_dropped() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        assert_eq!(
+            dispatch_text(&mut p, &store(), "/start", 7, 0),
+            DispatchAction::Drop
+        );
+    }
+
+    #[test]
+    fn bot_mention_suffix_is_stripped_from_commands() {
+        let mut p = PairingState::Paired { chat_id: 42 };
+        assert_eq!(
+            dispatch_text(&mut p, &store(), "/Battery@StashBot now", 42, 0),
+            DispatchAction::RunCommand {
+                chat_id: 42,
+                name: "battery".into(),
+                args: "now".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn poll_backoff_doubles_and_caps() {
+        let mut d = POLL_BACKOFF_START;
+        let mut seen = vec![d.as_secs()];
+        for _ in 0..8 {
+            d = next_backoff(d);
+            seen.push(d.as_secs());
+        }
+        assert_eq!(seen, vec![1, 2, 4, 8, 16, 32, 60, 60, 60]);
+    }
+
+    #[test]
+    fn poll_errors_are_classified() {
+        use teloxide::{ApiError, RequestError};
+        assert_eq!(
+            classify_poll_error(&RequestError::Api(ApiError::InvalidToken)),
+            PollError::InvalidToken
+        );
+        assert_eq!(
+            classify_poll_error(&RequestError::Api(ApiError::TerminatedByOtherGetUpdates)),
+            PollError::Conflict
+        );
+        assert_eq!(
+            classify_poll_error(&RequestError::RetryAfter(
+                teloxide::types::Seconds::from_seconds(3)
+            )),
+            PollError::RetryAfter(Duration::from_secs(3))
+        );
+        assert_eq!(
+            classify_poll_error(&RequestError::Api(ApiError::Unknown("Bad Gateway".into()))),
+            PollError::Transient
+        );
+    }
+
+    #[test]
+    fn hidden_commands_cover_callback_only_and_start() {
+        for name in ["pair", "start", "voice", "confirm", "retry", "ask"] {
+            assert!(HIDDEN_COMMANDS.contains(&name));
+        }
+        assert!(!HIDDEN_COMMANDS.contains(&"help"));
     }
 
     #[test]
