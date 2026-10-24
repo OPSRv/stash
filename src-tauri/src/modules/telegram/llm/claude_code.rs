@@ -81,7 +81,9 @@ pub(crate) struct RenderedPrompt {
 pub(crate) fn render_prompt(messages: &[ChatMessage]) -> RenderedPrompt {
     let system = messages
         .iter()
-        .filter(|m| m.role == Role::System && !m.content.trim().is_empty())
+        .filter(|m| {
+            m.role == Role::System && !m.is_cache_breakpoint() && !m.content.trim().is_empty()
+        })
         .map(|m| m.content.trim())
         .collect::<Vec<_>>()
         .join("\n\n");
