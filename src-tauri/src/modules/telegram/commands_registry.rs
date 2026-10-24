@@ -60,8 +60,8 @@ impl InlineButton {
     }
 }
 
-/// Canonical two-row quick-actions keyboard reused by the pairing welcome
-/// and `/help`. Each button's `callback_data` is just a bare command name
+/// Canonical quick-actions keyboard (two rows of shortcuts + a "☰ Меню"
+/// row) reused by the pairing welcome and `/help`. Each button's `callback_data` is just a bare command name
 /// — `handle_callback` treats data without a colon as "ns:<empty args>",
 /// so each button runs the same handler the user would reach by typing
 /// `/battery`, `/clip`, etc.
@@ -78,6 +78,7 @@ pub fn quick_actions_keyboard() -> InlineKeyboard {
                 InlineButton::new("⏰ Reminders", "reminders"),
                 InlineButton::new("🧠 Memory", "memory"),
             ],
+            vec![InlineButton::new("☰ Меню", "menu")],
         ],
     }
 }
@@ -417,11 +418,12 @@ mod tests {
     }
 
     #[test]
-    fn quick_actions_keyboard_has_six_buttons_in_two_rows() {
+    fn quick_actions_keyboard_has_six_buttons_plus_menu_row() {
         let kb = quick_actions_keyboard();
-        assert_eq!(kb.rows.len(), 2);
+        assert_eq!(kb.rows.len(), 3);
         assert_eq!(kb.rows[0].len(), 3);
         assert_eq!(kb.rows[1].len(), 3);
+        assert_eq!(kb.rows[2][0].callback_data, "menu");
         // Each callback_data must match a real slash-command name so
         // `handle_callback` can route it back via `find_command` without
         // any new ns:* routing.

@@ -51,22 +51,30 @@ impl CommandHandler for BatteryCmd {
                 };
                 // Below 20% + not plugged in → offer a quick sleep action.
                 let low = percent < 20 && !charging;
+                let mut rows = Vec::new();
+                if low {
+                    rows.push(vec![
+                        InlineButton::new("💤 Sleep Mac", "sleep"),
+                        InlineButton::new("☕ Keep awake off", "keepawake:off"),
+                    ]);
+                }
+                rows.push(super::menu::nav_row("refresh:battery"));
                 Reply {
                     text: format!("{icon} {percent}% — {status}"),
-                    keyboard: if low {
-                        Some(InlineKeyboard {
-                            rows: vec![vec![InlineButton::new("💤 Sleep Mac", "sleep")]],
-                        })
-                    } else {
-                        None
-                    },
+                    keyboard: Some(InlineKeyboard { rows }),
                     ..Default::default()
                 }
             }
-            BatterySnapshot::NoBattery => {
-                Reply::text("🔌 У цього Mac немає батареї (desktop / під'єднано до мережі).")
-            }
-            BatterySnapshot::Unknown => Reply::text("🪫 Не вдалося отримати дані про батарею."),
+            BatterySnapshot::NoBattery => Reply {
+                text: "🔌 У цього Mac немає батареї (desktop / під'єднано до мережі).".into(),
+                keyboard: Some(super::menu::nav_keyboard("refresh:battery")),
+                ..Default::default()
+            },
+            BatterySnapshot::Unknown => Reply {
+                text: "🪫 Не вдалося отримати дані про батарею.".into(),
+                keyboard: Some(super::menu::nav_keyboard("refresh:battery")),
+                ..Default::default()
+            },
         }
     }
 }
@@ -181,30 +189,57 @@ impl CommandHandler for ClipCmd {
         "clip"
     }
     fn description(&self) -> &'static str {
-        "Показати запис буфера обміну №N (1 = найновіший)"
+        "Історія буфера обміну з кнопками; /clip N — повний запис №N (1 = найновіший)"
     }
     fn usage(&self) -> &'static str {
-        "/clip [N]"
+        "/clip [N | page N]"
     }
-    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
         let trimmed = args.trim();
-        // Subcommand: `restore N` — push item N back onto the system
-        // clipboard. Only text items for now (image restoration needs
-        // the full paste pipeline).
-        if let Some(rest) = trimmed.strip_prefix("restore") {
-            let n: usize = rest.trim().parse().unwrap_or(1).max(1);
-            return match clip_restore_text(&self.state, n) {
-                Ok(preview) => Reply::text(format!("📋 Скопійовано №{n}: {preview}")),
-                Err(e) => Reply::text(format!("⚠️ {e}")),
-            };
-        }
-        let n: usize = trimmed.parse().unwrap_or(1).max(1);
+        let n = match parse_clip_args(trimmed) {
+            ClipAction::Page(page) => return render_clip_page(&self.state, page, None),
+            ClipAction::Copy(id, page) => {
+                let status = clip_copy_to_mac(&ctx.app, id)
+                    .map(|()| "✅ Скопійовано на Mac.".to_string())
+                    .unwrap_or_else(|e| format!("⚠️ {e}"));
+                return render_clip_page(&self.state, page, Some(status));
+            }
+            ClipAction::Pin(id, page) => {
+                let status = self
+                    .state
+                    .repo
+                    .lock()
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut r| {
+                        r.toggle_pin(id).map_err(|e| e.to_string())?;
+                        r.get(id).map_err(|e| e.to_string())
+                    });
+                let status = match status {
+                    Ok(Some(it)) if it.pinned => "📌 Закріплено.".to_string(),
+                    Ok(Some(_)) => "📍 Відкріплено.".to_string(),
+                    Ok(None) => "❓ Запис не знайдено.".to_string(),
+                    Err(e) => format!("⚠️ {e}"),
+                };
+                return render_clip_page(&self.state, page, Some(status));
+            }
+            // Subcommand: `restore N` — push item N back onto the system
+            // clipboard. Only text items for now (image restoration needs
+            // the full paste pipeline).
+            ClipAction::Restore(n) => {
+                return match clip_restore_text(&self.state, n) {
+                    Ok(preview) => Reply::text(format!("📋 Скопійовано №{n}: {preview}")),
+                    Err(e) => Reply::text(format!("⚠️ {e}")),
+                };
+            }
+            ClipAction::Item(n) => n,
+        };
         let items = match self
             .state
             .repo
             .lock()
             .map_err(|e| e.to_string())
-            .and_then(|repo| repo.list(n).map_err(|e| e.to_string()))
+            // One extra row so we know whether a "Next" exists.
+            .and_then(|repo| repo.list(n + 1).map_err(|e| e.to_string()))
         {
             Ok(v) => v,
             Err(e) => return Reply::text(format!("⚠️ помилка буфера: {e}")),
@@ -216,14 +251,26 @@ impl CommandHandler for ClipCmd {
                 let mut row: Vec<InlineButton> =
                     vec![InlineButton::new("📋 Re-copy", format!("clip:restore {n}"))];
                 if total > n {
-                    row.push(InlineButton::new("⏭ Next", format!("clip:{}", n + 1)));
+                    row.push(InlineButton::new("⏭ Next", format!("refresh:clip:{}", n + 1)));
                 }
                 if n > 1 {
-                    row.insert(0, InlineButton::new("⏮ Prev", format!("clip:{}", n - 1)));
+                    row.insert(
+                        0,
+                        InlineButton::new("⏮ Prev", format!("refresh:clip:{}", n - 1)),
+                    );
                 }
+                let page = (n - 1) / CLIP_PAGE_SIZE + 1;
                 Reply {
                     text: content,
-                    keyboard: Some(InlineKeyboard { rows: vec![row] }),
+                    keyboard: Some(InlineKeyboard {
+                        rows: vec![
+                            row,
+                            vec![InlineButton::new(
+                                "📋 Список",
+                                format!("refresh:clip:page:{page}"),
+                            )],
+                        ],
+                    }),
                     ..Default::default()
                 }
             }
@@ -273,6 +320,182 @@ fn truncate_preview(s: &str, max: usize) -> String {
     format!("{truncated}…")
 }
 
+/// Items per page in the `/clip` history card.
+const CLIP_PAGE_SIZE: usize = 5;
+
+#[derive(Debug, PartialEq, Eq)]
+enum ClipAction {
+    /// History card, 1-based page.
+    Page(usize),
+    /// Full view of the Nth newest item (legacy `/clip N`).
+    Item(usize),
+    /// Re-copy the Nth newest text item (legacy `/clip restore N`).
+    Restore(usize),
+    /// Copy item `id` back onto the Mac clipboard, then re-render `page`.
+    Copy(i64, usize),
+    /// Toggle the pin on item `id`, then re-render `page`.
+    Pin(i64, usize),
+}
+
+/// `/clip` args — typed (`page 2`, `copy 41 1`) and button
+/// (`page:2`, `copy:41:1`) forms share one tokenizer.
+fn parse_clip_args(args: &str) -> ClipAction {
+    let toks: Vec<&str> = args
+        .split([':', ' '])
+        .filter(|t| !t.is_empty())
+        .collect();
+    let num = |i: usize| toks.get(i).and_then(|t| t.parse::<usize>().ok());
+    let id = |i: usize| toks.get(i).and_then(|t| t.parse::<i64>().ok());
+    match toks.first().map(|t| t.to_ascii_lowercase()).as_deref() {
+        None => ClipAction::Page(1),
+        Some("page" | "p") => ClipAction::Page(num(1).unwrap_or(1).max(1)),
+        Some("restore") => ClipAction::Restore(num(1).unwrap_or(1).max(1)),
+        Some("copy") => match id(1) {
+            Some(i) => ClipAction::Copy(i, num(2).unwrap_or(1).max(1)),
+            None => ClipAction::Page(1),
+        },
+        Some("pin") => match id(1) {
+            Some(i) => ClipAction::Pin(i, num(2).unwrap_or(1).max(1)),
+            None => ClipAction::Page(1),
+        },
+        Some(other) => match other.parse::<usize>() {
+            Ok(n) => ClipAction::Item(n.max(1)),
+            Err(_) => ClipAction::Page(1),
+        },
+    }
+}
+
+/// Copy a history row (text / image / files) back onto the Mac clipboard
+/// through the same path the Clipboard tab uses.
+pub(crate) fn clip_copy_to_mac(app: &tauri::AppHandle, id: i64) -> Result<(), String> {
+    let state = app
+        .try_state::<Arc<ClipboardState>>()
+        .ok_or_else(|| "clipboard state not initialised".to_string())?;
+    crate::modules::clipboard::commands::clipboard_copy_only(state, id)
+}
+
+fn clip_line(item: &crate::modules::clipboard::repo::ClipboardItem) -> String {
+    let pin = if item.pinned { "📌 " } else { "" };
+    let body = match item.kind.as_str() {
+        "text" => truncate_preview(&item.content.trim().replace('\n', " "), 80),
+        "image" => "🖼 зображення".to_string(),
+        "file" => format!("📎 {}", truncate_preview(&item.content, 60)),
+        other => format!("[{other}]"),
+    };
+    format!("{pin}{body}")
+}
+
+/// Paged history card: numbered items, per-item "copy to Mac" + pin
+/// buttons, and ⬅️/➡️ paging that edits the card in place.
+fn render_clip_page(state: &Arc<ClipboardState>, page: usize, status: Option<String>) -> Reply {
+    let page = page.max(1);
+    let skip = (page - 1) * CLIP_PAGE_SIZE;
+    let items = match state
+        .repo
+        .lock()
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.list(skip + CLIP_PAGE_SIZE + 1).map_err(|e| e.to_string()))
+    {
+        Ok(v) => v,
+        Err(e) => return Reply::text(format!("⚠️ помилка буфера: {e}")),
+    };
+    let has_next = items.len() > skip + CLIP_PAGE_SIZE;
+    let slice: Vec<_> = items.iter().skip(skip).take(CLIP_PAGE_SIZE).collect();
+    let mut text = status.map(|s| format!("{s}\n\n")).unwrap_or_default();
+    let mut rows: Vec<Vec<InlineButton>> = Vec::new();
+    if slice.is_empty() {
+        text.push_str("📭 Буфер обміну порожній.");
+    } else {
+        text.push_str(&format!("📋 Буфер обміну · сторінка {page}\n"));
+        for (i, item) in slice.iter().enumerate() {
+            let n = skip + i + 1;
+            text.push_str(&format!("{n}. {}\n", clip_line(item)));
+            rows.push(vec![
+                InlineButton::new(format!("📋 {n} на Mac"), clip_cb("copy", item.id, page)),
+                InlineButton::new(
+                    if item.pinned {
+                        format!("📍 {n} відкріпити")
+                    } else {
+                        format!("📌 {n}")
+                    },
+                    clip_cb("pin", item.id, page),
+                ),
+            ]);
+        }
+        text.push_str("\n/clip N — повний текст запису №N");
+    }
+    let mut nav = Vec::new();
+    if page > 1 {
+        nav.push(InlineButton::new("⬅️", format!("refresh:clip:page:{}", page - 1)));
+    }
+    nav.push(InlineButton::new("🔄", format!("refresh:clip:page:{page}")));
+    if has_next {
+        nav.push(InlineButton::new("➡️", format!("refresh:clip:page:{}", page + 1)));
+    }
+    nav.push(super::menu::menu_button());
+    rows.push(nav);
+    Reply {
+        text: text.trim_end().to_string(),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
+fn clip_cb(verb: &str, id: i64, page: usize) -> String {
+    format!("refresh:clip:{verb}:{id}:{page}")
+}
+
+#[cfg(test)]
+mod clip_notes_tests {
+    use super::*;
+
+    #[test]
+    fn clip_args_cover_typed_and_button_forms() {
+        assert_eq!(parse_clip_args(""), ClipAction::Page(1));
+        assert_eq!(parse_clip_args("page:3"), ClipAction::Page(3));
+        assert_eq!(parse_clip_args("page 0"), ClipAction::Page(1));
+        assert_eq!(parse_clip_args("2"), ClipAction::Item(2));
+        assert_eq!(parse_clip_args("restore 4"), ClipAction::Restore(4));
+        assert_eq!(parse_clip_args("copy:41:2"), ClipAction::Copy(41, 2));
+        assert_eq!(parse_clip_args("pin 41"), ClipAction::Pin(41, 1));
+        assert_eq!(parse_clip_args("copy:abc"), ClipAction::Page(1));
+        assert_eq!(parse_clip_args("whatever"), ClipAction::Page(1));
+    }
+
+    #[test]
+    fn notes_args_cover_typed_and_button_forms() {
+        assert_eq!(parse_notes_args(""), NotesAction::Page(1));
+        assert_eq!(parse_notes_args("page:2"), NotesAction::Page(2));
+        assert_eq!(parse_notes_args("open:7"), NotesAction::Open(7));
+        assert_eq!(parse_notes_args("open 7"), NotesAction::Open(7));
+        assert_eq!(parse_notes_args("7"), NotesAction::Open(7));
+        assert_eq!(parse_notes_args("del:7"), NotesAction::AskDelete(7));
+        assert_eq!(parse_notes_args("delok:7"), NotesAction::Delete(7));
+        assert_eq!(parse_notes_args("undo:7"), NotesAction::Undo(7));
+        assert_eq!(parse_notes_args("pin:7"), NotesAction::Pin(7));
+        // A destructive verb without an id never deletes anything.
+        assert_eq!(parse_notes_args("delok"), NotesAction::Page(1));
+    }
+
+    #[test]
+    fn clip_notes_app_callbacks_fit_telegram_limit() {
+        let big = i64::MAX;
+        for cb in [
+            clip_cb("copy", big, 9_999),
+            clip_cb("pin", big, 9_999),
+            notes_cb("delok", big),
+            notes_cb("undo", big),
+            format!("refresh:memory:del:{big}"),
+            format!("refresh:clip:page:{}", usize::MAX),
+        ] {
+            assert!(cb.len() <= 64, "{cb} is {} bytes", cb.len());
+        }
+        assert!(app_cb("quit", &"x".repeat(80)).is_none());
+        let r = app_reply("t".into(), &[("🛑", "quit", &"Ж".repeat(26))]);
+        assert!(r.keyboard.is_none(), "over-long refresh payload must be dropped");
+    }
+}
+
 // -------------------- /note --------------------
 
 pub struct NoteCmd {
@@ -317,7 +540,13 @@ impl CommandHandler for NoteCmd {
                 Reply {
                     text: format!("📝 Збережено нотатку №{id}: {title}"),
                     keyboard: Some(InlineKeyboard {
-                        rows: vec![vec![InlineButton::new("📝 Recent", "notes")]],
+                        rows: vec![
+                            vec![
+                                InlineButton::new("📝 Відкрити", notes_cb("open", id)),
+                                InlineButton::new("🗑 Undo", notes_cb("undo", id)),
+                            ],
+                            vec![InlineButton::new("📚 Усі нотатки", "notes")],
+                        ],
                     }),
                     ..Default::default()
                 }
@@ -383,40 +612,223 @@ impl CommandHandler for NotesListCmd {
         "notes"
     }
     fn description(&self) -> &'static str {
-        "Останні нотатки (newest first)"
+        "Останні нотатки з кнопками (newest first); /notes open <id> — відкрити"
     }
     fn usage(&self) -> &'static str {
-        "/notes"
+        "/notes [page N | open <id>]"
     }
-    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
-        let summaries = match self.repo.lock() {
-            Ok(r) => match r.list_summaries(crate::modules::notes::repo::FolderFilter::All) {
-                Ok(v) => v,
-                Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
-            },
-            Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
-        };
-        if summaries.is_empty() {
-            return Reply::text("📭 Нотаток ще немає. Додай `/note <текст>`.");
-        }
-        let mut out = String::from("📝 Останні нотатки:\n");
-        for s in summaries.iter().take(10) {
-            let preview = s.preview.trim().replace('\n', " ");
-            let preview_short: String = preview.chars().take(60).collect();
-            out.push_str(&format!(
-                "• №{} — {}\n",
-                s.id,
-                if preview_short.is_empty() {
-                    s.title.clone()
-                } else {
-                    format!("{} · {}", s.title, preview_short)
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        match parse_notes_args(args) {
+            NotesAction::Page(page) => render_notes_page(&self.repo, page, None),
+            NotesAction::Open(id) => render_note_card(&self.repo, id, false),
+            NotesAction::AskDelete(id) => render_note_card(&self.repo, id, true),
+            NotesAction::Delete(id) | NotesAction::Undo(id) => {
+                let status = match delete_note(Some(&ctx.app), &self.repo, id) {
+                    Ok(true) => format!("🗑 Нотатку №{id} видалено."),
+                    Ok(false) => format!("❓ Нотатки №{id} немає."),
+                    Err(e) => format!("⚠️ помилка нотаток: {e}"),
+                };
+                render_notes_page(&self.repo, 1, Some(status))
+            }
+            NotesAction::Pin(id) => {
+                let result = self.repo.lock().map_err(|e| e.to_string()).and_then(|mut r| {
+                    let note = r.get(id).map_err(|e| e.to_string())?;
+                    match note {
+                        Some(n) => r.set_pinned(id, !n.pinned).map_err(|e| e.to_string()),
+                        None => Err(format!("нотатки №{id} немає")),
+                    }
+                });
+                match result {
+                    Ok(()) => {
+                        let _ = ctx.app.emit("notes:changed", id);
+                        render_note_card(&self.repo, id, false)
+                    }
+                    Err(e) => Reply::text(format!("⚠️ {e}")),
                 }
-            ));
+            }
         }
-        if summaries.len() > 10 {
-            out.push_str(&format!("…ще {}\n", summaries.len() - 10));
+    }
+}
+
+/// Notes per page in the `/notes` list card.
+const NOTES_PAGE_SIZE: usize = 8;
+/// Telegram caps a message at 4096 chars; leave room for the header.
+const NOTE_BODY_MAX_CHARS: usize = 3_500;
+
+#[derive(Debug, PartialEq, Eq)]
+enum NotesAction {
+    Page(usize),
+    Open(i64),
+    /// First tap on 🗑 — the card asks for confirmation in place.
+    AskDelete(i64),
+    /// Second tap — actually delete.
+    Delete(i64),
+    /// "Undo" under a freshly saved `/note` — delete without confirming.
+    Undo(i64),
+    Pin(i64),
+}
+
+fn parse_notes_args(args: &str) -> NotesAction {
+    let toks: Vec<&str> = args
+        .split([':', ' '])
+        .filter(|t| !t.is_empty())
+        .collect();
+    let id = toks.get(1).and_then(|t| t.parse::<i64>().ok());
+    let verb = toks.first().map(|t| t.to_ascii_lowercase());
+    match (verb.as_deref(), id) {
+        (Some("open"), Some(i)) => NotesAction::Open(i),
+        (Some("del"), Some(i)) => NotesAction::AskDelete(i),
+        (Some("delok"), Some(i)) => NotesAction::Delete(i),
+        (Some("undo"), Some(i)) => NotesAction::Undo(i),
+        (Some("pin"), Some(i)) => NotesAction::Pin(i),
+        (Some("page" | "p"), _) => NotesAction::Page(
+            toks.get(1)
+                .and_then(|t| t.parse::<usize>().ok())
+                .unwrap_or(1)
+                .max(1),
+        ),
+        // Bare number → open that note, mirroring `/clip N`.
+        (Some(v), None) if v.parse::<i64>().is_ok() => NotesAction::Open(v.parse().unwrap()),
+        _ => NotesAction::Page(1),
+    }
+}
+
+fn notes_cb(verb: &str, id: i64) -> String {
+    format!("refresh:notes:{verb}:{id}")
+}
+
+/// Delete a note with the same file cleanup the Notes tab does (audio +
+/// attachments) when the app handle is available; falls back to a bare
+/// row delete otherwise. Returns `Ok(false)` when the note doesn't exist.
+pub(crate) fn delete_note(
+    app: Option<&tauri::AppHandle>,
+    repo: &Arc<Mutex<NotesRepo>>,
+    id: i64,
+) -> Result<bool, String> {
+    let exists = repo
+        .lock()
+        .map_err(|e| e.to_string())?
+        .get(id)
+        .map_err(|e| e.to_string())?
+        .is_some();
+    if !exists {
+        return Ok(false);
+    }
+    let notes_state =
+        app.and_then(|a| a.try_state::<crate::modules::notes::commands::NotesState>());
+    match (app, notes_state) {
+        (Some(a), Some(st)) => crate::modules::notes::commands::notes_delete(a.clone(), st, id)?,
+        _ => repo
+            .lock()
+            .map_err(|e| e.to_string())?
+            .delete(id)
+            .map_err(|e| e.to_string())?,
+    }
+    if let Some(a) = app {
+        let _ = a.emit("notes:changed", id);
+    }
+    Ok(true)
+}
+
+fn render_notes_page(repo: &Arc<Mutex<NotesRepo>>, page: usize, status: Option<String>) -> Reply {
+    let summaries = match repo.lock() {
+        Ok(r) => match r.list_summaries(crate::modules::notes::repo::FolderFilter::All) {
+            Ok(v) => v,
+            Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+        },
+        Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+    };
+    let mut out = status.map(|s| format!("{s}\n\n")).unwrap_or_default();
+    if summaries.is_empty() {
+        out.push_str("📭 Нотаток ще немає. Додай `/note <текст>`.");
+        return Reply {
+            text: out,
+            keyboard: Some(InlineKeyboard {
+                rows: vec![vec![super::menu::menu_button()]],
+            }),
+            ..Default::default()
+        };
+    }
+    let pages = summaries.len().div_ceil(NOTES_PAGE_SIZE);
+    let page = page.clamp(1, pages);
+    let skip = (page - 1) * NOTES_PAGE_SIZE;
+    out.push_str(&format!("📝 Нотатки · {page}/{pages}:\n"));
+    let mut rows: Vec<Vec<InlineButton>> = Vec::new();
+    for s in summaries.iter().skip(skip).take(NOTES_PAGE_SIZE) {
+        let preview = s.preview.trim().replace('\n', " ");
+        let preview_short: String = preview.chars().take(60).collect();
+        let pin = if s.pinned { "📌 " } else { "" };
+        out.push_str(&format!(
+            "• {pin}№{} — {}\n",
+            s.id,
+            if preview_short.is_empty() {
+                s.title.clone()
+            } else {
+                format!("{} · {}", s.title, preview_short)
+            }
+        ));
+        rows.push(vec![InlineButton::new(
+            format!("{pin}№{} {}", s.id, truncate_preview(s.title.trim(), 28)),
+            notes_cb("open", s.id),
+        )]);
+    }
+    let mut nav = Vec::new();
+    if page > 1 {
+        nav.push(InlineButton::new("⬅️", format!("refresh:notes:page:{}", page - 1)));
+    }
+    if page < pages {
+        nav.push(InlineButton::new("➡️", format!("refresh:notes:page:{}", page + 1)));
+    }
+    nav.push(super::menu::menu_button());
+    rows.push(nav);
+    Reply {
+        text: out.trim_end().to_string(),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
+/// Full note view. `confirm_delete` swaps the action row for a
+/// second-tap confirmation so a stray tap never deletes anything.
+fn render_note_card(repo: &Arc<Mutex<NotesRepo>>, id: i64, confirm_delete: bool) -> Reply {
+    let note = match repo.lock().map_err(|e| e.to_string()).and_then(|r| r.get(id).map_err(|e| e.to_string())) {
+        Ok(Some(n)) => n,
+        Ok(None) => return render_notes_page(repo, 1, Some(format!("❓ Нотатки №{id} немає."))),
+        Err(e) => return Reply::text(format!("⚠️ помилка нотаток: {e}")),
+    };
+    let pin = if note.pinned { "📌 " } else { "" };
+    let body = note.body.trim();
+    let mut text = format!("{pin}📝 №{} · {}\n\n", note.id, note.title.trim());
+    if body.is_empty() {
+        text.push_str("(порожня нотатка)");
+    } else {
+        text.push_str(&truncate_preview(body, NOTE_BODY_MAX_CHARS));
+        if body.chars().count() > NOTE_BODY_MAX_CHARS {
+            text.push_str("\n\n✂️ Обрізано — повний текст у Stash → Notes.");
         }
-        Reply::text(out.trim_end().to_string())
+    }
+    let rows = if confirm_delete {
+        text.push_str("\n\n⚠️ Видалити цю нотатку? Натисни ще раз, щоб підтвердити.");
+        vec![vec![
+            InlineButton::new("🗑 Так, видалити", notes_cb("delok", id)),
+            InlineButton::new("↩️ Ні", notes_cb("open", id)),
+        ]]
+    } else {
+        vec![
+            vec![
+                InlineButton::new(
+                    if note.pinned { "📍 Відкріпити" } else { "📌 Закріпити" },
+                    notes_cb("pin", id),
+                ),
+                InlineButton::new("🗑 Видалити", notes_cb("del", id)),
+            ],
+            vec![InlineButton::new("⬅️ Назад", "refresh:notes:page:1")],
+        ]
+    };
+    Reply {
+        text,
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
     }
 }
 
@@ -509,7 +921,10 @@ impl CommandHandler for RemindCmd {
                 Reply {
                     text: format!("⏰ №{id} заплановано {when}: {text}\n{tag}"),
                     keyboard: Some(InlineKeyboard {
-                        rows: vec![vec![InlineButton::new("✖ Cancel", format!("forget:{id}"))]],
+                        rows: vec![vec![
+                            InlineButton::new("✖ Скасувати", reminders::cancel_cb(id)),
+                            InlineButton::new("⏰ Усі", "reminders"),
+                        ]],
                     }),
                     ..Default::default()
                 }
@@ -544,44 +959,14 @@ impl CommandHandler for RemindersCmd {
         "reminders"
     }
     fn description(&self) -> &'static str {
-        "Список активних нагадувань"
+        "Список активних нагадувань з кнопками скасування / відкладення"
     }
     fn usage(&self) -> &'static str {
-        "/reminders"
+        "/reminders [cancel <id> | snooze <id> <10m|1h|tomorrow> | done <id>]"
     }
-    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
-        let repo = match self.state.repo.lock() {
-            Ok(r) => r,
-            Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
-        };
-        let items = match repo.list_active_reminders() {
-            Ok(v) => v,
-            Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
-        };
-        if items.is_empty() {
-            return Reply::text("📭 Немає активних нагадувань.");
-        }
-        let now = now_secs();
-        let mut out = String::from("⏰ Активні:\n");
-        for r in items.iter().take(20) {
-            let delta = r.due_at - now;
-            let when = if delta < 0 {
-                "(прострочено)".to_string()
-            } else if delta < 60 {
-                "< 1 хв".to_string()
-            } else if delta < 3600 {
-                format!("{} хв", delta / 60)
-            } else if delta < 86_400 {
-                format!("{} год", delta / 3600)
-            } else {
-                format!("{} дн", delta / 86_400)
-            };
-            out.push_str(&format!("• №{} ({when}) — {}\n", r.id, r.text));
-        }
-        if items.len() > 20 {
-            out.push_str(&format!("…ще {}\n", items.len() - 20));
-        }
-        Reply::text(out.trim_end().to_string())
+    async fn handle(&self, ctx: Ctx, args: &str) -> Reply {
+        // Card rendering + button actions live in `reminders.rs`.
+        reminders::handle_command(&ctx.app, &self.state, args)
     }
 }
 
@@ -623,7 +1008,13 @@ impl CommandHandler for ForgetCmd {
             Ok(true) => {
                 use tauri::Emitter;
                 let _ = ctx.app.emit("reminders:changed", ());
-                Reply::text(format!("🗑️ Скасовано нагадування №{id}."))
+                Reply {
+                    text: format!("🗑️ Скасовано нагадування №{id}."),
+                    keyboard: Some(InlineKeyboard {
+                        rows: vec![vec![InlineButton::new("⏰ Список", "reminders")]],
+                    }),
+                    ..Default::default()
+                }
             }
             Ok(false) => Reply::text(format!("❓ Немає активного нагадування №{id}.")),
             Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
@@ -1521,7 +1912,16 @@ impl CommandHandler for RememberCmd {
             repo.memory_insert(text, now)
         };
         match result {
-            Ok(id) => Reply::text(format!("🧠 Записав. (id {id})")),
+            Ok(id) => Reply {
+                text: format!("🧠 Записав. (id {id})"),
+                keyboard: Some(InlineKeyboard {
+                    rows: vec![vec![
+                        InlineButton::new("↩️ Undo", format!("refresh:memory:del:{id}")),
+                        InlineButton::new("🧠 Усі факти", "memory"),
+                    ]],
+                }),
+                ..Default::default()
+            },
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
     }
@@ -1547,9 +1947,24 @@ impl CommandHandler for MemoryCmd {
         "Показати все, що я пам'ятаю про тебе"
     }
     fn usage(&self) -> &'static str {
-        "/memory"
+        "/memory [del <id>]"
     }
-    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        // `del:<id>` comes from the per-fact 🗑 buttons (and the Undo
+        // under `/remember`); the card re-renders in place afterwards.
+        let mut status = String::new();
+        let toks: Vec<&str> = args.split([':', ' ']).filter(|t| !t.is_empty()).collect();
+        if let (Some(&"del"), Some(id)) = (toks.first(), toks.get(1).and_then(|t| t.parse::<i64>().ok())) {
+            let result = match self.state.repo.lock() {
+                Ok(mut r) => r.memory_delete(id),
+                Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
+            };
+            status = match result {
+                Ok(true) => format!("🧠 Забув факт {id}.\n\n"),
+                Ok(false) => format!("🤷 Немає факту з id {id}.\n\n"),
+                Err(e) => format!("⚠️ {e}\n\n"),
+            };
+        }
         let rows = {
             let repo = match self.state.repo.lock() {
                 Ok(r) => r,
@@ -1558,16 +1973,40 @@ impl CommandHandler for MemoryCmd {
             repo.memory_list()
         };
         match rows {
-            Ok(rows) if rows.is_empty() => {
-                Reply::text("🗒 Поки що нічого. Почни з `/remember <факт>`.")
-            }
+            Ok(rows) if rows.is_empty() => Reply {
+                text: format!("{status}🗒 Поки що нічого. Почни з `/remember <факт>`."),
+                keyboard: Some(InlineKeyboard {
+                    rows: vec![vec![super::menu::menu_button()]],
+                }),
+                ..Default::default()
+            },
             Ok(rows) => {
                 let body = rows
                     .iter()
                     .map(|r| format!("• {} (id {})", r.fact, r.id))
                     .collect::<Vec<_>>()
                     .join("\n");
-                Reply::text(format!("🗒 Факти:\n{body}"))
+                // Two delete buttons per row, capped so a long memory
+                // doesn't turn into a wall of buttons.
+                let mut kb_rows: Vec<Vec<InlineButton>> = rows
+                    .iter()
+                    .take(12)
+                    .map(|r| {
+                        InlineButton::new(
+                            format!("🗑 {}", truncate_preview(&r.fact, 18)),
+                            format!("refresh:memory:del:{}", r.id),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .chunks(2)
+                    .map(|c| c.to_vec())
+                    .collect();
+                kb_rows.push(super::menu::nav_row("refresh:memory"));
+                Reply {
+                    text: format!("{status}🗒 Факти:\n{body}"),
+                    keyboard: Some(InlineKeyboard { rows: kb_rows }),
+                    ..Default::default()
+                }
             }
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
@@ -1727,7 +2166,13 @@ impl CommandHandler for ScreenshotCmd {
             text: caption,
             documents: files,
             keyboard: Some(InlineKeyboard {
-                rows: vec![vec![InlineButton::new("📸 Again", "screenshot")]],
+                // Plain `menu` (not `refresh:`) — a document message
+                // can't be edited into a text card.
+                rows: vec![vec![
+                    InlineButton::new("📸 Again", "screenshot"),
+                    InlineButton::new("📸 Лише головний", "screenshot:main"),
+                    InlineButton::new("☰ Меню", "menu"),
+                ]],
             }),
         }
     }
@@ -1938,12 +2383,30 @@ impl CommandHandler for WeatherCmd {
                 }
             }
         } else {
-            arg
+            arg.clone()
         };
         let for_label = city.clone();
-        match weather::fetch_weather(&city).await {
-            Ok(body) => Reply::text(format!("🌦 {for_label}\n{body}")),
-            Err(e) => Reply::text(format!("⚠️ погода: {e}")),
+        // Refresh re-asks for the same city when it was typed explicitly
+        // and fits in the callback payload; otherwise fall back to the
+        // memory-derived default.
+        let refresh = if arg.is_empty() {
+            "refresh:weather".to_string()
+        } else {
+            let cb = format!("refresh:weather:{arg}");
+            if cb.len() <= 64 {
+                cb
+            } else {
+                "refresh:weather".to_string()
+            }
+        };
+        let text = match weather::fetch_weather(&city).await {
+            Ok(body) => format!("🌦 {for_label}\n{body}"),
+            Err(e) => format!("⚠️ погода: {e}"),
+        };
+        Reply {
+            text,
+            keyboard: Some(super::menu::nav_keyboard(&refresh)),
+            ..Default::default()
         }
     }
 }
@@ -1980,7 +2443,7 @@ impl CommandHandler for AppCmd {
                 Ok(Ok(names)) if names.is_empty() => {
                     Reply::text("🪟 Нічого переднього плану не запущено.")
                 }
-                Ok(Ok(names)) => Reply::text(format!("🪟 Запущено: {}", names.join(", "))),
+                Ok(Ok(names)) => app_running_reply(&names),
                 Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
                 Err(e) => Reply::text(format!("⚠️ task join: {e}")),
             };
@@ -2000,7 +2463,7 @@ impl CommandHandler for AppCmd {
                 let n = name.clone();
                 let result = tokio::task::spawn_blocking(move || apps_control::open_app(&n)).await;
                 match result {
-                    Ok(Ok(())) => Reply::text(format!("🚀 Відкрив: {name}")),
+                    Ok(Ok(())) => app_reply(format!("🚀 Відкрив: {name}"), &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quit", &name)]),
                     Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
                     Err(e) => Reply::text(format!("⚠️ task join: {e}")),
                 }
@@ -2009,7 +2472,7 @@ impl CommandHandler for AppCmd {
                 let n = name.clone();
                 let result = tokio::task::spawn_blocking(move || apps_control::hide_app(&n)).await;
                 match result {
-                    Ok(Ok(())) => Reply::text(format!("👻 Згорнув: {name}")),
+                    Ok(Ok(())) => app_reply(format!("👻 Згорнув: {name}"), &[("🚀 Відкрити", "open", &name)]),
                     Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
                     Err(e) => Reply::text(format!("⚠️ task join: {e}")),
                 }
@@ -2019,7 +2482,7 @@ impl CommandHandler for AppCmd {
                 let result = tokio::task::spawn_blocking(move || apps_control::quit_app(&n)).await;
                 match result {
                     Ok(Ok(apps_control::QuitOutcome::Quit { resolved_name })) => {
-                        Reply::text(format!("🛑 Закрив: {resolved_name}"))
+                        app_reply(format!("🛑 Закрив: {resolved_name}"), &[("🚀 Відкрити", "open", &resolved_name)])
                     }
                     Ok(Ok(apps_control::QuitOutcome::NotRunning)) => {
                         Reply::text(format!("ℹ️ `{name}` не запущений — нема чого закривати."))
@@ -2042,6 +2505,46 @@ impl CommandHandler for AppCmd {
                 self.usage()
             )),
         }
+    }
+}
+
+/// `app:<verb> <name>` payload, or `None` when the app name would push
+/// it past Telegram's 64-byte callback limit.
+fn app_cb(verb: &str, name: &str) -> Option<String> {
+    let cb = format!("app:{verb} {name}");
+    (cb.len() <= 64).then_some(cb)
+}
+
+/// Single-app result card with follow-up actions that edit it in place.
+fn app_reply(text: String, actions: &[(&str, &str, &str)]) -> Reply {
+    let row: Vec<InlineButton> = actions
+        .iter()
+        .filter_map(|(label, verb, name)| {
+            app_cb(verb, name).map(|cb| InlineButton::new(*label, format!("refresh:{cb}")))
+        })
+        .filter(|b| b.callback_data.len() <= 64)
+        .collect();
+    Reply {
+        text,
+        keyboard: (!row.is_empty()).then(|| InlineKeyboard { rows: vec![row] }),
+        ..Default::default()
+    }
+}
+
+/// Running-apps list with a "hide" button per app (non-destructive, so a
+/// mis-tap is harmless) plus refresh.
+fn app_running_reply(names: &[String]) -> Reply {
+    let buttons: Vec<InlineButton> = names
+        .iter()
+        .take(12)
+        .filter_map(|n| app_cb("hide", n).map(|cb| InlineButton::new(format!("👻 {n}"), cb)))
+        .collect();
+    let mut rows: Vec<Vec<InlineButton>> = buttons.chunks(3).map(|c| c.to_vec()).collect();
+    rows.push(super::menu::nav_row("refresh:app:running"));
+    Reply {
+        text: format!("🪟 Запущено: {}", names.join(", ")),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
     }
 }
 
@@ -3137,6 +3640,7 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
     // so you can tap Next on the last page and land on page 1.
     let prev_page = if page == 1 { DASHBOARD_PAGES } else { page - 1 };
     let next_page = if page == DASHBOARD_PAGES { 1 } else { page + 1 };
+    rows.push(vec![super::menu::menu_button()]);
     rows.push(vec![
         InlineButton::new("◀", format!("refresh:dashboard:page={prev_page}")),
         InlineButton::new(

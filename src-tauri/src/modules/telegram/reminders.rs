@@ -16,6 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 
+use super::commands_registry::{InlineButton, InlineKeyboard, Reply};
 use super::state::TelegramState;
 
 const TICK_PERIOD: Duration = Duration::from_secs(30);
@@ -68,7 +69,11 @@ fn flush_due(app: &tauri::AppHandle, state: &TelegramState, now: i64) -> Result<
         } else {
             "⏰ "
         };
-        state.sender.enqueue(chat_id, format!("{prefix}{}", r.text));
+        state.sender.enqueue_with_keyboard(
+            chat_id,
+            format!("{prefix}{}", r.text),
+            Some(fired_keyboard(r.id)),
+        );
         if let Ok(mut repo) = state.repo.lock() {
             let _ = repo.mark_reminder_sent(r.id);
         }
@@ -88,6 +93,366 @@ fn now_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+// -------------------- interactive cards --------------------
+//
+// Everything the `/reminders` command renders lives here so the slash
+// handler in `module_cmds.rs` stays a thin delegate. Button payloads go
+// through `reminders:<verb>:<args>` so typing `/reminders snooze 12 10m`
+// and tapping a button hit the same parser.
+
+/// Hour of day (local) that the "Завтра" snooze lands on.
+const SNOOZE_TOMORROW_HOUR: i64 = 9;
+/// How many reminders get per-row action buttons in the list card.
+const LIST_BUTTON_ROWS: usize = 10;
+
+/// How far a snooze button pushes the reminder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnoozeSpec {
+    /// Relative offset in seconds from now.
+    Offset(i64),
+    /// Tomorrow at `SNOOZE_TOMORROW_HOUR`:00 local time.
+    Tomorrow,
+}
+
+/// Parsed `/reminders` arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemindersAction {
+    List,
+    Help,
+    Cancel(i64),
+    Snooze(i64, SnoozeSpec),
+    Done(i64),
+    /// Schedule a fresh reminder at an absolute unix time — used by the
+    /// calendar watcher's "remind me 5 min before" button.
+    At(i64, String),
+}
+
+fn parse_snooze_spec(s: &str) -> Option<SnoozeSpec> {
+    let s = s.trim().to_ascii_lowercase();
+    if matches!(s.as_str(), "tom" | "tomorrow" | "завтра") {
+        return Some(SnoozeSpec::Tomorrow);
+    }
+    if !s.is_ascii() || s.len() < 2 {
+        return None;
+    }
+    let (num, unit) = s.split_at(s.len() - 1);
+    let n: i64 = num.parse().ok().filter(|n| *n > 0)?;
+    let mul = match unit {
+        "m" => 60,
+        "h" => 3600,
+        "d" => 86_400,
+        _ => return None,
+    };
+    Some(SnoozeSpec::Offset(n.checked_mul(mul)?))
+}
+
+/// Parse `/reminders` args. Accepts both the button form
+/// (`snooze:12:10m`) and the typed form (`snooze 12 10m`).
+pub fn parse_reminders_args(args: &str) -> Result<RemindersAction, String> {
+    let args = args.trim();
+    if args.is_empty() || args.eq_ignore_ascii_case("list") {
+        return Ok(RemindersAction::List);
+    }
+    let (verb, rest) = match args.find([':', ' ']) {
+        Some(i) => (&args[..i], args[i + 1..].trim_start()),
+        None => (args, ""),
+    };
+    let id_of = |s: &str| -> Result<i64, String> {
+        s.trim()
+            .parse::<i64>()
+            .map_err(|_| format!("невірний id: `{}`", s.trim()))
+    };
+    match verb.to_ascii_lowercase().as_str() {
+        "help" | "add" => Ok(RemindersAction::Help),
+        "cancel" | "del" => Ok(RemindersAction::Cancel(id_of(rest)?)),
+        "done" => Ok(RemindersAction::Done(id_of(rest)?)),
+        "snooze" => {
+            let mut it = rest.splitn(2, [':', ' ']);
+            let id = id_of(it.next().unwrap_or(""))?;
+            let spec_raw = it.next().unwrap_or("10m");
+            let spec = parse_snooze_spec(spec_raw)
+                .ok_or_else(|| format!("невірний інтервал: `{spec_raw}` (10m, 1h, tomorrow)"))?;
+            Ok(RemindersAction::Snooze(id, spec))
+        }
+        "at" => {
+            let mut it = rest.splitn(2, [':', ' ']);
+            let due = id_of(it.next().unwrap_or(""))?;
+            let text = it.next().unwrap_or("").trim();
+            if text.is_empty() {
+                return Err("порожній текст нагадування".into());
+            }
+            Ok(RemindersAction::At(due, text.to_string()))
+        }
+        other => Err(format!("невідома дія `{other}`")),
+    }
+}
+
+/// Resolve a snooze spec to an absolute unix timestamp. `offset` is the
+/// local UTC offset in seconds — injected so tests stay deterministic.
+pub fn snooze_due(spec: SnoozeSpec, now: i64, offset: i64) -> i64 {
+    match spec {
+        SnoozeSpec::Offset(sec) => now + sec,
+        SnoozeSpec::Tomorrow => {
+            let local_day = (now + offset).div_euclid(86_400);
+            (local_day + 1) * 86_400 + SNOOZE_TOMORROW_HOUR * 3600 - offset
+        }
+    }
+}
+
+/// `HH:MM` for today, `завтра HH:MM` for tomorrow, `DD.MM HH:MM` otherwise.
+pub fn format_local_when(due: i64, now: i64, offset: i64) -> String {
+    let local = due + offset;
+    let mins = local.rem_euclid(86_400) / 60;
+    let hm = format!("{:02}:{:02}", mins / 60, mins % 60);
+    let day = local.div_euclid(86_400);
+    let today = (now + offset).div_euclid(86_400);
+    match day - today {
+        0 => hm,
+        1 => format!("завтра {hm}"),
+        _ => {
+            let (_, m, d) = ymd_from_days(day);
+            format!("{d:02}.{m:02} {hm}")
+        }
+    }
+}
+
+pub fn snooze_cb(id: i64, spec: &str) -> String {
+    format!("refresh:reminders:snooze:{id}:{spec}")
+}
+
+pub fn done_cb(id: i64) -> String {
+    format!("refresh:reminders:done:{id}")
+}
+
+pub fn cancel_cb(id: i64) -> String {
+    format!("refresh:reminders:cancel:{id}")
+}
+
+/// Callback that schedules `text` at `due`. The text is cut on a char
+/// boundary so the payload stays within Telegram's 64-byte limit.
+pub fn at_cb(due: i64, text: &str) -> String {
+    let mut out = format!("reminders:at:{due}:");
+    for c in text.trim().chars() {
+        if out.len() + c.len_utf8() > 64 {
+            break;
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Buttons attached to a fired reminder.
+pub fn fired_keyboard(id: i64) -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![
+            vec![
+                InlineButton::new("⏰ +10 хв", snooze_cb(id, "10m")),
+                InlineButton::new("⏰ +1 год", snooze_cb(id, "1h")),
+                InlineButton::new("⏰ Завтра", snooze_cb(id, "tom")),
+            ],
+            vec![InlineButton::new("✅ Готово", done_cb(id))],
+        ],
+    }
+}
+
+fn find_reminder(state: &TelegramState, id: i64) -> Result<Option<Reminder>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let rows = repo
+        .list_reminders_in_range(i64::MIN, i64::MAX)
+        .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().find(|r| r.id == id))
+}
+
+fn short(s: &str, max: usize) -> String {
+    let mut out: String = s.chars().take(max).collect();
+    if s.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
+fn relative_when(delta: i64) -> String {
+    if delta < 0 {
+        "прострочено".to_string()
+    } else if delta < 60 {
+        "< 1 хв".to_string()
+    } else if delta < 3600 {
+        format!("{} хв", delta / 60)
+    } else if delta < 86_400 {
+        format!("{} год", delta / 3600)
+    } else {
+        format!("{} дн", delta / 86_400)
+    }
+}
+
+const HOW_TO_ADD: &str = "➕ Як додати нагадування:\n\
+     • /remind 10m випити води\n\
+     • /remind 1h30m зателефонувати мамі\n\
+     • /remind 14:30 нарада команди\n\
+     • /remind tomorrow 9:00 спортзал\n\
+     • /remind 2026-04-25 14:30 лікар\n\
+     Або просто напиши: «нагадай за 20 хв винести сміття».";
+
+/// Active-reminders card with per-row cancel / snooze buttons. `status`
+/// is an optional one-line banner (e.g. "🗑 Скасовано №3") shown above
+/// the list after an in-place action.
+pub fn render_list(state: &TelegramState, status: Option<String>) -> Reply {
+    let items = match state.repo.lock() {
+        Ok(r) => match r.list_active_reminders() {
+            Ok(v) => v,
+            Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
+        },
+        Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
+    };
+    let mut text = status.map(|s| format!("{s}\n\n")).unwrap_or_default();
+    let mut rows: Vec<Vec<InlineButton>> = Vec::new();
+    if items.is_empty() {
+        text.push_str("📭 Немає активних нагадувань.");
+    } else {
+        let now = now_secs();
+        text.push_str("⏰ Активні:\n");
+        for r in items.iter().take(20) {
+            text.push_str(&format!(
+                "• №{} ({}) — {}\n",
+                r.id,
+                relative_when(r.due_at - now),
+                r.text
+            ));
+        }
+        if items.len() > 20 {
+            text.push_str(&format!("…ще {}\n", items.len() - 20));
+        }
+        for r in items.iter().take(LIST_BUTTON_ROWS) {
+            rows.push(vec![
+                InlineButton::new(format!("✖ №{} {}", r.id, short(&r.text, 18)), cancel_cb(r.id)),
+                InlineButton::new("⏰ +1 год", snooze_cb(r.id, "1h")),
+            ]);
+        }
+    }
+    rows.push(vec![InlineButton::new("➕ Як додати", "reminders:help")]);
+    rows.push(super::menu::nav_row("refresh:reminders"));
+    Reply {
+        text: text.trim_end().to_string(),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
+/// Entry point for the `/reminders` slash command and its buttons.
+pub fn handle_command(app: &tauri::AppHandle, state: &TelegramState, args: &str) -> Reply {
+    use tauri::Emitter;
+    let action = match parse_reminders_args(args) {
+        Ok(a) => a,
+        Err(e) => {
+            return Reply::text(format!(
+                "⚠️ {e}\nВикористання: /reminders [cancel <id> | snooze <id> <10m|1h|tomorrow> | done <id>]"
+            ))
+        }
+    };
+    let now = now_secs();
+    let offset = super::inbox::local_offset_seconds_public();
+    match action {
+        RemindersAction::List => render_list(state, None),
+        RemindersAction::Help => Reply {
+            text: HOW_TO_ADD.to_string(),
+            keyboard: Some(InlineKeyboard {
+                rows: vec![vec![InlineButton::new("⏰ Список", "refresh:reminders")]],
+            }),
+            ..Default::default()
+        },
+        RemindersAction::Cancel(id) => {
+            let result = state
+                .repo
+                .lock()
+                .map_err(|e| e.to_string())
+                .and_then(|mut r| r.cancel_reminder(id).map_err(|e| e.to_string()));
+            let status = match result {
+                Ok(true) => {
+                    let _ = app.emit("reminders:changed", ());
+                    format!("🗑 Скасовано нагадування №{id}.")
+                }
+                Ok(false) => format!("❓ Немає активного нагадування №{id}."),
+                Err(e) => format!("⚠️ помилка БД: {e}"),
+            };
+            render_list(state, Some(status))
+        }
+        RemindersAction::Done(id) => {
+            // Purely an acknowledgement: the row has already fired. Never
+            // cancels anything, so a recurring series (if one is ever
+            // modelled) keeps running.
+            let text = match find_reminder(state, id) {
+                Ok(Some(r)) => format!("✅ Готово: {}", r.text),
+                _ => "✅ Готово".to_string(),
+            };
+            Reply::text(text)
+        }
+        RemindersAction::Snooze(id, spec) => {
+            let original = match find_reminder(state, id) {
+                Ok(Some(r)) => r,
+                Ok(None) => return Reply::text(format!("❓ Немає нагадування №{id}.")),
+                Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
+            };
+            let due = snooze_due(spec, now, offset);
+            let new_id = {
+                let mut repo = match state.repo.lock() {
+                    Ok(r) => r,
+                    Err(e) => return Reply::text(format!("⚠️ помилка нагадувань: {e}")),
+                };
+                // Still pending (snoozed from the list) → move it rather
+                // than leaving a duplicate behind.
+                if !original.sent && !original.cancelled {
+                    let _ = repo.cancel_reminder(id);
+                }
+                match repo.insert_reminder(&original.text, due, now) {
+                    Ok(v) => v,
+                    Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
+                }
+            };
+            let _ = app.emit("reminders:changed", ());
+            Reply {
+                text: format!(
+                    "⏰ Відкладено до {}: {}",
+                    format_local_when(due, now, offset),
+                    original.text
+                ),
+                keyboard: Some(InlineKeyboard {
+                    rows: vec![vec![
+                        InlineButton::new("✖ Скасувати", cancel_cb(new_id)),
+                        InlineButton::new("⏰ Список", "reminders"),
+                    ]],
+                }),
+                ..Default::default()
+            }
+        }
+        RemindersAction::At(due, text) => {
+            if due <= now {
+                return Reply::text("⌛ Цей час уже минув — нагадування не створено.");
+            }
+            let result = state
+                .repo
+                .lock()
+                .map_err(|e| e.to_string())
+                .and_then(|mut r| r.insert_reminder(&text, due, now).map_err(|e| e.to_string()));
+            match result {
+                Ok(id) => {
+                    let _ = app.emit("reminders:changed", ());
+                    Reply {
+                        text: format!(
+                            "⏰ №{id} нагадаю о {}: {text}",
+                            format_local_when(due, now, offset)
+                        ),
+                        keyboard: Some(InlineKeyboard {
+                            rows: vec![vec![InlineButton::new("✖ Скасувати", cancel_cb(id))]],
+                        }),
+                        ..Default::default()
+                    }
+                }
+                Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
+            }
+        }
+    }
 }
 
 // -------------------- parser --------------------
@@ -569,6 +934,101 @@ mod tests {
         let (stamp, text) = parse_when("5 хв call 3 друзів", 0).unwrap();
         assert_eq!(stamp, 300);
         assert_eq!(text, "call 3 друзів");
+    }
+
+    #[test]
+    fn reminders_args_button_and_typed_forms_agree() {
+        assert_eq!(parse_reminders_args(""), Ok(RemindersAction::List));
+        assert_eq!(parse_reminders_args("help"), Ok(RemindersAction::Help));
+        assert_eq!(parse_reminders_args("cancel:7"), Ok(RemindersAction::Cancel(7)));
+        assert_eq!(parse_reminders_args("cancel 7"), Ok(RemindersAction::Cancel(7)));
+        assert_eq!(parse_reminders_args("done:3"), Ok(RemindersAction::Done(3)));
+        assert_eq!(
+            parse_reminders_args("snooze:12:10m"),
+            Ok(RemindersAction::Snooze(12, SnoozeSpec::Offset(600)))
+        );
+        assert_eq!(
+            parse_reminders_args("snooze 12 1h"),
+            Ok(RemindersAction::Snooze(12, SnoozeSpec::Offset(3600)))
+        );
+        assert_eq!(
+            parse_reminders_args("snooze:12:tom"),
+            Ok(RemindersAction::Snooze(12, SnoozeSpec::Tomorrow))
+        );
+        // Missing spec defaults to 10 minutes.
+        assert_eq!(
+            parse_reminders_args("snooze 5"),
+            Ok(RemindersAction::Snooze(5, SnoozeSpec::Offset(600)))
+        );
+        // Text with colons survives the `at` split.
+        assert_eq!(
+            parse_reminders_args("at:1700000000:Sync: Q3 plan"),
+            Ok(RemindersAction::At(1_700_000_000, "Sync: Q3 plan".into()))
+        );
+    }
+
+    #[test]
+    fn reminders_args_reject_garbage() {
+        assert!(parse_reminders_args("cancel:abc").is_err());
+        assert!(parse_reminders_args("snooze:1:0m").is_err());
+        assert!(parse_reminders_args("snooze:1:5x").is_err());
+        assert!(parse_reminders_args("snooze:1:хв").is_err());
+        assert!(parse_reminders_args("at:123:").is_err());
+        assert!(parse_reminders_args("explode").is_err());
+    }
+
+    #[test]
+    fn snooze_due_offsets_and_tomorrow() {
+        let now = 1_000_000; // day 11, 13:46:40 UTC
+        assert_eq!(snooze_due(SnoozeSpec::Offset(600), now, 0), now + 600);
+        assert_eq!(
+            snooze_due(SnoozeSpec::Tomorrow, now, 0),
+            12 * 86_400 + 9 * 3600
+        );
+        // UTC+3: local 09:00 on day 12 is 06:00 UTC.
+        assert_eq!(
+            snooze_due(SnoozeSpec::Tomorrow, now, 3 * 3600),
+            12 * 86_400 + 6 * 3600
+        );
+        // 23:00 UTC is already 02:00 of day 12 locally (+3), so
+        // "tomorrow" means local day 13.
+        let late = 11 * 86_400 + 23 * 3600;
+        assert_eq!(
+            snooze_due(SnoozeSpec::Tomorrow, late, 3 * 3600),
+            13 * 86_400 + 6 * 3600
+        );
+    }
+
+    #[test]
+    fn format_local_when_labels_days() {
+        let now = 10 * 86_400 + 8 * 3600;
+        assert_eq!(format_local_when(now + 3600 + 300, now, 0), "09:05");
+        assert_eq!(format_local_when(now + 86_400, now, 0), "завтра 08:00");
+        assert_eq!(format_local_when(0, 5 * 86_400, 0), "01.01 00:00");
+    }
+
+    #[test]
+    fn callback_payloads_fit_telegram_limit() {
+        let big = i64::MAX;
+        for cb in [
+            snooze_cb(big, "10m"),
+            snooze_cb(big, "tom"),
+            done_cb(big),
+            cancel_cb(big),
+            at_cb(big, &"дуже довга назва події ".repeat(10)),
+        ] {
+            assert!(cb.len() <= 64, "{cb} is {} bytes", cb.len());
+        }
+        for b in fired_keyboard(big).rows.iter().flatten() {
+            assert!(b.callback_data.len() <= 64);
+        }
+        // at_cb round-trips through the parser.
+        let cb = at_cb(1_700_000_000, "Стендап");
+        let args = cb.strip_prefix("reminders:").unwrap();
+        assert_eq!(
+            parse_reminders_args(args),
+            Ok(RemindersAction::At(1_700_000_000, "Стендап".into()))
+        );
     }
 
     #[test]
