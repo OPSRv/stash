@@ -111,10 +111,10 @@ mod tests {
     #[test]
     fn event_keyboard_picks_five_minutes_before_when_possible() {
         let kb = event_keyboard(10_000, "Standup", 9_000);
-        assert_eq!(kb.rows[0][0].callback_data, "reminders:at:9700:📅 Standup");
+        assert_eq!(kb.rows[0][0].callback_data, "refresh:reminders:at:9700:📅 Standup");
         // Event in 2 minutes → fall back to the start time.
         let kb = event_keyboard(10_000, "Standup", 9_880);
-        assert_eq!(kb.rows[0][0].callback_data, "reminders:at:10000:📅 Standup");
+        assert_eq!(kb.rows[0][0].callback_data, "refresh:reminders:at:10000:📅 Standup");
     }
 
     #[test]

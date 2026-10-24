@@ -54,7 +54,7 @@ impl CommandHandler for BatteryCmd {
                 let mut rows = Vec::new();
                 if low {
                     rows.push(vec![
-                        InlineButton::new("💤 Sleep Mac", "sleep"),
+                        InlineButton::new("💤 Sleep Mac", "sleep:ask"),
                         InlineButton::new("☕ Keep awake off", "keepawake:off"),
                     ]);
                 }
@@ -463,6 +463,35 @@ mod clip_notes_tests {
     }
 
     #[test]
+    fn memory_args_split_ask_from_delete() {
+        assert_eq!(parse_memory_args(""), MemoryAction::List);
+        assert_eq!(parse_memory_args("ask:5"), MemoryAction::Ask(5));
+        assert_eq!(parse_memory_args("del:5"), MemoryAction::Delete(5));
+        assert_eq!(parse_memory_args("del 5"), MemoryAction::Delete(5));
+        assert_eq!(parse_memory_args("del"), MemoryAction::List);
+        let card = memory_confirm_card(i64::MAX, "x");
+        let kb = card.keyboard.unwrap();
+        assert_eq!(kb.rows[0][0].callback_data, format!("refresh:memory:del:{}", i64::MAX));
+        assert!(memory_ask_cb(i64::MAX).len() <= 64);
+    }
+
+    #[test]
+    fn power_buttons_need_a_second_tap() {
+        for kind in [PowerKind::Sleep, PowerKind::Shutdown] {
+            let kb = power_confirm_card(kind).keyboard.unwrap();
+            let cbs: Vec<_> = kb.rows.iter().flatten().map(|b| b.callback_data.as_str()).collect();
+            let w = kind_word(kind);
+            assert_eq!(cbs, vec![format!("refresh:{w}:now"), format!("refresh:{w}:no")]);
+        }
+    }
+
+    #[test]
+    fn app_open_card_quit_goes_through_confirm() {
+        let r = app_reply("x".into(), &[("🛑 Закрити", "quitask", "Safari")]);
+        assert_eq!(r.keyboard.unwrap().rows[0][0].callback_data, "refresh:app:quitask Safari");
+    }
+
+    #[test]
     fn notes_args_cover_typed_and_button_forms() {
         assert_eq!(parse_notes_args(""), NotesAction::Page(1));
         assert_eq!(parse_notes_args("page:2"), NotesAction::Page(2));
@@ -471,7 +500,7 @@ mod clip_notes_tests {
         assert_eq!(parse_notes_args("7"), NotesAction::Open(7));
         assert_eq!(parse_notes_args("del:7"), NotesAction::AskDelete(7));
         assert_eq!(parse_notes_args("delok:7"), NotesAction::Delete(7));
-        assert_eq!(parse_notes_args("undo:7"), NotesAction::Undo(7));
+        assert_eq!(parse_notes_args("undo:7"), NotesAction::AskDelete(7));
         assert_eq!(parse_notes_args("pin:7"), NotesAction::Pin(7));
         // A destructive verb without an id never deletes anything.
         assert_eq!(parse_notes_args("delok"), NotesAction::Page(1));
@@ -622,7 +651,7 @@ impl CommandHandler for NotesListCmd {
             NotesAction::Page(page) => render_notes_page(&self.repo, page, None),
             NotesAction::Open(id) => render_note_card(&self.repo, id, false),
             NotesAction::AskDelete(id) => render_note_card(&self.repo, id, true),
-            NotesAction::Delete(id) | NotesAction::Undo(id) => {
+            NotesAction::Delete(id) => {
                 let status = match delete_note(Some(&ctx.app), &self.repo, id) {
                     Ok(true) => format!("🗑 Нотатку №{id} видалено."),
                     Ok(false) => format!("❓ Нотатки №{id} немає."),
@@ -663,8 +692,6 @@ enum NotesAction {
     AskDelete(i64),
     /// Second tap — actually delete.
     Delete(i64),
-    /// "Undo" under a freshly saved `/note` — delete without confirming.
-    Undo(i64),
     Pin(i64),
 }
 
@@ -679,7 +706,9 @@ fn parse_notes_args(args: &str) -> NotesAction {
         (Some("open"), Some(i)) => NotesAction::Open(i),
         (Some("del"), Some(i)) => NotesAction::AskDelete(i),
         (Some("delok"), Some(i)) => NotesAction::Delete(i),
-        (Some("undo"), Some(i)) => NotesAction::Undo(i),
+        // "🗑 Undo" under a saved `/note` never expires, so it goes
+        // through the same two-tap confirm as 🗑.
+        (Some("undo"), Some(i)) => NotesAction::AskDelete(i),
         (Some("pin"), Some(i)) => NotesAction::Pin(i),
         (Some("page" | "p"), _) => NotesAction::Page(
             toks.get(1)
@@ -1922,7 +1951,7 @@ impl CommandHandler for RememberCmd {
                 text: format!("🧠 Записав. (id {id})"),
                 keyboard: Some(InlineKeyboard {
                     rows: vec![vec![
-                        InlineButton::new("↩️ Undo", format!("refresh:memory:del:{id}")),
+                        InlineButton::new("↩️ Undo", memory_ask_cb(id)),
                         InlineButton::new("🧠 Усі факти", "memory"),
                     ]],
                 }),
@@ -1956,11 +1985,25 @@ impl CommandHandler for MemoryCmd {
         "/memory [del <id>]"
     }
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
-        // `del:<id>` comes from the per-fact 🗑 buttons (and the Undo
-        // under `/remember`); the card re-renders in place afterwards.
+        // Per-fact 🗑 buttons (and the Undo under `/remember`) send
+        // `ask:<id>` → confirm card; its ✅ sends `del:<id>`. A typed
+        // `/memory del <id>` deletes directly. The card re-renders in
+        // place afterwards.
         let mut status = String::new();
-        let toks: Vec<&str> = args.split([':', ' ']).filter(|t| !t.is_empty()).collect();
-        if let (Some(&"del"), Some(id)) = (toks.first(), toks.get(1).and_then(|t| t.parse::<i64>().ok())) {
+        let action = parse_memory_args(args);
+        if let MemoryAction::Ask(id) = action {
+            let fact = match self.state.repo.lock() {
+                Ok(r) => r.memory_list().ok().and_then(|rows| {
+                    rows.into_iter().find(|r| r.id == id).map(|r| r.fact)
+                }),
+                Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
+            };
+            if let Some(fact) = fact {
+                return memory_confirm_card(id, &fact);
+            }
+            status = format!("🤷 Немає факту з id {id}.\n\n");
+        }
+        if let MemoryAction::Delete(id) = action {
             let result = match self.state.repo.lock() {
                 Ok(mut r) => r.memory_delete(id),
                 Err(e) => return Reply::text(format!("⚠️ репозиторій зайнятий: {e}")),
@@ -2000,7 +2043,7 @@ impl CommandHandler for MemoryCmd {
                     .map(|r| {
                         InlineButton::new(
                             format!("🗑 {}", truncate_preview(&r.fact, 18)),
-                            format!("refresh:memory:del:{}", r.id),
+                            memory_ask_cb(r.id),
                         )
                     })
                     .collect::<Vec<_>>()
@@ -2016,6 +2059,45 @@ impl CommandHandler for MemoryCmd {
             }
             Err(e) => Reply::text(format!("⚠️ {e}")),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemoryAction {
+    List,
+    /// First tap on 🗑 — confirm card.
+    Ask(i64),
+    /// Confirmed (or typed) delete.
+    Delete(i64),
+}
+
+fn parse_memory_args(args: &str) -> MemoryAction {
+    let toks: Vec<&str> = args.split([':', ' ']).filter(|t| !t.is_empty()).collect();
+    let id = toks.get(1).and_then(|t| t.parse::<i64>().ok());
+    match (toks.first().copied(), id) {
+        (Some("ask"), Some(i)) => MemoryAction::Ask(i),
+        (Some("del"), Some(i)) => MemoryAction::Delete(i),
+        _ => MemoryAction::List,
+    }
+}
+
+fn memory_ask_cb(id: i64) -> String {
+    format!("refresh:memory:ask:{id}")
+}
+
+fn memory_confirm_card(id: i64, fact: &str) -> Reply {
+    Reply {
+        text: format!(
+            "⚠️ Забути факт (id {id})?\n\n«{}»",
+            truncate_preview(fact, 300)
+        ),
+        keyboard: Some(InlineKeyboard {
+            rows: vec![vec![
+                InlineButton::new("🗑 Так, забути", format!("refresh:memory:del:{id}")),
+                InlineButton::new("↩️ Ні", "refresh:memory"),
+            ]],
+        }),
+        ..Default::default()
     }
 }
 
@@ -2521,11 +2603,21 @@ impl CommandHandler for AppCmd {
                 let n = name.clone();
                 let result = tokio::task::spawn_blocking(move || apps_control::open_app(&n)).await;
                 match result {
-                    Ok(Ok(())) => app_reply(format!("🚀 Відкрив: {name}"), &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quit", &name)]),
+                    Ok(Ok(())) => app_reply(format!("🚀 Відкрив: {name}"), &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quitask", &name)]),
                     Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
                     Err(e) => Reply::text(format!("⚠️ task join: {e}")),
                 }
             }
+            // "🛑 Закрити" button → confirm in the same card first, so a
+            // stray tap can't kill an app with unsaved work.
+            "quitask" => app_reply(
+                format!("🛑 Закрити {name}?"),
+                &[("✅ Так, закрити", "quit", &name), ("✖ Ні", "keep", &name)],
+            ),
+            "keep" => app_reply(
+                format!("🚀 {name}"),
+                &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quitask", &name)],
+            ),
             "hide" | "minimize" => {
                 let n = name.clone();
                 let result = tokio::task::spawn_blocking(move || apps_control::hide_app(&n)).await;
@@ -4491,7 +4583,10 @@ async fn handle_power_cmd(timers: &Arc<PowerTimers>, kind: PowerKind, args: &str
             }
             None => Reply::text(format!("ℹ️ Немає запланованого {}.", label(kind, false))),
         },
-        "" => immediate(kind).await,
+        // Typed `/sleep` stays immediate; buttons go through `ask` → `now`.
+        "" | "now" => immediate(kind).await,
+        "ask" => power_confirm_card(kind),
+        "no" => Reply::text(format!("👌 {} скасовано.", label(kind, true))),
         other => match power::parse_duration(other) {
             Ok(delay) => {
                 timers.schedule(kind, delay);
@@ -4503,6 +4598,26 @@ async fn handle_power_cmd(timers: &Arc<PowerTimers>, kind: PowerKind, args: &str
             }
             Err(e) => Reply::text(format!("⚠️ {}: {e}", kind_word(kind))),
         },
+    }
+}
+
+/// Second-tap confirmation for the one-tap power buttons (battery alert,
+/// dashboard). Both answers edit this card in place.
+fn power_confirm_card(kind: PowerKind) -> Reply {
+    let (text, yes) = match kind {
+        PowerKind::Sleep => ("💤 Приспати Mac зараз?", "✅ Так, приспати"),
+        PowerKind::Shutdown => ("⏻ Вимкнути Mac зараз?", "✅ Так, вимкнути"),
+    };
+    let cmd = kind_word(kind);
+    Reply {
+        text: text.to_string(),
+        keyboard: Some(InlineKeyboard {
+            rows: vec![vec![
+                InlineButton::new(yes, format!("refresh:{cmd}:now")),
+                InlineButton::new("✖ Ні", format!("refresh:{cmd}:no")),
+            ]],
+        }),
+        ..Default::default()
     }
 }
 
@@ -4674,7 +4789,7 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
                 InlineButton::new("📸 Shot", "screenshot"),
             ],
             vec![
-                InlineButton::new("💤 Sleep", "sleep"),
+                InlineButton::new("💤 Sleep", "sleep:ask"),
                 InlineButton::new("🌙 Display off", "display"),
                 InlineButton::new("❓ Help", "help"),
             ],

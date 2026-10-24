@@ -130,7 +130,7 @@ impl JobRepo {
         self.conn.execute(
             "UPDATE download_jobs
              SET progress = ?1, bytes_done = ?2, bytes_total = ?3, status = 'active'
-             WHERE id = ?4",
+             WHERE id = ?4 AND status != 'cancelled'",
             params![progress, bytes_done, bytes_total, id],
         )?;
         Ok(())
@@ -157,14 +157,17 @@ impl JobRepo {
         Ok(())
     }
 
-    pub fn set_failed(&mut self, id: i64, error: &str, completed_at: i64) -> Result<()> {
-        self.conn.execute(
+    /// Mark a job failed. A user-cancelled job stays `cancelled` (its
+    /// killed child also exits non-zero) — returns `false` in that case so
+    /// the runner skips retries and failure notifications.
+    pub fn set_failed(&mut self, id: i64, error: &str, completed_at: i64) -> Result<bool> {
+        let changed = self.conn.execute(
             "UPDATE download_jobs
              SET status = 'failed', error = ?1, completed_at = ?2
-             WHERE id = ?3",
+             WHERE id = ?3 AND status != 'cancelled'",
             params![error, completed_at, id],
         )?;
-        Ok(())
+        Ok(changed > 0)
     }
 
     #[allow(dead_code)]
@@ -302,10 +305,25 @@ mod tests {
     fn set_failed_keeps_error_message() {
         let mut repo = fresh();
         let id = repo.create("u", "g", None, None, None, "video", None, 1).unwrap();
-        repo.set_failed(id, "yt-dlp exploded", 5).unwrap();
+        assert!(repo.set_failed(id, "yt-dlp exploded", 5).unwrap());
         let job = repo.get(id).unwrap().unwrap();
         assert_eq!(job.status, "failed");
         assert_eq!(job.error.as_deref(), Some("yt-dlp exploded"));
+    }
+
+    #[test]
+    fn cancelled_job_is_not_overwritten_by_failure_or_progress() {
+        let mut repo = fresh();
+        let id = repo.create("u", "g", None, None, None, "video", None, 1).unwrap();
+        repo.set_status(id, "cancelled").unwrap();
+        assert!(!repo.set_failed(id, "killed", 5).unwrap());
+        repo.set_progress(id, 0.9, None, None).unwrap();
+        let job = repo.get(id).unwrap().unwrap();
+        assert_eq!(job.status, "cancelled");
+        assert_eq!(job.error, None);
+        // Retry flips it back to pending; failures count again.
+        repo.set_status(id, "pending").unwrap();
+        assert!(repo.set_failed(id, "boom", 6).unwrap());
     }
 
     #[test]
