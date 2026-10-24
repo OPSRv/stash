@@ -28,7 +28,7 @@ pub struct QuickDetect {
     pub preview: QuickPreview,
 }
 
-fn ensure_http_scheme(url: &str) -> Result<(), String> {
+pub(crate) fn ensure_http_scheme(url: &str) -> Result<(), String> {
     let parsed = url::Url::parse(url).map_err(|e| format!("invalid url: {e}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(format!(
@@ -59,7 +59,7 @@ fn to_string_err<T, E: std::fmt::Display>(r: Result<T, E>) -> Result<T, String> 
     r.map_err(|e| e.to_string())
 }
 
-fn resolve_yt_dlp(state: &RunnerState) -> Result<std::path::PathBuf, String> {
+pub(crate) fn resolve_yt_dlp(state: &RunnerState) -> Result<std::path::PathBuf, String> {
     let bin_dir = state.default_downloads_dir.join("bin");
     {
         let guard = state.yt_dlp_path.lock().unwrap();
@@ -130,9 +130,35 @@ pub fn dl_start(
     height: Option<u32>,
     kind: String,
 ) -> Result<i64, String> {
-    ensure_http_scheme(&url)?;
-    let yt_dlp = resolve_yt_dlp(&state)?;
-    let platform = Platform::from_url(&url);
+    start_job(
+        app,
+        &state,
+        &url,
+        title.as_deref(),
+        thumbnail.as_deref(),
+        format_id.as_deref(),
+        height,
+        &kind,
+    )
+}
+
+/// Insert a job row and hand it to the runner. Shared by the `dl_start`
+/// Tauri command and the agent surface (`/dl`, `download_media` tool) so
+/// both respect the same validation, queue gate and runner settings.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_job(
+    app: AppHandle,
+    state: &Arc<RunnerState>,
+    url: &str,
+    title: Option<&str>,
+    thumbnail: Option<&str>,
+    format_id: Option<&str>,
+    height: Option<u32>,
+    kind: &str,
+) -> Result<i64, String> {
+    ensure_http_scheme(url)?;
+    let yt_dlp = resolve_yt_dlp(state)?;
+    let platform = Platform::from_url(url);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -141,21 +167,21 @@ pub fn dl_start(
         let mut repo = state.jobs.lock().unwrap();
         to_string_err(
             repo.create(
-                &url,
+                url,
                 serde_json::to_string(&platform)
                     .map(|s| s.trim_matches('"').to_string())
                     .unwrap_or_else(|_| "generic".into())
                     .as_str(),
-                title.as_deref(),
-                thumbnail.as_deref(),
-                format_id.as_deref(),
-                &kind,
+                title,
+                thumbnail,
+                format_id,
+                kind,
                 height.map(|h| h as i64),
                 now,
             ),
         )?
     };
-    spawn_download(app, Arc::clone(&state), &yt_dlp, id, &url, height, &kind)?;
+    spawn_download(app, Arc::clone(state), &yt_dlp, id, url, height, kind)?;
     Ok(id)
 }
 

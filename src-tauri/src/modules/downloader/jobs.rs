@@ -146,6 +146,17 @@ impl JobRepo {
         Ok(())
     }
 
+    /// Fill in a title for a job that started without one (agent-surface
+    /// downloads skip the slow yt-dlp probe). Never overwrites a real title.
+    pub fn set_title_if_missing(&mut self, id: i64, title: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE download_jobs SET title = ?1
+             WHERE id = ?2 AND (title IS NULL OR title = '')",
+            params![title, id],
+        )?;
+        Ok(())
+    }
+
     pub fn set_failed(&mut self, id: i64, error: &str, completed_at: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE download_jobs

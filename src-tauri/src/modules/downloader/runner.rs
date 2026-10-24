@@ -284,17 +284,20 @@ pub fn spawn_download(
                     "downloader:completed",
                     serde_json::json!({ "id": job_id, "path": path.clone() }),
                 );
-                // Mirror to Telegram if a chat is paired.
-                let name = std::path::Path::new(&path)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| format!("job #{job_id}"));
-                crate::modules::telegram::notifier::notify_if_paired(
-                    &app_clone,
-                    crate::modules::telegram::notifier::Category::DownloadComplete,
-                    format!("⬇️ Download finished — {name}"),
-                );
                 drop(repo);
+                // Jobs started from the agent surface get a rich card with
+                // follow-up buttons; everything else gets the plain notice.
+                if !super::agent::notify_finished(&app_clone, job_id) {
+                    let name = std::path::Path::new(&path)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| format!("job #{job_id}"));
+                    crate::modules::telegram::notifier::notify_if_paired(
+                        &app_clone,
+                        crate::modules::telegram::notifier::Category::DownloadComplete,
+                        format!("⬇️ Download finished — {name}"),
+                    );
+                }
                 // Clear any retry-counter state we accumulated before success so
                 // the `retry_counts` map doesn't grow unbounded across sessions.
                 state_clone.retry_counts.lock().unwrap().remove(&job_id);
@@ -377,6 +380,7 @@ pub fn spawn_download(
                     state_clone.retry_counts.lock().unwrap().remove(&job_id);
                     let _ =
                         app_clone.emit("downloader:failed", serde_json::json!({ "id": job_id }));
+                    super::agent::notify_finished(&app_clone, job_id);
                     drain_queue(app_clone.clone(), Arc::clone(&state_clone), &yt_dlp_owned);
                 }
             }

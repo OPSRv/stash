@@ -697,6 +697,9 @@ pub fn build_runtime_assistant(
         tools.register(super::tools::stash::DeleteNote::new(notes.repo.clone()));
     }
 
+    crate::modules::downloader::agent::register_tools(&mut tools);
+    crate::modules::translator::agent::register_tools(&mut tools);
+
     Ok(Assistant {
         state: Arc::clone(state),
         app: Some(app.clone()),
