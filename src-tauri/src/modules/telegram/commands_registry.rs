@@ -19,10 +19,10 @@ use async_trait::async_trait;
 pub struct Reply {
     pub text: String,
     pub keyboard: Option<InlineKeyboard>,
-    /// File attachments sent alongside `text`. On Telegram these go as
-    /// `send_document` (not `send_photo`) so PNGs from multi-4K screen
-    /// captures keep every pixel — the photo path re-encodes and scales
-    /// down to ≤1280px, which defeats the point for a screenshot tool.
+    /// File attachments sent alongside `text`. On Telegram, PNGs go as
+    /// `send_document` so multi-4K screen captures keep every pixel (the
+    /// photo path re-encodes and scales down to ≤1280px); JPEG/WebP go as
+    /// inline photos. See `sender::is_image_path`.
     /// On non-Telegram transports (CLI) only `text` is delivered, so
     /// handlers must still put usable paths or a summary into `text`.
     pub documents: Vec<PathBuf>,

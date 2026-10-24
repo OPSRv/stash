@@ -3623,7 +3623,6 @@ fn dashboard_keyboard(page: u8) -> InlineKeyboard {
                 InlineButton::new("🌐 Web", "navigate:web"),
                 InlineButton::new("⚙️ System", "navigate:system"),
             ],
-            vec![InlineButton::new("🎙 Voice", "navigate:voice")],
             vec![
                 InlineButton::new("🖼 Canvas", "navigate:canvas"),
                 InlineButton::new("🔄 Converter", "navigate:converter"),

@@ -47,9 +47,9 @@ pub struct Outbound {
     pub keyboard: Option<super::commands_registry::InlineKeyboard>,
     /// File attachments. When non-empty, the first file carries `text` as
     /// its caption (or, past 1024 chars, `text` follows as its own message)
-    /// and the rest are sent without captions. `.png/.jpg/.jpeg/.webp` go
-    /// via `send_photo` with a `send_document` fallback; everything else
-    /// via `send_document`. Empty = plain text-only message.
+    /// and the rest are sent without captions. `.jpg/.jpeg/.webp` go via
+    /// `send_photo` with a `send_document` fallback; everything else
+    /// (including lossless `.png`) via `send_document`. Empty = plain text-only message.
     pub documents: Vec<PathBuf>,
 }
 
@@ -287,10 +287,12 @@ pub(super) fn to_markup(k: &super::commands_registry::InlineKeyboard) -> InlineK
     }))
 }
 
+/// PNGs are deliberately excluded: they're screenshots / annotations where
+/// the photo path's re-encode + ≤1280px downscale would defeat the point.
 fn is_image_path(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "webp"))
+        .map(|e| matches!(e.to_ascii_lowercase().as_str(), "jpg" | "jpeg" | "webp"))
         .unwrap_or(false)
 }
 
@@ -525,7 +527,7 @@ mod tests {
 
     #[test]
     fn image_paths_detected_by_extension() {
-        assert!(is_image_path(Path::new("/tmp/a.PNG")));
+        assert!(!is_image_path(Path::new("/tmp/a.PNG")));
         assert!(is_image_path(Path::new("/tmp/a.jpeg")));
         assert!(is_image_path(Path::new("x.webp")));
         assert!(!is_image_path(Path::new("x.pdf")));

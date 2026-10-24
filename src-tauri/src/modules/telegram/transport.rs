@@ -171,6 +171,16 @@ fn command_name(token: &str) -> String {
 /// the frontend LinkifiedText uses, kept simple (regex-free) on
 /// purpose. False positives (e.g. a string with "http://" as literal
 /// text about protocols) are OK — the user can still delete the row.
+/// First `http(s)://` token in `s`, trimmed of trailing punctuation.
+pub(crate) fn first_url(s: &str) -> Option<&str> {
+    s.split_whitespace()
+        .find(|w| {
+            let l = w.to_ascii_lowercase();
+            l.starts_with("http://") || l.starts_with("https://")
+        })
+        .map(|w| w.trim_end_matches(|c: char| matches!(c, '.' | ',' | ')' | '!' | '?' | ';')))
+}
+
 pub(crate) fn contains_url(s: &str) -> bool {
     let lower = s.to_lowercase();
     // Looks for a scheme + at least one non-whitespace/punctuation
@@ -639,6 +649,14 @@ async fn handle_update(
                         let _ = app.emit("telegram:inbox_added", id);
                         inbox_already = true;
                     }
+                }
+                // Offer one-tap downloads for the first link.
+                if let Some(url) = first_url(&text) {
+                    state.sender.enqueue_with_keyboard(
+                        chat_id,
+                        "🔗 Посилання збережено в інбокс.".to_string(),
+                        Some(crate::modules::downloader::agent::url_actions_keyboard(url)),
+                    );
                 }
             }
 
@@ -1513,6 +1531,15 @@ mod tests {
             assert!(HIDDEN_COMMANDS.contains(&name));
         }
         assert!(!HIDDEN_COMMANDS.contains(&"help"));
+    }
+
+    #[test]
+    fn first_url_picks_first_link_and_trims_punctuation() {
+        assert_eq!(
+            first_url("grab https://youtu.be/x1, then http://b.c"),
+            Some("https://youtu.be/x1")
+        );
+        assert_eq!(first_url("see www.tauri.app"), None);
     }
 
     #[test]
