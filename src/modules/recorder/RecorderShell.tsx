@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { emit, listen } from '@tauri-apps/api/event';
 import { ConfirmDialog } from '../../shared/ui/ConfirmDialog';
 import { RangeSlider } from '../../shared/ui/RangeSlider';
 import { Select } from '../../shared/ui/Select';
@@ -23,6 +23,8 @@ type RecorderRemote = {
   action?: 'start' | 'stop' | 'toggle' | null;
   /** Input gain multiplier (1.0 = unity) pushed from the assistant / CLI. */
   gain?: number | null;
+  /** Echoed back on `recorder:remote:ack`; re-emits reuse the same id. */
+  ack_id?: number | null;
 };
 
 const formatClock = (ms: number) => formatDuration(ms, { unit: 'ms', includeHours: 'never' });
@@ -102,22 +104,47 @@ export const RecorderShell = ({ embedded = false }: RecorderShellProps) => {
   // Agent surface — start/stop from the assistant / CLI, mirroring the
   // Metronome's `metronome:remote`. Only fires while this shell is mounted
   // (i.e. the Valeton tab has been opened); capture is inherently UI-bound.
+  // Bound once (engine + save read through refs) so there's no unsubscribe
+  // gap on re-render; every payload is acked with the resulting phase so
+  // Rust stops re-emitting, and re-emits are deduped by `ack_id`.
+  const engineRef = useRef(engine);
+  const stopAndSaveRef = useRef(stopAndSave);
+  useLayoutEffect(() => {
+    engineRef.current = engine;
+    stopAndSaveRef.current = stopAndSave;
+  });
+  const lastAckRef = useRef<number | null>(null);
   useEffect(() => {
     const unlisten = listen<RecorderRemote>('recorder:remote', (e) => {
-      const gain = e.payload?.gain;
-      if (typeof gain === 'number') engine.setGain(gain);
-      const action = e.payload?.action;
-      if (action === 'start' && engine.phase !== 'recording') void engine.start();
-      else if (action === 'stop' && engine.phase === 'recording') void stopAndSave();
-      else if (action === 'toggle') {
-        if (engine.phase === 'recording') void stopAndSave();
-        else void engine.start();
+      const p = e.payload ?? {};
+      const eng = engineRef.current;
+      const ackId = typeof p.ack_id === 'number' ? p.ack_id : null;
+      let recording = eng.phase === 'recording';
+      if (ackId === null || ackId !== lastAckRef.current) {
+        lastAckRef.current = ackId;
+        if (typeof p.gain === 'number') eng.setGain(p.gain);
+        const wantStop = p.action === 'stop' || (p.action === 'toggle' && recording);
+        const wantStart = p.action === 'start' || (p.action === 'toggle' && !recording);
+        if (wantStop && recording) {
+          void stopAndSaveRef.current();
+          recording = false;
+        } else if (wantStart && !recording) {
+          void eng.start();
+          recording = true;
+        }
+      }
+      if (ackId !== null) {
+        try {
+          void emit('recorder:remote:ack', { ack_id: ackId, recording }).catch(() => {});
+        } catch {
+          // Event bridge unavailable (tests / plain Vite) — Rust just times out.
+        }
       }
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
-  }, [engine, stopAndSave]);
+  }, []);
 
   const rename = useCallback((id: string, name: string) => {
     recorderRename(id, name)

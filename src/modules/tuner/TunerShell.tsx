@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import { MicIcon } from '../../shared/ui/icons';
 import { Footswitch } from '../../shared/ui/pedal/Footswitch';
 import { PedalEnclosure } from '../../shared/ui/pedal/PedalEnclosure';
@@ -16,6 +16,8 @@ import { A4_HZ, DEFAULT_TUNING_ID, IN_TUNE_CENTS, tuningById, type Tuning } from
 /** Payload for the `tuner:remote` event (assistant / CLI). */
 type TunerRemote = {
   tuning_id?: string | null;
+  /** Echoed back on `tuner:remote:ack`; re-emits reuse the same id. */
+  ack_id?: number | null;
 };
 
 export const TunerShell = () => {
@@ -60,10 +62,24 @@ export const TunerShell = () => {
   // Assistant / CLI can preset the tuning from natural language. The shell is
   // only mounted while the modal is open, so the Rust side also persists the
   // choice; this listener applies it live when the modal happens to be open.
+  // Rust re-emits until acked (the modal mounts this shell mid-wait), so
+  // every payload is acked and repeats are deduped by `ack_id`.
+  const lastAckRef = useRef<number | null>(null);
   useEffect(() => {
     const unlisten = listen<TunerRemote>('tuner:remote', (e) => {
-      const id = e.payload?.tuning_id;
-      if (typeof id === 'string') setTuning(tuningById(id));
+      const p = e.payload ?? {};
+      const ackId = typeof p.ack_id === 'number' ? p.ack_id : null;
+      if (ackId === null || ackId !== lastAckRef.current) {
+        lastAckRef.current = ackId;
+        if (typeof p.tuning_id === 'string') setTuning(tuningById(p.tuning_id));
+      }
+      if (ackId !== null) {
+        try {
+          void emit('tuner:remote:ack', { ack_id: ackId }).catch(() => {});
+        } catch {
+          // Event bridge unavailable (tests / plain Vite) — Rust just times out.
+        }
+      }
     });
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});

@@ -3495,15 +3495,19 @@ impl CommandHandler for RecordCmd {
                 }
             };
             reveal_tab(&ctx.app, "valeton-editor");
-            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-            let _ = ctx.app.emit(
-                "recorder:remote",
-                &RecorderRemote {
-                    gain: Some(gain),
-                    ..Default::default()
-                },
-            );
-            return record_card(format!("🎚 Підсилення → {}%.", (gain * 100.0).round() as i64));
+            let payload = RecorderRemote {
+                gain: Some(gain),
+                ..Default::default()
+            };
+            let ack = emit_recorder(&ctx.app, &payload).await;
+            let Some(recording) = ack else {
+                return record_card(RECORDER_NO_ACK.to_string());
+            };
+            return record_card(format!(
+                "🎚 Підсилення → {}%.{}",
+                (gain * 100.0).round() as i64,
+                if recording { "\n🔴 Йде запис." } else { "" }
+            ));
         }
 
         let action = match first {
@@ -3524,22 +3528,35 @@ impl CommandHandler for RecordCmd {
         // Reveal + mount the Valeton editor (which hosts the recorder shell)
         // so its `recorder:remote` listener is attached before we emit.
         reveal_tab(&ctx.app, "valeton-editor");
-        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
         let payload = RecorderRemote {
             action: Some(action.clone()),
             ..Default::default()
         };
-        let _ = ctx.app.emit("recorder:remote", &payload);
-        record_card(match action.as_str() {
-            "start" => "🔴 Запис почато.".to_string(),
-            "stop" => "⏹ Запис зупинено й збережено.".to_string(),
-            _ => "⏯ Рекордер перемкнуто.".to_string(),
+        // The shell acks with the phase it ended up in, so a toggle reports
+        // what actually happened instead of guessing.
+        record_card(match emit_recorder(&ctx.app, &payload).await {
+            None => RECORDER_NO_ACK.to_string(),
+            Some(true) => "🔴 Запис почато.".to_string(),
+            Some(false) if action == "start" => "⚠️ Запис не стартував.".to_string(),
+            Some(false) => "⏹ Запис зупинено й збережено.".to_string(),
         })
     }
 }
 
-/// Explicit start/stop (idempotent) rather than toggle, since the bot can't
-/// read the recorder's phase back — a stale card must never flip it.
+const RECORDER_NO_ACK: &str =
+    "⚠️ Рекордер не відповів — відкрий Stash → Valeton (вигляд з педалями).";
+
+/// Deliver a `recorder:remote` payload with retries until the (lazy) Valeton
+/// tab mounts and acks. Returns the shell's `recording` flag, or `None` when
+/// nothing answered in time.
+async fn emit_recorder(app: &tauri::AppHandle, payload: &RecorderRemote) -> Option<bool> {
+    let value = serde_json::to_value(payload).unwrap_or_default();
+    let ack = emit_with_ack(app, "recorder:remote", value, std::time::Duration::from_secs(4)).await?;
+    Some(ack.get("recording").and_then(|v| v.as_bool()).unwrap_or(false))
+}
+
+/// Explicit start/stop (idempotent) rather than toggle — a stale card must
+/// never flip the recorder.
 fn record_card(text: String) -> Reply {
     let b = |text: &str, args: &str| InlineButton::new(text, format!("refresh:record:{args}"));
     Reply {
@@ -3844,19 +3861,31 @@ impl CommandHandler for TunerCmd {
         if let Some(id) = &tuning_id {
             persist_tuner_tuning(&ctx.app, id);
         }
-        // Reveal the Valeton editor and give its `tuner:remote` listener a
-        // moment to mount before we emit (it opens the modal + applies tuning).
+        // Reveal the Valeton editor and keep re-emitting: the first emit that
+        // lands opens the tuner modal, and the tuner shell (mounted inside it)
+        // applies the tuning and acks.
         reveal_tab(&ctx.app, "valeton-editor");
-        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-        let _ = ctx.app.emit(
+        let payload = serde_json::to_value(TunerRemote {
+            tuning_id: tuning_id.clone(),
+        })
+        .unwrap_or_default();
+        let ack = emit_with_ack(
+            &ctx.app,
             "tuner:remote",
-            &TunerRemote {
-                tuning_id: tuning_id.clone(),
-            },
-        );
+            payload,
+            std::time::Duration::from_secs(4),
+        )
+        .await;
         let current = tuning_id.clone().unwrap_or_else(|| read_tuner_tuning(&ctx.app));
+        let text = if ack.is_some() {
+            format!("🎸 Тюнер відкрито · стрій {current}")
+        } else {
+            format!(
+                "⚠️ Тюнер не відповів — відкрий Stash → Valeton. Стрій {current} збережено."
+            )
+        };
         Reply {
-            text: format!("🎸 Тюнер відкрито · стрій {current}"),
+            text,
             keyboard: Some(tuner_keyboard(&current)),
             ..Default::default()
         }
