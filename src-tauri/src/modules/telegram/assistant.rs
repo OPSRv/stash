@@ -736,6 +736,7 @@ pub fn build_runtime_assistant(
 
     crate::modules::downloader::agent::register_tools(&mut tools);
     crate::modules::translator::agent::register_tools(&mut tools);
+    crate::modules::system::agent::register_tools(&mut tools);
 
     Ok(Assistant {
         state: Arc::clone(state),

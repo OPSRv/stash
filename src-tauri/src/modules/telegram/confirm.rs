@@ -46,6 +46,14 @@ pub const DANGEROUS_TOOLS: &[&str] = &[
     "npm_run_script",
     "delete_note",
     "update_note",
+    "system_kill_process",
+    "system_display_power",
+    "system_empty_trash",
+    "system_docker_container",
+    "system_docker_prune",
+    "system_move_to_trash",
+    "system_storage_cleanup",
+    "system_toggle_launch_agent",
 ];
 
 /// Env var the assistant's `claude -p` run sets for the `stash mcp`

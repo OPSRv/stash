@@ -187,9 +187,141 @@ pub fn prune() -> Result<PruneResult, String> {
     })
 }
 
+/// One row of `docker ps -a`.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct DockerContainer {
+    /// Short (12-char) container id.
+    pub id: String,
+    pub name: String,
+    pub image: String,
+    /// `running` / `exited` / `paused` / `created` / …
+    pub state: String,
+    /// Human status line, e.g. `Up 3 hours`.
+    pub status: String,
+}
+
+impl DockerContainer {
+    pub fn is_running(&self) -> bool {
+        self.state.eq_ignore_ascii_case("running")
+    }
+}
+
+/// Parse one `docker ps --format '{{json .}}'` line.
+pub fn parse_ps_json_line(line: &str) -> Option<DockerContainer> {
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    let id: String = s("ID").chars().take(12).collect();
+    if id.is_empty() {
+        return None;
+    }
+    Some(DockerContainer {
+        id,
+        name: s("Names"),
+        image: s("Image"),
+        state: s("State"),
+        status: s("Status"),
+    })
+}
+
+/// All containers, running first.
+pub fn list_containers() -> Result<Vec<DockerContainer>, String> {
+    let path = docker_path().ok_or_else(|| "Docker не встановлено".to_string())?;
+    let out = Command::new(&path)
+        .args(["ps", "-a", "--format", "{{json .}}"])
+        .output()
+        .map_err(|e| format!("docker ps: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let mut items: Vec<DockerContainer> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(parse_ps_json_line)
+        .collect();
+    items.sort_by_key(|c| !c.is_running());
+    Ok(items)
+}
+
+/// Container lifecycle verbs we expose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerAction {
+    Start,
+    Stop,
+    Restart,
+    Remove,
+}
+
+impl ContainerAction {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "start" | "up" => Some(Self::Start),
+            "stop" | "down" => Some(Self::Stop),
+            "restart" => Some(Self::Restart),
+            "rm" | "remove" | "delete" => Some(Self::Remove),
+            _ => None,
+        }
+    }
+
+    fn args(self) -> &'static [&'static str] {
+        match self {
+            Self::Start => &["start"],
+            Self::Stop => &["stop"],
+            Self::Restart => &["restart"],
+            Self::Remove => &["rm", "-f"],
+        }
+    }
+}
+
+/// Container ids/names are `[A-Za-z0-9_.-]`; anything else is rejected so
+/// a model-supplied value can't smuggle extra CLI flags.
+pub fn is_valid_container_ref(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && !s.starts_with('-')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
+pub fn container_action(target: &str, action: ContainerAction) -> Result<(), String> {
+    if !is_valid_container_ref(target) {
+        return Err(format!("invalid container id: {target}"));
+    }
+    let path = docker_path().ok_or_else(|| "Docker не встановлено".to_string())?;
+    let out = Command::new(&path)
+        .args(action.args())
+        .arg(target)
+        .output()
+        .map_err(|e| format!("docker: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_ps_json_line_reads_fields() {
+        let line = r#"{"ID":"0123456789abcdef0123","Names":"web","Image":"nginx:1","State":"running","Status":"Up 3 hours"}"#;
+        let c = parse_ps_json_line(line).unwrap();
+        assert_eq!(c.id, "0123456789ab");
+        assert_eq!(c.name, "web");
+        assert!(c.is_running());
+        assert!(parse_ps_json_line("not json").is_none());
+        assert!(parse_ps_json_line(r#"{"Names":"x"}"#).is_none());
+    }
+
+    #[test]
+    fn container_refs_and_actions() {
+        assert!(is_valid_container_ref("my_db-1.local"));
+        assert!(!is_valid_container_ref("--rm"));
+        assert!(!is_valid_container_ref("a b"));
+        assert!(!is_valid_container_ref(""));
+        assert_eq!(ContainerAction::parse("RM"), Some(ContainerAction::Remove));
+        assert_eq!(ContainerAction::parse("pause"), None);
+    }
 
     #[test]
     fn parse_docker_size_handles_decimal_units() {

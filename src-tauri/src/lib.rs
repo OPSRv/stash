@@ -1236,6 +1236,7 @@ pub fn run() {
             );
             modules::downloader::agent::register_commands(&telegram_state);
             modules::translator::agent::register_commands(&telegram_state);
+            modules::system::agent::register_commands(&telegram_state);
             telegram_state.register_command(modules::telegram::bot_cmds::StartCmd);
             telegram_state.register_command(
                 modules::telegram::bot_cmds::RetryCmd::new(Arc::clone(&telegram_state)),

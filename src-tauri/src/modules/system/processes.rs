@@ -86,7 +86,7 @@ pub fn list_processes() -> Result<Vec<ProcessInfo>, String> {
     Ok(stdout.lines().filter_map(parse_ps_line).collect())
 }
 
-fn current_user() -> String {
+pub fn current_user() -> String {
     std::env::var("USER").unwrap_or_else(|_| {
         Command::new("whoami")
             .output()

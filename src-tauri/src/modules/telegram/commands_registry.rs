@@ -229,6 +229,12 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
             "sleep",
             "shutdown",
             "update",
+            "sys",
+            "proc",
+            "docker",
+            "trash",
+            "lock",
+            "dns",
         ],
     ),
     (
