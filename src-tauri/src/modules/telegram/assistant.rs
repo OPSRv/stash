@@ -718,73 +718,31 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::reminders::CreateReminder);
     tools.register(super::tools::reminders::ListReminders);
     tools.register(super::tools::reminders::CancelReminder);
-    tools.register(super::tools::stash::GetBattery);
-    tools.register(super::tools::stash::CanvasOcr);
-    tools.register(super::tools::stash::MetronomeControl);
-    tools.register(super::tools::stash::TunerControl);
-    tools.register(super::tools::stash::CircleProgression);
-    tools.register(super::tools::stash::ValetonSetTone);
-    tools.register(super::tools::stash::ValetonControl);
-    tools.register(super::tools::stash::RecordControl);
-    tools.register(super::tools::stash::MusicControl);
-    tools.register(super::tools::stash::VolumeControl);
-    tools.register(super::tools::stash::SaveNote);
-    tools.register(super::tools::stash::ListNotes);
-    tools.register(super::tools::stash::SendTelegram);
-    tools.register(super::tools::stash::NavigateTab);
-    tools.register(super::tools::stash::NpmListScripts);
-    tools.register(super::tools::stash::NpmRunScript);
-    tools.register(super::tools::stash::NpmStopScript);
-    tools.register(super::tools::stash::InvokeCommand);
-    tools.register(super::tools::stash::SeparateStems);
-    tools.register(super::tools::stash::DetectBpm);
-    tools.register(super::tools::stash::GetSeparatorJob);
-    tools.register(super::tools::stash::ConvertMedia);
-    tools.register(super::tools::stash::TranscribeToFile);
-    tools.register(super::tools::stash::GetConverterJob);
-    if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>()
-    {
-        tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));
-        tools.register(super::tools::stash::ClipboardSearch::new(
-            clip.inner().clone(),
-        ));
-        tools.register(super::tools::stash::ClipboardPin::new(clip.inner().clone()));
-        tools.register(super::tools::stash::ClipboardClear::new(
-            clip.inner().clone(),
-        ));
-    }
-    if let Some(pomo) = app.try_state::<Arc<crate::modules::pomodoro::state::PomodoroState>>() {
-        tools.register(super::tools::stash::PomodoroStatus::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroStart::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroStop::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroSavePreset::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroControl::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroEditBlocks::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroPresets::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroHistory::new(pomo.inner().clone()));
-    }
-    tools.register(super::tools::stash::ClipboardDelete);
-    tools.register(super::tools::stash::ClipboardCopyToMac);
-    tools.register(super::digest::ConfigureDigest);
-    if let Some(notes) = app.try_state::<crate::modules::notes::commands::NotesState>() {
-        tools.register(super::tools::stash::SearchNotes::new(notes.repo.clone()));
-        tools.register(super::tools::stash::GetNote::new(notes.repo.clone()));
-        tools.register(super::tools::stash::AppendToNote::new(notes.repo.clone()));
-        tools.register(super::tools::stash::UpdateNote::new(notes.repo.clone()));
-        tools.register(super::tools::stash::DeleteNote::new(notes.repo.clone()));
-    }
 
+    // Same order as before the move: metronome, tuner, circle, valeton, record, music.
+    crate::modules::metronome::agent::register_tools(&mut tools, app);
+    crate::modules::tuner::agent::register_tools(&mut tools, app);
+    crate::modules::circle::agent::register_tools(&mut tools, app);
+    crate::modules::valeton::agent::register_tools(&mut tools, app);
+    crate::modules::recorder::agent::register_tools(&mut tools, app);
+    crate::modules::music::agent::register_tools(&mut tools, app);
+
+    crate::modules::notes::agent::register_tools(&mut tools, app);
+    crate::modules::clipboard::agent::register_tools(&mut tools, app);
+    crate::modules::pomodoro::agent::register_tools(&mut tools, app);
+
+    crate::modules::system::agent::register_tools(&mut tools);
+    super::core_cmds::register_tools(&mut tools, app);
+
+    crate::modules::separator::agent::register_tools(&mut tools, app);
+    crate::modules::converter::agent::register_tools(&mut tools, app);
+    crate::modules::ocr::agent::register_tools(&mut tools, app);
+    crate::modules::npm_scripts::agent::register_tools(&mut tools, app);
+    super::send_cmds::register_tools(&mut tools, app);
+
+    tools.register(super::digest::ConfigureDigest);
     crate::modules::downloader::agent::register_tools(&mut tools);
     crate::modules::translator::agent::register_tools(&mut tools);
-    crate::modules::system::agent::register_tools(&mut tools);
 
     Ok(Assistant {
         state: Arc::clone(state),

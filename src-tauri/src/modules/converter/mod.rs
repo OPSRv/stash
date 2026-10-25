@@ -18,6 +18,7 @@
 //!     pipeline + its install dance; the converter just emits a
 //!     navigate event with the file pre-selected.
 
+pub mod agent;
 pub mod commands;
 pub mod jobs;
 pub mod pipeline;

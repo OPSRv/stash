@@ -4,6 +4,7 @@
 //! photos / image documents / PDFs get a `transcript` row alongside
 //! the original file — same UI as voice notes.
 
+pub mod agent;
 pub mod pdf;
 pub mod vision;
 

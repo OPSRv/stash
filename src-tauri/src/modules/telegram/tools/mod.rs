@@ -22,7 +22,6 @@ use serde_json::Value;
 
 pub mod memory;
 pub mod reminders;
-pub mod stash;
 
 use super::llm::{ToolCall, ToolSpec};
 use super::state::TelegramState;

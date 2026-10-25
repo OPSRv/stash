@@ -1,6 +1,5 @@
 //! Agent surface for the Translator: `/tr` slash command + `translate_text`
-//! LLM tool. Lives next to the module it drives instead of in the shared
-//! `telegram/module_cmds.rs`. `lib.rs` / `assistant.rs` call
+//! LLM tool. Lives next to the module it drives. `lib.rs` / `assistant.rs` call
 //! `register_commands` / `register_tools`.
 
 use std::sync::{Arc, OnceLock};

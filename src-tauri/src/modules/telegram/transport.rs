@@ -1070,7 +1070,7 @@ async fn handle_media(
                     // text-mode chat already uses, so we don't have
                     // a parallel code path for "what does AI do
                     // with this text".
-                    let kb = super::module_cmds::voice_action_keyboard(inbox_id);
+                    let kb = crate::modules::ai::agent::voice_action_keyboard(inbox_id);
                     state_for_task.sender.enqueue_with_keyboard(
                         chat_for_task,
                         format!("📝 {trimmed}"),
@@ -1592,7 +1592,7 @@ fn build_unknown_command_reply(
 /// alive and here's what I already know" + a nudge toward /help. The
 /// quick-actions keyboard is attached separately at the call site.
 pub(crate) fn build_welcome_message(app: &AppHandle) -> String {
-    use super::module_cmds::{read_battery, BatterySnapshot};
+    use super::agent_util::{read_battery, BatterySnapshot};
     let battery = match read_battery() {
         BatterySnapshot::Present { percent, charging } => {
             let icon = if charging { "🔌" } else { "🔋" };

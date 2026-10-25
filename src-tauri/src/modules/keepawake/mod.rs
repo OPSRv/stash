@@ -10,6 +10,7 @@
 //! hourly Telegram nudge while it's on so the user doesn't leave their
 //! Mac uncaffeinated overnight by mistake.
 
+pub mod agent;
 pub mod commands;
 pub mod state;
 

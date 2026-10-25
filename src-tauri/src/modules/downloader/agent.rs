@@ -1,7 +1,6 @@
 //! Agent surface for the Downloads tab: `/dl` slash command, LLM tools and
 //! the Telegram completion card. Everything the Telegram bot / assistant can
-//! do with downloads lives here, next to the module it drives, instead of in
-//! the shared `telegram/module_cmds.rs`.
+//! do with downloads lives here, next to the module it drives.
 //!
 //! Layout: typed core fns (`start_download`, `list_downloads`, …) hold the
 //! logic; `DlCmd` parses slash args → core → `Reply`; the `*Tool` structs
@@ -705,7 +704,7 @@ fn completed_path(app: &AppHandle, id: i64) -> Result<PathBuf, String> {
 /// callback doesn't spin for minutes. Job run + polling + result card are
 /// shared with `/stems` / `/bpm`.
 fn spawn_separator(app: &AppHandle, id: i64, mode: &str) -> Result<Reply, String> {
-    use crate::modules::telegram::module_cmds::{await_separator_job, enqueue_separator};
+    use crate::modules::telegram::agent_util::{await_separator_job, enqueue_separator};
     let path = completed_path(app, id)?;
     let (sep, job_id) = enqueue_separator(
         app,

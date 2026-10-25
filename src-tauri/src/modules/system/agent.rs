@@ -5,9 +5,10 @@
 //! drives; `lib.rs` / `assistant.rs` call `register_commands` /
 //! `register_tools`.
 //!
-//! Commands already living in `telegram/module_cmds.rs` (/battery,
-//! /display, /sleep, /shutdown, /focus, /app, /keepawake, /screenshot,
-//! /weather, /volume) are not duplicated here — the hub links to them.
+//! The quick system commands (/battery, /volume, /screenshot, /display,
+//! /sleep, /shutdown, /focus, /weather, /app) and the `get_battery` /
+//! `volume_control` tools live in the "quick system commands" section
+//! below; `/keepawake` lives in `keepawake/agent.rs`. The hub links to them.
 //!
 //! Destructive LLM tools are listed in `telegram::confirm::DANGEROUS_TOOLS`;
 //! destructive slash-command args opt in via `CommandHandler::dangerous`.
@@ -1580,9 +1581,855 @@ pub fn system_tools() -> Vec<SysTool> {
     ]
 }
 
+// ───────────────────────── quick system commands ─────────────────────────
+// /battery, /volume, /screenshot, /display, /sleep, /shutdown, /focus,
+// /weather, /app + `get_battery` / `volume_control` tools.
+
+use std::sync::Arc;
+
+use crate::modules::telegram::agent_util::{
+    apply_volume, now_ms, read_battery, run_slash, volume_bar, BatterySnapshot, VolumeAction,
+    VolumeSnapshot,
+};
+
+// -------------------- /battery --------------------
+
+pub struct BatteryCmd;
+
+#[async_trait]
+impl CommandHandler for BatteryCmd {
+    fn name(&self) -> &'static str {
+        "battery"
+    }
+    fn description(&self) -> &'static str {
+        "Показати заряд батареї та стан живлення"
+    }
+    fn usage(&self) -> &'static str {
+        "/battery"
+    }
+    async fn handle(&self, _ctx: Ctx, _args: &str) -> Reply {
+        match read_battery() {
+            BatterySnapshot::Present { percent, charging } => {
+                let icon = if charging { "🔌" } else { "🔋" };
+                let status = if charging {
+                    "заряджається"
+                } else {
+                    "від батареї"
+                };
+                // Below 20% + not plugged in → offer a quick sleep action.
+                let low = percent < 20 && !charging;
+                let mut rows = Vec::new();
+                if low {
+                    rows.push(vec![
+                        InlineButton::new("💤 Sleep Mac", "sleep:ask"),
+                        InlineButton::new("☕ Keep awake off", "keepawake:off"),
+                    ]);
+                }
+                rows.push(crate::modules::telegram::menu::nav_row("refresh:battery"));
+                Reply {
+                    text: format!("{icon} {percent}% — {status}"),
+                    keyboard: Some(InlineKeyboard { rows }),
+                    ..Default::default()
+                }
+            }
+            BatterySnapshot::NoBattery => Reply {
+                text: "🔌 У цього Mac немає батареї (desktop / під'єднано до мережі).".into(),
+                keyboard: Some(crate::modules::telegram::menu::nav_keyboard("refresh:battery")),
+                ..Default::default()
+            },
+            BatterySnapshot::Unknown => Reply {
+                text: "🪫 Не вдалося отримати дані про батарею.".into(),
+                keyboard: Some(crate::modules::telegram::menu::nav_keyboard("refresh:battery")),
+                ..Default::default()
+            },
+        }
+    }
+}
+
+// -------------------- /volume --------------------
+
+pub struct VolumeCmd;
+
+#[async_trait]
+impl CommandHandler for VolumeCmd {
+    fn name(&self) -> &'static str {
+        "volume"
+    }
+    fn description(&self) -> &'static str {
+        "Показати або змінити гучність macOS (0–100)"
+    }
+    fn usage(&self) -> &'static str {
+        "/volume [N | up | down | mute | unmute]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let action = match parse_volume_action(args) {
+            Ok(a) => a,
+            Err(other) => {
+                return Reply::text(format!(
+                    "✍️ Usage: /volume [N | +N | -N | up | down | mute | unmute | toggle]. Got: {other}"
+                ));
+            }
+        };
+        let snap = apply_volume(action);
+        Reply {
+            text: format_volume(&snap),
+            keyboard: Some(volume_keyboard(snap.muted)),
+            ..Default::default()
+        }
+    }
+}
+
+/// `N` sets the level; signed `+N` / `-N` nudge relative to the current
+/// level (so the card's −1/+1 buttons and typed args share one grammar).
+fn parse_volume_action(args: &str) -> Result<VolumeAction, String> {
+    let raw = args.trim().to_lowercase();
+    Ok(match raw.as_str() {
+        "" | "status" => VolumeAction::Status,
+        "up" | "+" => VolumeAction::Step(10),
+        "down" | "-" => VolumeAction::Step(-10),
+        "mute" => VolumeAction::Mute(true),
+        "unmute" => VolumeAction::Mute(false),
+        "toggle" | "togglemute" => VolumeAction::ToggleMute,
+        other if other.starts_with('+') || other.starts_with('-') => match other.parse::<i32>() {
+            Ok(n) => VolumeAction::Step(n.clamp(-100, 100)),
+            Err(_) => return Err(other.to_string()),
+        },
+        other => match other.parse::<i32>() {
+            Ok(n) => VolumeAction::Set(n.clamp(0, 100) as u32),
+            Err(_) => return Err(other.to_string()),
+        },
+    })
+}
+
+fn format_volume(s: &VolumeSnapshot) -> String {
+    if let Some(e) = &s.error {
+        return format!("⚠️ {e}");
+    }
+    let Some(p) = s.percent else {
+        return "🔇 Could not read system volume.".to_string();
+    };
+    if s.muted {
+        return format!("🔇 Muted (was {p}%)");
+    }
+    let bar = volume_bar(p);
+    format!("🔊 {p}% {bar}")
+}
+
+/// Live volume card — every button is `refresh:` so the level line updates
+/// in place. The 🎵 button swaps this card for the player card.
+fn volume_keyboard(muted: bool) -> InlineKeyboard {
+    let b = |text: &str, args: &str| InlineButton::new(text, format!("refresh:volume:{args}"));
+    InlineKeyboard {
+        rows: vec![
+            vec![
+                b("−10", "-10"),
+                b("−1", "-1"),
+                if muted { b("🔊", "unmute") } else { b("🔇", "mute") },
+                b("+1", "+1"),
+                b("+10", "+10"),
+            ],
+            vec![
+                InlineButton::new("🎵 Плеєр", "refresh:music"),
+                b("🔄", "status"),
+            ],
+        ],
+    }
+}
+
+// -------------------- /screenshot --------------------
+
+pub struct ScreenshotCmd;
+
+#[async_trait]
+impl CommandHandler for ScreenshotCmd {
+    fn name(&self) -> &'static str {
+        "screenshot"
+    }
+    fn description(&self) -> &'static str {
+        "Скрін усіх екранів у PNG (без перекодування). `main` — лише головний."
+    }
+    fn usage(&self) -> &'static str {
+        "/screenshot [main]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let sub = args.trim().to_ascii_lowercase();
+        let result = tokio::task::spawn_blocking(move || {
+            if matches!(sub.as_str(), "main" | "primary" | "1") {
+                crate::modules::system::screenshot::capture_main_display().map(|p| vec![p])
+            } else {
+                crate::modules::system::screenshot::capture_all_displays()
+            }
+        })
+        .await;
+
+        let files = match result {
+            Ok(Ok(ps)) => ps,
+            Ok(Err(e)) => return Reply::text(format!("⚠️ screenshot: {e}")),
+            Err(e) => return Reply::text(format!("⚠️ screenshot: task join: {e}")),
+        };
+
+        let paths_block = files
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let caption = format!("📸 Захоплено екранів: {}\n{}", files.len(), paths_block);
+        Reply {
+            text: caption,
+            documents: files,
+            keyboard: Some(InlineKeyboard {
+                // Plain `menu` (not `refresh:`) — a document message
+                // can't be edited into a text card.
+                rows: vec![vec![
+                    InlineButton::new("📸 Again", "screenshot"),
+                    InlineButton::new("📸 Лише головний", "screenshot:main"),
+                    InlineButton::new("☰ Меню", "menu"),
+                ]],
+            }),
+        }
+    }
+}
+
+// -------------------- /display /sleep /shutdown --------------------
+
+use crate::modules::system::power::{self, PowerKind, PowerTimers};
+
+pub struct DisplayCmd;
+
+#[async_trait]
+impl CommandHandler for DisplayCmd {
+    fn name(&self) -> &'static str {
+        "display"
+    }
+    fn description(&self) -> &'static str {
+        "Погасити екрани (Mac і фонові задачі працюють далі) або змінити яскравість: `up` / `down`."
+    }
+    fn usage(&self) -> &'static str {
+        "/display [off|up|down]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let text = match args.trim().to_ascii_lowercase().as_str() {
+            "" | "off" | "sleep" => match tokio::task::spawn_blocking(power::display_off).await {
+                Ok(Ok(())) => "💤 Екрани погашено (Mac працює далі).".to_string(),
+                Ok(Err(e)) => format!("⚠️ display: {e}"),
+                Err(e) => format!("⚠️ display: task join: {e}"),
+            },
+            verb @ ("up" | "+" | "brighter" | "down" | "-" | "dimmer") => {
+                let up = matches!(verb, "up" | "+" | "brighter");
+                let res = tokio::task::spawn_blocking(move || {
+                    crate::modules::system::displays::adjust_brightness(up)
+                })
+                .await;
+                match res {
+                    Ok(Ok(())) if up => "🔆 Яскравість + (вбудований дисплей).".to_string(),
+                    Ok(Ok(())) => "🔅 Яскравість − (вбудований дисплей).".to_string(),
+                    Ok(Err(e)) => format!("⚠️ brightness: {e}"),
+                    Err(e) => format!("⚠️ brightness: task join: {e}"),
+                }
+            }
+            other => format!("❓ Невідомо: `{other}`. Використання: {}", self.usage()),
+        };
+        Reply {
+            text,
+            keyboard: Some(display_keyboard()),
+            ..Default::default()
+        }
+    }
+}
+
+fn display_keyboard() -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![vec![
+            InlineButton::new("🔅", "refresh:display:down"),
+            InlineButton::new("🔆", "refresh:display:up"),
+            InlineButton::new("💤 Погасити", "refresh:display:off"),
+        ]],
+    }
+}
+
+pub struct SleepCmd {
+    timers: Arc<PowerTimers>,
+}
+
+impl SleepCmd {
+    pub fn new(timers: Arc<PowerTimers>) -> Self {
+        Self { timers }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for SleepCmd {
+    fn name(&self) -> &'static str {
+        "sleep"
+    }
+    fn description(&self) -> &'static str {
+        "Приспати Mac. Без аргументу — зараз; `15m` / `30s` / `1h` — за таймером. `cancel` / `status`."
+    }
+    fn usage(&self) -> &'static str {
+        "/sleep [<duration>|cancel|status]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        handle_power_cmd(&self.timers, PowerKind::Sleep, args).await
+    }
+}
+
+pub struct ShutdownCmd {
+    timers: Arc<PowerTimers>,
+}
+
+impl ShutdownCmd {
+    pub fn new(timers: Arc<PowerTimers>) -> Self {
+        Self { timers }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for ShutdownCmd {
+    fn name(&self) -> &'static str {
+        "shutdown"
+    }
+    fn description(&self) -> &'static str {
+        "Вимкнути Mac. Без аргументу — зараз; `30m` — за таймером. `cancel` / `status`. Незбережені документи можуть блокувати."
+    }
+    fn usage(&self) -> &'static str {
+        "/shutdown [<duration>|cancel|status]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        handle_power_cmd(&self.timers, PowerKind::Shutdown, args).await
+    }
+}
+
+// -------------------- /focus --------------------
+
+use crate::modules::system::focus;
+
+pub struct FocusCmd;
+
+#[async_trait]
+impl CommandHandler for FocusCmd {
+    fn name(&self) -> &'static str {
+        "focus"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати macOS Focus: on / off / status. Одноразове налаштування через Shortcuts.app."
+    }
+    fn usage(&self) -> &'static str {
+        "/focus <on|off|status>"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let text = self.run(args).await;
+        Reply {
+            text,
+            keyboard: Some(focus_keyboard()),
+            ..Default::default()
+        }
+    }
+}
+
+impl FocusCmd {
+    async fn run(&self, args: &str) -> String {
+        let sub = args.trim().to_ascii_lowercase();
+        let verb = sub.as_str();
+        let status = tokio::task::spawn_blocking(focus::check)
+            .await
+            .unwrap_or(focus::FocusCheck::ListFailed("internal: task join".into()));
+        if verb.is_empty() || verb == "status" {
+            return format_focus_status(&status);
+        }
+        match &status {
+            focus::FocusCheck::Ready => {}
+            focus::FocusCheck::CliMissing => {
+                return "⚠️ `shortcuts` CLI не знайдено. Потрібен macOS 12+.".into();
+            }
+            focus::FocusCheck::ShortcutsMissing { .. } => {
+                return format!(
+                    "⚠️ Не знайдено потрібних ярликів.\n{}",
+                    focus::setup_instructions()
+                );
+            }
+            focus::FocusCheck::ListFailed(e) => {
+                return format!("⚠️ shortcuts list: {e}");
+            }
+        }
+        match verb {
+            "on" | "enable" => match tokio::task::spawn_blocking(focus::enable).await {
+                Ok(Ok(())) => "🔕 Focus увімкнено.".into(),
+                Ok(Err(e)) => format!("⚠️ {e}"),
+                Err(e) => format!("⚠️ task join: {e}"),
+            },
+            "off" | "disable" => match tokio::task::spawn_blocking(focus::disable).await {
+                Ok(Ok(())) => "🔔 Focus вимкнено.".into(),
+                Ok(Err(e)) => format!("⚠️ {e}"),
+                Err(e) => format!("⚠️ task join: {e}"),
+            },
+            other => format!(
+                "❓ Невідомий підкоманда `{other}`.\nВикористання: {}",
+                self.usage()
+            ),
+        }
+    }
+}
+
+fn focus_keyboard() -> InlineKeyboard {
+    InlineKeyboard {
+        rows: vec![vec![
+            InlineButton::new("🔕 Увімкнути", "refresh:focus:on"),
+            InlineButton::new("🔔 Вимкнути", "refresh:focus:off"),
+            InlineButton::new("🔄", "refresh:focus:status"),
+        ]],
+    }
+}
+
+fn format_focus_status(s: &focus::FocusCheck) -> String {
+    match s {
+        focus::FocusCheck::Ready => "🔔 Focus готовий: `/focus on` або `/focus off`.".into(),
+        focus::FocusCheck::CliMissing => {
+            "⚠️ `shortcuts` CLI не знайдено. Потрібен macOS 12+.".into()
+        }
+        focus::FocusCheck::ShortcutsMissing { on, off } => {
+            let missing = match (on, off) {
+                (false, false) => "обидва ярлики",
+                (true, false) => "«Stash Focus Off»",
+                (false, true) => "«Stash Focus On»",
+                (true, true) => unreachable!("Ready should hit other branch"),
+            };
+            format!("⚠️ Відсутнє: {missing}.\n{}", focus::setup_instructions())
+        }
+        focus::FocusCheck::ListFailed(e) => format!("⚠️ shortcuts list: {e}"),
+    }
+}
+
+// -------------------- /weather --------------------
+
+use crate::modules::system::weather;
+
+pub struct WeatherCmd {
+    state: Arc<TelegramState>,
+}
+
+impl WeatherCmd {
+    pub fn new(state: Arc<TelegramState>) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl CommandHandler for WeatherCmd {
+    fn name(&self) -> &'static str {
+        "weather"
+    }
+    fn description(&self) -> &'static str {
+        "Погода з wttr.in. Без аргумента — з пам'яті (факт `location: <місто>`)."
+    }
+    fn usage(&self) -> &'static str {
+        "/weather [<місто>]"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let arg = args.trim().to_string();
+        let city = if arg.is_empty() {
+            // Pull the `location:` fact out of memory. Falling back to IP
+            // geolocation would be surprising and wrong when the user
+            // asks for "their" weather after saving a city.
+            let facts: Vec<String> = match self.state.repo.lock() {
+                Ok(r) => match r.memory_list() {
+                    Ok(rows) => rows.into_iter().map(|r| r.fact).collect(),
+                    Err(e) => return Reply::text(format!("⚠️ пам'ять: {e}")),
+                },
+                Err(e) => return Reply::text(format!("⚠️ пам'ять: {e}")),
+            };
+            match weather::location_from_facts(&facts) {
+                Some(c) => c,
+                None => {
+                    return Reply::text(
+                        "❓ Місто не збережене. Скажи, наприклад: \
+                         `/remember location: Київ` — або `/weather Київ`.",
+                    );
+                }
+            }
+        } else {
+            arg.clone()
+        };
+        let for_label = city.clone();
+        // Refresh re-asks for the same city when it was typed explicitly
+        // and fits in the callback payload; otherwise fall back to the
+        // memory-derived default.
+        let refresh = if arg.is_empty() {
+            "refresh:weather".to_string()
+        } else {
+            let cb = format!("refresh:weather:{arg}");
+            if cb.len() <= 64 {
+                cb
+            } else {
+                "refresh:weather".to_string()
+            }
+        };
+        let text = match weather::fetch_weather(&city).await {
+            Ok(body) => format!("🌦 {for_label}\n{body}"),
+            Err(e) => format!("⚠️ погода: {e}"),
+        };
+        Reply {
+            text,
+            keyboard: Some(crate::modules::telegram::menu::nav_keyboard(&refresh)),
+            ..Default::default()
+        }
+    }
+}
+
+// -------------------- /app --------------------
+
+use crate::modules::system::apps_control;
+
+pub struct AppCmd;
+
+#[async_trait]
+impl CommandHandler for AppCmd {
+    fn name(&self) -> &'static str {
+        "app"
+    }
+    fn description(&self) -> &'static str {
+        "Керувати програмами macOS: відкрити, згорнути, закрити, список запущених."
+    }
+    fn usage(&self) -> &'static str {
+        "/app <open|hide|quit> <name> | /app running"
+    }
+    async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
+        let sub = args.trim();
+        if sub.is_empty() {
+            return Reply::text(format!("✍️ Використання: {}", self.usage()));
+        }
+        // Running-list is the only sub without a name argument, so peel it
+        // off first before the verb/name split.
+        if sub.eq_ignore_ascii_case("running")
+            || sub.eq_ignore_ascii_case("list")
+            || sub.eq_ignore_ascii_case("ls")
+        {
+            return match tokio::task::spawn_blocking(apps_control::list_running_apps).await {
+                Ok(Ok(names)) if names.is_empty() => {
+                    Reply::text("🪟 Нічого переднього плану не запущено.")
+                }
+                Ok(Ok(names)) => app_running_reply(&names),
+                Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+            };
+        }
+
+        let mut parts = sub.splitn(2, char::is_whitespace);
+        let verb = parts.next().unwrap_or("").to_ascii_lowercase();
+        let name = parts.next().unwrap_or("").trim().to_string();
+        if name.is_empty() {
+            return Reply::text(format!(
+                "✍️ Треба ім'я програми. Використання: {}",
+                self.usage()
+            ));
+        }
+        match verb.as_str() {
+            "open" | "launch" | "focus" => {
+                let n = name.clone();
+                let result = tokio::task::spawn_blocking(move || apps_control::open_app(&n)).await;
+                match result {
+                    Ok(Ok(())) => app_reply(format!("🚀 Відкрив: {name}"), &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quitask", &name)]),
+                    Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                    Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                }
+            }
+            // "🛑 Закрити" button → confirm in the same card first, so a
+            // stray tap can't kill an app with unsaved work.
+            "quitask" => app_reply(
+                format!("🛑 Закрити {name}?"),
+                &[("✅ Так, закрити", "quit", &name), ("✖ Ні", "keep", &name)],
+            ),
+            "keep" => app_reply(
+                format!("🚀 {name}"),
+                &[("👻 Згорнути", "hide", &name), ("🛑 Закрити", "quitask", &name)],
+            ),
+            "hide" | "minimize" => {
+                let n = name.clone();
+                let result = tokio::task::spawn_blocking(move || apps_control::hide_app(&n)).await;
+                match result {
+                    Ok(Ok(())) => app_reply(format!("👻 Згорнув: {name}"), &[("🚀 Відкрити", "open", &name)]),
+                    Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                    Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                }
+            }
+            "quit" | "close" | "exit" => {
+                let n = name.clone();
+                let result = tokio::task::spawn_blocking(move || apps_control::quit_app(&n)).await;
+                match result {
+                    Ok(Ok(apps_control::QuitOutcome::Quit { resolved_name })) => {
+                        app_reply(format!("🛑 Закрив: {resolved_name}"), &[("🚀 Відкрити", "open", &resolved_name)])
+                    }
+                    Ok(Ok(apps_control::QuitOutcome::NotRunning)) => {
+                        Reply::text(format!("ℹ️ `{name}` не запущений — нема чого закривати."))
+                    }
+                    Ok(Ok(apps_control::QuitOutcome::StillRunning { resolved_name })) => {
+                        // Most common cause is an unsaved-document dialog
+                        // blocking the Quit event. Report honestly so the
+                        // assistant doesn't falsely claim success.
+                        Reply::text(format!(
+                            "⚠️ `{resolved_name}` не закрився (можливо, діалог «зберегти»?). \
+                             Натисни `/app quit {resolved_name}` ще раз після відповіді на діалог."
+                        ))
+                    }
+                    Ok(Err(e)) => Reply::text(format!("⚠️ {e}")),
+                    Err(e) => Reply::text(format!("⚠️ task join: {e}")),
+                }
+            }
+            other => Reply::text(format!(
+                "❓ Невідомий підкоманда `{other}`.\nВикористання: {}",
+                self.usage()
+            )),
+        }
+    }
+}
+
+/// `app:<verb> <name>` payload, or `None` when the app name would push
+/// it past Telegram's 64-byte callback limit.
+fn app_cb(verb: &str, name: &str) -> Option<String> {
+    let cb = format!("app:{verb} {name}");
+    (cb.len() <= 64).then_some(cb)
+}
+
+/// Single-app result card with follow-up actions that edit it in place.
+fn app_reply(text: String, actions: &[(&str, &str, &str)]) -> Reply {
+    let row: Vec<InlineButton> = actions
+        .iter()
+        .filter_map(|(label, verb, name)| {
+            app_cb(verb, name).map(|cb| InlineButton::new(*label, format!("refresh:{cb}")))
+        })
+        .filter(|b| b.callback_data.len() <= 64)
+        .collect();
+    Reply {
+        text,
+        keyboard: (!row.is_empty()).then(|| InlineKeyboard { rows: vec![row] }),
+        ..Default::default()
+    }
+}
+
+/// Running-apps list with a "hide" button per app (non-destructive, so a
+/// mis-tap is harmless) plus refresh.
+fn app_running_reply(names: &[String]) -> Reply {
+    let buttons: Vec<InlineButton> = names
+        .iter()
+        .take(12)
+        .filter_map(|n| app_cb("hide", n).map(|cb| InlineButton::new(format!("👻 {n}"), cb)))
+        .collect();
+    let mut rows: Vec<Vec<InlineButton>> = buttons.chunks(3).map(|c| c.to_vec()).collect();
+    rows.push(crate::modules::telegram::menu::nav_row("refresh:app:running"));
+    Reply {
+        text: format!("🪟 Запущено: {}", names.join(", ")),
+        keyboard: Some(InlineKeyboard { rows }),
+        ..Default::default()
+    }
+}
+
+async fn handle_power_cmd(timers: &Arc<PowerTimers>, kind: PowerKind, args: &str) -> Reply {
+    let sub = args.trim().to_ascii_lowercase();
+    match sub.as_str() {
+        "cancel" | "off" | "stop" | "abort" => {
+            if timers.cancel(kind) {
+                Reply::text(format!("✖️ {} cancelled.", label(kind, true)))
+            } else {
+                Reply::text(format!("ℹ️ Немає запланованого {}.", label(kind, false)))
+            }
+        }
+        "status" => match timers.pending_fire_at(kind) {
+            Some(fire_at_ms) => {
+                let now = now_ms();
+                let remaining = (fire_at_ms - now).max(0) as u64;
+                Reply::text(format!(
+                    "⏱ {} через {}",
+                    label(kind, true),
+                    power::format_duration(std::time::Duration::from_millis(remaining))
+                ))
+            }
+            None => Reply::text(format!("ℹ️ Немає запланованого {}.", label(kind, false))),
+        },
+        // Typed `/sleep` stays immediate; buttons go through `ask` → `now`.
+        "" | "now" => immediate(kind).await,
+        "ask" => power_confirm_card(kind),
+        "no" => Reply::text(format!("👌 {} скасовано.", label(kind, true))),
+        other => match power::parse_duration(other) {
+            Ok(delay) => {
+                timers.schedule(kind, delay);
+                Reply::text(format!(
+                    "⏳ {} заплановано через {}.",
+                    label(kind, true),
+                    power::format_duration(delay)
+                ))
+            }
+            Err(e) => Reply::text(format!("⚠️ {}: {e}", kind_word(kind))),
+        },
+    }
+}
+
+/// Second-tap confirmation for the one-tap power buttons (battery alert,
+/// dashboard). Both answers edit this card in place.
+fn power_confirm_card(kind: PowerKind) -> Reply {
+    let (text, yes) = match kind {
+        PowerKind::Sleep => ("💤 Приспати Mac зараз?", "✅ Так, приспати"),
+        PowerKind::Shutdown => ("⏻ Вимкнути Mac зараз?", "✅ Так, вимкнути"),
+    };
+    let cmd = kind_word(kind);
+    Reply {
+        text: text.to_string(),
+        keyboard: Some(InlineKeyboard {
+            rows: vec![vec![
+                InlineButton::new(yes, format!("refresh:{cmd}:now")),
+                InlineButton::new("✖ Ні", format!("refresh:{cmd}:no")),
+            ]],
+        }),
+        ..Default::default()
+    }
+}
+
+async fn immediate(kind: PowerKind) -> Reply {
+    let verb = match kind {
+        PowerKind::Sleep => power::sleep_now,
+        PowerKind::Shutdown => power::shutdown_now,
+    };
+    match tokio::task::spawn_blocking(verb).await {
+        Ok(Ok(())) => Reply::text(match kind {
+            PowerKind::Sleep => "😴 Засинаю…",
+            PowerKind::Shutdown => "⏻ Вимикаюсь…",
+        }),
+        Ok(Err(e)) => Reply::text(format!("⚠️ {}: {e}", kind_word(kind))),
+        Err(e) => Reply::text(format!("⚠️ {}: task join: {e}", kind_word(kind))),
+    }
+}
+
+fn label(kind: PowerKind, caps: bool) -> &'static str {
+    match (kind, caps) {
+        (PowerKind::Sleep, true) => "Sleep",
+        (PowerKind::Sleep, false) => "sleep",
+        (PowerKind::Shutdown, true) => "Shutdown",
+        (PowerKind::Shutdown, false) => "shutdown",
+    }
+}
+
+fn kind_word(kind: PowerKind) -> &'static str {
+    match kind {
+        PowerKind::Sleep => "sleep",
+        PowerKind::Shutdown => "shutdown",
+    }
+}
+
+// ---- quick system LLM tools ----
+
+pub struct GetBattery;
+
+#[async_trait]
+impl Tool for GetBattery {
+    fn name(&self) -> &'static str {
+        "get_battery"
+    }
+    fn description(&self) -> &'static str {
+        "Return the Mac's current battery percentage + charging state. \
+         Returns {present:false} on desktop Macs without a battery."
+    }
+    fn schema(&self) -> Value {
+        json!({ "type": "object", "properties": {}, "additionalProperties": false })
+    }
+    async fn invoke(&self, _ctx: &ToolCtx, _args: Value) -> Result<Value, String> {
+        Ok(match read_battery() {
+            BatterySnapshot::Present { percent, charging } => {
+                json!({ "present": true, "percent": percent, "charging": charging })
+            }
+            BatterySnapshot::NoBattery => {
+                json!({ "present": false, "reason": "desktop_mac" })
+            }
+            BatterySnapshot::Unknown => {
+                json!({ "present": false, "reason": "unavailable" })
+            }
+        })
+    }
+}
+
+// ---- Volume ----
+
+pub struct VolumeControl;
+
+#[async_trait]
+impl Tool for VolumeControl {
+    fn name(&self) -> &'static str {
+        "volume_control"
+    }
+    fn description(&self) -> &'static str {
+        "Adjust macOS system output volume. Provide at most one of: \
+         `level` (absolute 0-100), `delta` (relative change, e.g. 5 or -20), \
+         `step` (\"up\" or \"down\" — 10-point nudge), `mute` (boolean), or \
+         `toggle_mute` (true flips mute). Pass `{}` to return the current \
+         level + mute state."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "level": { "type": "integer", "minimum": 0, "maximum": 100 },
+                "delta": { "type": "integer", "minimum": -100, "maximum": 100 },
+                "step":  { "type": "string", "enum": ["up", "down"] },
+                "mute":  { "type": "boolean" },
+                "toggle_mute": { "type": "boolean" }
+            },
+            "additionalProperties": false
+        })
+    }
+    async fn invoke(&self, ctx: &ToolCtx, args: Value) -> Result<Value, String> {
+        let level = args.get("level").and_then(|v| v.as_i64());
+        let step = args.get("step").and_then(|v| v.as_str());
+        let mute = args.get("mute").and_then(|v| v.as_bool());
+        let delta = args.get("delta").and_then(|v| v.as_i64());
+        let toggle = args
+            .get("toggle_mute")
+            .and_then(|v| v.as_bool())
+            .filter(|b| *b);
+        let count = [
+            level.is_some(),
+            step.is_some(),
+            mute.is_some(),
+            delta.is_some(),
+            toggle.is_some(),
+        ]
+        .iter()
+        .filter(|&&b| b)
+        .count();
+        if count > 1 {
+            return Err("provide at most one of level/delta/step/mute/toggle_mute".to_string());
+        }
+        let slash_args = if let Some(n) = level {
+            n.clamp(0, 100).to_string()
+        } else if let Some(d) = delta {
+            format!("{:+}", d.clamp(-100, 100))
+        } else if toggle.is_some() {
+            "toggle".to_string()
+        } else if let Some(s) = step {
+            s.to_string()
+        } else if let Some(m) = mute {
+            if m {
+                "mute".to_string()
+            } else {
+                "unmute".to_string()
+            }
+        } else {
+            // No arg => status query
+            String::new()
+        };
+        run_slash(ctx, "volume", &slash_args).await
+    }
+}
+
 // ───────────────────────── wiring ─────────────────────────
 
-pub fn register_commands(tg: &TelegramState) {
+pub fn register_commands(tg: &Arc<TelegramState>) {
+    tg.register_command(BatteryCmd);
+    tg.register_command(VolumeCmd);
+    tg.register_command(ScreenshotCmd);
+    let power_timers = Arc::new(PowerTimers::new());
+    tg.register_command(DisplayCmd);
+    tg.register_command(SleepCmd::new(Arc::clone(&power_timers)));
+    tg.register_command(ShutdownCmd::new(Arc::clone(&power_timers)));
+    tg.register_command(AppCmd);
+    tg.register_command(FocusCmd);
+    tg.register_command(WeatherCmd::new(Arc::clone(tg)));
     tg.register_command(SysCmd);
     tg.register_command(ProcCmd);
     tg.register_command(DockerCmd);
@@ -1592,6 +2439,8 @@ pub fn register_commands(tg: &TelegramState) {
 }
 
 pub fn register_tools(tools: &mut ToolRegistry) {
+    tools.register(GetBattery);
+    tools.register(VolumeControl);
     for t in system_tools() {
         tools.register(t);
     }
@@ -1883,5 +2732,113 @@ mod tests {
         assert_eq!(v["total_bytes"], 36);
         assert_eq!(v["items"][0]["size_bytes"], 30);
         assert_eq!(v["items"].as_array().unwrap().len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod quick_cmd_tests {
+    use super::*;
+    use crate::modules::telegram::agent_util::test_support::{
+        all_callbacks, assert_fits, tool_ctx as ctx,
+    };
+
+    #[test]
+    fn power_buttons_need_a_second_tap() {
+        for kind in [PowerKind::Sleep, PowerKind::Shutdown] {
+            let kb = power_confirm_card(kind).keyboard.unwrap();
+            let cbs: Vec<_> = kb.rows.iter().flatten().map(|b| b.callback_data.as_str()).collect();
+            let w = kind_word(kind);
+            assert_eq!(cbs, vec![format!("refresh:{w}:now"), format!("refresh:{w}:no")]);
+        }
+    }
+
+    #[test]
+    fn app_open_card_quit_goes_through_confirm() {
+        let r = app_reply("x".into(), &[("🛑 Закрити", "quitask", "Safari")]);
+        assert_eq!(r.keyboard.unwrap().rows[0][0].callback_data, "refresh:app:quitask Safari");
+    }
+
+    #[test]
+    fn format_volume_renders_percent() {
+        let s = VolumeSnapshot {
+            percent: Some(42),
+            muted: false,
+            error: None,
+        };
+        let out = format_volume(&s);
+        assert!(out.contains("42%"));
+        assert!(out.starts_with("🔊"));
+    }
+
+    #[test]
+    fn format_volume_mute_shows_previous_level() {
+        let s = VolumeSnapshot {
+            percent: Some(60),
+            muted: true,
+            error: None,
+        };
+        let out = format_volume(&s);
+        assert!(out.contains("60%"));
+        assert!(out.starts_with("🔇"));
+    }
+
+    // ---- volume / misc cards ----
+
+    #[test]
+    fn volume_action_parser_handles_relative_and_toggle() {
+        assert!(matches!(parse_volume_action("").unwrap(), VolumeAction::Status));
+        assert!(matches!(parse_volume_action("+1").unwrap(), VolumeAction::Step(1)));
+        assert!(matches!(parse_volume_action("-10").unwrap(), VolumeAction::Step(-10)));
+        assert!(matches!(parse_volume_action("+").unwrap(), VolumeAction::Step(10)));
+        assert!(matches!(parse_volume_action("55").unwrap(), VolumeAction::Set(55)));
+        assert!(matches!(parse_volume_action("500").unwrap(), VolumeAction::Set(100)));
+        assert!(matches!(parse_volume_action("toggle").unwrap(), VolumeAction::ToggleMute));
+        assert!(parse_volume_action("loud").is_err());
+    }
+
+    #[test]
+    fn app_callbacks_fit_telegram_limit() {
+        assert!(app_cb("quit", &"x".repeat(80)).is_none());
+        let r = app_reply("t".into(), &[("🛑", "quit", &"Ж".repeat(26))]);
+        assert!(r.keyboard.is_none(), "over-long refresh payload must be dropped");
+    }
+
+    #[test]
+    fn misc_system_keyboards_fit() {
+        for kb in [
+            volume_keyboard(false),
+            volume_keyboard(true),
+            display_keyboard(),
+            focus_keyboard(),
+        ] {
+            assert_fits(&kb);
+            assert!(all_callbacks(&kb).iter().all(|d| d.starts_with("refresh:")));
+        }
+        for d in all_callbacks(&volume_keyboard(false)) {
+            let args = d.strip_prefix("refresh:volume:").unwrap_or("");
+            assert!(parse_volume_action(args).is_ok(), "unparseable: {args}");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn get_battery_returns_present_or_fallback_shape() {
+        let out = GetBattery.invoke(&ctx(), json!({})).await.unwrap();
+        // Real `pmset` runs on the host; either shape is acceptable —
+        // the important invariant is that the tool always returns
+        // well-formed JSON with a `present` boolean.
+        let present = out.get("present").and_then(|v| v.as_bool());
+        assert!(
+            present.is_some(),
+            "expected a boolean `present` field, got {out}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn volume_control_rejects_multiple_mutually_exclusive_fields() {
+        let err = VolumeControl
+            .invoke(&ctx(), json!({ "level": 50, "mute": true }))
+            .await
+            .unwrap_err();
+        assert!(err.contains("at most one"));
     }
 }

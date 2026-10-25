@@ -529,14 +529,42 @@ mod tests {
     fn every_command_is_categorised() {
         let sources = [
             include_str!("commands_registry.rs"),
-            include_str!("module_cmds.rs"),
             include_str!("confirm.rs"),
+            // Per-module agent surfaces (`modules/<m>/agent.rs`).
+            include_str!("core_cmds.rs"),
+            include_str!("memory_cmds.rs"),
+            include_str!("send_cmds.rs"),
+            include_str!("../ai/agent.rs"),
+            include_str!("../circle/agent.rs"),
+            include_str!("../clipboard/agent.rs"),
+            include_str!("../converter/agent.rs"),
+            include_str!("../downloader/agent.rs"),
+            include_str!("../keepawake/agent.rs"),
+            include_str!("../metronome/agent.rs"),
+            include_str!("../music/agent.rs"),
+            include_str!("../notes/agent.rs"),
+            include_str!("../npm_scripts/agent.rs"),
+            include_str!("../ocr/agent.rs"),
+            include_str!("../pomodoro/agent.rs"),
+            include_str!("../recorder/agent.rs"),
+            include_str!("../separator/agent.rs"),
+            include_str!("../system/agent.rs"),
+            include_str!("../terminal/agent.rs"),
+            include_str!("../translator/agent.rs"),
+            include_str!("../tuner/agent.rs"),
+            include_str!("../valeton/agent.rs"),
         ];
+        // Only `CommandHandler` impls count — agent files also hold `Tool`
+        // impls whose `fn name` is an LLM tool name, not a slash command.
+        let handler = "impl CommandHandler for";
         let marker = "fn name(&self) -> &'static str {";
         let mut names = Vec::new();
         for src in sources {
-            for chunk in src.split(marker).skip(1) {
+            for chunk in src.split(handler).skip(1) {
                 let Some(name) = chunk
+                    .split_once(marker)
+                    .map(|(_, rest)| rest)
+                    .unwrap_or("")
                     .trim_start()
                     .strip_prefix('"')
                     .and_then(|r| r.split('"').next())
