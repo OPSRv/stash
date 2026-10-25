@@ -687,6 +687,7 @@ const InboxBody = ({
     case 'text':
       return <TextItem content={item.text_content ?? ''} />;
     case 'voice':
+    case 'audio':
       return item.file_path ? (
         <VoiceItem
           filePath={item.file_path}
@@ -698,7 +699,7 @@ const InboxBody = ({
           onEditTranscript={onEditTranscript}
         />
       ) : (
-        <TextItem content="[voice file missing]" />
+        <TextItem content={`[${item.kind} file missing]`} />
       );
     case 'photo':
       return item.file_path ? (

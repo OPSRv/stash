@@ -246,8 +246,40 @@
     --accent-soft: rgba(var(--stash-accent-rgb), 0.18);
     --accent-fog: rgba(var(--stash-accent-rgb), 0.08);
     --accent-fg: #ffffff;
+
+    /* Telegram inbox kind badge hues (rgb for bg tint, fg for text). */
+    --kind-voice-rgb: 167, 139, 250;
+    --kind-voice-fg: #b79cff;
+    --kind-audio-rgb: 244, 114, 182;
+    --kind-audio-fg: #f78fc4;
+    --kind-photo-rgb: 34, 211, 238;
+    --kind-photo-fg: #4fdcf2;
+    --kind-video-rgb: 251, 146, 60;
+    --kind-video-fg: #fda35c;
+    --kind-video-note-rgb: 248, 113, 113;
+    --kind-video-note-fg: #fa8a8a;
+    --kind-document-rgb: 74, 222, 128;
+    --kind-document-fg: #5be68d;
+    --kind-sticker-rgb: 250, 204, 21;
+    --kind-sticker-fg: #fbd339;
   }
   html.light {
+
+    /* Telegram inbox kind badge hues, light theme (darker for contrast). */
+    --kind-voice-rgb: 124, 77, 220;
+    --kind-voice-fg: #6a3fcf;
+    --kind-audio-rgb: 219, 39, 119;
+    --kind-audio-fg: #c01f67;
+    --kind-photo-rgb: 8, 145, 178;
+    --kind-photo-fg: #0a7490;
+    --kind-video-rgb: 234, 88, 12;
+    --kind-video-fg: #b84a0a;
+    --kind-video-note-rgb: 220, 38, 38;
+    --kind-video-note-fg: #c42b2b;
+    --kind-document-rgb: 22, 163, 74;
+    --kind-document-fg: #16803c;
+    --kind-sticker-rgb: 202, 138, 4;
+    --kind-sticker-fg: #8f6203;
     --color-danger-bg: rgba(var(--color-danger-rgb), 0.1);
     --color-danger-fg: #d84848;
     --color-danger-border: rgba(var(--color-danger-rgb), 0.32);

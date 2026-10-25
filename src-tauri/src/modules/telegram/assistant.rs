@@ -72,6 +72,26 @@ pub struct AssistantReply {
     pub truncated: bool,
 }
 
+/// Step-level progress of one assistant turn, for transports that want
+/// to show live feedback (Telegram edits a placeholder message in place).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressEvent<'a> {
+    /// The turn began (history loaded, first LLM call about to go out).
+    TurnStarted,
+    /// A tool call is about to run.
+    ToolStarted { name: &'a str, args_json: &'a str },
+    /// The tool call that started last finished.
+    ToolFinished { name: &'a str, ok: bool },
+    /// The model produced its final answer (not emitted on error).
+    Final,
+}
+
+/// Observer for `ProgressEvent`s. Called synchronously from the turn
+/// loop, so implementations must be cheap and non-blocking.
+pub trait ProgressSink: Send + Sync {
+    fn on_event(&self, event: ProgressEvent<'_>);
+}
+
 impl Assistant {
     /// Process one user message. Writes every row (user, assistant,
     /// any intermediate tool rows) to the `chat` table in the same
@@ -95,6 +115,23 @@ impl Assistant {
         user_text: &str,
         now_secs: Option<i64>,
     ) -> Result<AssistantReply, LlmError> {
+        self.handle_with_progress(user_text, now_secs, None).await
+    }
+
+    /// `handle_at` plus an optional progress observer that sees every
+    /// tool step as it happens.
+    pub async fn handle_with_progress(
+        &self,
+        user_text: &str,
+        now_secs: Option<i64>,
+        progress: Option<&dyn ProgressSink>,
+    ) -> Result<AssistantReply, LlmError> {
+        let emit = |ev: ProgressEvent<'_>| {
+            if let Some(p) = progress {
+                p.on_event(ev);
+            }
+        };
+        emit(ProgressEvent::TurnStarted);
         let ai_settings = AiSettings::load(self.state.as_ref());
         // Clients with their own tool surface (Claude Code → `stash mcp`)
         // get no function-tool specs and prompt text that points at the
@@ -240,7 +277,16 @@ impl Assistant {
             // 4. Dispatch tool calls and append results.
             let ctx = self.tool_ctx();
             for call in tool_calls {
-                let result = match self.tools.invoke(&ctx, &call).await {
+                emit(ProgressEvent::ToolStarted {
+                    name: &call.name,
+                    args_json: &call.args_json,
+                });
+                let outcome = self.tools.invoke(&ctx, &call).await;
+                emit(ProgressEvent::ToolFinished {
+                    name: &call.name,
+                    ok: outcome.is_ok(),
+                });
+                let result = match outcome {
                     Ok(payload) => cap_message(&payload),
                     Err(e) => format!(
                         "{{\"error\":{}}}",
@@ -272,6 +318,7 @@ impl Assistant {
             let _ = repo.chat_prune(keep);
         }
 
+        emit(ProgressEvent::Final);
         Ok(AssistantReply {
             text: final_text,
             truncated,
@@ -726,6 +773,7 @@ pub fn build_runtime_assistant(
     }
     tools.register(super::tools::stash::ClipboardDelete);
     tools.register(super::tools::stash::ClipboardCopyToMac);
+    tools.register(super::digest::ConfigureDigest);
     if let Some(notes) = app.try_state::<crate::modules::notes::commands::NotesState>() {
         tools.register(super::tools::stash::SearchNotes::new(notes.repo.clone()));
         tools.register(super::tools::stash::GetNote::new(notes.repo.clone()));
@@ -736,6 +784,7 @@ pub fn build_runtime_assistant(
 
     crate::modules::downloader::agent::register_tools(&mut tools);
     crate::modules::translator::agent::register_tools(&mut tools);
+    crate::modules::system::agent::register_tools(&mut tools);
 
     Ok(Assistant {
         state: Arc::clone(state),
@@ -769,6 +818,22 @@ pub async fn handle_user_text_at(
 ) -> Result<AssistantReply, LlmError> {
     let assistant = build_runtime_assistant(app, state)?;
     assistant.handle_at(text, now_secs).await
+}
+
+/// Same single dispatch point, with a progress observer attached. Used by
+/// the Telegram transport to render live tool steps; CLI / voice keep
+/// calling `handle_user_text`.
+pub async fn handle_user_text_with_progress(
+    app: &tauri::AppHandle,
+    state: &Arc<TelegramState>,
+    text: &str,
+    now_secs: Option<i64>,
+    progress: &dyn ProgressSink,
+) -> Result<AssistantReply, LlmError> {
+    let assistant = build_runtime_assistant(app, state)?;
+    assistant
+        .handle_with_progress(text, now_secs, Some(progress))
+        .await
 }
 
 fn history_to_message(row: &ChatRow) -> Option<ChatMessage> {
@@ -929,6 +994,73 @@ mod tests {
         assert_eq!(rows[2].tool_name.as_deref(), Some("list_facts"));
         assert_eq!(rows[3].role, ChatRole::Assistant);
         assert_eq!(rows[3].content, "You like tea.");
+    }
+
+    #[derive(Default)]
+    struct RecordingSink(Mutex<Vec<String>>);
+
+    impl ProgressSink for RecordingSink {
+        fn on_event(&self, ev: ProgressEvent<'_>) {
+            let line = match ev {
+                ProgressEvent::TurnStarted => "start".to_string(),
+                ProgressEvent::ToolStarted { name, args_json } => {
+                    format!("tool:{name}:{args_json}")
+                }
+                ProgressEvent::ToolFinished { name, ok } => format!("done:{name}:{ok}"),
+                ProgressEvent::Final => "final".to_string(),
+            };
+            self.0.lock().unwrap().push(line);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn progress_sink_sees_every_tool_step_in_order() {
+        let client = ScriptedClient::new(vec![
+            Ok(tool_reply("c1", "list_facts", "{}")),
+            Ok(tool_reply("c2", "no_such_tool", "{\"x\":1}")),
+            Ok(plain_reply("done")),
+        ]);
+        let mut tools = ToolRegistry::new();
+        tools.register(crate::modules::telegram::tools::memory::ListFacts);
+        let assistant = Assistant {
+            state: fresh_state(),
+            app: None,
+            client: Box::new(client),
+            tools,
+        };
+        let sink = RecordingSink::default();
+        let reply = assistant
+            .handle_with_progress("hi", None, Some(&sink))
+            .await
+            .unwrap();
+        assert_eq!(reply.text, "done");
+        assert_eq!(
+            *sink.0.lock().unwrap(),
+            vec![
+                "start",
+                "tool:list_facts:{}",
+                "done:list_facts:true",
+                "tool:no_such_tool:{\"x\":1}",
+                "done:no_such_tool:false",
+                "final",
+            ]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn progress_sink_gets_no_final_on_error() {
+        let assistant = Assistant {
+            state: fresh_state(),
+            app: None,
+            client: Box::new(ScriptedClient::new(vec![Err(LlmError::RateLimit)])),
+            tools: ToolRegistry::new(),
+        };
+        let sink = RecordingSink::default();
+        assert!(assistant
+            .handle_with_progress("hi", None, Some(&sink))
+            .await
+            .is_err());
+        assert_eq!(*sink.0.lock().unwrap(), vec!["start"]);
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -388,6 +388,151 @@ pub fn truncate_chars(s: &str, max: usize) -> String {
     out
 }
 
+// -------------------- Live progress for AI turns --------------------
+
+/// Header of the progress placeholder before any tool has run.
+pub const PROGRESS_THINKING: &str = "⏳ Думаю…";
+/// Max step lines rendered; older ones collapse into a counter.
+const PROGRESS_MAX_STEPS: usize = 8;
+/// Max chars of an argument detail shown next to a tool label.
+const PROGRESS_DETAIL_CHARS: usize = 40;
+
+/// Tool name → (emoji, Ukrainian label, optional arg key whose value is
+/// appended as a short detail).
+const TOOL_LABELS: &[(&str, &str, &str, Option<&str>)] = &[
+    ("search_notes", "🔎", "шукаю нотатки", Some("query")),
+    ("list_notes", "📒", "переглядаю нотатки", None),
+    ("get_note", "📄", "відкриваю нотатку", None),
+    ("save_note", "📝", "зберігаю нотатку", None),
+    ("append_to_note", "📝", "доповнюю нотатку", None),
+    ("update_note", "✏️", "редагую нотатку", None),
+    ("delete_note", "🗑", "видаляю нотатку", None),
+    ("metronome_control", "🥁", "метроном", None),
+    ("tuner_control", "🎸", "тюнер", None),
+    ("circle_progression", "🎼", "коло квінт", None),
+    ("valeton_set_tone", "🎛", "налаштовую тон Valeton", None),
+    ("valeton_control", "🎛", "Valeton", None),
+    ("record_control", "🎙", "запис", None),
+    ("music_control", "🎵", "музика", None),
+    ("volume_control", "🔊", "гучність", None),
+    ("get_battery", "🔋", "дивлюсь батарею", None),
+    ("canvas_ocr_image", "🔍", "розпізнаю текст", None),
+    ("remember_fact", "🧠", "запамʼятовую", None),
+    ("list_facts", "🧠", "згадую факти", None),
+    ("forget_fact", "🧠", "забуваю факт", None),
+    ("create_reminder", "⏰", "ставлю нагадування", Some("when")),
+    ("list_reminders", "⏰", "переглядаю нагадування", None),
+    ("cancel_reminder", "⏰", "скасовую нагадування", None),
+    ("send_telegram", "📨", "надсилаю повідомлення", None),
+    ("navigate_tab", "🧭", "відкриваю вкладку", Some("tab")),
+    ("npm_list_scripts", "📦", "дивлюсь npm-скрипти", None),
+    ("npm_run_script", "▶️", "запускаю npm-скрипт", None),
+    ("npm_stop_script", "⏹", "зупиняю npm-скрипт", None),
+    ("invoke_command", "⚙️", "команда", Some("name")),
+    ("separate_stems", "🎚", "розділяю на стеми", None),
+    ("detect_bpm", "🥁", "визначаю BPM", None),
+    ("get_separator_job", "🎚", "перевіряю розділення", None),
+    ("convert_media", "🔄", "конвертую медіа", None),
+    ("transcribe_to_file", "📝", "розшифровую аудіо", None),
+    ("get_converter_job", "🔄", "перевіряю конвертацію", None),
+    ("get_last_clip", "📋", "беру останній кліп", None),
+    ("clipboard_search", "📋", "шукаю в буфері", Some("query")),
+    ("clipboard_pin", "📌", "закріплюю кліп", None),
+    ("clipboard_clear", "🧹", "очищаю буфер", None),
+    ("clipboard_delete", "🗑", "видаляю кліп", None),
+    ("clipboard_copy_to_mac", "📋", "копіюю на Mac", None),
+    ("pomodoro_status", "🍅", "статус помодоро", None),
+    ("pomodoro_start", "🍅", "запускаю помодоро", None),
+    ("pomodoro_stop", "🍅", "зупиняю помодоро", None),
+    ("pomodoro_save_preset", "🍅", "зберігаю пресет", None),
+    ("pomodoro_control", "🍅", "помодоро", None),
+    ("pomodoro_edit_blocks", "🍅", "редагую блоки", None),
+    ("pomodoro_presets", "🍅", "пресети помодоро", None),
+    ("pomodoro_history", "🍅", "історія помодоро", None),
+    ("download_media", "⬇️", "завантажую", None),
+    ("list_downloads", "⬇️", "список завантажень", None),
+    ("get_download", "⬇️", "статус завантаження", None),
+    ("cancel_download", "⬇️", "скасовую завантаження", None),
+    ("control_download", "⬇️", "керую завантаженням", None),
+    ("translate_text", "🌐", "перекладаю", None),
+];
+
+/// Human label for a tool step, e.g. `🥁 метроном 120 BPM` or
+/// `🔎 шукаю нотатки «ідеї»`. Unknown tools fall back to `⚙️ <name>`.
+pub fn tool_label(name: &str, args_json: &str) -> String {
+    let Some(&(_, emoji, label, detail_key)) = TOOL_LABELS.iter().find(|(n, ..)| *n == name)
+    else {
+        return format!("⚙️ {name}");
+    };
+    let args: serde_json::Value = serde_json::from_str(args_json).unwrap_or_default();
+    let mut out = format!("{emoji} {label}");
+    if name == "metronome_control" {
+        if let Some(bpm) = args.get("bpm").and_then(|v| v.as_f64()) {
+            out.push_str(&format!(" {} BPM", bpm.round() as i64));
+        }
+    } else if let Some(v) = detail_key
+        .and_then(|k| args.get(k))
+        .and_then(|v| v.as_str())
+        .map(sanitize_detail)
+        .filter(|v| !v.is_empty())
+    {
+        if name == "invoke_command" {
+            out.push_str(&format!(" /{v}"));
+        } else {
+            out.push_str(&format!(" «{v}»"));
+        }
+    }
+    out
+}
+
+/// One-line, markup-free, length-capped argument detail.
+fn sanitize_detail(s: &str) -> String {
+    let flat: String = s
+        .chars()
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
+        .filter(|c| !matches!(c, '*' | '_' | '`' | '[' | ']' | '~' | '|' | '<' | '>'))
+        .collect();
+    truncate_chars(flat.trim(), PROGRESS_DETAIL_CHARS)
+}
+
+/// State of one tool step in the progress message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepStatus {
+    Running,
+    Ok,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgressStep {
+    pub label: String,
+    pub status: StepStatus,
+}
+
+/// Render the progress placeholder: one line per step (newest last),
+/// with a trailing "thinking" line while no step is running.
+pub fn render_progress(steps: &[ProgressStep]) -> String {
+    if steps.is_empty() {
+        return PROGRESS_THINKING.to_string();
+    }
+    let hidden = steps.len().saturating_sub(PROGRESS_MAX_STEPS);
+    let mut lines: Vec<String> = Vec::with_capacity(PROGRESS_MAX_STEPS + 2);
+    if hidden > 0 {
+        lines.push(format!("… ще кроків: {hidden}"));
+    }
+    for s in &steps[hidden..] {
+        lines.push(match s.status {
+            StepStatus::Running => format!("⏳ {}…", s.label),
+            StepStatus::Ok => format!("✅ {}", s.label),
+            StepStatus::Failed => format!("⚠️ {}", s.label),
+        });
+    }
+    if steps.iter().all(|s| s.status != StepStatus::Running) {
+        lines.push(PROGRESS_THINKING.to_string());
+    }
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,5 +715,75 @@ mod tests {
     fn truncate_is_char_safe() {
         assert_eq!(truncate_chars("привіт", 10), "привіт");
         assert_eq!(truncate_chars("привіт", 4), "при…");
+    }
+
+    #[test]
+    fn tool_labels_map_known_tools_and_fall_back() {
+        assert_eq!(
+            tool_label("metronome_control", r#"{"action":"start","bpm":120}"#),
+            "🥁 метроном 120 BPM"
+        );
+        assert_eq!(tool_label("metronome_control", "{}"), "🥁 метроном");
+        assert_eq!(
+            tool_label("search_notes", r#"{"query":"ідеї"}"#),
+            "🔎 шукаю нотатки «ідеї»"
+        );
+        assert_eq!(
+            tool_label("invoke_command", r#"{"name":"volume","args":"50"}"#),
+            "⚙️ команда /volume"
+        );
+        assert_eq!(tool_label("mystery_tool", "{}"), "⚙️ mystery_tool");
+        // Bad JSON never breaks the label.
+        assert_eq!(tool_label("list_notes", "not json"), "📒 переглядаю нотатки");
+    }
+
+    #[test]
+    fn tool_label_detail_is_flat_short_and_markup_free() {
+        let long = format!(r#"{{"query":"a_b *c*\n{}"}}"#, "x".repeat(100));
+        let l = tool_label("search_notes", &long);
+        assert!(!l.contains('\n') && !l.contains('*') && !l.contains('_'), "{l}");
+        assert!(l.chars().count() < 70, "{l}");
+        assert!(l.ends_with("…»"), "{l}");
+        // Blank detail is omitted entirely.
+        assert_eq!(tool_label("search_notes", r#"{"query":"  "}"#), "🔎 шукаю нотатки");
+    }
+
+    fn step(label: &str, status: StepStatus) -> ProgressStep {
+        ProgressStep {
+            label: label.into(),
+            status,
+        }
+    }
+
+    #[test]
+    fn progress_renders_steps_and_thinking_tail() {
+        assert_eq!(render_progress(&[]), PROGRESS_THINKING);
+        let running = [
+            step("🥁 метроном", StepStatus::Ok),
+            step("🔎 шукаю нотатки", StepStatus::Running),
+        ];
+        assert_eq!(
+            render_progress(&running),
+            "✅ 🥁 метроном\n⏳ 🔎 шукаю нотатки…"
+        );
+        let idle = [
+            step("🥁 метроном", StepStatus::Ok),
+            step("⚙️ x", StepStatus::Failed),
+        ];
+        assert_eq!(
+            render_progress(&idle),
+            format!("✅ 🥁 метроном\n⚠️ ⚙️ x\n{PROGRESS_THINKING}")
+        );
+    }
+
+    #[test]
+    fn progress_collapses_old_steps() {
+        let steps: Vec<_> = (0..11)
+            .map(|i| step(&format!("s{i}"), StepStatus::Ok))
+            .collect();
+        let out = render_progress(&steps);
+        assert!(out.starts_with("… ще кроків: 3\n✅ s3\n"), "{out}");
+        assert!(!out.contains("✅ s2\n"));
+        assert_eq!(out.lines().count(), 1 + PROGRESS_MAX_STEPS + 1);
     }
 }

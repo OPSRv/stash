@@ -216,7 +216,7 @@ impl CommandHandler for HelpCmd {
 /// `every_command_is_categorised` test fails on such a gap, so keep it
 /// complete. Names that aren't registered (yet) are skipped silently.
 const HELP_CATEGORIES: &[(&str, &[&str])] = &[
-    ("🧭 Огляд", &["dashboard", "menu", "status"]),
+    ("🧭 Огляд", &["dashboard", "menu", "status", "digest"]),
     (
         "💻 Система",
         &[
@@ -229,6 +229,12 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
             "sleep",
             "shutdown",
             "update",
+            "sys",
+            "proc",
+            "docker",
+            "trash",
+            "lock",
+            "dns",
         ],
     ),
     (

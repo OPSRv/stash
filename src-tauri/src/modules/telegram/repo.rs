@@ -113,7 +113,8 @@ impl TelegramRepo {
                 repeat_rule TEXT,
                 sent INTEGER NOT NULL DEFAULT 0,
                 cancelled INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                ext_id TEXT
              );
              CREATE INDEX IF NOT EXISTS idx_reminders_due
                 ON reminders(due_at) WHERE sent=0 AND cancelled=0;
@@ -121,7 +122,7 @@ impl TelegramRepo {
              CREATE TABLE IF NOT EXISTS inbox (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 telegram_message_id INTEGER NOT NULL,
-                kind TEXT NOT NULL CHECK(kind IN ('text','voice','photo','document','video','video_note','sticker')),
+                kind TEXT NOT NULL CHECK(kind IN ('text','voice','audio','photo','document','video','video_note','sticker')),
                 text_content TEXT,
                 file_path TEXT,
                 mime_type TEXT,
@@ -133,10 +134,11 @@ impl TelegramRepo {
              );
              CREATE INDEX IF NOT EXISTS idx_inbox_recent ON inbox(received_at DESC);",
         )?;
-        // Existing DBs created before video_note was added will carry
-        // an old CHECK constraint without it, so inserts of the new
-        // kind would fail. Detect and rebuild the table preserving all
-        // rows. Idempotent — no-op once the schema already has it.
+        // Existing DBs created before video_note / audio were added carry
+        // an old CHECK constraint without them, so inserts of the new
+        // kinds would fail. SQLite can't ALTER a CHECK, so detect and
+        // rebuild the table preserving all rows. Idempotent — no-op once
+        // the schema already lists the newest kind.
         let needs_rebuild = conn
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type='table' AND name='inbox'",
@@ -145,7 +147,7 @@ impl TelegramRepo {
             )
             .optional()?
             .flatten()
-            .map(|sql| sql.contains("CHECK") && !sql.contains("video_note"))
+            .map(|sql| sql.contains("CHECK") && !sql.contains("'audio'"))
             .unwrap_or(false);
         if needs_rebuild {
             conn.execute_batch(
@@ -153,7 +155,7 @@ impl TelegramRepo {
                  CREATE TABLE inbox_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     telegram_message_id INTEGER NOT NULL,
-                    kind TEXT NOT NULL CHECK(kind IN ('text','voice','photo','document','video','video_note','sticker')),
+                    kind TEXT NOT NULL CHECK(kind IN ('text','voice','audio','photo','document','video','video_note','sticker')),
                     text_content TEXT,
                     file_path TEXT,
                     mime_type TEXT,
@@ -172,6 +174,14 @@ impl TelegramRepo {
                  CREATE INDEX IF NOT EXISTS idx_inbox_recent ON inbox(received_at DESC);
                  COMMIT;",
             )?;
+        }
+        // `ext_id` (Reminders.app item id) arrived after the reminders
+        // table shipped — add it to older DBs in place.
+        let has_ext_id = conn
+            .prepare("SELECT 1 FROM pragma_table_info('reminders') WHERE name = 'ext_id'")?
+            .exists([])?;
+        if !has_ext_id {
+            conn.execute_batch("ALTER TABLE reminders ADD COLUMN ext_id TEXT;")?;
         }
         Ok(Self { conn })
     }
@@ -540,6 +550,37 @@ impl TelegramRepo {
         Ok(deleted)
     }
 
+    /// Remember the Reminders.app item id a reminder was mirrored to.
+    pub fn set_reminder_ext_id(&mut self, id: i64, ext_id: Option<&str>) -> Result<()> {
+        self.conn.execute(
+            "UPDATE reminders SET ext_id = ?2 WHERE id = ?1",
+            params![id, ext_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn reminder_ext_id(&self, id: i64) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT ext_id FROM reminders WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
+    /// Detach and return the Reminders.app id of `id` (NULLs the column)
+    /// so the same external item is never acted on twice.
+    pub fn take_reminder_ext_id(&mut self, id: i64) -> Result<Option<String>> {
+        let ext = self.reminder_ext_id(id)?;
+        if ext.is_some() {
+            self.set_reminder_ext_id(id, None)?;
+        }
+        Ok(ext)
+    }
+
     pub fn cancel_reminder(&mut self, id: i64) -> Result<bool> {
         let changed = self.conn.execute(
             "UPDATE reminders SET cancelled = 1
@@ -888,5 +929,112 @@ mod tests {
         assert_eq!(rows[0].role, ChatRole::Tool);
         assert_eq!(rows[0].tool_call_id.as_deref(), Some("call_123"));
         assert_eq!(rows[0].tool_name.as_deref(), Some("get_battery"));
+    }
+
+    #[test]
+    fn inbox_accepts_audio_kind() {
+        let mut repo = fresh();
+        let id = repo
+            .insert_media_inbox(
+                7,
+                "audio",
+                Some("telegram/inbox/2026-04-25/song.mp3"),
+                Some("audio/mpeg"),
+                Some(180),
+                None,
+                1_000,
+            )
+            .unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert!(items.iter().any(|i| i.id == id && i.kind == "audio"));
+    }
+
+    #[test]
+    fn migration_rebuilds_pre_audio_inbox_table() {
+        // video_note-era schema: has video_note but no audio.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE inbox (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_message_id INTEGER NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('text','voice','photo','document','video','video_note','sticker')),
+                text_content TEXT,
+                file_path TEXT,
+                mime_type TEXT,
+                duration_sec INTEGER,
+                transcript TEXT,
+                caption TEXT,
+                received_at INTEGER NOT NULL,
+                routed_to TEXT
+             );
+             INSERT INTO inbox(telegram_message_id, kind, file_path, transcript, received_at)
+                VALUES(1, 'voice', 'telegram/inbox/a.mp3', 'hello', 100);",
+        )
+        .unwrap();
+        let repo = TelegramRepo::new(conn).unwrap();
+        let items = repo.list_inbox(10).unwrap();
+        assert_eq!(items.len(), 1, "old rows must survive the rebuild");
+        assert_eq!(items[0].kind, "voice");
+        assert_eq!(repo.inbox_transcript(items[0].id).unwrap().as_deref(), Some("hello"));
+        repo.conn
+            .execute(
+                "INSERT INTO inbox(telegram_message_id, kind, received_at) VALUES(2, 'audio', 200)",
+                [],
+            )
+            .unwrap();
+        // Rebuilt schema now lists the new kind.
+        let sql: String = repo
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='inbox'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(sql.contains("'audio'"));
+    }
+
+    #[test]
+    fn migration_adds_ext_id_to_legacy_reminders_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                text TEXT NOT NULL,
+                due_at INTEGER NOT NULL,
+                repeat_rule TEXT,
+                sent INTEGER NOT NULL DEFAULT 0,
+                cancelled INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+             );
+             INSERT INTO reminders(text, due_at, created_at) VALUES('old', 500, 1);",
+        )
+        .unwrap();
+        let mut repo = TelegramRepo::new(conn).unwrap();
+        let active = repo.list_active_reminders().unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].text, "old");
+        assert_eq!(repo.reminder_ext_id(active[0].id).unwrap(), None);
+        repo.set_reminder_ext_id(active[0].id, Some("x-apple-reminder://A"))
+            .unwrap();
+        assert_eq!(
+            repo.reminder_ext_id(active[0].id).unwrap().as_deref(),
+            Some("x-apple-reminder://A")
+        );
+    }
+
+    #[test]
+    fn take_reminder_ext_id_detaches_once() {
+        let mut repo = fresh();
+        let id = repo.insert_reminder("t", 100, 1).unwrap();
+        assert_eq!(repo.take_reminder_ext_id(id).unwrap(), None);
+        repo.set_reminder_ext_id(id, Some("x-apple-reminder://B")).unwrap();
+        assert_eq!(
+            repo.take_reminder_ext_id(id).unwrap().as_deref(),
+            Some("x-apple-reminder://B")
+        );
+        assert_eq!(repo.take_reminder_ext_id(id).unwrap(), None);
+        // Unknown row → None, not an error.
+        assert_eq!(repo.reminder_ext_id(9_999).unwrap(), None);
     }
 }

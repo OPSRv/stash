@@ -932,8 +932,9 @@ impl CommandHandler for RemindCmd {
                 // in brackets survives into the returned text so the
                 // user learns whether the handshake went through.
                 let title = text.clone();
+                let state = Arc::clone(&self.state);
                 let mirror = tokio::task::spawn_blocking(move || {
-                    crate::modules::system::reminders_bridge::create_reminder(&title, due)
+                    reminders::ext_mirror_create_blocking(&state, id, &title, due)
                 })
                 .await;
                 let tag = match mirror {
@@ -1036,6 +1037,7 @@ impl CommandHandler for ForgetCmd {
         match result {
             Ok(true) => {
                 use tauri::Emitter;
+                reminders::ext_sync_cancel(&self.state, id);
                 let _ = ctx.app.emit("reminders:changed", ());
                 Reply {
                     text: format!("🗑️ Скасовано нагадування №{id}."),
@@ -5070,54 +5072,158 @@ impl CommandHandler for DetectBpmCmd {
     }
 }
 
+/// Stem names the separator understands — used to tell a trailing
+/// `stems_csv` apart from the last word of an unquoted path.
+const STEM_NAMES: [&str; 6] = ["vocals", "drums", "bass", "guitar", "piano", "other"];
+
+/// Parse `/stems` / `/bpm` args: `<path> [stems_csv]`.
+///
+/// The path may contain spaces (downloaded titles usually do): either
+/// quote it (`"…"` or `'…'`, the rest must be a stems list), or leave it
+/// bare — then trailing words that are known stem names / comma lists
+/// (`vocals, drums`, `vocals,bass`) are peeled off as stems and the rest
+/// is the path. If the peeled path doesn't exist on disk but the whole
+/// argument string does, the whole string wins. `None` when no path given.
+pub fn parse_separator_args(args: &str) -> Option<(String, Option<Vec<String>>)> {
+    parse_separator_args_with(args, |p| std::path::Path::new(p).is_file())
+}
+
+/// Pure core of [`parse_separator_args`] with an injectable "file exists"
+/// predicate so the disambiguation is unit-testable.
+fn parse_separator_args_with(
+    args: &str,
+    exists: impl Fn(&str) -> bool,
+) -> Option<(String, Option<Vec<String>>)> {
+    let args = args.trim();
+    let quoted = args
+        .chars()
+        .next()
+        .filter(|c| *c == '"' || *c == '\'')
+        .and_then(|q| {
+            let close = args[1..].find(q)? + 1;
+            let rest = args[close + 1..].trim();
+            // The remainder after a closing quote must be a stems list;
+            // otherwise the quote was part of the name (`'Rock 'n' Roll.mp3'`).
+            (rest.is_empty() || is_stems_list(rest))
+                .then(|| (args[1..close].to_string(), rest.to_string()))
+        });
+    let (path, mut rest) = match quoted {
+        Some(pair) => pair,
+        None => {
+            let (head, tail) = split_trailing_stems(strip_outer_quotes(args));
+            (head.to_string(), tail.to_string())
+        }
+    };
+    let mut path = path.trim().to_string();
+    if !path.is_empty() && !exists(&path) {
+        let whole = strip_outer_quotes(args).trim();
+        if whole != path && exists(whole) {
+            path = whole.to_string();
+            rest.clear();
+        }
+    }
+    if path.is_empty() {
+        return None;
+    }
+    let stems: Vec<String> = rest
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|x| !x.is_empty())
+        .map(str::to_string)
+        .collect();
+    Some((path, (!stems.is_empty()).then_some(stems)))
+}
+
+/// `"…"` / `'…'` wrapping the whole string → inner text; a lone dangling
+/// quote at either end is dropped.
+fn strip_outer_quotes(s: &str) -> &str {
+    for q in ['"', '\''] {
+        if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s.trim_matches(['"', '\''])
+}
+
+/// Peel trailing whitespace-separated tokens that are stem names / comma
+/// lists off a bare path. Returns `(path_part, stems_part)`; the path part
+/// always keeps at least its first token.
+fn split_trailing_stems(s: &str) -> (&str, &str) {
+    let s = s.trim();
+    let mut head = s;
+    while let Some((h, last)) = head.rsplit_once(char::is_whitespace) {
+        // A lone `,` (from `vocals , bass`) is a separator, not a path word.
+        let sep_only = last.chars().all(|c| c == ',');
+        if h.trim().is_empty() || !(sep_only || is_stems_list(last)) {
+            break;
+        }
+        head = h.trim_end();
+    }
+    let tail = s[head.len()..].trim();
+    if is_stems_list(tail) {
+        (head, tail)
+    } else {
+        (s, "")
+    }
+}
+
+/// Text made solely of known stem names separated by commas / whitespace.
+fn is_stems_list(s: &str) -> bool {
+    let mut parts = s
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|x| !x.is_empty())
+        .peekable();
+    parts.peek().is_some() && parts.all(|x| STEM_NAMES.contains(&x.to_ascii_lowercase().as_str()))
+}
+
 async fn run_separator_cmd(
     ctx: Ctx,
     args: &str,
     mut spec: separator::SeparatorRunArgs,
 ) -> Reply {
-    let parts = args.trim().splitn(2, char::is_whitespace).collect::<Vec<_>>();
-    let path = match parts.first() {
-        Some(p) if !p.trim().is_empty() => p.trim().trim_matches('"').to_string(),
-        _ => return Reply::text("⚠️ /stems <file_path> [stems_csv]"),
+    let Some((path, stems)) = parse_separator_args(args) else {
+        return Reply::text("⚠️ /stems <file_path> [stems_csv]");
     };
     if !std::path::Path::new(&path).is_file() {
-        return Reply::text(format!("⚠️ file not found: {path}"));
+        return Reply::text(format!("⚠️ файл не знайдено: {path}"));
     }
-    let stems = parts
-        .get(1)
-        .map(|s| {
-            s.split(',')
-                .map(|x| x.trim().to_string())
-                .filter(|x| !x.is_empty())
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty());
-
-    spec.input_path = path.clone();
+    spec.input_path = path;
     if stems.is_some() {
         spec.stems = stems;
     }
+    match enqueue_separator(&ctx.app, spec) {
+        Ok((state, job_id)) => await_separator_job(&state, &job_id).await,
+        Err(e) => Reply::text(format!("⚠️ {e}")),
+    }
+}
 
-    let app = ctx.app.clone();
-    let state = app.state::<Arc<separator::SeparatorState>>();
-    let state_arc = Arc::clone(&state);
-    let job_id = match separator::enqueue_job(&app, &state_arc, spec) {
-        Ok(id) => id,
-        Err(e) => return Reply::text(format!("⚠️ {e}")),
-    };
+/// Queue a Demucs/BeatNet job. Returns the separator state + job id to
+/// hand to `await_separator_job`. Shared with the downloader's buttons.
+pub fn enqueue_separator(
+    app: &tauri::AppHandle,
+    spec: separator::SeparatorRunArgs,
+) -> Result<(Arc<separator::SeparatorState>, String), String> {
+    let state = app
+        .try_state::<Arc<separator::SeparatorState>>()
+        .map(|s| Arc::clone(&s))
+        .ok_or("модуль Stems не ініціалізовано")?;
+    let job_id = separator::enqueue_job(app, &state, spec)?;
+    Ok((state, job_id))
+}
 
-    // Wait for the job to settle. The sidecar is single-job, so we poll
-    // the in-memory state every 500ms; this matches the cadence of the
-    // UI's progress events without overloading the lock. Hard cap of
-    // 30 minutes per job — stems separation on CPU averages 2-5×
-    // realtime, and a 30-minute cap covers any realistic input.
+/// Wait for a separator job to settle and render the result card.
+pub async fn await_separator_job(state: &Arc<separator::SeparatorState>, job_id: &str) -> Reply {
+    // The sidecar is single-job, so we poll the in-memory state every
+    // 500ms; this matches the cadence of the UI's progress events without
+    // overloading the lock. Hard cap of 30 minutes per job — stems
+    // separation on CPU averages 2-5× realtime, and a 30-minute cap
+    // covers any realistic input.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30 * 60);
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         if std::time::Instant::now() > deadline {
-            return Reply::text("⚠️ separator: timeout (30 min)");
+            return Reply::text("⚠️ Stems: таймаут (30 хв)");
         }
-        let snapshot = state_arc
+        let snapshot = state
             .jobs
             .lock()
             .unwrap()
@@ -5125,17 +5231,17 @@ async fn run_separator_cmd(
             .find(|j| j.id == job_id)
             .cloned();
         let Some(job) = snapshot else {
-            return Reply::text("⚠️ separator: job lost");
+            return Reply::text("⚠️ Stems: задачу втрачено");
         };
         match job.status {
             separator::JobStatus::Completed => return reply_for_completed_job(&job),
             separator::JobStatus::Failed => {
                 let err = job.error.unwrap_or_else(|| "unknown".into());
                 let head = err.lines().next().unwrap_or(&err).to_string();
-                return Reply::text(format!("⚠️ separator: {head}"));
+                return Reply::text(format!("⚠️ Stems: {head}"));
             }
             separator::JobStatus::Cancelled => {
-                return Reply::text("⚠️ separator: cancelled");
+                return Reply::text("✖ Stems: скасовано");
             }
             _ => continue,
         }
@@ -5152,9 +5258,9 @@ fn reply_for_completed_job(job: &separator::SeparatorJob) -> Reply {
 
     let mut text = String::new();
     if let Some(stems) = stems_map {
-        text.push_str(&format!("🎚 Stems ready ({})\n", stems.len()));
+        text.push_str(&format!("🎚 Стеми готові ({})\n", stems.len()));
     } else {
-        text.push_str("🎚 Done\n");
+        text.push_str("🎚 Готово\n");
     }
     if !bpm_line.is_empty() {
         text.push_str(&bpm_line);
@@ -5188,11 +5294,118 @@ fn reply_for_completed_job(job: &separator::SeparatorJob) -> Reply {
             paths
         })
         .unwrap_or_default();
+    // Telegram rejects bot uploads over 50 MB — keep those on disk only.
+    let limit = crate::modules::downloader::agent::TELEGRAM_UPLOAD_LIMIT;
+    let (documents, big): (Vec<_>, Vec<_>) = documents
+        .into_iter()
+        .partition(|p| std::fs::metadata(p).is_ok_and(|m| m.len() < limit));
+    if !big.is_empty() {
+        text.push_str(&format!(
+            "{} файл(и) завеликі для Telegram — див. вкладку Stems\n",
+            big.len()
+        ));
+    }
 
     Reply {
         text: text.trim_end().to_string(),
         documents,
         keyboard: None,
+    }
+}
+
+#[cfg(test)]
+mod separator_args_tests {
+    use super::{parse_separator_args, parse_separator_args_with};
+
+    fn v(xs: &[&str]) -> Option<Vec<String>> {
+        Some(xs.iter().map(|x| x.to_string()).collect())
+    }
+
+    #[test]
+    fn empty_is_none() {
+        assert_eq!(parse_separator_args("   "), None);
+        assert_eq!(parse_separator_args("\"\""), None);
+    }
+
+    #[test]
+    fn bare_path_with_spaces_is_whole_remainder() {
+        assert_eq!(
+            parse_separator_args("  /Users/me/Downloads/My Song (Live) .mp3  "),
+            Some(("/Users/me/Downloads/My Song (Live) .mp3".into(), None))
+        );
+    }
+
+    #[test]
+    fn bare_path_with_trailing_stems_csv() {
+        assert_eq!(
+            parse_separator_args("/tmp/My Song.mp3 vocals,Drums"),
+            Some(("/tmp/My Song.mp3".into(), v(&["vocals", "Drums"])))
+        );
+        // A last word that isn't a stems list stays part of the path.
+        assert_eq!(
+            parse_separator_args("/tmp/Song vocals live.mp3"),
+            Some(("/tmp/Song vocals live.mp3".into(), None))
+        );
+    }
+
+    #[test]
+    fn quoted_path_then_stems() {
+        assert_eq!(
+            parse_separator_args("\"/tmp/a b.wav\" vocals, bass"),
+            Some(("/tmp/a b.wav".into(), v(&["vocals", "bass"])))
+        );
+        assert_eq!(
+            parse_separator_args("'/tmp/it\"s.wav'"),
+            Some(("/tmp/it\"s.wav".into(), None))
+        );
+    }
+
+    #[test]
+    fn bare_path_with_spaced_stems_list() {
+        assert_eq!(
+            parse_separator_args_with("/tmp/a.mp3 vocals, drums", |_| true),
+            Some(("/tmp/a.mp3".into(), v(&["vocals", "drums"])))
+        );
+        assert_eq!(
+            parse_separator_args_with("/tmp/My Song.mp3 vocals , bass,  piano", |_| true),
+            Some(("/tmp/My Song.mp3".into(), v(&["vocals", "bass", "piano"])))
+        );
+    }
+
+    #[test]
+    fn whole_args_win_when_peeled_path_missing() {
+        // A file literally named "Best of drums": the peeled "/tmp/Best of"
+        // doesn't exist, the full string does.
+        let exists = |p: &str| p == "/tmp/Best of drums";
+        assert_eq!(
+            parse_separator_args_with("/tmp/Best of drums", exists),
+            Some(("/tmp/Best of drums".into(), None))
+        );
+        // Neither exists: keep the peeled interpretation (caller reports).
+        assert_eq!(
+            parse_separator_args_with("/tmp/x.mp3 drums", |_| false),
+            Some(("/tmp/x.mp3".into(), v(&["drums"])))
+        );
+    }
+
+    #[test]
+    fn quoted_remainder_must_be_stems() {
+        assert_eq!(
+            parse_separator_args_with("'/tmp/Rock 'n' Roll.mp3'", |_| true),
+            Some(("/tmp/Rock 'n' Roll.mp3".into(), None))
+        );
+        assert_eq!(
+            parse_separator_args_with("\"/tmp/a b.wav\" vocals drums", |_| true),
+            Some(("/tmp/a b.wav".into(), v(&["vocals", "drums"])))
+        );
+    }
+
+    #[test]
+    fn unterminated_quote_falls_back_to_bare() {
+        assert_eq!(
+            parse_separator_args("\"/tmp/a b.wav"),
+            Some(("/tmp/a b.wav".into(), None))
+        );
     }
 }
 

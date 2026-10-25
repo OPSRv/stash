@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod apps_control;
 pub mod battery;
 pub mod caches;

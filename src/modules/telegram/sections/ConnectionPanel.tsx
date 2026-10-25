@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 
+import { Badge } from '../../../shared/ui/Badge';
 import { Button } from '../../../shared/ui/Button';
 import { IconButton } from '../../../shared/ui/IconButton';
 import { CopyIcon } from '../../../shared/ui/icons';
@@ -7,7 +9,7 @@ import { Input } from '../../../shared/ui/Input';
 import { SettingRow } from '../../../settings/SettingRow';
 import { copyText } from '../../../shared/util/clipboard';
 import * as api from '../api';
-import type { ConnectionStatus } from '../types';
+import type { ConnectionStatus, TransportStatus } from '../types';
 
 /// Telegram bot token shape: `<numeric bot id>:<35-char secret>`. Matches
 /// what BotFather hands out. We keep the check permissive (secret length
@@ -22,10 +24,14 @@ export function ConnectionPanel() {
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /// Last transport health report (`telegram:status`); `null` = healthy.
+  const [transportError, setTransportError] = useState<string | null>(null);
 
   const refresh = async () => {
     try {
-      setStatus(await api.status());
+      const [next, transport] = await Promise.all([api.status(), api.transportStatus()]);
+      setStatus(next);
+      setTransportError(transport?.error ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -33,6 +39,13 @@ export function ConnectionPanel() {
 
   useEffect(() => {
     void refresh();
+    const unlisteners = [
+      listen<TransportStatus>('telegram:status', (e) => setTransportError(e.payload?.error ?? null)),
+      listen('telegram:status_changed', () => void refresh()),
+    ];
+    return () => {
+      unlisteners.forEach((p) => void p.then((off) => off()));
+    };
   }, []);
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -40,6 +53,9 @@ export function ConnectionPanel() {
     setError(null);
     try {
       await fn();
+      // Any connection action restarts (or stops) polling, so the old
+      // transport report no longer applies.
+      setTransportError(null);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -56,6 +72,14 @@ export function ConnectionPanel() {
         <div role="alert" className="py-3 t-danger text-meta">
           {error}
         </div>
+      )}
+
+      {transportError && (
+        <TransportErrorRow
+          error={transportError}
+          busy={busy}
+          onReenterToken={() => run(() => api.clearToken())}
+        />
       )}
 
       {status.kind === 'no_token' && (
@@ -141,6 +165,67 @@ export function ConnectionPanel() {
         />
       )}
     </>
+  );
+}
+
+/// Map the transport's raw error (`telegram:status`) onto actionable copy.
+/// The backend strings carry the HTTP code — 401 = bad token, 409 =
+/// another poller on the same bot.
+function describeTransportError(error: string) {
+  if (error.includes('401')) {
+    return {
+      badge: 'Offline',
+      tone: 'danger' as const,
+      title: 'Token rejected — re-enter the bot token',
+      detail: 'Telegram no longer accepts this bot token (revoked or regenerated in @BotFather).',
+      tokenAction: true,
+    };
+  }
+  if (error.includes('409')) {
+    return {
+      badge: 'Conflict',
+      tone: 'warning' as const,
+      title: 'Another Stash instance is polling this bot',
+      detail: 'Quit the other instance using this token. Stash keeps retrying in the background.',
+      tokenAction: false,
+    };
+  }
+  return {
+    badge: 'Offline',
+    tone: 'danger' as const,
+    title: 'Connection problem',
+    detail: error,
+    tokenAction: false,
+  };
+}
+
+function TransportErrorRow({
+  error,
+  busy,
+  onReenterToken,
+}: {
+  error: string;
+  busy: boolean;
+  onReenterToken: () => void;
+}) {
+  const d = describeTransportError(error);
+  return (
+    <div role="alert" className="flex items-start justify-between gap-4 py-3">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <Badge tone={d.tone}>{d.badge}</Badge>
+          <span className="t-primary text-body font-medium">{d.title}</span>
+        </div>
+        <div className="t-tertiary text-meta mt-1">{d.detail}</div>
+      </div>
+      {d.tokenAction && (
+        <div className="shrink-0">
+          <Button size="sm" tone="danger" variant="soft" disabled={busy} onClick={onReenterToken}>
+            Re-enter token
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
 

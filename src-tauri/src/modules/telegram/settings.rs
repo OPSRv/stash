@@ -251,6 +251,104 @@ impl InboxLimits {
     }
 }
 
+/// Morning digest — a scheduled push of the dashboard to the paired
+/// chat. Unlike notification categories this is opt **in**: a pristine
+/// install never sends an unsolicited daily message.
+pub const KEY_DIGEST_ENABLED: &str = "digest.enabled";
+pub const KEY_DIGEST_TIME: &str = "digest.time";
+pub const KEY_DIGEST_WEEKDAYS: &str = "digest.weekdays";
+/// Local day number (days since 1970-01-01 in local time) of the last
+/// digest sent — persisted so a restart doesn't double-send.
+pub const KEY_DIGEST_LAST_SENT_DAY: &str = "digest.last_sent_day";
+pub const DEFAULT_DIGEST_TIME: &str = "08:00";
+/// Weekday bitmask, bit 0 = Monday … bit 6 = Sunday.
+pub const DIGEST_ALL_DAYS: u8 = 0b111_1111;
+pub const DIGEST_WORKDAYS: u8 = 0b001_1111;
+pub const DIGEST_WEEKENDS: u8 = 0b110_0000;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DigestSettings {
+    pub enabled: bool,
+    /// Local wall-clock time, `HH:MM` (24h).
+    pub time: String,
+    /// Bit 0 = Monday … bit 6 = Sunday.
+    pub weekdays: u8,
+}
+
+impl Default for DigestSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            time: DEFAULT_DIGEST_TIME.to_string(),
+            weekdays: DIGEST_ALL_DAYS,
+        }
+    }
+}
+
+impl DigestSettings {
+    pub fn load(state: &TelegramState) -> Self {
+        let Ok(repo) = state.repo.lock() else {
+            return Self::default();
+        };
+        let get = |k: &str| repo.kv_get(k).ok().flatten();
+        let d = Self::default();
+        Self {
+            enabled: get(KEY_DIGEST_ENABLED)
+                .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+                .unwrap_or(d.enabled),
+            time: get(KEY_DIGEST_TIME)
+                .and_then(|s| normalize_hhmm(&s))
+                .unwrap_or(d.time),
+            weekdays: get(KEY_DIGEST_WEEKDAYS)
+                .and_then(|s| s.parse::<u8>().ok())
+                .map(|m| m & DIGEST_ALL_DAYS)
+                .unwrap_or(d.weekdays),
+        }
+    }
+
+    /// Persists the settings. Rejects a malformed `time` instead of
+    /// silently storing garbage the scheduler can't read.
+    pub fn save(&self, state: &TelegramState) -> Result<(), String> {
+        let time = normalize_hhmm(&self.time)
+            .ok_or_else(|| format!("invalid time '{}', expected HH:MM", self.time))?;
+        let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.kv_set(KEY_DIGEST_ENABLED, &bool_to_kv(self.enabled))
+            .map_err(|e| e.to_string())?;
+        repo.kv_set(KEY_DIGEST_TIME, &time)
+            .map_err(|e| e.to_string())?;
+        repo.kv_set(
+            KEY_DIGEST_WEEKDAYS,
+            &(self.weekdays & DIGEST_ALL_DAYS).to_string(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Target time as minutes after local midnight.
+    pub fn minute_of_day(&self) -> u32 {
+        parse_hhmm(&self.time)
+            .or_else(|| parse_hhmm(DEFAULT_DIGEST_TIME))
+            .map(|(h, m)| h * 60 + m)
+            .unwrap_or(8 * 60)
+    }
+}
+
+/// Parse `H:MM` / `HH:MM` (24h) into `(hour, minute)`.
+pub fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
+    let (h, m) = s.trim().split_once(':')?;
+    if h.is_empty() || h.len() > 2 || m.len() != 2 {
+        return None;
+    }
+    let h: u32 = h.parse().ok()?;
+    let m: u32 = m.parse().ok()?;
+    (h < 24 && m < 60).then_some((h, m))
+}
+
+/// Canonical zero-padded `HH:MM`, or `None` when unparseable.
+pub fn normalize_hhmm(s: &str) -> Option<String> {
+    parse_hhmm(s).map(|(h, m)| format!("{h:02}:{m:02}"))
+}
+
 /// Context-window values outside `[10, 200]` tend to either starve the
 /// assistant of continuity or blow up prompt size — clamp rather than
 /// reject so an out-of-range slider move can't brick the UI.
@@ -427,6 +525,46 @@ mod tests {
         .save(&s)
         .unwrap();
         assert_eq!(InboxLimits::load(&s).retention_days, 0);
+    }
+
+    #[test]
+    fn digest_defaults_off_every_day() {
+        let s = fresh();
+        let d = DigestSettings::load(&s);
+        assert!(!d.enabled);
+        assert_eq!(d.time, DEFAULT_DIGEST_TIME);
+        assert_eq!(d.weekdays, DIGEST_ALL_DAYS);
+    }
+
+    #[test]
+    fn digest_round_trip_normalises_time() {
+        let s = fresh();
+        DigestSettings {
+            enabled: true,
+            time: "7:05".into(),
+            weekdays: DIGEST_WORKDAYS,
+        }
+        .save(&s)
+        .unwrap();
+        let d = DigestSettings::load(&s);
+        assert!(d.enabled);
+        assert_eq!(d.time, "07:05");
+        assert_eq!(d.weekdays, DIGEST_WORKDAYS);
+        assert_eq!(d.minute_of_day(), 7 * 60 + 5);
+    }
+
+    #[test]
+    fn digest_rejects_bad_time() {
+        let s = fresh();
+        let bad = DigestSettings {
+            time: "25:00".into(),
+            ..DigestSettings::default()
+        };
+        assert!(bad.save(&s).is_err());
+        for t in ["", "8", "08:5", "08:60", "ab:cd", "123:00"] {
+            assert!(parse_hhmm(t).is_none(), "{t}");
+        }
+        assert_eq!(parse_hhmm(" 23:59 "), Some((23, 59)));
     }
 
     #[test]
