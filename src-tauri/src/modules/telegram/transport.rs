@@ -1070,7 +1070,7 @@ async fn handle_media(
                     // text-mode chat already uses, so we don't have
                     // a parallel code path for "what does AI do
                     // with this text".
-                    let kb = super::module_cmds::voice_action_keyboard(inbox_id);
+                    let kb = crate::modules::ai::agent::voice_action_keyboard(inbox_id);
                     state_for_task.sender.enqueue_with_keyboard(
                         chat_for_task,
                         format!("📝 {trimmed}"),

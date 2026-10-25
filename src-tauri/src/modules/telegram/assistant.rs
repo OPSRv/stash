@@ -797,23 +797,10 @@ pub fn build_runtime_assistant(
 
     // ═══════════════ BEGIN G4 ═══════════════
     // G4 media/AI — owned by one move agent; see docs/agent-surface-refactor.md.
-    tools.register(super::tools::stash::CanvasOcr);
-    tools.register(super::tools::stash::SendTelegram);
-    tools.register(super::tools::stash::NpmListScripts);
-    tools.register(super::tools::stash::NpmRunScript);
-    tools.register(super::tools::stash::NpmStopScript);
-    tools.register(super::tools::stash::SeparateStems);
-    tools.register(super::tools::stash::DetectBpm);
-    tools.register(super::tools::stash::GetSeparatorJob);
-    tools.register(super::tools::stash::ConvertMedia);
-    tools.register(super::tools::stash::TranscribeToFile);
-    tools.register(super::tools::stash::GetConverterJob);
     crate::modules::separator::agent::register_tools(&mut tools, app);
     crate::modules::converter::agent::register_tools(&mut tools, app);
     crate::modules::ocr::agent::register_tools(&mut tools, app);
-    crate::modules::ai::agent::register_tools(&mut tools, app);
     crate::modules::npm_scripts::agent::register_tools(&mut tools, app);
-    crate::modules::terminal::agent::register_tools(&mut tools, app);
     super::send_cmds::register_tools(&mut tools, app);
     // ═══════════════ END G4 ═══════════════
 

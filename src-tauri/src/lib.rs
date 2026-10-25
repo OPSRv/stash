@@ -1209,19 +1209,9 @@ pub fn run() {
 
             // ═══════════════ BEGIN G4 ═══════════════
             // G4 media/AI — owned by one move agent; see docs/agent-surface-refactor.md.
-            telegram_state.register_command(modules::telegram::module_cmds::OcrCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::LaunchClaudeCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::SendCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::VoiceActionCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::SummarizeCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::AiCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::SeparateStemsCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::DetectBpmCmd);
             modules::separator::agent::register_commands(&telegram_state, app.handle());
-            modules::converter::agent::register_commands(&telegram_state, app.handle());
             modules::ocr::agent::register_commands(&telegram_state, app.handle());
             modules::ai::agent::register_commands(&telegram_state, app.handle());
-            modules::npm_scripts::agent::register_commands(&telegram_state, app.handle());
             modules::terminal::agent::register_commands(&telegram_state, app.handle());
             modules::telegram::send_cmds::register_commands(&telegram_state, app.handle());
             // ═══════════════ END G4 ═══════════════
