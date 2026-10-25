@@ -634,6 +634,7 @@ async fn handle_update(
                 assistant_text, friendly_llm_error, remember_prompt, retry_keyboard,
                 with_reply_context,
             };
+            use super::commands_registry::InlineKeyboard;
             // URLs always land in the inbox, even when the AI path
             // succeeds — that's the surface where the user expects to
             // see shareable links ("download this mp3", "save this
@@ -672,19 +673,27 @@ async fn handle_update(
             // configured. Any missing-piece error (no key, no model,
             // provider not supported) falls back to the inbox so the
             // message isn't silently swallowed.
+            // "typing…" runs until a progress placeholder replaces it
+            // (slow turn or tool call); the placeholder is then edited per
+            // step and finally becomes the answer itself.
             let typing = TypingGuard::start(bot, chat_id);
-            let result = super::assistant::handle_user_text_at(
-                app,
-                state,
-                &prompt,
-                Some(msg.date.timestamp()),
-            )
-            .await;
-            drop(typing);
-            match result {
-                Ok(reply) => {
-                    state.sender.enqueue(chat_id, assistant_text(&reply));
-                }
+            let tracker = ProgressTracker::default();
+            let turn = async {
+                let r = super::assistant::handle_user_text_with_progress(
+                    app,
+                    state,
+                    &prompt,
+                    Some(msg.date.timestamp()),
+                    &tracker,
+                )
+                .await;
+                tracker.finish();
+                r
+            };
+            let (result, placeholder) =
+                tokio::join!(turn, drive_progress(bot, state, chat_id, &tracker, typing));
+            let (reply_text, reply_kb): (String, Option<InlineKeyboard>) = match result {
+                Ok(reply) => (assistant_text(&reply), None),
                 Err(e) => {
                     tracing::info!(error = %e, "assistant unavailable, falling back to inbox");
                     let friendly = friendly_llm_error(&e);
@@ -695,11 +704,7 @@ async fn handle_update(
                         // assistant failure so the user knows why
                         // there's no AI reply, but don't pretend we're
                         // "saving" something twice.
-                        state.sender.enqueue_with_keyboard(
-                            chat_id,
-                            friendly,
-                            Some(retry_keyboard()),
-                        );
+                        (friendly.to_string(), Some(retry_keyboard()))
                     } else {
                         let msg_id = msg.id.0 as i64;
                         let received_at = now;
@@ -713,23 +718,24 @@ async fn handle_update(
                             Ok(id) => {
                                 tracing::debug!(id, text_len = text.len(), "inbox text ingested");
                                 let _ = app.emit("telegram:inbox_added", id);
-                                state.sender.enqueue_with_keyboard(
-                                    chat_id,
+                                (
                                     format!("📥 Збережено в інбокс.\n{friendly}"),
                                     Some(retry_keyboard()),
-                                );
+                                )
                             }
                             Err(e2) => {
                                 tracing::warn!(error = %e2, "inbox insert failed");
-                                state.sender.enqueue(
-                                    chat_id,
-                                    "⚠️ Не вдалося зберегти в інбокс — переглянь лог Stash.",
-                                );
+                                (
+                                    "⚠️ Не вдалося зберегти в інбокс — переглянь лог Stash."
+                                        .to_string(),
+                                    None,
+                                )
                             }
                         }
                     }
                 }
-            }
+            };
+            finalize_reply(bot, state, chat_id, placeholder, reply_text, reply_kb).await;
         }
     }
     let _ = app.emit("telegram:status_changed", ());
@@ -1147,13 +1153,14 @@ pub async fn publish_bot_commands(bot: &teloxide::Bot, state: &TelegramState) {
 /// Telegram rejects the markup). Best-effort: a message Telegram refuses
 /// to edit (too old / from a different bot) falls through to a log line;
 /// we'd rather leave the old card visible than spam a fresh one.
+/// Returns `true` when the message now shows `text`.
 async fn edit_message(
     bot: &teloxide::Bot,
     chat_id: i64,
     message_id: teloxide::types::MessageId,
     text: &str,
     keyboard: &Option<super::commands_registry::InlineKeyboard>,
-) {
+) -> bool {
     use super::format::{markdown_to_telegram_html, split_message, MESSAGE_LIMIT};
     use teloxide::prelude::*;
     use teloxide::types::{ChatId, ParseMode};
@@ -1173,7 +1180,7 @@ async fn edit_message(
         req = req.reply_markup(m);
     }
     match req.await {
-        Ok(_) => {}
+        Ok(_) => true,
         // Same text but the keyboard may have changed (e.g. a toggle
         // button) — Telegram rejects the whole edit, so push markup alone.
         Err(RequestError::Api(ApiError::MessageNotModified)) => {
@@ -1183,6 +1190,7 @@ async fn edit_message(
                     .reply_markup(m)
                     .await;
             }
+            true
         }
         Err(e) => {
             tracing::debug!(error = %e, "editMessageText (HTML) failed, retrying plain");
@@ -1190,11 +1198,233 @@ async fn edit_message(
             if let Some(m) = markup {
                 plain = plain.reply_markup(m);
             }
-            if let Err(e) = plain.await {
-                tracing::debug!(error = %e, "editMessageText failed");
+            match plain.await {
+                Ok(_) | Err(RequestError::Api(ApiError::MessageNotModified)) => true,
+                Err(e) => {
+                    tracing::debug!(error = %e, "editMessageText failed");
+                    false
+                }
             }
         }
     }
+}
+
+// -------------------- Live progress for AI turns --------------------
+
+/// Show the progress placeholder only for turns slower than this (or as
+/// soon as the first tool starts). Fast chat replies stay a single message.
+const PLACEHOLDER_DELAY: Duration = Duration::from_millis(1_500);
+/// Minimum gap between edits of the progress message (Telegram allows
+/// roughly one message operation per second per chat).
+const PROGRESS_EDIT_GAP: Duration = Duration::from_millis(1_100);
+
+/// Steps of the running turn, fed by the assistant's progress events.
+#[derive(Debug, Default)]
+struct ProgressLog {
+    steps: Vec<super::format::ProgressStep>,
+    tool_seen: bool,
+    done: bool,
+}
+
+impl ProgressLog {
+    fn apply(&mut self, ev: super::assistant::ProgressEvent<'_>) {
+        use super::assistant::ProgressEvent;
+        use super::format::{tool_label, ProgressStep, StepStatus};
+        match ev {
+            ProgressEvent::ToolStarted { name, args_json } => {
+                self.tool_seen = true;
+                self.steps.push(ProgressStep {
+                    label: tool_label(name, args_json),
+                    status: StepStatus::Running,
+                });
+            }
+            ProgressEvent::ToolFinished { ok, .. } => {
+                if let Some(s) = self
+                    .steps
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.status == StepStatus::Running)
+                {
+                    s.status = if ok { StepStatus::Ok } else { StepStatus::Failed };
+                }
+            }
+            ProgressEvent::TurnStarted | ProgressEvent::Final => {}
+        }
+    }
+}
+
+/// `ProgressSink` for one Telegram turn: records steps and wakes the
+/// progress driver.
+#[derive(Default)]
+struct ProgressTracker {
+    log: std::sync::Mutex<ProgressLog>,
+    notify: tokio::sync::Notify,
+}
+
+impl ProgressTracker {
+    fn with_log<R>(&self, f: impl FnOnce(&mut ProgressLog) -> R) -> R {
+        f(&mut self.log.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn finish(&self) {
+        self.with_log(|l| l.done = true);
+        self.notify.notify_one();
+    }
+
+    fn render(&self) -> String {
+        self.with_log(|l| super::format::render_progress(&l.steps))
+    }
+}
+
+impl super::assistant::ProgressSink for ProgressTracker {
+    fn on_event(&self, event: super::assistant::ProgressEvent<'_>) {
+        self.with_log(|l| l.apply(event));
+        self.notify.notify_one();
+    }
+}
+
+/// How long to wait before the next edit so edits stay `gap` apart.
+fn throttle_wait(
+    last_edit: tokio::time::Instant,
+    now: tokio::time::Instant,
+    gap: Duration,
+) -> Duration {
+    gap.saturating_sub(now.saturating_duration_since(last_edit))
+}
+
+/// Runs next to the assistant turn. Keeps "typing…" alive until the
+/// placeholder is needed (turn slower than `PLACEHOLDER_DELAY`, or a tool
+/// started), then edits it with the step list at most once per
+/// `PROGRESS_EDIT_GAP`. Returns the placeholder id + time of its last
+/// change, or `None` when the turn finished before a placeholder was sent.
+async fn drive_progress(
+    bot: &teloxide::Bot,
+    state: &TelegramState,
+    chat_id: i64,
+    tracker: &ProgressTracker,
+    typing: TypingGuard,
+) -> Option<(teloxide::types::MessageId, tokio::time::Instant)> {
+    use tokio::time::Instant;
+    let deadline = Instant::now() + PLACEHOLDER_DELAY;
+    loop {
+        let (done, tool_seen) = tracker.with_log(|l| (l.done, l.tool_seen));
+        if done {
+            return None;
+        }
+        if tool_seen {
+            break;
+        }
+        tokio::select! {
+            _ = tracker.notify.notified() => {}
+            _ = tokio::time::sleep_until(deadline) => break,
+        }
+    }
+    let mut shown = tracker.render();
+    let id = state.sender.send_tracked(chat_id, shown.clone()).await?;
+    drop(typing);
+    let mut last_edit = Instant::now();
+    loop {
+        if tracker.with_log(|l| l.done) {
+            return Some((id, last_edit));
+        }
+        tracker.notify.notified().await;
+        // Coalesce bursts of events into one edit per gap.
+        let wait = throttle_wait(last_edit, Instant::now(), PROGRESS_EDIT_GAP);
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+        if tracker.with_log(|l| l.done) {
+            return Some((id, last_edit));
+        }
+        let text = tracker.render();
+        if text != shown {
+            if edit_plain(bot, chat_id, id, &text).await {
+                shown = text;
+            }
+            last_edit = Instant::now();
+        }
+    }
+}
+
+/// Plain-text edit for progress updates (labels may contain markup-ish
+/// characters, and a progress line never needs formatting).
+async fn edit_plain(
+    bot: &teloxide::Bot,
+    chat_id: i64,
+    message_id: teloxide::types::MessageId,
+    text: &str,
+) -> bool {
+    use teloxide::prelude::*;
+    use teloxide::types::ChatId;
+    use teloxide::{ApiError, RequestError};
+    match bot.edit_message_text(ChatId(chat_id), message_id, text).await {
+        Ok(_) | Err(RequestError::Api(ApiError::MessageNotModified)) => true,
+        Err(e) => {
+            tracing::debug!(error = %e, "progress edit failed");
+            false
+        }
+    }
+}
+
+/// How the final reply replaces the progress placeholder.
+#[derive(Debug, PartialEq, Eq)]
+enum FinalPlan {
+    /// Edit the placeholder into `first`; send `rest` as new messages.
+    Edit { first: String, rest: Vec<String> },
+    /// Doesn't fit an edit (blank / file-sized) — delete the placeholder
+    /// and send the reply through the normal queue.
+    Replace,
+}
+
+fn plan_final(text: &str) -> FinalPlan {
+    match super::sender::reply_chunks(text) {
+        Some(mut chunks) if !chunks.is_empty() => {
+            let first = chunks.remove(0);
+            FinalPlan::Edit {
+                first,
+                rest: chunks,
+            }
+        }
+        _ => FinalPlan::Replace,
+    }
+}
+
+/// Deliver the turn's final text: into the placeholder when there is one
+/// (keyboard on the last message), otherwise as a normal queued reply.
+async fn finalize_reply(
+    bot: &teloxide::Bot,
+    state: &TelegramState,
+    chat_id: i64,
+    placeholder: Option<(teloxide::types::MessageId, tokio::time::Instant)>,
+    text: String,
+    keyboard: Option<super::commands_registry::InlineKeyboard>,
+) {
+    use teloxide::prelude::*;
+    use teloxide::types::ChatId;
+    let Some((id, last_edit)) = placeholder else {
+        state.sender.enqueue_with_keyboard(chat_id, text, keyboard);
+        return;
+    };
+    let wait = throttle_wait(last_edit, tokio::time::Instant::now(), PROGRESS_EDIT_GAP);
+    if !wait.is_zero() {
+        tokio::time::sleep(wait).await;
+    }
+    if let FinalPlan::Edit { first, mut rest } = plan_final(&text) {
+        let edit_kb = if rest.is_empty() { keyboard.clone() } else { None };
+        if edit_message(bot, chat_id, id, &first, &edit_kb).await {
+            if let Some(last) = rest.pop() {
+                for chunk in rest {
+                    state.sender.enqueue(chat_id, chunk);
+                }
+                state.sender.enqueue_with_keyboard(chat_id, last, keyboard);
+            }
+            return;
+        }
+    }
+    if let Err(e) = bot.delete_message(ChatId(chat_id), id).await {
+        tracing::debug!(error = %e, "could not delete progress placeholder");
+    }
+    state.sender.enqueue_with_keyboard(chat_id, text, keyboard);
 }
 
 /// Keeps Telegram's "typing…" indicator alive (it expires after ~5s)
@@ -1515,6 +1745,93 @@ mod tests {
                 args: "now".into(),
             }
         );
+    }
+
+    #[test]
+    fn progress_log_tracks_tool_steps() {
+        use crate::modules::telegram::assistant::ProgressEvent as E;
+        use crate::modules::telegram::format::{render_progress, StepStatus};
+        let mut log = ProgressLog::default();
+        log.apply(E::TurnStarted);
+        assert!(!log.tool_seen);
+        assert_eq!(render_progress(&log.steps), "⏳ Думаю…");
+        log.apply(E::ToolStarted {
+            name: "metronome_control",
+            args_json: r#"{"bpm":120}"#,
+        });
+        assert!(log.tool_seen);
+        assert_eq!(render_progress(&log.steps), "⏳ 🥁 метроном 120 BPM…");
+        log.apply(E::ToolFinished {
+            name: "metronome_control",
+            ok: true,
+        });
+        log.apply(E::ToolStarted {
+            name: "search_notes",
+            args_json: r#"{"query":"x"}"#,
+        });
+        log.apply(E::ToolFinished {
+            name: "search_notes",
+            ok: false,
+        });
+        assert_eq!(log.steps[0].status, StepStatus::Ok);
+        assert_eq!(log.steps[1].status, StepStatus::Failed);
+        assert_eq!(
+            render_progress(&log.steps),
+            "✅ 🥁 метроном 120 BPM\n⚠️ 🔎 шукаю нотатки «x»\n⏳ Думаю…"
+        );
+        // A stray finish with nothing running is ignored.
+        log.apply(E::ToolFinished { name: "x", ok: false });
+        log.apply(E::Final);
+        assert_eq!(log.steps.len(), 2);
+        assert_eq!(log.steps[0].status, StepStatus::Ok);
+    }
+
+    #[test]
+    fn throttle_waits_out_the_gap() {
+        let t0 = tokio::time::Instant::now();
+        let gap = Duration::from_millis(1_100);
+        assert_eq!(throttle_wait(t0, t0, gap), gap);
+        assert_eq!(
+            throttle_wait(t0, t0 + Duration::from_millis(400), gap),
+            Duration::from_millis(700)
+        );
+        assert_eq!(throttle_wait(t0, t0 + Duration::from_secs(5), gap), Duration::ZERO);
+        // Clock "before" the last edit never panics or over-waits.
+        assert_eq!(throttle_wait(t0 + Duration::from_secs(1), t0, gap), gap);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn tracker_finish_wakes_waiter_and_marks_done() {
+        use crate::modules::telegram::assistant::{ProgressEvent, ProgressSink};
+        let t = ProgressTracker::default();
+        t.on_event(ProgressEvent::ToolStarted {
+            name: "get_battery",
+            args_json: "{}",
+        });
+        // Permit stored by notify_one → this returns immediately.
+        t.notify.notified().await;
+        assert_eq!(t.render(), "⏳ 🔋 дивлюсь батарею…");
+        t.finish();
+        t.notify.notified().await;
+        assert!(t.with_log(|l| l.done));
+    }
+
+    #[test]
+    fn final_plan_edits_first_chunk_or_replaces() {
+        assert_eq!(
+            plan_final("готово"),
+            FinalPlan::Edit {
+                first: "готово".into(),
+                rest: vec![]
+            }
+        );
+        let para = format!("{}\n\n", "щось ".repeat(150));
+        match plan_final(&para.repeat(8)) {
+            FinalPlan::Edit { rest, .. } => assert_eq!(rest.len(), 1),
+            other => panic!("expected edit, got {other:?}"),
+        }
+        assert_eq!(plan_final(&para.repeat(40)), FinalPlan::Replace);
+        assert_eq!(plan_final("  "), FinalPlan::Replace);
     }
 
     #[test]

@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use teloxide::prelude::*;
 use teloxide::requests::Request;
-use teloxide::types::{ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, ParseMode};
+use teloxide::types::{
+    ChatId, InlineKeyboardButton, InlineKeyboardMarkup, InputFile, MessageId, ParseMode,
+};
 use teloxide::{ApiError, RequestError};
 use tokio::sync::{mpsc, oneshot};
 
@@ -62,8 +64,22 @@ pub struct TelegramSender {
     slot: Mutex<Option<SenderInner>>,
 }
 
+/// One item of the outbound queue.
+enum Job {
+    /// Fire-and-forget message (see `Outbound`).
+    Send(Outbound),
+    /// Single short text message whose id the caller needs (e.g. a
+    /// progress placeholder that is later edited in place). Rides the same
+    /// queue so it keeps its place relative to earlier enqueued messages.
+    Tracked {
+        chat_id: i64,
+        text: String,
+        reply: oneshot::Sender<Option<MessageId>>,
+    },
+}
+
 struct SenderInner {
-    tx: mpsc::UnboundedSender<Outbound>,
+    tx: mpsc::UnboundedSender<Job>,
     shutdown: oneshot::Sender<()>,
 }
 
@@ -81,7 +97,7 @@ impl TelegramSender {
         if slot.is_some() {
             return Ok(());
         }
-        let (tx, rx) = mpsc::unbounded_channel::<Outbound>();
+        let (tx, rx) = mpsc::unbounded_channel::<Job>();
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
             run_drain(token, rx, shutdown_rx).await;
@@ -126,20 +142,42 @@ impl TelegramSender {
         documents: Vec<PathBuf>,
     ) {
         let text = text.into();
+        self.push(Job::Send(Outbound {
+            chat_id,
+            text,
+            keyboard,
+            documents,
+        }));
+    }
+
+    /// Queue a single short plain-text message and wait until it is actually
+    /// sent, returning its id (`None` when the sender is stopped or the
+    /// send failed). Paced and ordered like every other queued message.
+    pub async fn send_tracked(&self, chat_id: i64, text: impl Into<String>) -> Option<MessageId> {
+        let (reply, rx) = oneshot::channel();
+        if !self.push(Job::Tracked {
+            chat_id,
+            text: text.into(),
+            reply,
+        }) {
+            return None;
+        }
+        rx.await.ok().flatten()
+    }
+
+    fn push(&self, job: Job) -> bool {
         match self.slot.lock().unwrap().as_ref() {
-            Some(inner) => {
-                if let Err(e) = inner.tx.send(Outbound {
-                    chat_id,
-                    text,
-                    keyboard,
-                    documents,
-                }) {
-                    tracing::warn!(error = %e, "telegram sender: enqueue failed");
+            Some(inner) => match inner.tx.send(job) {
+                Ok(()) => true,
+                Err(_) => {
+                    tracing::warn!("telegram sender: enqueue failed (drain task gone)");
+                    false
                 }
+            },
+            None => {
+                tracing::debug!("telegram sender: enqueue dropped (sender not running)");
+                false
             }
-            None => tracing::debug!(
-                "telegram sender: enqueue dropped (sender not running); chat_id={chat_id}"
-            ),
         }
     }
 }
@@ -152,7 +190,7 @@ impl Default for TelegramSender {
 
 async fn run_drain(
     token: String,
-    mut rx: mpsc::UnboundedReceiver<Outbound>,
+    mut rx: mpsc::UnboundedReceiver<Job>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
     use teloxide::prelude::*;
@@ -170,7 +208,7 @@ async fn run_drain(
                 break;
             }
             next = rx.recv() => {
-                let Some(msg) = next else { break };
+                let Some(job) = next else { break };
 
                 // Rate limit: sleep until MIN_SEND_GAP has elapsed since the
                 // last successful send, so a burst of enqueues still paces out.
@@ -179,7 +217,13 @@ async fn run_drain(
                     tokio::time::sleep(MIN_SEND_GAP - elapsed).await;
                 }
 
-                deliver(&bot, &msg).await;
+                match job {
+                    Job::Send(msg) => deliver(&bot, &msg).await,
+                    Job::Tracked { chat_id, text, reply } => {
+                        let id = send_single(&bot, ChatId(chat_id), &text).await;
+                        let _ = reply.send(id);
+                    }
+                }
                 last_send = tokio::time::Instant::now();
             }
         }
@@ -412,6 +456,36 @@ async fn send_text(bot: &Bot, chat: ChatId, text: &str, markup: Option<InlineKey
     }
 }
 
+/// Send one short plain-text message and return its id. Text past one
+/// message is cut to the first chunk.
+async fn send_single(bot: &Bot, chat: ChatId, text: &str) -> Option<MessageId> {
+    let chunk = split_message(text.trim(), CHUNK_LIMIT)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| EMPTY_PLACEHOLDER.to_string());
+    match retrying("sendMessage(tracked)", || {
+        bot.send_message(chat, chunk.clone()).send()
+    })
+    .await
+    {
+        Ok(m) => Some(m.id),
+        Err(e) => {
+            tracing::warn!(error = %e, "telegram sender: tracked message not delivered");
+            None
+        }
+    }
+}
+
+/// Split a reply into the Markdown chunks the queue would send, or `None`
+/// when it is blank or long enough to ship as a `.md` file. Lets callers
+/// that edit a message in place decide whether the reply fits that shape.
+pub(crate) fn reply_chunks(text: &str) -> Option<Vec<String>> {
+    match plan_text(text, false) {
+        TextPlan::Chunks(c) => Some(c),
+        TextPlan::Skip | TextPlan::File => None,
+    }
+}
+
 /// Upload a very long reply as `reply-<ts>.md`. Returns `false` when the
 /// upload failed so the caller can fall back to chunked messages.
 async fn send_text_as_file(
@@ -630,6 +704,21 @@ mod tests {
         assert!(matches!(plan_text(&medium, false), TextPlan::Chunks(c) if c.len() == 2));
         let huge = para.repeat(40); // ~30k chars → > 4 chunks
         assert_eq!(plan_text(&huge, false), TextPlan::File);
+    }
+
+    #[test]
+    fn reply_chunks_mirror_queue_plan() {
+        assert_eq!(reply_chunks("  "), None);
+        assert_eq!(reply_chunks(" hi "), Some(vec!["hi".to_string()]));
+        let para = format!("{}\n\n", "щось ".repeat(150));
+        assert_eq!(reply_chunks(&para.repeat(8)).map(|c| c.len()), Some(2));
+        assert_eq!(reply_chunks(&para.repeat(40)), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn send_tracked_without_sender_returns_none() {
+        let s = TelegramSender::new();
+        assert_eq!(s.send_tracked(1, "⏳").await, None);
     }
 
     #[test]
