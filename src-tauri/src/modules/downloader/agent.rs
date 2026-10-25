@@ -9,13 +9,10 @@
 //! `register_commands` / `register_tools`.
 
 use std::collections::HashSet;
-use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use async_trait::async_trait;
-use lru::LruCache;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -24,7 +21,8 @@ use super::runner::{self, RunnerState};
 use crate::modules::telegram::commands_registry::{
     CommandHandler, Ctx, InlineButton, InlineKeyboard, Reply,
 };
-use crate::modules::telegram::pairing::PairingState;
+use crate::modules::telegram::notifier;
+use crate::modules::telegram::short_ids::ShortIdStore;
 use crate::modules::telegram::state::TelegramState;
 use crate::modules::telegram::tools::{Tool, ToolCtx, ToolRegistry};
 
@@ -279,39 +277,28 @@ fn terminal_action(status: &str, retrying: bool) -> TerminalAction {
     }
 }
 
-/// Completion cards respect the "Download complete" notification toggle;
-/// failure cards always go out — the user asked for this download from
-/// the agent surface and would otherwise never learn it failed.
-fn card_allowed(status: &str, download_complete_enabled: bool) -> bool {
-    status != "completed" || download_complete_enabled
-}
-
 /// Called by the runner when a job reaches a terminal state (completed or
 /// finally failed). Pushes the job card with follow-up buttons to the
-/// paired chat. Returns `true` when this job was agent-originated (so the
-/// caller can skip its generic notification).
+/// paired chat. Completion cards respect the "Download complete" toggle;
+/// failure cards always go out — the user asked for this download from
+/// the agent surface and would otherwise never learn it failed. Returns `true` when this job
+/// was agent-originated (so the caller can skip its generic notification).
 pub fn notify_finished(app: &AppHandle, id: i64) -> bool {
     if !agent_jobs().lock().unwrap().remove(&id) {
         return false;
     }
-    let Some(tg) = app.try_state::<Arc<TelegramState>>() else {
-        return true;
-    };
-    let chat_id = match &*tg.pairing.lock().unwrap() {
-        PairingState::Paired { chat_id } => *chat_id,
-        _ => return true,
-    };
     if let Ok(job) = get_download(app, id) {
-        let enabled = crate::modules::telegram::settings::category_enabled(
-            &tg,
-            crate::modules::telegram::notifier::Category::DownloadComplete,
-        );
-        if !card_allowed(&job.status, enabled) {
-            return true;
-        }
         let reply = job_card(&job);
-        tg.sender
-            .enqueue_with_keyboard(chat_id, reply.text, reply.keyboard);
+        if job.status == "completed" {
+            notifier::notify_with_keyboard(
+                app,
+                notifier::Category::DownloadComplete,
+                reply.text,
+                reply.keyboard,
+            );
+        } else {
+            notifier::send_to_paired(app, reply.text, reply.keyboard, Vec::new());
+        }
     }
     true
 }
@@ -493,36 +480,10 @@ fn list_reply(jobs: &[DownloadJob]) -> Reply {
 
 // ───────────────────────── URL stash (bare links) ─────────────────────────
 
-/// Small LRU of `short id → payload` for inline buttons whose payload can't
-/// fit Telegram's 64-byte `callback_data` (long URLs).
-pub struct ShortIdStore {
-    next: AtomicU32,
-    map: Mutex<LruCache<u32, String>>,
-}
-
-impl ShortIdStore {
-    pub fn new(cap: usize) -> Self {
-        Self {
-            next: AtomicU32::new(1),
-            map: Mutex::new(LruCache::new(
-                NonZeroUsize::new(cap.max(1)).expect("cap is non-zero"),
-            )),
-        }
-    }
-
-    pub fn put(&self, value: impl Into<String>) -> u32 {
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
-        self.map.lock().unwrap().put(id, value.into());
-        id
-    }
-
-    pub fn get(&self, id: u32) -> Option<String> {
-        self.map.lock().unwrap().get(&id).cloned()
-    }
-}
-
-fn url_store() -> &'static ShortIdStore {
-    static STORE: OnceLock<ShortIdStore> = OnceLock::new();
+/// `short id → URL` for inline buttons whose payload can't fit Telegram's
+/// 64-byte `callback_data` (long URLs).
+fn url_store() -> &'static ShortIdStore<String> {
+    static STORE: OnceLock<ShortIdStore<String>> = OnceLock::new();
     STORE.get_or_init(|| ShortIdStore::new(64))
 }
 
@@ -741,18 +702,14 @@ fn completed_path(app: &AppHandle, id: i64) -> Result<PathBuf, String> {
 
 /// Queue a Demucs/BeatNet job on a downloaded file and push the result to
 /// the paired chat when it settles. Returns an immediate ack so the
-/// callback doesn't spin for minutes.
+/// callback doesn't spin for minutes. Job run + polling + result card are
+/// shared with `/stems` / `/bpm`.
 fn spawn_separator(app: &AppHandle, id: i64, mode: &str) -> Result<Reply, String> {
-    use crate::modules::separator;
+    use crate::modules::telegram::module_cmds::{await_separator_job, enqueue_separator};
     let path = completed_path(app, id)?;
-    let sep = app
-        .try_state::<Arc<separator::SeparatorState>>()
-        .map(|s| s.inner().clone())
-        .ok_or("модуль Stems не ініціалізовано")?;
-    let job_id = separator::enqueue_job(
+    let (sep, job_id) = enqueue_separator(
         app,
-        &sep,
-        separator::SeparatorRunArgs {
+        crate::modules::separator::SeparatorRunArgs {
             input_path: path.display().to_string(),
             mode: Some(mode.into()),
             ..Default::default()
@@ -760,84 +717,14 @@ fn spawn_separator(app: &AppHandle, id: i64, mode: &str) -> Result<Reply, String
     )?;
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
-        let reply = await_separator(&sep, &job_id).await;
-        if let Some(tg) = app2.try_state::<Arc<TelegramState>>() {
-            if let PairingState::Paired { chat_id } = &*tg.pairing.lock().unwrap() {
-                tg.sender
-                    .enqueue_full(*chat_id, reply.text, reply.keyboard, reply.documents);
-            }
-        }
+        let reply = await_separator_job(&sep, &job_id).await;
+        notifier::send_to_paired(&app2, reply.text, reply.keyboard, reply.documents);
     });
     Ok(Reply::text(if mode == "bpm" {
         "🥁 Визначаю BPM… результат прийде окремим повідомленням"
     } else {
         "🎛 Розділяю на стеми… результат прийде окремим повідомленням"
     }))
-}
-
-async fn await_separator(
-    sep: &Arc<crate::modules::separator::SeparatorState>,
-    job_id: &str,
-) -> Reply {
-    use crate::modules::separator::JobStatus;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30 * 60);
-    loop {
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-        if std::time::Instant::now() > deadline {
-            return Reply::text("⚠️ Stems: таймаут (30 хв)");
-        }
-        let job = sep
-            .jobs
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|j| j.id == job_id)
-            .cloned();
-        let Some(job) = job else {
-            return Reply::text("⚠️ Stems: задачу втрачено");
-        };
-        match job.status {
-            JobStatus::Completed => {
-                let bpm = job.result.as_ref().and_then(|r| r.bpm);
-                let stems = job.result.and_then(|r| r.stems);
-                let mut text = String::new();
-                if let Some(bpm) = bpm {
-                    text.push_str(&format!("🥁 BPM: {bpm:.1}\n"));
-                }
-                let mut documents = Vec::new();
-                if let Some(stems) = stems {
-                    text.push_str(&format!("🎛 Стеми готові ({})", stems.len()));
-                    let mut entries: Vec<_> = stems.into_iter().collect();
-                    entries.sort();
-                    let mut big = 0;
-                    for (_, p) in entries {
-                        let p = PathBuf::from(p);
-                        match std::fs::metadata(&p) {
-                            Ok(m) if m.len() < TELEGRAM_UPLOAD_LIMIT => documents.push(p),
-                            _ => big += 1,
-                        }
-                    }
-                    if big > 0 {
-                        text.push_str(&format!("\n{big} файл(и) завеликі для Telegram — див. вкладку Stems"));
-                    }
-                }
-                if text.is_empty() {
-                    text = "🎛 Готово".into();
-                }
-                return Reply {
-                    text: text.trim_end().to_string(),
-                    documents,
-                    ..Default::default()
-                };
-            }
-            JobStatus::Failed => {
-                let err = job.error.unwrap_or_else(|| "unknown".into());
-                return Reply::text(format!("⚠️ Stems: {}", err.lines().next().unwrap_or("")));
-            }
-            JobStatus::Cancelled => return Reply::text("✖ Stems: скасовано"),
-            _ => continue,
-        }
-    }
 }
 
 // ───────────────────────── LLM tools ─────────────────────────
@@ -1082,13 +969,6 @@ mod tests {
         assert_eq!(terminal_action("pending", false), TerminalAction::None);
     }
 
-    #[test]
-    fn completion_card_respects_toggle_but_failures_always_go_out() {
-        assert!(card_allowed("completed", true));
-        assert!(!card_allowed("completed", false));
-        assert!(card_allowed("failed", false));
-    }
-
     fn job(id: i64, status: &str, path: Option<&str>) -> DownloadJob {
         DownloadJob {
             id,
@@ -1206,19 +1086,6 @@ mod tests {
             // Round-trip through the parser.
             assert!(matches!(parse_dl_args(cb.strip_prefix("dl:").unwrap()), Ok(DlArgs::Stashed { .. })));
         }
-    }
-
-    #[test]
-    fn short_id_store_round_trips_and_evicts() {
-        let s = ShortIdStore::new(2);
-        let a = s.put("a");
-        let b = s.put("b");
-        assert_ne!(a, b);
-        assert_eq!(s.get(a).as_deref(), Some("a"));
-        let c = s.put("c"); // evicts `b` (a was touched more recently)
-        assert_eq!(s.get(b), None);
-        assert_eq!(s.get(a).as_deref(), Some("a"));
-        assert_eq!(s.get(c).as_deref(), Some("c"));
     }
 
     #[test]

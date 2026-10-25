@@ -16,9 +16,8 @@ use std::time::Duration;
 
 use tauri::AppHandle;
 
-use super::battery_watcher::notify_with_keyboard;
 use super::commands_registry::{InlineButton, InlineKeyboard};
-use super::notifier::Category;
+use super::notifier::{notify_with_keyboard, Category};
 use super::settings::NotificationSettings;
 
 const POLL_PERIOD: Duration = Duration::from_secs(60);
