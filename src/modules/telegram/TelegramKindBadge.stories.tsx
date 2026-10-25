@@ -16,11 +16,14 @@ type Story = StoryObj<typeof meta>;
 
 export const Text: Story = { args: { kind: 'text' } };
 export const Voice: Story = { args: { kind: 'voice' } };
+export const Audio: Story = { args: { kind: 'audio' } };
 export const Photo: Story = { args: { kind: 'photo' } };
 export const Video: Story = { args: { kind: 'video' } };
 export const VideoNote: Story = { args: { kind: 'video_note' } };
 export const Document: Story = { args: { kind: 'document' } };
 export const Sticker: Story = { args: { kind: 'sticker' } };
+
+export const UnknownKind: Story = { args: { kind: 'location' } };
 
 export const AllKinds: Story = {
   render: () => (
