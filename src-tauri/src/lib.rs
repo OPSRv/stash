@@ -1187,21 +1187,6 @@ pub fn run() {
             // ═══════════════ END G2 ═══════════════
 
             // ═══════════════ BEGIN G3 ═══════════════
-            // G3 system — owned by one move agent; see docs/agent-surface-refactor.md.
-            telegram_state.register_command(modules::telegram::module_cmds::BatteryCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::ScreenshotCmd);
-            let power_timers = Arc::new(modules::system::power::PowerTimers::new());
-            telegram_state.register_command(modules::telegram::module_cmds::DisplayCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::SleepCmd::new(Arc::clone(&power_timers)));
-            telegram_state.register_command(modules::telegram::module_cmds::ShutdownCmd::new(Arc::clone(&power_timers)));
-            telegram_state.register_command(modules::telegram::module_cmds::AppCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::FocusCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::WeatherCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::KeepAwakeCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::DashboardCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::NavigateCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::UpdateCmd);
             modules::system::agent::register_commands(&telegram_state);
             modules::keepawake::agent::register_commands(&telegram_state, app.handle());
             modules::telegram::core_cmds::register_commands(&telegram_state, app.handle());

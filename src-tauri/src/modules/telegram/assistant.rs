@@ -785,13 +785,7 @@ pub fn build_runtime_assistant(
     // ═══════════════ END G2 ═══════════════
 
     // ═══════════════ BEGIN G3 ═══════════════
-    // G3 system — owned by one move agent; see docs/agent-surface-refactor.md.
-    tools.register(super::tools::stash::GetBattery);
-    tools.register(super::tools::stash::VolumeControl);
-    tools.register(super::tools::stash::NavigateTab);
-    tools.register(super::tools::stash::InvokeCommand);
     crate::modules::system::agent::register_tools(&mut tools);
-    crate::modules::keepawake::agent::register_tools(&mut tools, app);
     super::core_cmds::register_tools(&mut tools, app);
     // ═══════════════ END G3 ═══════════════
 
