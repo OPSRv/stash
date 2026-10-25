@@ -35,6 +35,12 @@ const POLL_PERIOD: Duration = Duration::from_secs(60);
 const CATCH_UP_MIN: u32 = 3 * 60;
 const DAY_SECS: i64 = 86_400;
 
+/// Local day number on which the scheduler must stay quiet because a
+/// settings change landed after the target time (see [`suppressed_day_after_change`]).
+/// Kept separate from `last_sent_day` so it can be recomputed (and
+/// cleared) on every later change instead of permanently eating the day.
+const KEY_DIGEST_SUPPRESSED_DAY: &str = "digest.suppressed_day";
+
 const WEEKDAY_SHORT: [&str; 7] = ["пн", "вт", "ср", "чт", "пт", "сб", "нд"];
 
 // -------------------- scheduler --------------------
@@ -61,7 +67,12 @@ async fn run_once(app: &AppHandle) {
         return;
     }
     let now_local = now_secs() + super::inbox::local_offset_seconds_public();
-    if !should_send(now_local, &settings, last_sent_day(&state)) {
+    if !should_send(
+        now_local,
+        &settings,
+        kv_day(&state, KEY_DIGEST_LAST_SENT_DAY),
+        kv_day(&state, KEY_DIGEST_SUPPRESSED_DAY),
+    ) {
         return;
     }
     // Mark first: a slow dashboard build racing the next tick must not
@@ -91,12 +102,13 @@ pub(crate) fn should_send(
     now_local: i64,
     settings: &DigestSettings,
     last_sent_day: Option<i64>,
+    suppressed_day: Option<i64>,
 ) -> bool {
     if !settings.enabled {
         return false;
     }
     let day = local_day(now_local);
-    if last_sent_day.is_some_and(|d| d >= day) {
+    if last_sent_day.is_some_and(|d| d >= day) || suppressed_day == Some(day) {
         return false;
     }
     if settings.weekdays & (1 << weekday_index(day)) == 0 {
@@ -107,35 +119,46 @@ pub(crate) fn should_send(
     minute >= target && minute - target < CATCH_UP_MIN
 }
 
-/// When the user enables the digest (or moves its time) to a moment that
-/// already passed today, treat today as done — otherwise the scheduler
-/// would fire within a minute of flipping the toggle at 10:00 for an
-/// 08:00 digest, which reads as a bug.
-pub(crate) fn suppress_today_on_change(
+/// Recompute today's suppression after a settings change. Returns the
+/// local day to suppress, or `None` to clear it.
+///
+/// Any change that lands when today's (new) target time has already
+/// passed suppresses today — enabling at 10:00 for 08:00, moving the time
+/// earlier than now, or adding today's weekday after the time — otherwise
+/// the scheduler would fire within a minute, which reads as a bug. A
+/// change whose target is still ahead today clears the suppression, so an
+/// intermediate value (e.g. "07:00" while retyping 08:00 → 07:45 at
+/// 07:30) can't eat the day for good. A no-op save keeps what was there.
+pub(crate) fn suppressed_day_after_change(
     old: &DigestSettings,
     new: &DigestSettings,
     now_local: i64,
-) -> bool {
-    let changed = !old.enabled || old.time != new.time;
-    new.enabled && changed && minute_of_day(now_local) >= new.minute_of_day()
+    current: Option<i64>,
+) -> Option<i64> {
+    let today = local_day(now_local);
+    let current = current.filter(|d| *d == today);
+    if !new.enabled || minute_of_day(now_local) < new.minute_of_day() {
+        return None;
+    }
+    if old == new {
+        return current;
+    }
+    Some(today)
 }
 
-fn last_sent_day(state: &TelegramState) -> Option<i64> {
-    state
-        .repo
-        .lock()
-        .ok()?
-        .kv_get(KEY_DIGEST_LAST_SENT_DAY)
-        .ok()
-        .flatten()?
-        .parse()
-        .ok()
+fn kv_day(state: &TelegramState, key: &str) -> Option<i64> {
+    state.repo.lock().ok()?.kv_get(key).ok().flatten()?.parse().ok()
+}
+
+fn set_kv_day(state: &TelegramState, key: &str, day: Option<i64>) {
+    if let Ok(mut repo) = state.repo.lock() {
+        let v = day.map(|d| d.to_string()).unwrap_or_default();
+        let _ = repo.kv_set(key, &v);
+    }
 }
 
 fn mark_sent(state: &TelegramState, day: i64) {
-    if let Ok(mut repo) = state.repo.lock() {
-        let _ = repo.kv_set(KEY_DIGEST_LAST_SENT_DAY, &day.to_string());
-    }
+    set_kv_day(state, KEY_DIGEST_LAST_SENT_DAY, Some(day));
 }
 
 /// Single write path for digest settings (command, tool, Settings UI).
@@ -147,8 +170,10 @@ pub fn apply_settings(
     new.save(state)?;
     let saved = DigestSettings::load(state);
     let now_local = now_secs() + super::inbox::local_offset_seconds_public();
-    if suppress_today_on_change(&old, &saved, now_local) {
-        mark_sent(state, local_day(now_local));
+    let current = kv_day(state, KEY_DIGEST_SUPPRESSED_DAY);
+    let next = suppressed_day_after_change(&old, &saved, now_local, current);
+    if next != current {
+        set_kv_day(state, KEY_DIGEST_SUPPRESSED_DAY, next);
     }
     Ok(saved)
 }
@@ -633,11 +658,11 @@ mod tests {
     #[test]
     fn fires_at_or_after_time_once_per_day() {
         let cfg = s(true, "08:00", DIGEST_ALL_DAYS);
-        assert!(!should_send(at(MONDAY, 7, 59), &cfg, None));
-        assert!(should_send(at(MONDAY, 8, 0), &cfg, None));
-        assert!(should_send(at(MONDAY, 8, 1), &cfg, Some(MONDAY - 1)));
+        assert!(!should_send(at(MONDAY, 7, 59), &cfg, None, None));
+        assert!(should_send(at(MONDAY, 8, 0), &cfg, None, None));
+        assert!(should_send(at(MONDAY, 8, 1), &cfg, Some(MONDAY - 1), None));
         assert!(
-            !should_send(at(MONDAY, 8, 1), &cfg, Some(MONDAY)),
+            !should_send(at(MONDAY, 8, 1), &cfg, Some(MONDAY), None),
             "already sent today"
         );
     }
@@ -645,8 +670,8 @@ mod tests {
     #[test]
     fn catch_up_window_is_three_hours() {
         let cfg = s(true, "08:00", DIGEST_ALL_DAYS);
-        assert!(should_send(at(MONDAY, 10, 59), &cfg, None));
-        assert!(!should_send(at(MONDAY, 11, 0), &cfg, None));
+        assert!(should_send(at(MONDAY, 10, 59), &cfg, None, None));
+        assert!(!should_send(at(MONDAY, 11, 0), &cfg, None, None));
     }
 
     #[test]
@@ -654,12 +679,13 @@ mod tests {
         assert!(!should_send(
             at(MONDAY, 9, 0),
             &s(false, "08:00", DIGEST_ALL_DAYS),
+            None,
             None
         ));
         let weekends = s(true, "08:00", DIGEST_WEEKENDS);
-        assert!(!should_send(at(MONDAY, 9, 0), &weekends, None));
+        assert!(!should_send(at(MONDAY, 9, 0), &weekends, None, None));
         assert!(
-            should_send(at(MONDAY + 5, 9, 0), &weekends, None),
+            should_send(at(MONDAY + 5, 9, 0), &weekends, None, None),
             "Saturday"
         );
     }
@@ -668,23 +694,60 @@ mod tests {
     fn enabling_after_time_suppresses_today() {
         let off = s(false, "08:00", DIGEST_ALL_DAYS);
         let on = s(true, "08:00", DIGEST_ALL_DAYS);
-        assert!(suppress_today_on_change(&off, &on, at(MONDAY, 10, 0)));
-        assert!(!suppress_today_on_change(&off, &on, at(MONDAY, 7, 0)));
-        // Only a weekday change on an already-enabled digest: no suppression.
-        let on_weekdays = s(true, "08:00", DIGEST_WORKDAYS);
-        assert!(!suppress_today_on_change(
-            &on,
-            &on_weekdays,
-            at(MONDAY, 10, 0)
-        ));
+        let now = at(MONDAY, 10, 0);
+        assert_eq!(suppressed_day_after_change(&off, &on, now, None), Some(MONDAY));
+        assert_eq!(suppressed_day_after_change(&off, &on, at(MONDAY, 7, 0), None), None);
         // Moving the time earlier than now counts as a change.
         let earlier = s(true, "07:00", DIGEST_ALL_DAYS);
         let later = s(true, "18:00", DIGEST_ALL_DAYS);
-        assert!(suppress_today_on_change(
-            &later,
-            &earlier,
-            at(MONDAY, 10, 0)
-        ));
+        assert_eq!(suppressed_day_after_change(&later, &earlier, now, None), Some(MONDAY));
+        // Disabling clears.
+        assert_eq!(suppressed_day_after_change(&on, &off, now, Some(MONDAY)), None);
+    }
+
+    #[test]
+    fn suppression_is_recomputed_on_every_change() {
+        // Retyping 08:00 → 07:45 at 07:30 passes through 07:00.
+        let now = at(MONDAY, 7, 30);
+        let a = s(true, "08:00", DIGEST_ALL_DAYS);
+        let mid = s(true, "07:00", DIGEST_ALL_DAYS);
+        let fin = s(true, "07:45", DIGEST_ALL_DAYS);
+        let sup = suppressed_day_after_change(&a, &mid, now, None);
+        assert_eq!(sup, Some(MONDAY));
+        let sup = suppressed_day_after_change(&mid, &fin, now, sup);
+        assert_eq!(sup, None, "final target is still ahead today");
+        assert!(should_send(at(MONDAY, 7, 45), &fin, None, sup));
+
+        // Enabled at 10:00 for 08:00, then moved to 11:00 → fires at 11:00.
+        let off = s(false, "08:00", DIGEST_ALL_DAYS);
+        let on = s(true, "08:00", DIGEST_ALL_DAYS);
+        let eleven = s(true, "11:00", DIGEST_ALL_DAYS);
+        let sup = suppressed_day_after_change(&off, &on, at(MONDAY, 10, 0), None);
+        assert!(!should_send(at(MONDAY, 10, 1), &on, None, sup));
+        let sup = suppressed_day_after_change(&on, &eleven, at(MONDAY, 10, 5), sup);
+        assert_eq!(sup, None);
+        assert!(should_send(at(MONDAY, 11, 0), &eleven, None, sup));
+    }
+
+    #[test]
+    fn adding_todays_weekday_after_time_does_not_fire() {
+        let weekends = s(true, "08:00", DIGEST_WEEKENDS);
+        let all = s(true, "08:00", DIGEST_ALL_DAYS);
+        let now = at(MONDAY, 9, 0);
+        let sup = suppressed_day_after_change(&weekends, &all, now, None);
+        assert_eq!(sup, Some(MONDAY));
+        assert!(!should_send(at(MONDAY, 9, 1), &all, None, sup));
+        // Next day fires normally (stale suppression is ignored).
+        assert!(should_send(at(MONDAY + 1, 8, 0), &all, None, sup));
+    }
+
+    #[test]
+    fn noop_save_keeps_suppression_but_drops_stale_days() {
+        let on = s(true, "08:00", DIGEST_ALL_DAYS);
+        let now = at(MONDAY, 9, 0);
+        assert_eq!(suppressed_day_after_change(&on, &on, now, Some(MONDAY)), Some(MONDAY));
+        assert_eq!(suppressed_day_after_change(&on, &on, now, Some(MONDAY - 1)), None);
+        assert_eq!(suppressed_day_after_change(&on, &on, now, None), None);
     }
 
     #[test]

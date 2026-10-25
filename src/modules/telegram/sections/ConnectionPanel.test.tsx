@@ -166,4 +166,15 @@ describe('<ConnectionPanel />', () => {
     act(() => __emit('telegram:status', { error: null }));
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
+
+  it('replays a transport error reported before the panel mounted', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_status') return { kind: 'paired', chat_id: 42 };
+      if (cmd === 'telegram_transport_status')
+        return { error: 'Telegram rejected the bot token (401).' };
+      return undefined;
+    });
+    render(<ConnectionPanel />);
+    expect(await screen.findByText(/token rejected/i)).toBeInTheDocument();
+  });
 });

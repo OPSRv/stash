@@ -7,6 +7,7 @@ export type ConnectionStatus =
 export type InboxKind =
   | 'text'
   | 'voice'
+  | 'audio'
   | 'photo'
   | 'document'
   | 'video'

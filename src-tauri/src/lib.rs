@@ -799,6 +799,7 @@ pub fn run() {
             telegram_clear_token,
             telegram_has_token,
             telegram_status,
+            modules::telegram::commands::telegram_transport_status,
             telegram_start_pairing,
             telegram_cancel_pairing,
             telegram_unpair,

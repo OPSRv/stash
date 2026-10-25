@@ -19,11 +19,32 @@ pub struct ShortIdStore<T> {
     map: Mutex<LruCache<u32, (Instant, T)>>,
 }
 
+/// Starting id derived from the wall clock, so buttons left over from a
+/// previous run don't resolve to this run's payloads (the store is
+/// in-memory and would otherwise restart at 1). Kept below 2^30 so ids
+/// stay ≤10 digits in callback data with plenty of headroom before
+/// wrapping.
+fn seed_from_clock() -> u32 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    seed_from_nanos(nanos)
+}
+
+fn seed_from_nanos(nanos: u128) -> u32 {
+    // Mix seconds and sub-second bits: two launches seconds apart land
+    // far apart in the id space.
+    let mixed = (nanos as u64) ^ ((nanos >> 32) as u64).rotate_left(17);
+    let id = (mixed.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 34) as u32; // 30 bits
+    id.max(1)
+}
+
 impl<T: Clone> ShortIdStore<T> {
     /// LRU bounded by `cap` entries (min 1), no expiry.
     pub fn new(cap: usize) -> Self {
         Self {
-            next: AtomicU32::new(1),
+            next: AtomicU32::new(seed_from_clock()),
             ttl: None,
             map: Mutex::new(LruCache::new(
                 NonZeroUsize::new(cap.max(1)).expect("cap is non-zero"),
@@ -42,7 +63,11 @@ impl<T: Clone> ShortIdStore<T> {
 
     /// Park `value`, returning its short id.
     pub fn put(&self, value: impl Into<T>) -> u32 {
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        let mut id = self.next.fetch_add(1, Ordering::Relaxed);
+        if id == 0 {
+            // Wrapped (practically never): skip 0 so ids stay non-zero.
+            id = self.next.fetch_add(1, Ordering::Relaxed);
+        }
         self.map
             .lock()
             .unwrap()
@@ -82,6 +107,19 @@ mod tests {
         assert_eq!(s.get(a).as_deref(), Some("a"));
         assert_eq!(s.get(b).as_deref(), Some("b"));
         assert_eq!(s.get(9999), None);
+    }
+
+    #[test]
+    fn seed_is_nonzero_short_and_varies_between_runs() {
+        let a = seed_from_nanos(1_761_400_000_000_000_000);
+        let b = seed_from_nanos(1_761_400_005_000_000_000);
+        let c = seed_from_nanos(1_761_400_000_000_000_123);
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        for v in [a, b, c, seed_from_nanos(0), seed_from_clock()] {
+            assert!(v >= 1 && v < (1 << 30), "{v}");
+        }
+        assert_eq!(seed_from_nanos(0), 1);
     }
 
     #[test]

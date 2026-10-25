@@ -29,7 +29,9 @@ export function ConnectionPanel() {
 
   const refresh = async () => {
     try {
-      setStatus(await api.status());
+      const [next, transport] = await Promise.all([api.status(), api.transportStatus()]);
+      setStatus(next);
+      setTransportError(transport?.error ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

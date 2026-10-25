@@ -9,6 +9,7 @@ import type {
   MemoryRow,
   NotificationSettings,
   RouteTarget,
+  TransportStatus,
 } from './types';
 
 export const setToken = (token: string): Promise<void> =>
@@ -19,6 +20,11 @@ export const clearToken = (): Promise<void> => invoke('telegram_clear_token');
 export const hasToken = (): Promise<boolean> => invoke('telegram_has_token');
 
 export const status = (): Promise<ConnectionStatus> => invoke('telegram_status');
+
+/// Last long-polling health report (replays `telegram:status` for panels
+/// that mounted after it fired). `error` is `null` while healthy.
+export const transportStatus = (): Promise<TransportStatus> =>
+  invoke('telegram_transport_status');
 
 export const startPairing = (): Promise<ConnectionStatus> =>
   invoke('telegram_start_pairing');
