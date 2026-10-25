@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { invoke } from '@tauri-apps/api/core';
+import * as events from '@tauri-apps/api/event';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 import { ConnectionPanel } from './ConnectionPanel';
+
+const __emit = (events as unknown as { __emit: (e: string, p: unknown) => void }).__emit;
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   writeText: vi.fn().mockResolvedValue(undefined),
@@ -143,5 +146,24 @@ describe('<ConnectionPanel />', () => {
     expect(
       await screen.findByText(/Telegram rejected the token/i),
     ).toBeInTheDocument();
+  });
+
+  it('shows transport status errors and clears them when healthy', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd) => {
+      if (cmd === 'telegram_status') return { kind: 'paired', chat_id: 42 };
+      return undefined;
+    });
+    render(<ConnectionPanel />);
+    await screen.findByText(/paired with chat 42/i);
+
+    act(() => __emit('telegram:status', { error: 'Telegram rejected the bot token (401).' }));
+    expect(await screen.findByText(/token rejected/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /re-enter token/i })).toBeInTheDocument();
+
+    act(() => __emit('telegram:status', { error: 'Another app instance is polling this bot (409 Conflict).' }));
+    expect(await screen.findByText(/another stash instance/i)).toBeInTheDocument();
+
+    act(() => __emit('telegram:status', { error: null }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 });

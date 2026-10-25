@@ -6,6 +6,7 @@ pub mod calendar;
 pub mod commands;
 pub mod commands_registry;
 pub mod confirm;
+pub mod digest;
 pub mod file_secrets;
 pub mod format;
 pub mod inbox;

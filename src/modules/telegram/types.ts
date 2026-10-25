@@ -81,3 +81,17 @@ export type MemoryRow = {
   fact: string;
   created_at: number;
 };
+
+/// Scheduled morning digest (dashboard + today's reminders pushed to
+/// Telegram once a day). `weekdays` is a bitmask: bit 0 = Monday …
+/// bit 6 = Sunday.
+export type DigestSettings = {
+  enabled: boolean;
+  /// Local 24h `HH:MM`.
+  time: string;
+  weekdays: number;
+};
+
+/// Payload of the `telegram:status` event — `error` is `null` once
+/// polling is healthy again.
+export type TransportStatus = { error: string | null };

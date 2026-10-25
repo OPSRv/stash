@@ -6,6 +6,7 @@ import { Toggle } from '../../../shared/ui/Toggle';
 import { SettingRow } from '../../../settings/SettingRow';
 import * as api from '../api';
 import type { NotificationSettings } from '../types';
+import { DigestPanel } from './DigestPanel';
 
 type Row = {
   key: keyof Pick<
@@ -139,6 +140,8 @@ export function NotificationsPanel() {
           />
         }
       />
+
+      <DigestPanel />
 
       <SettingRow
         title="Reload from disk"
