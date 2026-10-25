@@ -5079,10 +5079,21 @@ const STEM_NAMES: [&str; 6] = ["vocals", "drums", "bass", "guitar", "piano", "ot
 /// Parse `/stems` / `/bpm` args: `<path> [stems_csv]`.
 ///
 /// The path may contain spaces (downloaded titles usually do): either
-/// quote it (`"…"` or `'…'`, the rest is the stems list), or leave it bare
-/// — then the whole remainder is the path, unless its last word is a
-/// comma-separated list of known stem names. `None` when no path given.
+/// quote it (`"…"` or `'…'`, the rest must be a stems list), or leave it
+/// bare — then trailing words that are known stem names / comma lists
+/// (`vocals, drums`, `vocals,bass`) are peeled off as stems and the rest
+/// is the path. If the peeled path doesn't exist on disk but the whole
+/// argument string does, the whole string wins. `None` when no path given.
 pub fn parse_separator_args(args: &str) -> Option<(String, Option<Vec<String>>)> {
+    parse_separator_args_with(args, |p| std::path::Path::new(p).is_file())
+}
+
+/// Pure core of [`parse_separator_args`] with an injectable "file exists"
+/// predicate so the disambiguation is unit-testable.
+fn parse_separator_args_with(
+    args: &str,
+    exists: impl Fn(&str) -> bool,
+) -> Option<(String, Option<Vec<String>>)> {
     let args = args.trim();
     let quoted = args
         .chars()
@@ -5090,29 +5101,77 @@ pub fn parse_separator_args(args: &str) -> Option<(String, Option<Vec<String>>)>
         .filter(|c| *c == '"' || *c == '\'')
         .and_then(|q| {
             let close = args[1..].find(q)? + 1;
-            Some((args[1..close].to_string(), &args[close + 1..]))
+            let rest = args[close + 1..].trim();
+            // The remainder after a closing quote must be a stems list;
+            // otherwise the quote was part of the name (`'Rock 'n' Roll.mp3'`).
+            (rest.is_empty() || is_stems_list(rest))
+                .then(|| (args[1..close].to_string(), rest.to_string()))
         });
-    let (path, rest) = match quoted {
-        Some((path, rest)) => (path, rest.trim()),
-        None => match args.rsplit_once(char::is_whitespace) {
-            Some((head, last)) if is_stems_csv(last) => (head.trim_end().to_string(), last),
-            _ => (args.trim_matches('"').to_string(), ""),
-        },
+    let (path, mut rest) = match quoted {
+        Some(pair) => pair,
+        None => {
+            let (head, tail) = split_trailing_stems(strip_outer_quotes(args));
+            (head.to_string(), tail.to_string())
+        }
     };
-    let path = path.trim().to_string();
+    let mut path = path.trim().to_string();
+    if !path.is_empty() && !exists(&path) {
+        let whole = strip_outer_quotes(args).trim();
+        if whole != path && exists(whole) {
+            path = whole.to_string();
+            rest.clear();
+        }
+    }
     if path.is_empty() {
         return None;
     }
     let stems: Vec<String> = rest
-        .split(',')
-        .map(|x| x.trim().to_string())
+        .split(|c: char| c == ',' || c.is_whitespace())
         .filter(|x| !x.is_empty())
+        .map(str::to_string)
         .collect();
     Some((path, (!stems.is_empty()).then_some(stems)))
 }
 
-fn is_stems_csv(tok: &str) -> bool {
-    let mut parts = tok.split(',').filter(|x| !x.is_empty()).peekable();
+/// `"…"` / `'…'` wrapping the whole string → inner text; a lone dangling
+/// quote at either end is dropped.
+fn strip_outer_quotes(s: &str) -> &str {
+    for q in ['"', '\''] {
+        if s.len() >= 2 && s.starts_with(q) && s.ends_with(q) {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s.trim_matches(['"', '\''])
+}
+
+/// Peel trailing whitespace-separated tokens that are stem names / comma
+/// lists off a bare path. Returns `(path_part, stems_part)`; the path part
+/// always keeps at least its first token.
+fn split_trailing_stems(s: &str) -> (&str, &str) {
+    let s = s.trim();
+    let mut head = s;
+    while let Some((h, last)) = head.rsplit_once(char::is_whitespace) {
+        // A lone `,` (from `vocals , bass`) is a separator, not a path word.
+        let sep_only = last.chars().all(|c| c == ',');
+        if h.trim().is_empty() || !(sep_only || is_stems_list(last)) {
+            break;
+        }
+        head = h.trim_end();
+    }
+    let tail = s[head.len()..].trim();
+    if is_stems_list(tail) {
+        (head, tail)
+    } else {
+        (s, "")
+    }
+}
+
+/// Text made solely of known stem names separated by commas / whitespace.
+fn is_stems_list(s: &str) -> bool {
+    let mut parts = s
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|x| !x.is_empty())
+        .peekable();
     parts.peek().is_some() && parts.all(|x| STEM_NAMES.contains(&x.to_ascii_lowercase().as_str()))
 }
 
@@ -5256,7 +5315,7 @@ fn reply_for_completed_job(job: &separator::SeparatorJob) -> Reply {
 
 #[cfg(test)]
 mod separator_args_tests {
-    use super::parse_separator_args;
+    use super::{parse_separator_args, parse_separator_args_with};
 
     fn v(xs: &[&str]) -> Option<Vec<String>> {
         Some(xs.iter().map(|x| x.to_string()).collect())
@@ -5298,6 +5357,46 @@ mod separator_args_tests {
         assert_eq!(
             parse_separator_args("'/tmp/it\"s.wav'"),
             Some(("/tmp/it\"s.wav".into(), None))
+        );
+    }
+
+    #[test]
+    fn bare_path_with_spaced_stems_list() {
+        assert_eq!(
+            parse_separator_args_with("/tmp/a.mp3 vocals, drums", |_| true),
+            Some(("/tmp/a.mp3".into(), v(&["vocals", "drums"])))
+        );
+        assert_eq!(
+            parse_separator_args_with("/tmp/My Song.mp3 vocals , bass,  piano", |_| true),
+            Some(("/tmp/My Song.mp3".into(), v(&["vocals", "bass", "piano"])))
+        );
+    }
+
+    #[test]
+    fn whole_args_win_when_peeled_path_missing() {
+        // A file literally named "Best of drums": the peeled "/tmp/Best of"
+        // doesn't exist, the full string does.
+        let exists = |p: &str| p == "/tmp/Best of drums";
+        assert_eq!(
+            parse_separator_args_with("/tmp/Best of drums", exists),
+            Some(("/tmp/Best of drums".into(), None))
+        );
+        // Neither exists: keep the peeled interpretation (caller reports).
+        assert_eq!(
+            parse_separator_args_with("/tmp/x.mp3 drums", |_| false),
+            Some(("/tmp/x.mp3".into(), v(&["drums"])))
+        );
+    }
+
+    #[test]
+    fn quoted_remainder_must_be_stems() {
+        assert_eq!(
+            parse_separator_args_with("'/tmp/Rock 'n' Roll.mp3'", |_| true),
+            Some(("/tmp/Rock 'n' Roll.mp3".into(), None))
+        );
+        assert_eq!(
+            parse_separator_args_with("\"/tmp/a b.wav\" vocals drums", |_| true),
+            Some(("/tmp/a b.wav".into(), v(&["vocals", "drums"])))
         );
     }
 

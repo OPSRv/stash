@@ -543,10 +543,102 @@ fn ext_spawn(what: &'static str, f: impl FnOnce() -> Result<(), String> + Send +
     });
 }
 
+/// Snooze successors: old row id → the row it was snoozed into. Lets a
+/// Reminders.app create that was still in flight (osascript takes ~1 s)
+/// follow the reminder to its new row instead of deleting the item.
+/// In-memory only — the race it covers lasts seconds.
+static SNOOZED_TO: std::sync::Mutex<std::collections::BTreeMap<i64, i64>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+const SNOOZED_TO_CAP: usize = 512;
+
+fn record_snooze_successor(old_id: i64, new_id: i64) {
+    if old_id == new_id {
+        return;
+    }
+    if let Ok(mut m) = SNOOZED_TO.lock() {
+        if m.len() >= SNOOZED_TO_CAP {
+            m.clear();
+        }
+        m.insert(old_id, new_id);
+    }
+}
+
+/// Where a freshly created Reminders.app item for row `id` belongs.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MirrorTarget {
+    /// Row `id` is still active — store the item on it.
+    Own,
+    /// Row was snoozed (possibly repeatedly) into active row `to`, due at
+    /// `due` — move the item there.
+    Moved { to: i64, due: i64 },
+    /// Cancelled / fired / successor gone — delete the item.
+    Delete,
+}
+
+/// Pure decision for [`ext_mirror_create_blocking`]: follow the snooze
+/// chain from `id` (bounded, cycle-safe) to the first active row.
+pub fn mirror_target(
+    id: i64,
+    active: &[Reminder],
+    successors: &std::collections::BTreeMap<i64, i64>,
+) -> MirrorTarget {
+    let due_of = |rid: i64| active.iter().find(|r| r.id == rid).map(|r| r.due_at);
+    if due_of(id).is_some() {
+        return MirrorTarget::Own;
+    }
+    let mut cur = id;
+    for _ in 0..16 {
+        let Some(&next) = successors.get(&cur) else { break };
+        if next == id {
+            break;
+        }
+        if let Some(due) = due_of(next) {
+            return MirrorTarget::Moved { to: next, due };
+        }
+        cur = next;
+    }
+    MirrorTarget::Delete
+}
+
+/// What to do with the Reminders.app item once the target row is known.
+#[derive(Debug, PartialEq, Eq)]
+enum MirrorOp {
+    None,
+    UpdateDue(i64),
+    Delete,
+}
+
+/// Store `ext` on the row it now belongs to. Pure DB logic (testable
+/// without `osascript`); returns the follow-up bridge call.
+fn place_mirror(
+    repo: &mut super::repo::TelegramRepo,
+    id: i64,
+    ext: &str,
+    successors: &std::collections::BTreeMap<i64, i64>,
+) -> Result<MirrorOp, String> {
+    let active = repo.list_active_reminders().map_err(|e| e.to_string())?;
+    match mirror_target(id, &active, successors) {
+        MirrorTarget::Own => {
+            repo.set_reminder_ext_id(id, Some(ext)).map_err(|e| e.to_string())?;
+            Ok(MirrorOp::None)
+        }
+        MirrorTarget::Moved { to, due } => {
+            // Dedup hit: the successor already owns an item — drop ours.
+            if repo.reminder_ext_id(to).map_err(|e| e.to_string())?.is_some() {
+                return Ok(MirrorOp::Delete);
+            }
+            repo.set_reminder_ext_id(to, Some(ext)).map_err(|e| e.to_string())?;
+            Ok(MirrorOp::UpdateDue(due))
+        }
+        MirrorTarget::Delete => Ok(MirrorOp::Delete),
+    }
+}
+
 /// Mirror reminder `id` into Reminders.app and remember the item id.
 /// Blocking (spawns `osascript`) — call from `spawn_blocking` or a
-/// thread. If the row was cancelled / fired while the script ran, the
-/// freshly created item is deleted again instead of being stored.
+/// thread. If the row was snoozed while the script ran, the item follows
+/// it to the successor row (due re-pointed); if it was cancelled / fired,
+/// the freshly created item is deleted again instead of being stored.
 pub fn ext_mirror_create_blocking(
     state: &TelegramState,
     id: i64,
@@ -554,23 +646,16 @@ pub fn ext_mirror_create_blocking(
     due: i64,
 ) -> Result<(), String> {
     let ext = bridge::create_reminder(text, due)?;
-    let still_active = {
+    let op = {
+        let successors = SNOOZED_TO.lock().map(|m| m.clone()).unwrap_or_default();
         let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
-        let active = repo
-            .list_active_reminders()
-            .map_err(|e| e.to_string())?
-            .iter()
-            .any(|r| r.id == id);
-        if active {
-            repo.set_reminder_ext_id(id, Some(&ext))
-                .map_err(|e| e.to_string())?;
-        }
-        active
+        place_mirror(&mut repo, id, &ext, &successors)?
     };
-    if !still_active {
-        bridge::delete_reminder(&ext)?;
+    match op {
+        MirrorOp::None => Ok(()),
+        MirrorOp::UpdateDue(new_due) => bridge::update_due(&ext, new_due),
+        MirrorOp::Delete => bridge::delete_reminder(&ext),
     }
-    Ok(())
 }
 
 /// Fire-and-forget variant of [`ext_mirror_create_blocking`].
@@ -648,7 +733,9 @@ pub fn ext_sync_move(state: &TelegramState, old_id: i64, new_id: i64, due: i64) 
         Err(e) => Err(e.to_string()),
     };
     match op {
-        Ok(ExtMove::None) => {}
+        // Nothing mirrored yet — maybe a create is still in flight; let it
+        // find the successor row when it lands.
+        Ok(ExtMove::None) => record_snooze_successor(old_id, new_id),
         Ok(ExtMove::Update(ext)) => ext_spawn("update_due", move || bridge::update_due(&ext, due)),
         Ok(ExtMove::Delete(ext)) => ext_spawn("delete", move || bridge::delete_reminder(&ext)),
         Err(e) => tracing::warn!(error = %e, "Reminders.app sync: snooze bookkeeping failed"),
@@ -1211,6 +1298,67 @@ mod tests {
         repo.set_reminder_ext_id(new, Some("B")).unwrap();
         assert_eq!(ext_move(&mut repo, old, new).unwrap(), ExtMove::Delete("A".into()));
         assert_eq!(repo.reminder_ext_id(new).unwrap().as_deref(), Some("B"));
+    }
+
+    fn mrem(id: i64, due: i64) -> Reminder {
+        Reminder { id, text: "t".into(), due_at: due, sent: false, cancelled: false }
+    }
+
+    #[test]
+    fn mirror_target_decisions() {
+        use std::collections::BTreeMap;
+        let mut succ = BTreeMap::new();
+        // Still active → own it.
+        assert_eq!(mirror_target(1, &[mrem(1, 100)], &succ), MirrorTarget::Own);
+        // Cancelled, no successor → delete (cancel semantics kept).
+        assert_eq!(mirror_target(1, &[], &succ), MirrorTarget::Delete);
+        // Snoozed 1 → 2 → follow.
+        succ.insert(1, 2);
+        assert_eq!(
+            mirror_target(1, &[mrem(2, 700)], &succ),
+            MirrorTarget::Moved { to: 2, due: 700 }
+        );
+        // Snoozed twice 1 → 2 → 3, only 3 active.
+        succ.insert(2, 3);
+        assert_eq!(
+            mirror_target(1, &[mrem(3, 900)], &succ),
+            MirrorTarget::Moved { to: 3, due: 900 }
+        );
+        // Successor later cancelled → delete.
+        assert_eq!(mirror_target(1, &[], &succ), MirrorTarget::Delete);
+        // Cycle doesn't hang.
+        succ.insert(3, 1);
+        assert_eq!(mirror_target(1, &[], &succ), MirrorTarget::Delete);
+    }
+
+    #[test]
+    fn place_mirror_transfers_to_snoozed_row() {
+        use std::collections::BTreeMap;
+        let mut repo = ext_repo();
+        let old = repo.insert_reminder("t", 100, 1).unwrap();
+        let new = repo.insert_reminder("t", 700, 1).unwrap();
+        repo.cancel_reminder(old).unwrap();
+        let succ = BTreeMap::from([(old, new)]);
+        assert_eq!(place_mirror(&mut repo, old, "A", &succ).unwrap(), MirrorOp::UpdateDue(700));
+        assert_eq!(repo.reminder_ext_id(new).unwrap().as_deref(), Some("A"));
+        assert_eq!(repo.reminder_ext_id(old).unwrap(), None);
+        // A second in-flight item for the same chain → successor already
+        // mirrored → delete the extra one.
+        assert_eq!(place_mirror(&mut repo, old, "B", &succ).unwrap(), MirrorOp::Delete);
+        assert_eq!(repo.reminder_ext_id(new).unwrap().as_deref(), Some("A"));
+    }
+
+    #[test]
+    fn place_mirror_own_and_cancelled() {
+        use std::collections::BTreeMap;
+        let mut repo = ext_repo();
+        let id = repo.insert_reminder("t", 100, 1).unwrap();
+        assert_eq!(place_mirror(&mut repo, id, "A", &BTreeMap::new()).unwrap(), MirrorOp::None);
+        assert_eq!(repo.reminder_ext_id(id).unwrap().as_deref(), Some("A"));
+        let gone = repo.insert_reminder("u", 100, 1).unwrap();
+        repo.cancel_reminder(gone).unwrap();
+        assert_eq!(place_mirror(&mut repo, gone, "B", &BTreeMap::new()).unwrap(), MirrorOp::Delete);
+        assert_eq!(repo.reminder_ext_id(gone).unwrap(), None);
     }
 
     #[test]
