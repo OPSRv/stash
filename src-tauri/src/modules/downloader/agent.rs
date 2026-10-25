@@ -705,7 +705,7 @@ fn completed_path(app: &AppHandle, id: i64) -> Result<PathBuf, String> {
 /// callback doesn't spin for minutes. Job run + polling + result card are
 /// shared with `/stems` / `/bpm`.
 fn spawn_separator(app: &AppHandle, id: i64, mode: &str) -> Result<Reply, String> {
-    use crate::modules::telegram::module_cmds::{await_separator_job, enqueue_separator};
+    use crate::modules::telegram::agent_util::{await_separator_job, enqueue_separator};
     let path = completed_path(app, id)?;
     let (sep, job_id) = enqueue_separator(
         app,

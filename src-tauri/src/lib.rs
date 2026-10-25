@@ -1153,85 +1153,78 @@ pub fn run() {
             // Cross-module slash commands. Registering here (rather than in
             // TelegramState::new) keeps the telegram module independent of
             // the order in which other module states are constructed.
-            telegram_state.register_command(
-                modules::telegram::module_cmds::BatteryCmd,
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::ClipCmd::new(Arc::clone(&shared_repo)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::NoteCmd::new(Arc::clone(&notes_repo_for_telegram)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::NotesListCmd::new(notes_repo_for_telegram),
-            );
+            // ═══════════════ BEGIN G1 ═══════════════
+            // G1 audio — owned by one move agent; see docs/agent-surface-refactor.md.
             telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::OcrCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::KeepAwakeCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::LaunchClaudeCmd);
-            telegram_state.register_command(
-                modules::telegram::module_cmds::SendCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
-            telegram_state.register_command(
-                modules::telegram::module_cmds::RemindCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::VoiceActionCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::RemindersCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::ForgetCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::RememberCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::MemoryCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::SummarizeCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::ForgetFactCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::ScreenshotCmd,
-            );
-            let power_timers = Arc::new(modules::system::power::PowerTimers::new());
-            telegram_state.register_command(
-                modules::telegram::module_cmds::DisplayCmd,
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::SleepCmd::new(Arc::clone(&power_timers)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::ShutdownCmd::new(Arc::clone(&power_timers)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::DashboardCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(modules::telegram::module_cmds::AppCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::FocusCmd);
-            telegram_state.register_command(
-                modules::telegram::module_cmds::WeatherCmd::new(Arc::clone(&telegram_state)),
-            );
-            telegram_state.register_command(modules::telegram::module_cmds::NavigateCmd);
             telegram_state.register_command(modules::telegram::module_cmds::MetronomeCmd);
             telegram_state.register_command(modules::telegram::module_cmds::TunerCmd);
             telegram_state.register_command(modules::telegram::module_cmds::RecordCmd);
             telegram_state.register_command(modules::telegram::module_cmds::ValetonCmd);
-            telegram_state.register_command(
-                modules::telegram::module_cmds::PomodoroCmd::new(Arc::clone(&pomodoro_state)),
-            );
-            telegram_state.register_command(
-                modules::telegram::module_cmds::AiCmd::new(Arc::clone(&telegram_state)),
-            );
+            modules::music::agent::register_commands(&telegram_state, app.handle());
+            modules::metronome::agent::register_commands(&telegram_state, app.handle());
+            modules::tuner::agent::register_commands(&telegram_state, app.handle());
+            modules::recorder::agent::register_commands(&telegram_state, app.handle());
+            modules::valeton::agent::register_commands(&telegram_state, app.handle());
+            modules::circle::agent::register_commands(&telegram_state, app.handle());
+            // ═══════════════ END G1 ═══════════════
+
+            // ═══════════════ BEGIN G2 ═══════════════
+            // G2 productivity — owned by one move agent; see docs/agent-surface-refactor.md.
+            telegram_state.register_command(modules::telegram::module_cmds::ClipCmd::new(Arc::clone(&shared_repo)));
+            telegram_state.register_command(modules::telegram::module_cmds::NoteCmd::new(Arc::clone(&notes_repo_for_telegram)));
+            telegram_state.register_command(modules::telegram::module_cmds::NotesListCmd::new(notes_repo_for_telegram));
+            telegram_state.register_command(modules::telegram::module_cmds::RemindCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::RemindersCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::ForgetCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::RememberCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::MemoryCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::ForgetFactCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::PomodoroCmd::new(Arc::clone(&pomodoro_state)));
+            modules::notes::agent::register_commands(&telegram_state, app.handle());
+            modules::clipboard::agent::register_commands(&telegram_state, app.handle());
+            modules::pomodoro::agent::register_commands(&telegram_state, app.handle());
+            modules::telegram::memory_cmds::register_commands(&telegram_state, app.handle());
+            // ═══════════════ END G2 ═══════════════
+
+            // ═══════════════ BEGIN G3 ═══════════════
+            // G3 system — owned by one move agent; see docs/agent-surface-refactor.md.
+            telegram_state.register_command(modules::telegram::module_cmds::BatteryCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::VolumeCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::ScreenshotCmd);
+            let power_timers = Arc::new(modules::system::power::PowerTimers::new());
+            telegram_state.register_command(modules::telegram::module_cmds::DisplayCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::SleepCmd::new(Arc::clone(&power_timers)));
+            telegram_state.register_command(modules::telegram::module_cmds::ShutdownCmd::new(Arc::clone(&power_timers)));
+            telegram_state.register_command(modules::telegram::module_cmds::AppCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::FocusCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::WeatherCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::KeepAwakeCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::DashboardCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::NavigateCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::UpdateCmd);
+            modules::system::agent::register_commands(&telegram_state);
+            modules::keepawake::agent::register_commands(&telegram_state, app.handle());
+            modules::telegram::core_cmds::register_commands(&telegram_state, app.handle());
+            // ═══════════════ END G3 ═══════════════
+
+            // ═══════════════ BEGIN G4 ═══════════════
+            // G4 media/AI — owned by one move agent; see docs/agent-surface-refactor.md.
+            telegram_state.register_command(modules::telegram::module_cmds::OcrCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::LaunchClaudeCmd);
+            telegram_state.register_command(modules::telegram::module_cmds::SendCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::VoiceActionCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::SummarizeCmd::new(Arc::clone(&telegram_state)));
+            telegram_state.register_command(modules::telegram::module_cmds::AiCmd::new(Arc::clone(&telegram_state)));
             telegram_state.register_command(modules::telegram::module_cmds::SeparateStemsCmd);
             telegram_state.register_command(modules::telegram::module_cmds::DetectBpmCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::UpdateCmd);
+            modules::separator::agent::register_commands(&telegram_state, app.handle());
+            modules::converter::agent::register_commands(&telegram_state, app.handle());
+            modules::ocr::agent::register_commands(&telegram_state, app.handle());
+            modules::ai::agent::register_commands(&telegram_state, app.handle());
+            modules::npm_scripts::agent::register_commands(&telegram_state, app.handle());
+            modules::terminal::agent::register_commands(&telegram_state, app.handle());
+            modules::telegram::send_cmds::register_commands(&telegram_state, app.handle());
+            // ═══════════════ END G4 ═══════════════
             telegram_state.register_command(
                 modules::telegram::confirm::ConfirmCmd::new(Arc::clone(&telegram_state)),
             );
@@ -1240,7 +1233,6 @@ pub fn run() {
             );
             modules::downloader::agent::register_commands(&telegram_state);
             modules::translator::agent::register_commands(&telegram_state);
-            modules::system::agent::register_commands(&telegram_state);
             telegram_state.register_command(modules::telegram::bot_cmds::StartCmd);
             telegram_state.register_command(
                 modules::telegram::bot_cmds::RetryCmd::new(Arc::clone(&telegram_state)),

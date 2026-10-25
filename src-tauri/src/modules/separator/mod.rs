@@ -11,6 +11,7 @@
 //! sidecar's source tree is Python instead of Rust because Demucs and
 //! BeatNet are Python-only libraries.
 
+pub mod agent;
 pub mod catalog;
 pub mod commands;
 pub mod installer;

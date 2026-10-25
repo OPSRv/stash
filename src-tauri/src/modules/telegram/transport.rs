@@ -1592,7 +1592,7 @@ fn build_unknown_command_reply(
 /// alive and here's what I already know" + a nudge toward /help. The
 /// quick-actions keyboard is attached separately at the call site.
 pub(crate) fn build_welcome_message(app: &AppHandle) -> String {
-    use super::module_cmds::{read_battery, BatterySnapshot};
+    use super::agent_util::{read_battery, BatterySnapshot};
     let battery = match read_battery() {
         BatterySnapshot::Present { percent, charging } => {
             let icon = if charging { "🔌" } else { "🔋" };

@@ -7,6 +7,7 @@
 //! can show which ones are running, which TCP ports they listen on, and
 //! stop them.
 
+pub mod agent;
 pub mod commands;
 pub mod package;
 pub mod procs;
