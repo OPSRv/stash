@@ -12,6 +12,10 @@ pub struct ProcessInfo {
     pub name: String,
     /// Full command line (may be long).
     pub command: String,
+    /// Process start time (unix seconds) — 0 when unknown. Used to build a
+    /// short identity token so a stale kill button can't hit a reused pid.
+    #[serde(skip_serializing)]
+    pub start_secs: u64,
 }
 
 /// Parse a single line of our custom `ps` output. Format (whitespace-separated):
@@ -59,6 +63,7 @@ pub fn parse_ps_line(line: &str) -> Option<ProcessInfo> {
         user,
         name: basename(exe),
         command,
+        start_secs: 0,
     })
 }
 
@@ -83,7 +88,62 @@ pub fn list_processes() -> Result<Vec<ProcessInfo>, String> {
         ));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
-    Ok(stdout.lines().filter_map(parse_ps_line).collect())
+    Ok(stdout
+        .lines()
+        .filter_map(parse_ps_line)
+        .map(|mut p| {
+            p.start_secs = process_start_secs(p.pid).unwrap_or(0);
+            p
+        })
+        .collect())
+}
+
+/// Start time of `pid` in unix seconds via `proc_pidinfo` (no subprocess).
+#[cfg(target_os = "macos")]
+pub fn process_start_secs(pid: i32) -> Option<u64> {
+    if pid <= 0 {
+        return None;
+    }
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            size,
+        )
+    };
+    (n == size).then_some(info.pbi_start_tvsec)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn process_start_secs(_pid: i32) -> Option<u64> {
+    None
+}
+
+/// Short identity token for a process (start seconds mod 1e6) — embedded in
+/// kill callbacks and re-checked before signalling.
+pub fn identity_token(start_secs: u64) -> u32 {
+    (start_secs % 1_000_000) as u32
+}
+
+/// Current identity token of a live `pid`, `None` if it's gone / unknown.
+pub fn current_token(pid: i32) -> Option<u32> {
+    process_start_secs(pid).map(identity_token)
+}
+
+/// Pids a kill must never target: init/launchd, the whole process group
+/// (≤ 1), Stash itself, and the process that launched it.
+pub fn is_protected_pid(pid: i32, own: i32, parent: i32) -> bool {
+    pid <= 1 || pid == own || (parent > 1 && pid == parent)
+}
+
+fn is_protected(pid: i32) -> bool {
+    let own = std::process::id() as i32;
+    let parent = unsafe { libc::getppid() };
+    is_protected_pid(pid, own, parent)
 }
 
 pub fn current_user() -> String {
@@ -103,6 +163,9 @@ pub fn current_user() -> String {
 pub fn kill_process(pid: i32, force: bool) -> Result<(), String> {
     if pid <= 1 {
         return Err("refusing to kill pid <= 1".into());
+    }
+    if is_protected(pid) {
+        return Err(format!("refusing to kill pid {pid}: Stash's own process"));
     }
     // Verify the process is owned by the current user before signalling.
     let me = current_user();
@@ -185,6 +248,34 @@ mod tests {
     fn refuses_low_pid() {
         assert!(kill_process(0, false).is_err());
         assert!(kill_process(1, true).is_err());
+    }
+
+    #[test]
+    fn refuses_own_pid() {
+        // Must error out before signalling — otherwise this test would die.
+        assert!(kill_process(std::process::id() as i32, false).is_err());
+    }
+
+    #[test]
+    fn protected_pid_logic() {
+        assert!(is_protected_pid(1, 500, 400));
+        assert!(is_protected_pid(500, 500, 400));
+        assert!(is_protected_pid(400, 500, 400));
+        assert!(!is_protected_pid(401, 500, 400));
+        // parent == launchd (1) doesn't protect anything extra.
+        assert!(!is_protected_pid(2, 500, 1));
+    }
+
+    #[test]
+    fn identity_token_wraps_and_is_stable() {
+        assert_eq!(identity_token(1_761_400_123), 400_123);
+        assert_eq!(identity_token(5), 5);
+        #[cfg(target_os = "macos")]
+        {
+            let me = std::process::id() as i32;
+            let t = current_token(me).expect("own start time");
+            assert_eq!(current_token(me), Some(t));
+        }
     }
 
     #[test]

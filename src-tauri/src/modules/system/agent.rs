@@ -417,9 +417,10 @@ pub fn top_processes(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcArgs {
     List { sort: ProcSort, query: Option<String> },
-    /// First tap on ✖ — show the confirm row.
-    Ask { sort: ProcSort, pid: i32 },
-    Kill { sort: ProcSort, pid: i32, force: bool },
+    /// First tap on ✖ — show the confirm row. `tok` is the identity token
+    /// (see [`processes::identity_token`]) of the process the card showed.
+    Ask { sort: ProcSort, pid: i32, tok: Option<u32> },
+    Kill { sort: ProcSort, pid: i32, force: bool, tok: Option<u32> },
     Usage,
 }
 
@@ -432,11 +433,15 @@ pub fn parse_proc_args(args: &str) -> ProcArgs {
     if let Some(sort) = ProcSort::parse(&first) {
         return ProcArgs::List { sort, query: None };
     }
-    // `<verb> [sort] <pid>`
-    let sort_pid = |rest: &[&str]| -> Option<(ProcSort, i32)> {
+    // `<verb> [sort] <pid> [tok]`
+    let sort_pid = |rest: &[&str]| -> Option<(ProcSort, i32, Option<u32>)> {
+        let (sort, rest) = match rest.first().and_then(|s| ProcSort::parse(s)) {
+            Some(sort) => (sort, &rest[1..]),
+            None => (ProcSort::Cpu, rest),
+        };
         match rest {
-            [pid] => Some((ProcSort::Cpu, pid.parse().ok()?)),
-            [s, pid] => Some((ProcSort::parse(s)?, pid.parse().ok()?)),
+            [pid] => Some((sort, pid.parse().ok()?, None)),
+            [pid, tok] => Some((sort, pid.parse().ok()?, Some(tok.parse().ok()?))),
             _ => None,
         }
     };
@@ -446,13 +451,14 @@ pub fn parse_proc_args(args: &str) -> ProcArgs {
             query: Some(toks[1..].join(" ")),
         },
         "ask" => sort_pid(&toks[1..])
-            .map(|(sort, pid)| ProcArgs::Ask { sort, pid })
+            .map(|(sort, pid, tok)| ProcArgs::Ask { sort, pid, tok })
             .unwrap_or(ProcArgs::Usage),
         "kill" | "term" | "force" | "kill9" => sort_pid(&toks[1..])
-            .map(|(sort, pid)| ProcArgs::Kill {
+            .map(|(sort, pid, tok)| ProcArgs::Kill {
                 sort,
                 pid,
                 force: matches!(first.as_str(), "force" | "kill9"),
+                tok,
             })
             .unwrap_or(ProcArgs::Usage),
         _ => ProcArgs::Usage,
@@ -484,21 +490,39 @@ pub fn proc_text(list: &[ProcessInfo], sort: ProcSort, query: Option<&str>) -> S
     s.trim_end().to_string()
 }
 
+/// ` <tok>` suffix for a kill/ask callback, empty when the start time is unknown.
+fn tok_suffix(tok: Option<u32>) -> String {
+    tok.map(|t| format!(" {t}")).unwrap_or_default()
+}
+
+fn proc_token(p: &ProcessInfo) -> Option<u32> {
+    (p.start_secs > 0).then(|| processes::identity_token(p.start_secs))
+}
+
+/// The process behind `pid` is still the one the card showed (`tok`).
+/// No token (typed by hand) → nothing to compare, accept.
+fn same_process(tok: Option<u32>, current: Option<u32>) -> bool {
+    tok.is_none() || tok == current
+}
+
+const PROC_CHANGED: &str = "⚠️ Процес змінився — онови список";
+
 /// `me`: current user (only own processes get a kill button); `own_pid`:
-/// Stash itself, never offered.
+/// Stash itself, never offered. `asking`: pid + identity token under confirm.
 pub fn proc_keyboard(
     list: &[ProcessInfo],
     sort: ProcSort,
     me: &str,
     own_pid: i32,
-    asking: Option<i32>,
+    asking: Option<(i32, Option<u32>)>,
 ) -> InlineKeyboard {
     let mut rows: Vec<Vec<InlineButton>> = Vec::new();
     let k = sort.key();
-    if let Some(pid) = asking {
+    if let Some((pid, tok)) = asking {
+        let t = tok_suffix(tok);
         rows.push(vec![
-            InlineButton::new("✅ Завершити", format!("refresh:proc:kill {k} {pid}")),
-            InlineButton::new("💀 Force", format!("refresh:proc:force {k} {pid}")),
+            InlineButton::new("✅ Завершити", format!("refresh:proc:kill {k} {pid}{t}")),
+            InlineButton::new("💀 Force", format!("refresh:proc:force {k} {pid}{t}")),
             InlineButton::new("✖ Ні", format!("refresh:proc:{k}")),
         ]);
     } else {
@@ -509,7 +533,7 @@ pub fn proc_keyboard(
             .map(|(i, p)| {
                 InlineButton::new(
                     format!("✖ {} {}", i + 1, short(&p.name, 14)),
-                    format!("refresh:proc:ask {k} {}", p.pid),
+                    format!("refresh:proc:ask {k} {}{}", p.pid, tok_suffix(proc_token(p))),
                 )
             })
             .collect();
@@ -536,7 +560,7 @@ pub fn proc_keyboard(
 async fn proc_card(
     sort: ProcSort,
     query: Option<String>,
-    asking: Option<i32>,
+    asking: Option<(i32, Option<u32>)>,
     flash: Option<String>,
 ) -> Reply {
     let all = match blocking(processes::list_processes).await {
@@ -544,8 +568,17 @@ async fn proc_card(
         Err(e) => return Reply::text(format!("⚠️ Не вдалося отримати процеси: {e}")),
     };
     let mut list = top_processes(all.clone(), sort, query.as_deref(), PROC_ROWS);
+    // A stale card: the pid now belongs to another process (or is gone).
+    let (asking, flash) = match asking {
+        Some((pid, tok))
+            if !same_process(tok, all.iter().find(|p| p.pid == pid).and_then(proc_token)) =>
+        {
+            (None, Some(PROC_CHANGED.to_string()))
+        }
+        a => (a, flash),
+    };
     // Keep the target visible in the confirm view even if it fell off the top.
-    if let Some(pid) = asking {
+    if let Some((pid, _)) = asking {
         if !list.iter().any(|p| p.pid == pid) {
             if let Some(p) = all.iter().find(|p| p.pid == pid) {
                 list.push(p.clone());
@@ -554,7 +587,7 @@ async fn proc_card(
     }
     let me = processes::current_user();
     let mut text = proc_text(&list, sort, query.as_deref());
-    if let Some(pid) = asking {
+    if let Some((pid, _)) = asking {
         let name = all
             .iter()
             .find(|p| p.pid == pid)
@@ -595,11 +628,24 @@ impl CommandHandler for ProcCmd {
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
         match parse_proc_args(args) {
             ProcArgs::List { sort, query } => proc_card(sort, query, None, None).await,
-            ProcArgs::Ask { sort, pid } => proc_card(sort, None, Some(pid), None).await,
-            ProcArgs::Kill { sort, pid, force } => {
-                let res = blocking(move || processes::kill_process(pid, force)).await;
-                let sig = if force { "SIGKILL" } else { "SIGTERM" };
-                let flash = result_line(&format!("✅ {sig} → pid {pid}"), res);
+            ProcArgs::Ask { sort, pid, tok } => {
+                proc_card(sort, None, Some((pid, tok)), None).await
+            }
+            ProcArgs::Kill { sort, pid, force, tok } => {
+                let res = blocking(move || {
+                    if !same_process(tok, processes::current_token(pid)) {
+                        return Ok(false);
+                    }
+                    processes::kill_process(pid, force).map(|_| true)
+                })
+                .await;
+                let flash = match res {
+                    Ok(false) => PROC_CHANGED.to_string(),
+                    res => {
+                        let sig = if force { "SIGKILL" } else { "SIGTERM" };
+                        result_line(&format!("✅ {sig} → pid {pid}"), res.map(|_| ()))
+                    }
+                };
                 proc_card(sort, None, None, Some(flash)).await
             }
             ProcArgs::Usage => Reply::text(format!("⚙️ {PROC_USAGE}")),
@@ -614,7 +660,9 @@ pub enum DockerArgs {
     Show,
     Launch,
     Act { action: ContainerAction, id: String },
-    AskRemove { id: String },
+    /// First tap on a disruptive container button (stop/restart/rm) —
+    /// render the confirm row.
+    Ask { action: ContainerAction, id: String },
     AskPrune,
     Prune,
     Usage,
@@ -629,8 +677,16 @@ pub fn parse_docker_args(args: &str) -> DockerArgs {
         }
         [v] if v.eq_ignore_ascii_case("askprune") => DockerArgs::AskPrune,
         [v] if v.eq_ignore_ascii_case("prune") => DockerArgs::Prune,
-        [v, id] if v.eq_ignore_ascii_case("askrm") && docker::is_valid_container_ref(id) => {
-            DockerArgs::AskRemove { id: id.to_string() }
+        [v, id]
+            if v.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("ask"))
+                && docker::is_valid_container_ref(id) =>
+        {
+            match ContainerAction::parse(&v[3..]) {
+                Some(action) if action != ContainerAction::Start => {
+                    DockerArgs::Ask { action, id: id.to_string() }
+                }
+                _ => DockerArgs::Usage,
+            }
         }
         [v, id] if docker::is_valid_container_ref(id) => match ContainerAction::parse(v) {
             Some(action) => DockerArgs::Act { action, id: id.to_string() },
@@ -681,6 +737,26 @@ pub fn docker_text(st: &DockerStatus, containers: &[DockerContainer]) -> String 
 
 const DOCKER_ROWS: usize = 8;
 
+/// Callback verb for a container action (`ContainerAction::parse` round-trips it).
+fn docker_cmd(a: ContainerAction) -> &'static str {
+    match a {
+        ContainerAction::Start => "start",
+        ContainerAction::Stop => "stop",
+        ContainerAction::Restart => "restart",
+        ContainerAction::Remove => "rm",
+    }
+}
+
+/// Ukrainian infinitive for the confirm button / prompt.
+fn docker_verb(a: ContainerAction) -> &'static str {
+    match a {
+        ContainerAction::Start => "Запустити",
+        ContainerAction::Stop => "Зупинити",
+        ContainerAction::Restart => "Перезапустити",
+        ContainerAction::Remove => "Видалити",
+    }
+}
+
 pub fn docker_keyboard(
     st: &DockerStatus,
     containers: &[DockerContainer],
@@ -688,8 +764,11 @@ pub fn docker_keyboard(
 ) -> InlineKeyboard {
     let mut rows: Vec<Vec<InlineButton>> = Vec::new();
     match confirm {
-        Some(DockerArgs::AskRemove { id }) => rows.push(vec![
-            InlineButton::new("✅ Видалити", format!("refresh:docker:rm {id}")),
+        Some(DockerArgs::Ask { action, id }) => rows.push(vec![
+            InlineButton::new(
+                format!("✅ {}", docker_verb(*action)),
+                format!("refresh:docker:{} {id}", docker_cmd(*action)),
+            ),
             InlineButton::new("✖ Ні", "refresh:docker:"),
         ]),
         Some(DockerArgs::AskPrune) => rows.push(vec![
@@ -706,8 +785,8 @@ pub fn docker_keyboard(
             let label = short(&c.name, 14);
             rows.push(if c.is_running() {
                 vec![
-                    InlineButton::new(format!("⏹ {label}"), format!("refresh:docker:stop {}", c.id)),
-                    InlineButton::new("🔄", format!("refresh:docker:restart {}", c.id)),
+                    InlineButton::new(format!("⏹ {label}"), format!("refresh:docker:askstop {}", c.id)),
+                    InlineButton::new("🔄", format!("refresh:docker:askrestart {}", c.id)),
                 ]
             } else {
                 vec![
@@ -740,13 +819,17 @@ async fn docker_card(confirm: Option<DockerArgs>, flash: Option<String>) -> Repl
     .unwrap_or_default();
     let mut text = docker_text(&st, &containers);
     match &confirm {
-        Some(DockerArgs::AskRemove { id }) => {
+        Some(DockerArgs::Ask { action, id }) => {
             let name = containers
                 .iter()
                 .find(|c| &c.id == id)
                 .map(|c| short(&c.name, 24))
                 .unwrap_or_else(|| id.clone());
-            text.push_str(&format!("\n\n⚠️ Видалити контейнер `{name}`? Це незворотно."));
+            let tail = if *action == ContainerAction::Remove { " Це незворотно." } else { "" };
+            text.push_str(&format!(
+                "\n\n⚠️ {} контейнер `{name}`?{tail}",
+                docker_verb(*action)
+            ));
         }
         Some(DockerArgs::AskPrune) => text.push_str(
             "\n\n⚠️ Prune видалить усі зупинені контейнери, невикористані образи, томи та build cache.",
@@ -802,7 +885,7 @@ impl CommandHandler for DockerCmd {
     async fn handle(&self, _ctx: Ctx, args: &str) -> Reply {
         match parse_docker_args(args) {
             DockerArgs::Show => docker_card(None, None).await,
-            a @ (DockerArgs::AskRemove { .. } | DockerArgs::AskPrune) => {
+            a @ (DockerArgs::Ask { .. } | DockerArgs::AskPrune) => {
                 docker_card(Some(a), None).await
             }
             DockerArgs::Launch => {
@@ -1020,8 +1103,29 @@ fn run_processes(a: &Value) -> Result<Value, String> {
 fn run_kill(a: &Value) -> Result<Value, String> {
     let pid = a.get("pid").and_then(Value::as_i64).ok_or("missing `pid`")? as i32;
     let force = a.get("force").and_then(Value::as_bool).unwrap_or(false);
+    // Optional identity check: the pid may have been reused since the model
+    // listed processes. `kill_process` itself refuses Stash's own pid.
+    if let Some(expected) = arg_str(a, "name").filter(|n| !n.trim().is_empty()) {
+        let list = processes::list_processes()?;
+        let actual = list.iter().find(|p| p.pid == pid).map(|p| p.name.as_str());
+        if !name_matches(expected, actual) {
+            return Err(format!(
+                "pid {pid} is now `{}`, not `{expected}` — list processes again",
+                actual.unwrap_or("gone")
+            ));
+        }
+    }
     processes::kill_process(pid, force)?;
     Ok(json!({ "ok": true, "pid": pid, "signal": if force { "SIGKILL" } else { "SIGTERM" } }))
+}
+
+/// Case-insensitive match of a model-supplied process name against the live one.
+fn name_matches(expected: &str, actual: Option<&str>) -> bool {
+    let e = expected.trim().to_lowercase();
+    actual.is_some_and(|a| {
+        let a = a.to_lowercase();
+        a == e || a.contains(&e) || e.contains(&a)
+    })
 }
 
 fn run_quick_action(a: &Value) -> Result<Value, String> {
@@ -1288,6 +1392,10 @@ fn sch_kill() -> Value {
         "type": "object",
         "properties": {
             "pid": { "type": "integer" },
+            "name": {
+                "type": "string",
+                "description": "Expected process name from system_processes; the kill is refused if the pid now belongs to another process. Always pass it."
+            },
             "force": { "type": "boolean", "description": "SIGKILL instead of SIGTERM." }
         },
         "required": ["pid"],
@@ -1501,6 +1609,7 @@ mod tests {
             user: user.into(),
             name: name.into(),
             command: format!("/bin/{name}"),
+            start_secs: 1_761_400_000 + pid as u64,
         }
     }
 
@@ -1539,6 +1648,24 @@ mod tests {
     }
 
     #[test]
+    fn kill_name_check() {
+        assert!(name_matches("Safari", Some("Safari")));
+        assert!(name_matches("chrome", Some("Google Chrome Helper")));
+        assert!(!name_matches("Safari", Some("stash")));
+        assert!(!name_matches("Safari", None));
+    }
+
+    #[test]
+    fn same_process_guards_reused_pid() {
+        assert!(same_process(None, None));
+        assert!(same_process(None, Some(5)));
+        assert!(same_process(Some(5), Some(5)));
+        assert!(!same_process(Some(5), Some(6)));
+        // Gone process with a token → treat as changed.
+        assert!(!same_process(Some(5), None));
+    }
+
+    #[test]
     fn parse_proc() {
         assert_eq!(parse_proc_args(""), ProcArgs::List { sort: ProcSort::Cpu, query: None });
         assert_eq!(parse_proc_args("ram"), ProcArgs::List { sort: ProcSort::Mem, query: None });
@@ -1546,15 +1673,23 @@ mod tests {
             parse_proc_args("find google chrome"),
             ProcArgs::List { sort: ProcSort::Cpu, query: Some("google chrome".into()) }
         );
-        assert_eq!(parse_proc_args("ask mem 42"), ProcArgs::Ask { sort: ProcSort::Mem, pid: 42 });
+        assert_eq!(
+            parse_proc_args("ask mem 42"),
+            ProcArgs::Ask { sort: ProcSort::Mem, pid: 42, tok: None }
+        );
         assert_eq!(
             parse_proc_args("kill 42"),
-            ProcArgs::Kill { sort: ProcSort::Cpu, pid: 42, force: false }
+            ProcArgs::Kill { sort: ProcSort::Cpu, pid: 42, force: false, tok: None }
         );
         assert_eq!(
-            parse_proc_args("force mem 42"),
-            ProcArgs::Kill { sort: ProcSort::Mem, pid: 42, force: true }
+            parse_proc_args("force mem 42 123456"),
+            ProcArgs::Kill { sort: ProcSort::Mem, pid: 42, force: true, tok: Some(123456) }
         );
+        assert_eq!(
+            parse_proc_args("kill 42 7"),
+            ProcArgs::Kill { sort: ProcSort::Cpu, pid: 42, force: false, tok: Some(7) }
+        );
+        assert_eq!(parse_proc_args("kill mem 42 x"), ProcArgs::Usage);
         assert_eq!(parse_proc_args("kill abc"), ProcArgs::Usage);
         assert_eq!(parse_proc_args("bogus"), ProcArgs::Usage);
         assert!(ProcCmd.dangerous("kill 42"));
@@ -1573,13 +1708,16 @@ mod tests {
         let kb = proc_keyboard(&list, ProcSort::Cpu, "me", 400, None);
         let cbs = all_callbacks(&kb);
         let asks: Vec<_> = cbs.iter().filter(|c| c.contains(":ask ")).collect();
-        assert_eq!(asks, vec!["refresh:proc:ask cpu 300"]);
+        assert_eq!(asks, vec!["refresh:proc:ask cpu 300 400300"]);
         // No direct kill without the confirm step.
         assert!(!cbs.iter().any(|c| c.contains(":kill ")));
-        let confirm = proc_keyboard(&list, ProcSort::Mem, "me", 400, Some(300));
+        let confirm = proc_keyboard(&list, ProcSort::Mem, "me", 400, Some((300, Some(400300))));
         let cbs = all_callbacks(&confirm);
-        assert_eq!(cbs[0], "refresh:proc:kill mem 300");
-        assert_eq!(cbs[1], "refresh:proc:force mem 300");
+        assert_eq!(cbs[0], "refresh:proc:kill mem 300 400300");
+        assert_eq!(cbs[1], "refresh:proc:force mem 300 400300");
+        // Worst case still fits Telegram's 64-byte callback limit.
+        let worst = proc_keyboard(&list, ProcSort::Mem, "me", 400, Some((i32::MAX, Some(999_999))));
+        assert!(all_callbacks(&worst).iter().all(|c| c.len() <= 64));
         for cb in &cbs {
             assert!(cb.len() <= 64, "{cb}");
             if let Some(args) = cb.strip_prefix("refresh:proc:") {
@@ -1596,7 +1734,21 @@ mod tests {
             parse_docker_args("stop 0123456789ab"),
             DockerArgs::Act { action: ContainerAction::Stop, id: "0123456789ab".into() }
         );
-        assert_eq!(parse_docker_args("askrm web"), DockerArgs::AskRemove { id: "web".into() });
+        assert_eq!(
+            parse_docker_args("askrm web"),
+            DockerArgs::Ask { action: ContainerAction::Remove, id: "web".into() }
+        );
+        assert_eq!(
+            parse_docker_args("askstop web"),
+            DockerArgs::Ask { action: ContainerAction::Stop, id: "web".into() }
+        );
+        assert_eq!(
+            parse_docker_args("askrestart web"),
+            DockerArgs::Ask { action: ContainerAction::Restart, id: "web".into() }
+        );
+        assert_eq!(parse_docker_args("askstart web"), DockerArgs::Usage);
+        assert_eq!(parse_docker_args("askbogus web"), DockerArgs::Usage);
+        assert!(!DockerCmd.dangerous("askstop web"));
         assert_eq!(parse_docker_args("stop --all"), DockerArgs::Usage);
         assert!(DockerCmd.dangerous("rm web"));
         assert!(DockerCmd.dangerous("prune"));
@@ -1625,13 +1777,28 @@ mod tests {
         ];
         let kb = docker_keyboard(&st, &cs, None);
         let cbs = all_callbacks(&kb);
-        assert!(cbs.contains(&"refresh:docker:stop 0123456789ab".to_string()));
+        assert!(cbs.contains(&"refresh:docker:askstop 0123456789ab".to_string()));
+        assert!(cbs.contains(&"refresh:docker:askrestart 0123456789ab".to_string()));
+        assert!(cbs.contains(&"refresh:docker:start ba9876543210".to_string()));
         assert!(cbs.contains(&"refresh:docker:askrm ba9876543210".to_string()));
-        // rm/prune only reachable through the confirm step.
-        assert!(!cbs.iter().any(|c| c.starts_with("refresh:docker:rm ") || c == "refresh:docker:prune"));
+        // stop/restart/rm/prune only reachable through the confirm step.
+        assert!(!cbs.iter().any(|c| {
+            ["rm ", "stop ", "restart "].iter().any(|v| c.starts_with(&format!("refresh:docker:{v}")))
+                || c == "refresh:docker:prune"
+        }));
         let confirm = docker_keyboard(&st, &cs, Some(&DockerArgs::AskPrune));
         assert_eq!(all_callbacks(&confirm)[0], "refresh:docker:prune");
-        for cb in cbs.iter().chain(all_callbacks(&confirm).iter()) {
+        let stop = docker_keyboard(
+            &st,
+            &cs,
+            Some(&DockerArgs::Ask { action: ContainerAction::Stop, id: "0123456789ab".into() }),
+        );
+        assert_eq!(all_callbacks(&stop)[0], "refresh:docker:stop 0123456789ab");
+        assert_eq!(
+            parse_docker_args("stop 0123456789ab"),
+            DockerArgs::Act { action: ContainerAction::Stop, id: "0123456789ab".into() }
+        );
+        for cb in cbs.iter().chain(all_callbacks(&confirm).iter()).chain(all_callbacks(&stop).iter()) {
             assert!(cb.len() <= 64, "{cb}");
             if let Some(args) = cb.strip_prefix("refresh:docker:") {
                 assert_ne!(parse_docker_args(args), DockerArgs::Usage, "{cb}");
