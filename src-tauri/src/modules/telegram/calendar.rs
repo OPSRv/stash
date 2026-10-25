@@ -127,16 +127,16 @@ mod tests {
 }
 
 #[derive(Debug, Clone)]
-struct UpcomingEvent {
+pub(super) struct UpcomingEvent {
     uid: String,
-    title: String,
-    starts_at: i64, // unix seconds
-    location: Option<String>,
+    pub(super) title: String,
+    pub(super) starts_at: i64, // unix seconds
+    pub(super) location: Option<String>,
 }
 
 /// Query Calendar.app for events starting in the next `window_min` minutes.
 /// Output format: tab-separated `UID\tTITLE\tEPOCH\tLOCATION`, one per line.
-fn fetch_upcoming(window_min: u32) -> Result<Vec<UpcomingEvent>, String> {
+pub(super) fn fetch_upcoming(window_min: u32) -> Result<Vec<UpcomingEvent>, String> {
     let script = format!(
         r#"set w to {window_min} * minutes
 set a to (current date)

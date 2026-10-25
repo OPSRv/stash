@@ -186,12 +186,45 @@ pub async fn build_digest(app: &AppHandle, state: &TelegramState) -> Reply {
         .and_then(|r| r.list_active_reminders().ok())
         .unwrap_or_default();
     let offset = super::inbox::local_offset_seconds_public();
-    text.push_str(&format_today_reminders(&reminders, now_secs(), offset));
+    let now = now_secs();
+    text.push_str(&format_today_reminders(&reminders, now, offset));
+    // Rest of today's Calendar.app events (osascript is blocking; failures
+    // — no permission, Calendar not running — just omit the section).
+    let window_min = minutes_until_local_midnight(now, offset);
+    if let Ok(Ok(events)) =
+        tokio::task::spawn_blocking(move || super::calendar::fetch_upcoming(window_min)).await
+    {
+        text.push_str(&format_today_events(&events, now, offset));
+    }
     Reply {
         text,
         keyboard: Some(digest_keyboard()),
         ..Default::default()
     }
+}
+
+fn minutes_until_local_midnight(now: i64, offset: i64) -> u32 {
+    let into_day = (now + offset).rem_euclid(86_400);
+    ((86_400 - into_day) / 60).max(1) as u32
+}
+
+/// "Calendar" section — empty string when there's nothing left today.
+fn format_today_events(events: &[super::calendar::UpcomingEvent], now: i64, offset: i64) -> String {
+    if events.is_empty() {
+        return String::new();
+    }
+    let mut sorted: Vec<_> = events.iter().collect();
+    sorted.sort_by_key(|e| e.starts_at);
+    let mut out = String::from("\n\n🗓 *Календар:*");
+    for e in sorted {
+        let title: String = e.title.chars().take(60).collect();
+        out.push_str(&format!("\n• {} — {}", format_local_when(e.starts_at, now, offset), title));
+        if let Some(loc) = e.location.as_deref().filter(|l| !l.is_empty()) {
+            let loc: String = loc.chars().take(40).collect();
+            out.push_str(&format!(" ({loc})"));
+        }
+    }
+    out
 }
 
 /// "Today" section — reminders whose due time falls on the current local day.
@@ -565,6 +598,13 @@ pub async fn telegram_send_digest_now(app: AppHandle) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn minutes_until_midnight_counts_rest_of_local_day() {
+        // 23:00 UTC with +2h offset → 01:00 local → 23h left.
+        assert_eq!(super::minutes_until_local_midnight(82_800, 7_200), 23 * 60);
+        assert_eq!(super::minutes_until_local_midnight(86_399, 0), 1);
+    }
+
     use super::*;
 
     fn s(enabled: bool, time: &str, weekdays: u8) -> DigestSettings {
