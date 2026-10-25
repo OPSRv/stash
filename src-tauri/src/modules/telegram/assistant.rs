@@ -726,6 +726,7 @@ pub fn build_runtime_assistant(
     }
     tools.register(super::tools::stash::ClipboardDelete);
     tools.register(super::tools::stash::ClipboardCopyToMac);
+    tools.register(super::digest::ConfigureDigest);
     if let Some(notes) = app.try_state::<crate::modules::notes::commands::NotesState>() {
         tools.register(super::tools::stash::SearchNotes::new(notes.repo.clone()));
         tools.register(super::tools::stash::GetNote::new(notes.repo.clone()));

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   AiSettings,
   ConnectionStatus,
+  DigestSettings,
   DiarStatus,
   InboxItem,
   InboxLimits,
@@ -105,3 +106,13 @@ export const diarizationDownload = (): Promise<void> =>
 
 export const diarizationDelete = (): Promise<void> =>
   invoke('diarization_delete');
+
+export const getDigestSettings = (): Promise<DigestSettings> =>
+  invoke('telegram_get_digest_settings');
+
+/// Persists and returns the normalised settings (e.g. `7:05` → `07:05`).
+export const setDigestSettings = (settings: DigestSettings): Promise<DigestSettings> =>
+  invoke('telegram_set_digest_settings', { settings });
+
+/// Push the digest right now. Resolves `false` when the bot isn't paired.
+export const sendDigestNow = (): Promise<boolean> => invoke('telegram_send_digest_now');

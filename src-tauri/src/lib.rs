@@ -875,6 +875,9 @@ pub fn run() {
             backup::commands::backup_import,
             backup::commands::backup_last_error,
             backup::commands::backup_dismiss_error,
+            modules::telegram::digest::telegram_get_digest_settings,
+            modules::telegram::digest::telegram_set_digest_settings,
+            modules::telegram::digest::telegram_send_digest_now,
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -1243,6 +1246,9 @@ pub fn run() {
             telegram_state.register_command(
                 modules::telegram::bot_cmds::AskCmd::new(Arc::clone(&telegram_state)),
             );
+            telegram_state.register_command(
+                modules::telegram::digest::DigestCmd::new(Arc::clone(&telegram_state)),
+            );
 
             // Outbound watchers — battery + calendar + reminders ticker.
             modules::telegram::battery_watcher::spawn(app.handle().clone());
@@ -1251,6 +1257,7 @@ pub fn run() {
                 app.handle().clone(),
                 Arc::clone(&telegram_state),
             );
+            modules::telegram::digest::spawn(app.handle().clone());
 
             // Rehydrate paired state from secrets. Without this every app
             // restart left the bot offline even though bot_token + chat_id
