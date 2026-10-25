@@ -1,8 +1,6 @@
 //! Agent surface — Valeton GP-5: `/valeton` + `valeton_set_tone` / `valeton_control`.
 //!
-//! Moved verbatim from `telegram/module_cmds.rs` / `telegram/tools/stash.rs`
-//! (G1, see `docs/agent-surface-refactor.md`). Shared helpers live in
-//! `crate::modules::telegram::agent_util`.
+//! Shared helpers live in `crate::modules::telegram::agent_util`.
 
 use std::sync::Arc;
 

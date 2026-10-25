@@ -719,8 +719,6 @@ pub fn build_runtime_assistant(
     tools.register(super::tools::reminders::ListReminders);
     tools.register(super::tools::reminders::CancelReminder);
 
-    // ═══════════════ BEGIN G1 ═══════════════
-    // G1 audio — owned by one move agent; see docs/agent-surface-refactor.md.
     // Same order as before the move: metronome, tuner, circle, valeton, record, music.
     crate::modules::metronome::agent::register_tools(&mut tools, app);
     crate::modules::tuner::agent::register_tools(&mut tools, app);
@@ -728,28 +726,19 @@ pub fn build_runtime_assistant(
     crate::modules::valeton::agent::register_tools(&mut tools, app);
     crate::modules::recorder::agent::register_tools(&mut tools, app);
     crate::modules::music::agent::register_tools(&mut tools, app);
-    // ═══════════════ END G1 ═══════════════
 
-    // ═══════════════ BEGIN G2 ═══════════════
-    // G2 productivity — owned by one move agent; see docs/agent-surface-refactor.md.
     crate::modules::notes::agent::register_tools(&mut tools, app);
     crate::modules::clipboard::agent::register_tools(&mut tools, app);
     crate::modules::pomodoro::agent::register_tools(&mut tools, app);
-    // ═══════════════ END G2 ═══════════════
 
-    // ═══════════════ BEGIN G3 ═══════════════
     crate::modules::system::agent::register_tools(&mut tools);
     super::core_cmds::register_tools(&mut tools, app);
-    // ═══════════════ END G3 ═══════════════
 
-    // ═══════════════ BEGIN G4 ═══════════════
-    // G4 media/AI — owned by one move agent; see docs/agent-surface-refactor.md.
     crate::modules::separator::agent::register_tools(&mut tools, app);
     crate::modules::converter::agent::register_tools(&mut tools, app);
     crate::modules::ocr::agent::register_tools(&mut tools, app);
     crate::modules::npm_scripts::agent::register_tools(&mut tools, app);
     super::send_cmds::register_tools(&mut tools, app);
-    // ═══════════════ END G4 ═══════════════
 
     tools.register(super::digest::ConfigureDigest);
     crate::modules::downloader::agent::register_tools(&mut tools);

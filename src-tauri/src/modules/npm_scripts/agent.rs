@@ -1,8 +1,6 @@
 //! Agent surface — npm scripts: `npm_list_scripts`, `npm_run_script`, `npm_stop_script`.
 //!
-//! Moved verbatim from `telegram/module_cmds.rs` / `telegram/tools/stash.rs`
-//! (see `docs/agent-surface-refactor.md`). Shared helpers live in
-//! `crate::modules::telegram::agent_util`.
+//! Shared helpers live in `crate::modules::telegram::agent_util`.
 
 use async_trait::async_trait;
 use serde_json::{json, Value};

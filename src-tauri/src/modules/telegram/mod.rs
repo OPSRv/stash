@@ -16,7 +16,6 @@ pub mod keyring;
 pub mod llm;
 pub mod memory_cmds;
 pub mod menu;
-pub mod module_cmds;
 pub mod notifier;
 pub mod pairing;
 pub mod reminders;

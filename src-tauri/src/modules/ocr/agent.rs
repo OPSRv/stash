@@ -1,8 +1,6 @@
 //! Agent surface — OCR: `/ocr` + `canvas_ocr_image`.
 //!
-//! Moved verbatim from `telegram/module_cmds.rs` / `telegram/tools/stash.rs`
-//! (see `docs/agent-surface-refactor.md`). Shared helpers live in
-//! `crate::modules::telegram::agent_util`.
+//! Shared helpers live in `crate::modules::telegram::agent_util`.
 
 use std::sync::Arc;
 

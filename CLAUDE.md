@@ -54,8 +54,10 @@ Keep ML / heavyweight runtimes **outside** the macOS bundle. Two flavours, depen
 
 The Telegram bot and AI assistant are a **first-class surface** for every module, not an option. Any new feature (command, tab, timer, action) **must** be reachable via:
 
-1. A **slash command** in `src-tauri/src/modules/telegram/module_cmds.rs` (when a deterministic quick action makes sense), and/or
-2. An **LLM tool** in `src-tauri/src/modules/telegram/tools/stash.rs`, registered in `assistant.rs` → so the assistant (Telegram, CLI via `stash ai "…"`, future voice popup) can invoke the action from a natural-language prompt.
+1. A **slash command** (`CommandHandler`) in the module's own `src-tauri/src/modules/<name>/agent.rs` (when a deterministic quick action makes sense), and/or
+2. An **LLM tool** (`Tool`) in the same `agent.rs` → so the assistant (Telegram, CLI via `stash ai "…"`, future voice popup) can invoke the action from a natural-language prompt.
+
+Each `agent.rs` exposes `register_commands` / `register_tools`, called from `lib.rs` and `telegram/assistant.rs`. Helpers needed by more than one module live in `telegram/agent_util.rs` — module agents never import from each other. Cross-cutting bot commands (dashboard, navigate, update, memory, send) live in `telegram/*_cmds.rs`. Destructive LLM actions must be listed in `telegram/confirm.rs` (or declare `CommandHandler::dangerous`) so the user gets a ✅/✖ card. Canonical examples: `downloader/agent.rs`, `system/agent.rs`.
 
 The single assistant dispatch point is `telegram::assistant::handle_user_text(app, state, prompt)`. All transports (Telegram, CLI, voice) go through it — never duplicate the LLM/tool loop elsewhere.
 

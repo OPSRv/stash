@@ -1,8 +1,7 @@
 //! Helpers shared by the agent surface of more than one module — slash
 //! commands (`CommandHandler`) and LLM tools (`Tool`) alike.
 //!
-//! Each module owns its own `src-tauri/src/modules/<m>/agent.rs` (see
-//! `docs/agent-surface-refactor.md`). Anything two or more of those files
+//! Each module owns its own `src-tauri/src/modules/<m>/agent.rs`. Anything two or more of those files
 //! need lives here instead of being copied, so module agents never import
 //! from each other: popup navigation (`reveal_tab`, `KNOWN_TABS`), the
 //! frontend round-trip (`emit_with_ack`), slash-syntax parsing

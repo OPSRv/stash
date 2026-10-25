@@ -1,7 +1,6 @@
 //! Agent surface — Circle of fifths: `circle_progression`.
 //!
-//! Moved verbatim from `telegram/tools/stash.rs` (G1, see
-//! `docs/agent-surface-refactor.md`). No slash command.
+//! No slash command.
 
 use async_trait::async_trait;
 use serde_json::{json, Value};

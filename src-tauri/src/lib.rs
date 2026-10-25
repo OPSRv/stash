@@ -1152,37 +1152,26 @@ pub fn run() {
             // Cross-module slash commands. Registering here (rather than in
             // TelegramState::new) keeps the telegram module independent of
             // the order in which other module states are constructed.
-            // ═══════════════ BEGIN G1 ═══════════════
-            // G1 audio — owned by one move agent; see docs/agent-surface-refactor.md.
             modules::music::agent::register_commands(&telegram_state, app.handle());
             modules::metronome::agent::register_commands(&telegram_state, app.handle());
             modules::tuner::agent::register_commands(&telegram_state, app.handle());
             modules::recorder::agent::register_commands(&telegram_state, app.handle());
             modules::valeton::agent::register_commands(&telegram_state, app.handle());
-            // ═══════════════ END G1 ═══════════════
 
-            // ═══════════════ BEGIN G2 ═══════════════
-            // G2 productivity — owned by one move agent; see docs/agent-surface-refactor.md.
             modules::notes::agent::register_commands(&telegram_state, app.handle());
             modules::clipboard::agent::register_commands(&telegram_state, app.handle());
             modules::pomodoro::agent::register_commands(&telegram_state, app.handle());
             modules::telegram::memory_cmds::register_commands(&telegram_state, app.handle());
-            // ═══════════════ END G2 ═══════════════
 
-            // ═══════════════ BEGIN G3 ═══════════════
             modules::system::agent::register_commands(&telegram_state);
             modules::keepawake::agent::register_commands(&telegram_state, app.handle());
             modules::telegram::core_cmds::register_commands(&telegram_state, app.handle());
-            // ═══════════════ END G3 ═══════════════
 
-            // ═══════════════ BEGIN G4 ═══════════════
-            // G4 media/AI — owned by one move agent; see docs/agent-surface-refactor.md.
             modules::separator::agent::register_commands(&telegram_state, app.handle());
             modules::ocr::agent::register_commands(&telegram_state, app.handle());
             modules::ai::agent::register_commands(&telegram_state, app.handle());
             modules::terminal::agent::register_commands(&telegram_state, app.handle());
             modules::telegram::send_cmds::register_commands(&telegram_state, app.handle());
-            // ═══════════════ END G4 ═══════════════
             telegram_state.register_command(
                 modules::telegram::confirm::ConfirmCmd::new(Arc::clone(&telegram_state)),
             );

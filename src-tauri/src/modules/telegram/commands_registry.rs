@@ -529,9 +529,8 @@ mod tests {
     fn every_command_is_categorised() {
         let sources = [
             include_str!("commands_registry.rs"),
-            include_str!("module_cmds.rs"),
             include_str!("confirm.rs"),
-            // Per-module agent surfaces (docs/agent-surface-refactor.md).
+            // Per-module agent surfaces (`modules/<m>/agent.rs`).
             include_str!("core_cmds.rs"),
             include_str!("memory_cmds.rs"),
             include_str!("send_cmds.rs"),

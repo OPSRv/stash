@@ -98,7 +98,7 @@ fn now_secs() -> i64 {
 // -------------------- interactive cards --------------------
 //
 // Everything the `/reminders` command renders lives here so the slash
-// handler in `module_cmds.rs` stays a thin delegate. Button payloads go
+// handler in `memory_cmds.rs` stays a thin delegate. Button payloads go
 // through `reminders:<verb>:<args>` so typing `/reminders snooze 12 10m`
 // and tapping a button hit the same parser.
 
