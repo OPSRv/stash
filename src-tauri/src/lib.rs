@@ -988,7 +988,6 @@ pub fn run() {
             let notes_db = data_dir.join("notes.sqlite");
             let notes_repo = NotesRepo::new(Connection::open(&notes_db)?)?;
             let notes_repo = Arc::new(Mutex::new(notes_repo));
-            let notes_repo_for_telegram = Arc::clone(&notes_repo);
             app.manage(NotesState { repo: notes_repo });
 
             // Canvas — project persistence + on-disk raster assets.
@@ -1170,16 +1169,6 @@ pub fn run() {
 
             // ═══════════════ BEGIN G2 ═══════════════
             // G2 productivity — owned by one move agent; see docs/agent-surface-refactor.md.
-            telegram_state.register_command(modules::telegram::module_cmds::ClipCmd::new(Arc::clone(&shared_repo)));
-            telegram_state.register_command(modules::telegram::module_cmds::NoteCmd::new(Arc::clone(&notes_repo_for_telegram)));
-            telegram_state.register_command(modules::telegram::module_cmds::NotesListCmd::new(notes_repo_for_telegram));
-            telegram_state.register_command(modules::telegram::module_cmds::RemindCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::RemindersCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::ForgetCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::RememberCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::MemoryCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::ForgetFactCmd::new(Arc::clone(&telegram_state)));
-            telegram_state.register_command(modules::telegram::module_cmds::PomodoroCmd::new(Arc::clone(&pomodoro_state)));
             modules::notes::agent::register_commands(&telegram_state, app.handle());
             modules::clipboard::agent::register_commands(&telegram_state, app.handle());
             modules::pomodoro::agent::register_commands(&telegram_state, app.handle());
