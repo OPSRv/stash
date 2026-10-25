@@ -732,50 +732,9 @@ pub fn build_runtime_assistant(
 
     // ═══════════════ BEGIN G2 ═══════════════
     // G2 productivity — owned by one move agent; see docs/agent-surface-refactor.md.
-    tools.register(super::tools::stash::SaveNote);
-    tools.register(super::tools::stash::ListNotes);
-    if let Some(clip) = app.try_state::<Arc<crate::modules::clipboard::commands::ClipboardState>>()
-    {
-        tools.register(super::tools::stash::GetLastClip::new(clip.inner().clone()));
-        tools.register(super::tools::stash::ClipboardSearch::new(
-            clip.inner().clone(),
-        ));
-        tools.register(super::tools::stash::ClipboardPin::new(clip.inner().clone()));
-        tools.register(super::tools::stash::ClipboardClear::new(
-            clip.inner().clone(),
-        ));
-    }
-    if let Some(pomo) = app.try_state::<Arc<crate::modules::pomodoro::state::PomodoroState>>() {
-        tools.register(super::tools::stash::PomodoroStatus::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroStart::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroStop::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroSavePreset::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroControl::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroEditBlocks::new(
-            pomo.inner().clone(),
-        ));
-        tools.register(super::tools::stash::PomodoroPresets::new(pomo.inner().clone()));
-        tools.register(super::tools::stash::PomodoroHistory::new(pomo.inner().clone()));
-    }
-    tools.register(super::tools::stash::ClipboardDelete);
-    tools.register(super::tools::stash::ClipboardCopyToMac);
-    if let Some(notes) = app.try_state::<crate::modules::notes::commands::NotesState>() {
-        tools.register(super::tools::stash::SearchNotes::new(notes.repo.clone()));
-        tools.register(super::tools::stash::GetNote::new(notes.repo.clone()));
-        tools.register(super::tools::stash::AppendToNote::new(notes.repo.clone()));
-        tools.register(super::tools::stash::UpdateNote::new(notes.repo.clone()));
-        tools.register(super::tools::stash::DeleteNote::new(notes.repo.clone()));
-    }
     crate::modules::notes::agent::register_tools(&mut tools, app);
     crate::modules::clipboard::agent::register_tools(&mut tools, app);
     crate::modules::pomodoro::agent::register_tools(&mut tools, app);
-    super::memory_cmds::register_tools(&mut tools, app);
     // ═══════════════ END G2 ═══════════════
 
     // ═══════════════ BEGIN G3 ═══════════════
