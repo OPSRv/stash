@@ -1155,17 +1155,11 @@ pub fn run() {
             // the order in which other module states are constructed.
             // ═══════════════ BEGIN G1 ═══════════════
             // G1 audio — owned by one move agent; see docs/agent-surface-refactor.md.
-            telegram_state.register_command(modules::telegram::module_cmds::MusicCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::MetronomeCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::TunerCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::RecordCmd);
-            telegram_state.register_command(modules::telegram::module_cmds::ValetonCmd);
             modules::music::agent::register_commands(&telegram_state, app.handle());
             modules::metronome::agent::register_commands(&telegram_state, app.handle());
             modules::tuner::agent::register_commands(&telegram_state, app.handle());
             modules::recorder::agent::register_commands(&telegram_state, app.handle());
             modules::valeton::agent::register_commands(&telegram_state, app.handle());
-            modules::circle::agent::register_commands(&telegram_state, app.handle());
             // ═══════════════ END G1 ═══════════════
 
             // ═══════════════ BEGIN G2 ═══════════════

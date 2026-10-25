@@ -721,19 +721,13 @@ pub fn build_runtime_assistant(
 
     // ═══════════════ BEGIN G1 ═══════════════
     // G1 audio — owned by one move agent; see docs/agent-surface-refactor.md.
-    tools.register(super::tools::stash::MetronomeControl);
-    tools.register(super::tools::stash::TunerControl);
-    tools.register(super::tools::stash::CircleProgression);
-    tools.register(super::tools::stash::ValetonSetTone);
-    tools.register(super::tools::stash::ValetonControl);
-    tools.register(super::tools::stash::RecordControl);
-    tools.register(super::tools::stash::MusicControl);
-    crate::modules::music::agent::register_tools(&mut tools, app);
+    // Same order as before the move: metronome, tuner, circle, valeton, record, music.
     crate::modules::metronome::agent::register_tools(&mut tools, app);
     crate::modules::tuner::agent::register_tools(&mut tools, app);
-    crate::modules::recorder::agent::register_tools(&mut tools, app);
-    crate::modules::valeton::agent::register_tools(&mut tools, app);
     crate::modules::circle::agent::register_tools(&mut tools, app);
+    crate::modules::valeton::agent::register_tools(&mut tools, app);
+    crate::modules::recorder::agent::register_tools(&mut tools, app);
+    crate::modules::music::agent::register_tools(&mut tools, app);
     // ═══════════════ END G1 ═══════════════
 
     // ═══════════════ BEGIN G2 ═══════════════
