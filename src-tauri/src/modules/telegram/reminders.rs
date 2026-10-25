@@ -416,6 +416,7 @@ pub fn handle_command(app: &tauri::AppHandle, state: &TelegramState, args: &str)
                 .and_then(|mut r| r.cancel_reminder(id).map_err(|e| e.to_string()));
             let status = match result {
                 Ok(true) => {
+                    ext_sync_cancel(state, id);
                     let _ = app.emit("reminders:changed", ());
                     format!("🗑 Скасовано нагадування №{id}.")
                 }
@@ -427,7 +428,9 @@ pub fn handle_command(app: &tauri::AppHandle, state: &TelegramState, args: &str)
         RemindersAction::Done(id) => {
             // Purely an acknowledgement: the row has already fired. Never
             // cancels anything, so a recurring series (if one is ever
-            // modelled) keeps running.
+            // modelled) keeps running. The Reminders.app copy gets
+            // ticked off so it stops nagging on the phone.
+            ext_sync_done(state, id);
             let text = match find_reminder(state, id) {
                 Ok(Some(r)) => format!("✅ Готово: {}", r.text),
                 _ => "✅ Готово".to_string(),
@@ -475,6 +478,7 @@ pub fn handle_command(app: &tauri::AppHandle, state: &TelegramState, args: &str)
                     Err(e) => return Reply::text(format!("⚠️ помилка БД: {e}")),
                 }
             };
+            ext_sync_move(state, id, new_id, due);
             let _ = app.emit("reminders:changed", ());
             Reply {
                 text: format!(
@@ -517,6 +521,137 @@ pub fn handle_command(app: &tauri::AppHandle, state: &TelegramState, args: &str)
                 Err(e) => Reply::text(format!("⚠️ помилка БД: {e}")),
             }
         }
+    }
+}
+
+// -------------------- Reminders.app sync --------------------
+//
+// `/remind` (and the assistant's `create_reminder`) mirror each reminder
+// into macOS Reminders.app so it rings on iPhone too. The returned item
+// id lives in `reminders.ext_id`; snooze / cancel / done here then move,
+// delete or complete that same item. Everything is best-effort: the
+// AppleScript call runs on a detached thread, failures are only logged,
+// and the bot reply never waits on it.
+
+use crate::modules::system::reminders_bridge as bridge;
+
+fn ext_spawn(what: &'static str, f: impl FnOnce() -> Result<(), String> + Send + 'static) {
+    std::thread::spawn(move || {
+        if let Err(e) = f() {
+            tracing::warn!(error = %e, op = what, "Reminders.app sync failed");
+        }
+    });
+}
+
+/// Mirror reminder `id` into Reminders.app and remember the item id.
+/// Blocking (spawns `osascript`) — call from `spawn_blocking` or a
+/// thread. If the row was cancelled / fired while the script ran, the
+/// freshly created item is deleted again instead of being stored.
+pub fn ext_mirror_create_blocking(
+    state: &TelegramState,
+    id: i64,
+    text: &str,
+    due: i64,
+) -> Result<(), String> {
+    let ext = bridge::create_reminder(text, due)?;
+    let still_active = {
+        let mut repo = state.repo.lock().map_err(|e| e.to_string())?;
+        let active = repo
+            .list_active_reminders()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .any(|r| r.id == id);
+        if active {
+            repo.set_reminder_ext_id(id, Some(&ext))
+                .map_err(|e| e.to_string())?;
+        }
+        active
+    };
+    if !still_active {
+        bridge::delete_reminder(&ext)?;
+    }
+    Ok(())
+}
+
+/// Fire-and-forget variant of [`ext_mirror_create_blocking`].
+pub fn ext_mirror_create(state: Arc<TelegramState>, id: i64, text: String, due: i64) {
+    ext_spawn("create", move || {
+        ext_mirror_create_blocking(&state, id, &text, due)
+    });
+}
+
+/// Reminder `id` was cancelled → delete its Reminders.app item.
+pub fn ext_sync_cancel(state: &TelegramState, id: i64) {
+    let ext = state
+        .repo
+        .lock()
+        .ok()
+        .and_then(|mut r| r.take_reminder_ext_id(id).ok().flatten());
+    if let Some(ext) = ext {
+        ext_spawn("delete", move || bridge::delete_reminder(&ext));
+    }
+}
+
+/// Reminder `id` was acknowledged → tick its Reminders.app item off.
+pub fn ext_sync_done(state: &TelegramState, id: i64) {
+    let ext = state
+        .repo
+        .lock()
+        .ok()
+        .and_then(|mut r| r.take_reminder_ext_id(id).ok().flatten());
+    if let Some(ext) = ext {
+        ext_spawn("complete", move || bridge::complete_reminder(&ext));
+    }
+}
+
+/// What to do with the old row's Reminders.app item after a snooze.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ExtMove {
+    /// Nothing mirrored — nothing to do.
+    None,
+    /// Re-point the item at the new due date; it now belongs to the new row.
+    Update(String),
+    /// The new row already owns an item (dedup hit) — drop the old one.
+    Delete(String),
+}
+
+/// Hand the old row's Reminders.app id over to the snoozed row. Pure DB
+/// logic, split out so it's testable without `osascript`.
+pub fn ext_move(
+    repo: &mut super::repo::TelegramRepo,
+    old_id: i64,
+    new_id: i64,
+) -> Result<ExtMove, String> {
+    let Some(ext) = repo
+        .take_reminder_ext_id(old_id)
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(ExtMove::None);
+    };
+    let new_has_ext = repo
+        .reminder_ext_id(new_id)
+        .map_err(|e| e.to_string())?
+        .is_some();
+    if old_id == new_id || new_has_ext {
+        return Ok(ExtMove::Delete(ext));
+    }
+    repo.set_reminder_ext_id(new_id, Some(&ext))
+        .map_err(|e| e.to_string())?;
+    Ok(ExtMove::Update(ext))
+}
+
+/// Reminder `old_id` was snoozed into `new_id` due at `due` → move the
+/// Reminders.app item so the iPhone stops ringing at the old time.
+pub fn ext_sync_move(state: &TelegramState, old_id: i64, new_id: i64, due: i64) {
+    let op = match state.repo.lock() {
+        Ok(mut repo) => ext_move(&mut repo, old_id, new_id),
+        Err(e) => Err(e.to_string()),
+    };
+    match op {
+        Ok(ExtMove::None) => {}
+        Ok(ExtMove::Update(ext)) => ext_spawn("update_due", move || bridge::update_due(&ext, due)),
+        Ok(ExtMove::Delete(ext)) => ext_spawn("delete", move || bridge::delete_reminder(&ext)),
+        Err(e) => tracing::warn!(error = %e, "Reminders.app sync: snooze bookkeeping failed"),
     }
 }
 
@@ -895,6 +1030,7 @@ pub fn reminders_cancel(
         repo.cancel_reminder(id).map_err(|e| e.to_string())?
     };
     if removed {
+        ext_sync_cancel(&state, id);
         let _ = app.emit("reminders:changed", ());
     }
     Ok(removed)
@@ -1040,6 +1176,50 @@ mod tests {
         assert!(parse_reminders_args("snooze:1:хв").is_err());
         assert!(parse_reminders_args("at:123:").is_err());
         assert!(parse_reminders_args("explode").is_err());
+    }
+
+    fn ext_repo() -> crate::modules::telegram::repo::TelegramRepo {
+        crate::modules::telegram::repo::TelegramRepo::new(
+            rusqlite::Connection::open_in_memory().unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn ext_move_hands_item_to_snoozed_row() {
+        let mut repo = ext_repo();
+        let old = repo.insert_reminder("t", 100, 1).unwrap();
+        let new = repo.insert_reminder("t", 700, 1).unwrap();
+        repo.set_reminder_ext_id(old, Some("x-apple-reminder://A")).unwrap();
+        assert_eq!(
+            ext_move(&mut repo, old, new).unwrap(),
+            ExtMove::Update("x-apple-reminder://A".into())
+        );
+        assert_eq!(repo.reminder_ext_id(old).unwrap(), None);
+        assert_eq!(
+            repo.reminder_ext_id(new).unwrap().as_deref(),
+            Some("x-apple-reminder://A")
+        );
+    }
+
+    #[test]
+    fn ext_move_deletes_when_target_already_mirrored() {
+        let mut repo = ext_repo();
+        let old = repo.insert_reminder("t", 100, 1).unwrap();
+        let new = repo.insert_reminder("t", 700, 1).unwrap();
+        repo.set_reminder_ext_id(old, Some("A")).unwrap();
+        repo.set_reminder_ext_id(new, Some("B")).unwrap();
+        assert_eq!(ext_move(&mut repo, old, new).unwrap(), ExtMove::Delete("A".into()));
+        assert_eq!(repo.reminder_ext_id(new).unwrap().as_deref(), Some("B"));
+    }
+
+    #[test]
+    fn ext_move_is_noop_without_mirror() {
+        let mut repo = ext_repo();
+        let old = repo.insert_reminder("t", 100, 1).unwrap();
+        let new = repo.insert_reminder("t", 700, 1).unwrap();
+        assert_eq!(ext_move(&mut repo, old, new).unwrap(), ExtMove::None);
+        assert_eq!(repo.reminder_ext_id(new).unwrap(), None);
     }
 
     #[test]

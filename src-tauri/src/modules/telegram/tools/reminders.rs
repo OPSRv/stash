@@ -80,6 +80,15 @@ impl Tool for CreateReminder {
         if let Some(app) = ctx.app.as_ref() {
             use tauri::Emitter;
             let _ = app.emit("reminders:changed", ());
+            // Mirror into Reminders.app like `/remind` does, in the
+            // background so the LLM turn never waits on AppleScript.
+            // Gated on a live app so unit tests never spawn osascript.
+            super::super::reminders::ext_mirror_create(
+                std::sync::Arc::clone(&ctx.state),
+                id,
+                parsed_text.clone(),
+                due_at,
+            );
         }
         Ok(json!({ "id": id, "due_at": due_at, "text": parsed_text }))
     }
@@ -143,6 +152,7 @@ impl Tool for CancelReminder {
             repo.cancel_reminder(id).map_err(|e| e.to_string())?
         };
         if removed {
+            super::super::reminders::ext_sync_cancel(&ctx.state, id);
             if let Some(app) = ctx.app.as_ref() {
                 use tauri::Emitter;
                 let _ = app.emit("reminders:changed", ());

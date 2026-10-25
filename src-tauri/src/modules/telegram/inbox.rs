@@ -166,11 +166,11 @@ pub fn extract_media(msg: &Message) -> Option<MediaIntent> {
             caption: None,
             extension: "mp4",
         }),
-        // Music / audio files (mp3, m4a, …) ride the voice pipeline so they
-        // get transcribed too. Stored under the `voice` kind because the
-        // inbox table's CHECK constraint has no `audio` value.
+        // Music / audio files (mp3, m4a, …) get their own `audio` kind but
+        // ride the same Whisper pipeline as voice notes (see
+        // `is_transcribable`).
         MediaKind::Audio(a) => Some(MediaIntent {
-            kind: "voice",
+            kind: "audio",
             file_id: a.audio.file.id.clone(),
             declared_size: Some(a.audio.file.size as u64),
             mime: a.audio.mime_type.as_ref().map(|m| m.to_string()),
@@ -219,11 +219,11 @@ pub fn is_unsupported_media(msg: &Message) -> bool {
     !matches!(common.media_kind, MediaKind::Text(_)) && extract_media(msg).is_none()
 }
 
-/// Whisper handles these kinds: voice notes, regular videos and
-/// round video notes. Symphonia demuxes the mp4 container and pulls
+/// Whisper handles these kinds: voice notes, audio files, regular
+/// videos and round video notes. Symphonia demuxes the mp4 container and pulls
 /// the audio track, so we don't need a separate ffmpeg pass.
 pub fn is_transcribable(kind: &str) -> bool {
-    matches!(kind, "voice" | "video" | "video_note")
+    matches!(kind, "voice" | "audio" | "video" | "video_note")
 }
 
 /// Today's date in `YYYY-MM-DD` form, in local time.
@@ -545,6 +545,16 @@ mod tests {
     #[test]
     fn caps_allow_small_within_day() {
         assert!(matches!(check_caps(Some(1024), 0, PF, PD), CapVerdict::Ok));
+    }
+
+    #[test]
+    fn audio_kind_is_transcribed_like_voice() {
+        for k in ["voice", "audio", "video", "video_note"] {
+            assert!(is_transcribable(k), "{k} must go through Whisper");
+        }
+        for k in ["text", "photo", "document", "sticker"] {
+            assert!(!is_transcribable(k), "{k} must not go through Whisper");
+        }
     }
 
     #[test]

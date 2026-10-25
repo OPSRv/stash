@@ -932,8 +932,9 @@ impl CommandHandler for RemindCmd {
                 // in brackets survives into the returned text so the
                 // user learns whether the handshake went through.
                 let title = text.clone();
+                let state = Arc::clone(&self.state);
                 let mirror = tokio::task::spawn_blocking(move || {
-                    crate::modules::system::reminders_bridge::create_reminder(&title, due)
+                    reminders::ext_mirror_create_blocking(&state, id, &title, due)
                 })
                 .await;
                 let tag = match mirror {
@@ -1036,6 +1037,7 @@ impl CommandHandler for ForgetCmd {
         match result {
             Ok(true) => {
                 use tauri::Emitter;
+                reminders::ext_sync_cancel(&self.state, id);
                 let _ = ctx.app.emit("reminders:changed", ());
                 Reply {
                     text: format!("🗑️ Скасовано нагадування №{id}."),
