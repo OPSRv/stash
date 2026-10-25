@@ -8,6 +8,7 @@
 //! single-user traffic is tiny and dropping messages silently is worse than
 //! holding a handful of strings.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -62,6 +63,18 @@ pub struct Outbound {
 
 pub struct TelegramSender {
     slot: Mutex<Option<SenderInner>>,
+    /// Per-chat count of jobs queued so far. Lets a caller holding a
+    /// tracked message (progress placeholder) tell whether anything else
+    /// was queued after it — e.g. a tool that sent a file mid-turn.
+    seq: Mutex<HashMap<i64, u64>>,
+}
+
+/// A message sent through [`TelegramSender::send_tracked`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrackedMessage {
+    pub id: MessageId,
+    /// The chat's queue sequence right after this message was queued.
+    pub seq: u64,
 }
 
 /// One item of the outbound queue.
@@ -87,7 +100,21 @@ impl TelegramSender {
     pub fn new() -> Self {
         Self {
             slot: Mutex::new(None),
+            seq: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Number of jobs queued for `chat_id` so far (see [`TrackedMessage`]).
+    pub fn chat_seq(&self, chat_id: i64) -> u64 {
+        self.seq
+            .lock()
+            .map(|m| m.get(&chat_id).copied().unwrap_or(0))
+            .unwrap_or(0)
+    }
+
+    /// `true` when something was queued for the chat after `tracked`.
+    pub fn sent_after(&self, chat_id: i64, tracked: &TrackedMessage) -> bool {
+        self.chat_seq(chat_id) != tracked.seq
     }
 
     /// Start the drain task. Safe to call while already running — subsequent
@@ -151,32 +178,52 @@ impl TelegramSender {
     }
 
     /// Queue a single short plain-text message and wait until it is actually
-    /// sent, returning its id (`None` when the sender is stopped or the
-    /// send failed). Paced and ordered like every other queued message.
-    pub async fn send_tracked(&self, chat_id: i64, text: impl Into<String>) -> Option<MessageId> {
+    /// sent, returning its id and queue position (`None` when the sender is
+    /// stopped or the send failed). Paced and ordered like every other
+    /// queued message.
+    pub async fn send_tracked(
+        &self,
+        chat_id: i64,
+        text: impl Into<String>,
+    ) -> Option<TrackedMessage> {
         let (reply, rx) = oneshot::channel();
-        if !self.push(Job::Tracked {
+        let seq = self.push_seq(Job::Tracked {
             chat_id,
             text: text.into(),
             reply,
-        }) {
-            return None;
-        }
-        rx.await.ok().flatten()
+        })?;
+        let id = rx.await.ok().flatten()?;
+        Some(TrackedMessage { id, seq })
     }
 
     fn push(&self, job: Job) -> bool {
-        match self.slot.lock().unwrap().as_ref() {
+        self.push_seq(job).is_some()
+    }
+
+    /// Queue `job`; returns the chat's sequence number after it. The seq
+    /// bump happens under the slot lock so it matches queue order.
+    fn push_seq(&self, job: Job) -> Option<u64> {
+        let chat_id = match &job {
+            Job::Send(o) => o.chat_id,
+            Job::Tracked { chat_id, .. } => *chat_id,
+        };
+        let slot = self.slot.lock().unwrap();
+        match slot.as_ref() {
             Some(inner) => match inner.tx.send(job) {
-                Ok(()) => true,
+                Ok(()) => {
+                    let mut seq = self.seq.lock().unwrap_or_else(|e| e.into_inner());
+                    let n = seq.entry(chat_id).or_insert(0);
+                    *n += 1;
+                    Some(*n)
+                }
                 Err(_) => {
                     tracing::warn!("telegram sender: enqueue failed (drain task gone)");
-                    false
+                    None
                 }
             },
             None => {
                 tracing::debug!("telegram sender: enqueue dropped (sender not running)");
-                false
+                None
             }
         }
     }
@@ -719,6 +766,25 @@ mod tests {
     async fn send_tracked_without_sender_returns_none() {
         let s = TelegramSender::new();
         assert_eq!(s.send_tracked(1, "⏳").await, None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn chat_seq_counts_queued_jobs_per_chat() {
+        let s = TelegramSender::new();
+        s.enqueue(1, "dropped: not running");
+        assert_eq!(s.chat_seq(1), 0);
+        s.start("0:fake".into()).unwrap();
+        let marker = TrackedMessage {
+            id: MessageId(5),
+            seq: s.chat_seq(1),
+        };
+        assert!(!s.sent_after(1, &marker));
+        s.enqueue(2, "other chat");
+        assert!(!s.sent_after(1, &marker), "other chats don't count");
+        s.enqueue(1, "tool output");
+        assert!(s.sent_after(1, &marker));
+        assert_eq!(s.chat_seq(1), 1);
+        s.stop();
     }
 
     #[test]

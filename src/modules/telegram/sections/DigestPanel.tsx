@@ -21,12 +21,15 @@ const DAYS: { label: string; full: string }[] = [
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /// Morning digest controls: on/off, local send time, weekdays and a
-/// "send now" action. Every change persists immediately.
+/// "send now" action. Toggles persist immediately; the time persists on
+/// blur / Enter so intermediate keystrokes ("07:00" while retyping
+/// 08:00 → 07:45) never reach the scheduler.
 export function DigestPanel() {
   const [settings, setSettings] = useState<DigestSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [draftTime, setDraftTime] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -60,6 +63,14 @@ export function DigestPanel() {
     }
   };
 
+  const commitTime = () => {
+    if (!settings || draftTime === null) return;
+    setDraftTime(null);
+    if (HHMM_RE.test(draftTime) && draftTime !== settings.time) {
+      void mutate({ ...settings, time: draftTime });
+    }
+  };
+
   if (!settings) return null;
 
   return (
@@ -90,11 +101,16 @@ export function DigestPanel() {
             size="sm"
             type="time"
             aria-label="Digest time"
-            value={settings.time}
+            value={draftTime ?? settings.time}
             disabled={!settings.enabled}
-            onChange={(e) => {
-              const time = e.target.value;
-              if (HHMM_RE.test(time)) void mutate({ ...settings, time });
+            onChange={(e) => setDraftTime(e.target.value)}
+            onBlur={commitTime}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitTime();
+              if (e.key === 'Escape' && draftTime !== null) {
+                e.stopPropagation();
+                setDraftTime(null);
+              }
             }}
             className="w-[104px]"
           />

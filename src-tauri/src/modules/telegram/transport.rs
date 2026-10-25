@@ -246,6 +246,9 @@ type ShutdownSlot = Arc<Mutex<Option<(u64, oneshot::Sender<()>)>>>;
 pub struct TransportHandle {
     shutdown: ShutdownSlot,
     generation: AtomicU64,
+    /// Last health report sent on `telegram:status` (`None` = healthy).
+    /// Kept so a lazily-mounted panel can replay errors it missed.
+    last_error: std::sync::Mutex<Option<String>>,
 }
 
 impl TransportHandle {
@@ -253,6 +256,18 @@ impl TransportHandle {
         Self {
             shutdown: Arc::new(Mutex::new(None)),
             generation: AtomicU64::new(0),
+            last_error: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Last transport error reported to the UI, `None` while healthy.
+    pub fn last_error(&self) -> Option<String> {
+        self.last_error.lock().ok().and_then(|g| g.clone())
+    }
+
+    fn set_last_error(&self, error: Option<&str>) {
+        if let Ok(mut g) = self.last_error.lock() {
+            *g = error.map(str::to_owned);
         }
     }
 
@@ -273,6 +288,8 @@ impl TransportHandle {
         if slot.is_some() {
             return Ok(());
         }
+        // A fresh start (new token / re-pair) invalidates the old report.
+        self.set_last_error(None);
         let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
         let (tx, rx) = oneshot::channel::<()>();
         *slot = Some((generation, tx));
@@ -286,6 +303,7 @@ impl TransportHandle {
     }
 
     pub async fn stop(&self) {
+        self.set_last_error(None);
         if let Some((_, tx)) = self.shutdown.lock().await.take() {
             let _ = tx.send(());
         }
@@ -372,7 +390,8 @@ fn next_backoff(current: Duration) -> Duration {
 }
 
 /// Tell the UI about transport health. `None` = healthy again.
-fn emit_status(app: &AppHandle, error: Option<&str>) {
+fn emit_status(app: &AppHandle, state: &TelegramState, error: Option<&str>) {
+    state.transport.set_last_error(error);
     let _ = app.emit("telegram:status", serde_json::json!({ "error": error }));
     let _ = app.emit("telegram:status_changed", ());
 }
@@ -435,7 +454,7 @@ async fn run_polling(token: String, app: AppHandle, state: Arc<TelegramState>) {
             Ok(list) => {
                 backoff = POLL_BACKOFF_START;
                 if std::mem::take(&mut reported_error) {
-                    emit_status(&app, None);
+                    emit_status(&app, &state, None);
                 }
                 for u in list {
                     offset = (u.id.0 as i32).saturating_add(1);
@@ -464,6 +483,7 @@ async fn run_polling(token: String, app: AppHandle, state: Arc<TelegramState>) {
                     tracing::error!(error = %e, "getUpdates: bot token rejected (401) — stopping transport");
                     emit_status(
                         &app,
+                        &state,
                         Some("Telegram rejected the bot token (401). Re-pair the bot in Stash → Telegram."),
                     );
                     return;
@@ -478,6 +498,7 @@ async fn run_polling(token: String, app: AppHandle, state: Arc<TelegramState>) {
                         reported_error = true;
                         emit_status(
                             &app,
+                            &state,
                             Some("Another app instance is polling this bot (409 Conflict)."),
                         );
                     }
@@ -679,14 +700,24 @@ async fn handle_update(
             let typing = TypingGuard::start(bot, chat_id);
             let tracker = ProgressTracker::default();
             let turn = async {
-                let r = super::assistant::handle_user_text_with_progress(
-                    app,
-                    state,
-                    &prompt,
-                    Some(msg.date.timestamp()),
-                    &tracker,
+                use futures_util::FutureExt;
+                // A panic inside the turn must still finish the tracker and
+                // reach `finalize_reply`, or the placeholder stays "⏳…".
+                let r = std::panic::AssertUnwindSafe(
+                    super::assistant::handle_user_text_with_progress(
+                        app,
+                        state,
+                        &prompt,
+                        Some(msg.date.timestamp()),
+                        &tracker,
+                    ),
                 )
-                .await;
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|_| {
+                    tracing::error!("assistant turn panicked");
+                    Err(super::llm::LlmError::BadResponse("assistant turn panicked".into()))
+                });
                 tracker.finish();
                 r
             };
@@ -1172,14 +1203,19 @@ async fn edit_message(
         .next()
         .unwrap_or_else(|| "👇".to_string());
     let markup = keyboard.as_ref().map(super::sender::to_markup);
+    let html = markdown_to_telegram_html(&chunk);
 
-    let mut req = bot
-        .edit_message_text(ChatId(chat_id), message_id, markdown_to_telegram_html(&chunk))
-        .parse_mode(ParseMode::Html);
-    if let Some(m) = markup.clone() {
-        req = req.reply_markup(m);
-    }
-    match req.await {
+    let res = retry_after_once(|| {
+        let mut req = bot
+            .edit_message_text(ChatId(chat_id), message_id, html.clone())
+            .parse_mode(ParseMode::Html);
+        if let Some(m) = markup.clone() {
+            req = req.reply_markup(m);
+        }
+        req.send()
+    })
+    .await;
+    match res {
         Ok(_) => true,
         // Same text but the keyboard may have changed (e.g. a toggle
         // button) — Telegram rejects the whole edit, so push markup alone.
@@ -1192,13 +1228,21 @@ async fn edit_message(
             }
             true
         }
+        Err(e @ RequestError::RetryAfter(_)) => {
+            tracing::debug!(error = %e, "editMessageText still flood-limited");
+            false
+        }
         Err(e) => {
             tracing::debug!(error = %e, "editMessageText (HTML) failed, retrying plain");
-            let mut plain = bot.edit_message_text(ChatId(chat_id), message_id, chunk);
-            if let Some(m) = markup {
-                plain = plain.reply_markup(m);
-            }
-            match plain.await {
+            let plain = retry_after_once(|| {
+                let mut req = bot.edit_message_text(ChatId(chat_id), message_id, chunk.clone());
+                if let Some(m) = markup.clone() {
+                    req = req.reply_markup(m);
+                }
+                req.send()
+            })
+            .await;
+            match plain {
                 Ok(_) | Err(RequestError::Api(ApiError::MessageNotModified)) => true,
                 Err(e) => {
                     tracing::debug!(error = %e, "editMessageText failed");
@@ -1303,7 +1347,7 @@ async fn drive_progress(
     chat_id: i64,
     tracker: &ProgressTracker,
     typing: TypingGuard,
-) -> Option<(teloxide::types::MessageId, tokio::time::Instant)> {
+) -> Option<(super::sender::TrackedMessage, tokio::time::Instant)> {
     use tokio::time::Instant;
     let deadline = Instant::now() + PLACEHOLDER_DELAY;
     loop {
@@ -1320,12 +1364,13 @@ async fn drive_progress(
         }
     }
     let mut shown = tracker.render();
-    let id = state.sender.send_tracked(chat_id, shown.clone()).await?;
+    let tracked = state.sender.send_tracked(chat_id, shown.clone()).await?;
+    let id = tracked.id;
     drop(typing);
     let mut last_edit = Instant::now();
     loop {
         if tracker.with_log(|l| l.done) {
-            return Some((id, last_edit));
+            return Some((tracked, last_edit));
         }
         tracker.notify.notified().await;
         // Coalesce bursts of events into one edit per gap.
@@ -1334,7 +1379,7 @@ async fn drive_progress(
             tokio::time::sleep(wait).await;
         }
         if tracker.with_log(|l| l.done) {
-            return Some((id, last_edit));
+            return Some((tracked, last_edit));
         }
         let text = tracker.render();
         if text != shown {
@@ -1343,6 +1388,38 @@ async fn drive_progress(
             }
             last_edit = Instant::now();
         }
+    }
+}
+
+/// Cap on a flood-control wait before retrying an edit/delete of the
+/// progress placeholder — longer waits would stall the user's answer.
+const EDIT_RETRY_AFTER_CAP: Duration = Duration::from_secs(10);
+
+/// Wait before retrying a request Telegram flood-limited, `None` for any
+/// other error.
+fn retry_after_wait(e: &teloxide::RequestError) -> Option<Duration> {
+    match e {
+        teloxide::RequestError::RetryAfter(s) => Some(s.duration().min(EDIT_RETRY_AFTER_CAP)),
+        _ => None,
+    }
+}
+
+/// Run a Bot API call; on `RetryAfter` sleep (capped) and retry once.
+async fn retry_after_once<T, F, Fut>(mut op: F) -> Result<T, teloxide::RequestError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, teloxide::RequestError>>,
+{
+    match op().await {
+        Err(e) => match retry_after_wait(&e) {
+            Some(wait) => {
+                tracing::debug!(wait_ms = wait.as_millis() as u64, "flood control — retrying once");
+                tokio::time::sleep(wait).await;
+                op().await
+            }
+            None => Err(e),
+        },
+        ok => ok,
     }
 }
 
@@ -1357,7 +1434,12 @@ async fn edit_plain(
     use teloxide::prelude::*;
     use teloxide::types::ChatId;
     use teloxide::{ApiError, RequestError};
-    match bot.edit_message_text(ChatId(chat_id), message_id, text).await {
+    let res = retry_after_once(|| {
+        bot.edit_message_text(ChatId(chat_id), message_id, text)
+            .send()
+    })
+    .await;
+    match res {
         Ok(_) | Err(RequestError::Api(ApiError::MessageNotModified)) => true,
         Err(e) => {
             tracing::debug!(error = %e, "progress edit failed");
@@ -1376,7 +1458,13 @@ enum FinalPlan {
     Replace,
 }
 
-fn plan_final(text: &str) -> FinalPlan {
+/// `sent_after`: something else (a tool's file / message) was queued
+/// after the placeholder — editing it would put the answer above that
+/// output, so the full answer goes to the bottom instead.
+fn plan_final(text: &str, sent_after: bool) -> FinalPlan {
+    if sent_after {
+        return FinalPlan::Replace;
+    }
     match super::sender::reply_chunks(text) {
         Some(mut chunks) if !chunks.is_empty() => {
             let first = chunks.remove(0);
@@ -1395,13 +1483,13 @@ async fn finalize_reply(
     bot: &teloxide::Bot,
     state: &TelegramState,
     chat_id: i64,
-    placeholder: Option<(teloxide::types::MessageId, tokio::time::Instant)>,
+    placeholder: Option<(super::sender::TrackedMessage, tokio::time::Instant)>,
     text: String,
     keyboard: Option<super::commands_registry::InlineKeyboard>,
 ) {
     use teloxide::prelude::*;
     use teloxide::types::ChatId;
-    let Some((id, last_edit)) = placeholder else {
+    let Some((tracked, last_edit)) = placeholder else {
         state.sender.enqueue_with_keyboard(chat_id, text, keyboard);
         return;
     };
@@ -1409,7 +1497,9 @@ async fn finalize_reply(
     if !wait.is_zero() {
         tokio::time::sleep(wait).await;
     }
-    if let FinalPlan::Edit { first, mut rest } = plan_final(&text) {
+    let id = tracked.id;
+    let sent_after = state.sender.sent_after(chat_id, &tracked);
+    if let FinalPlan::Edit { first, mut rest } = plan_final(&text, sent_after) {
         let edit_kb = if rest.is_empty() { keyboard.clone() } else { None };
         if edit_message(bot, chat_id, id, &first, &edit_kb).await {
             if let Some(last) = rest.pop() {
@@ -1421,7 +1511,7 @@ async fn finalize_reply(
             return;
         }
     }
-    if let Err(e) = bot.delete_message(ChatId(chat_id), id).await {
+    if let Err(e) = retry_after_once(|| bot.delete_message(ChatId(chat_id), id).send()).await {
         tracing::debug!(error = %e, "could not delete progress placeholder");
     }
     state.sender.enqueue_with_keyboard(chat_id, text, keyboard);
@@ -1819,19 +1909,68 @@ mod tests {
     #[test]
     fn final_plan_edits_first_chunk_or_replaces() {
         assert_eq!(
-            plan_final("готово"),
+            plan_final("готово", false),
             FinalPlan::Edit {
                 first: "готово".into(),
                 rest: vec![]
             }
         );
         let para = format!("{}\n\n", "щось ".repeat(150));
-        match plan_final(&para.repeat(8)) {
+        match plan_final(&para.repeat(8), false) {
             FinalPlan::Edit { rest, .. } => assert_eq!(rest.len(), 1),
             other => panic!("expected edit, got {other:?}"),
         }
-        assert_eq!(plan_final(&para.repeat(40)), FinalPlan::Replace);
-        assert_eq!(plan_final("  "), FinalPlan::Replace);
+        assert_eq!(plan_final(&para.repeat(40), false), FinalPlan::Replace);
+        assert_eq!(plan_final("  ", false), FinalPlan::Replace);
+        // A tool sent something after the placeholder → answer goes below it.
+        assert_eq!(plan_final("готово", true), FinalPlan::Replace);
+    }
+
+    #[test]
+    fn retry_after_wait_is_capped_and_only_for_flood_control() {
+        use teloxide::types::Seconds;
+        use teloxide::RequestError;
+        assert_eq!(
+            retry_after_wait(&RequestError::RetryAfter(Seconds::from_seconds(3))),
+            Some(Duration::from_secs(3))
+        );
+        assert_eq!(
+            retry_after_wait(&RequestError::RetryAfter(Seconds::from_seconds(120))),
+            Some(EDIT_RETRY_AFTER_CAP)
+        );
+        assert_eq!(
+            retry_after_wait(&RequestError::Api(teloxide::ApiError::MessageNotModified)),
+            None
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retry_after_once_retries_a_single_time() {
+        use std::sync::atomic::AtomicU32;
+        use teloxide::types::Seconds;
+        use teloxide::RequestError;
+        let calls = AtomicU32::new(0);
+        let r: Result<u32, RequestError> = retry_after_once(|| {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n == 0 {
+                    Err(RequestError::RetryAfter(Seconds::from_seconds(0)))
+                } else {
+                    Ok(n)
+                }
+            }
+        })
+        .await;
+        assert_eq!(r.unwrap(), 1);
+        // Flood-limited twice → gives up after the one retry.
+        let calls = AtomicU32::new(0);
+        let r: Result<(), RequestError> = retry_after_once(|| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            async { Err(RequestError::RetryAfter(Seconds::from_seconds(0))) }
+        })
+        .await;
+        assert!(r.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[test]

@@ -105,6 +105,20 @@ pub fn telegram_has_token(state: State<'_, Arc<TelegramState>>) -> Result<bool, 
     Ok(state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some())
 }
 
+/// Last long-polling health report — same shape as the `telegram:status`
+/// event, so a panel mounted after the event fired can still show it.
+#[derive(Debug, Serialize)]
+pub struct TransportStatus {
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub fn telegram_transport_status(state: State<'_, Arc<TelegramState>>) -> TransportStatus {
+    TransportStatus {
+        error: state.transport.last_error(),
+    }
+}
+
 #[tauri::command]
 pub fn telegram_status(state: State<'_, Arc<TelegramState>>) -> Result<ConnectionStatus, String> {
     let has_token = state.secrets.get(ACCOUNT_BOT_TOKEN)?.is_some();
