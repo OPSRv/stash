@@ -19,6 +19,7 @@ pub mod reminders;
 pub mod repo;
 pub mod sender;
 pub mod settings;
+pub mod short_ids;
 pub mod state;
 pub mod tools;
 pub mod transport;

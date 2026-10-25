@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 use super::commands_registry::{InlineButton, InlineKeyboard};
-use super::notifier::Category;
+use super::notifier::{notify_with_keyboard, Category};
 
 const POLL_PERIOD: Duration = Duration::from_secs(5 * 60);
 const ALERT_COOLDOWN: Duration = Duration::from_secs(60 * 60);
@@ -66,34 +66,6 @@ fn low_battery_keyboard() -> InlineKeyboard {
             vec![InlineButton::new("💤 Sleep Mac", "sleep:ask")],
         ],
     }
-}
-
-/// Like `notifier::notify_if_paired`, but carries an inline keyboard.
-/// Honours pairing + the per-category settings toggle; cooldown/dedup is
-/// the caller's job (each watcher already tracks its own). Returns
-/// whether the message was queued.
-pub(super) fn notify_with_keyboard(
-    app: &AppHandle,
-    category: Category,
-    text: impl Into<String>,
-    keyboard: InlineKeyboard,
-) -> bool {
-    use super::pairing::PairingState;
-    use tauri::Manager;
-    let Some(state) = app.try_state::<std::sync::Arc<super::state::TelegramState>>() else {
-        return false;
-    };
-    let chat_id = match &*state.pairing.lock().unwrap() {
-        PairingState::Paired { chat_id } => *chat_id,
-        _ => return false,
-    };
-    if !super::settings::category_enabled(&state, category) {
-        return false;
-    }
-    state
-        .sender
-        .enqueue_with_keyboard(chat_id, text, Some(keyboard));
-    true
 }
 
 fn read_pmset_percent() -> Option<(u32, bool)> {

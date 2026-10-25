@@ -3,12 +3,9 @@
 //! `telegram/module_cmds.rs`. `lib.rs` / `assistant.rs` call
 //! `register_commands` / `register_tools`.
 
-use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use lru::LruCache;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
@@ -17,6 +14,7 @@ use super::engine;
 use crate::modules::telegram::commands_registry::{
     CommandHandler, Ctx, InlineButton, InlineKeyboard, Reply,
 };
+use crate::modules::telegram::short_ids::ShortIdStore;
 use crate::modules::telegram::state::TelegramState;
 use crate::modules::telegram::tools::{Tool, ToolCtx, ToolRegistry};
 
@@ -115,36 +113,10 @@ pub async fn translate(app: Option<&AppHandle>, req: TranslateReq) -> Result<Tra
 
 // ───────────────────────── source-text store ─────────────────────────
 
-/// Small LRU of `short id → source text` so re-translate buttons fit
-/// Telegram's 64-byte `callback_data`.
-pub struct ShortIdStore {
-    next: AtomicU32,
-    map: Mutex<LruCache<u32, String>>,
-}
-
-impl ShortIdStore {
-    pub fn new(cap: usize) -> Self {
-        Self {
-            next: AtomicU32::new(1),
-            map: Mutex::new(LruCache::new(
-                NonZeroUsize::new(cap.max(1)).expect("cap is non-zero"),
-            )),
-        }
-    }
-
-    pub fn put(&self, value: impl Into<String>) -> u32 {
-        let id = self.next.fetch_add(1, Ordering::Relaxed);
-        self.map.lock().unwrap().put(id, value.into());
-        id
-    }
-
-    pub fn get(&self, id: u32) -> Option<String> {
-        self.map.lock().unwrap().get(&id).cloned()
-    }
-}
-
-fn text_store() -> &'static ShortIdStore {
-    static STORE: OnceLock<ShortIdStore> = OnceLock::new();
+/// `short id → source text` so re-translate buttons fit Telegram's
+/// 64-byte `callback_data`.
+fn text_store() -> &'static ShortIdStore<String> {
+    static STORE: OnceLock<ShortIdStore<String>> = OnceLock::new();
     STORE.get_or_init(|| ShortIdStore::new(128))
 }
 
@@ -413,16 +385,5 @@ mod tests {
             let args = cb.strip_prefix("refresh:tr:").unwrap();
             assert!(matches!(parse_tr_args(args), TrArgs::Again { id: u32::MAX, .. }));
         }
-    }
-
-    #[test]
-    fn store_round_trips_and_evicts_oldest() {
-        let s = ShortIdStore::new(2);
-        let a = s.put("one");
-        let b = s.put("two");
-        let c = s.put("three");
-        assert_eq!(s.get(a), None);
-        assert_eq!(s.get(b).as_deref(), Some("two"));
-        assert_eq!(s.get(c).as_deref(), Some("three"));
     }
 }

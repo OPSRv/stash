@@ -11,11 +11,13 @@
 //! For now categories only carry a cool-down so a battery-low alert
 //! fired ten times in a row doesn't spam the chat.
 
-use std::sync::{Mutex, OnceLock};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
+use super::commands_registry::InlineKeyboard;
 use super::pairing::PairingState;
 use super::state::TelegramState;
 
@@ -45,18 +47,24 @@ fn last_fired() -> &'static Mutex<std::collections::HashMap<Category, Instant>> 
     STORE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+/// Managed telegram state + paired chat id, or `None` when the bot isn't
+/// running / no chat is paired.
+fn paired_chat(app: &AppHandle) -> Option<(tauri::State<'_, Arc<TelegramState>>, i64)> {
+    let state = app.try_state::<Arc<TelegramState>>()?;
+    let chat_id = match &*state.pairing.lock().unwrap() {
+        PairingState::Paired { chat_id } => *chat_id,
+        _ => return None,
+    };
+    Some((state, chat_id))
+}
+
 /// Fire-and-forget notification. Silently drops when:
 ///   - the telegram state isn't managed (app setup failed / not running),
 ///   - no chat is paired,
 ///   - the category is still within its cooldown window.
 pub fn notify_if_paired(app: &AppHandle, category: Category, text: impl Into<String>) {
-    let state = match app.try_state::<std::sync::Arc<TelegramState>>() {
-        Some(s) => s,
-        None => return,
-    };
-    let chat_id = match &*state.pairing.lock().unwrap() {
-        PairingState::Paired { chat_id } => *chat_id,
-        _ => return,
+    let Some((state, chat_id)) = paired_chat(app) else {
+        return;
     };
 
     // Per-category toggle check — user may have silenced this kind.
@@ -79,4 +87,43 @@ pub fn notify_if_paired(app: &AppHandle, category: Category, text: impl Into<Str
     }
 
     state.sender.enqueue(chat_id, text);
+}
+
+/// Like `notify_if_paired`, but carries an inline keyboard. Honours
+/// pairing + the per-category settings toggle; cooldown/dedup is the
+/// caller's job (each watcher already tracks its own). Returns whether
+/// the message was queued.
+pub fn notify_with_keyboard(
+    app: &AppHandle,
+    category: Category,
+    text: impl Into<String>,
+    keyboard: impl Into<Option<InlineKeyboard>>,
+) -> bool {
+    let Some((state, chat_id)) = paired_chat(app) else {
+        return false;
+    };
+    if !super::settings::category_enabled(&state, category) {
+        tracing::debug!(?category, "telegram notifier: disabled in settings");
+        return false;
+    }
+    state
+        .sender
+        .enqueue_with_keyboard(chat_id, text, keyboard.into());
+    true
+}
+
+/// Push a message straight to the paired chat, bypassing category toggles
+/// and cooldowns. For results the user explicitly asked for (e.g. a long
+/// job started from a button). Returns whether it was queued.
+pub fn send_to_paired(
+    app: &AppHandle,
+    text: impl Into<String>,
+    keyboard: Option<InlineKeyboard>,
+    documents: Vec<PathBuf>,
+) -> bool {
+    let Some((state, chat_id)) = paired_chat(app) else {
+        return false;
+    };
+    state.sender.enqueue_full(chat_id, text, keyboard, documents);
+    true
 }
