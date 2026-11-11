@@ -20,6 +20,7 @@ import { CopyIcon, ExternalIcon, NextIcon, NoteIcon, PauseIcon, PlayIcon, PrevIc
 import { revealFile } from '../../shared/util/revealFile';
 import { copyText } from '../../shared/util/clipboard';
 import { dragIconPath, mediaStreamUrl, mixdown, readPeaks, STEM_LABELS, stemColor, writePeaks, type ChordSegment } from './api';
+import { getSharedAudioContext } from '../../shared/audio/sharedAudioContext';
 
 interface StemMixerProps {
   /// Stable identifier for the job whose stems we're mixing. Used as
@@ -203,10 +204,9 @@ export function StemMixer({
 }: StemMixerProps) {
   const { toast } = useToast();
 
-  // Web Audio graph — single AudioContext per mixer instance. We rebuild
+  // Web Audio graph on the app-wide shared AudioContext. We rebuild
   // BufferSource nodes on every play / seek (sources are one-shot per
-  // WebAudio spec), but the GainNodes and the AudioContext itself
-  // outlive playback so volume/mute changes apply instantly even while
+  // WebAudio spec), but the GainNodes outlive playback so volume/mute changes apply instantly even while
   // paused.
   const ctxRef = useRef<AudioContext | null>(null);
   const masterGainRef = useRef<GainNode | null>(null);
@@ -386,9 +386,10 @@ export function StemMixer({
     let cancelled = false;
     setLoading(true);
     setLoadError(null);
-    const ctx = new (window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext)();
+    // App-wide shared context (see sharedAudioContext.ts). Minting a private
+    // one per opened job renegotiated the output device and could leave a
+    // running Metronome silent.
+    const ctx = getSharedAudioContext();
     ctxRef.current = ctx;
     const master = ctx.createGain();
     master.gain.value = masterVolume;
@@ -480,7 +481,10 @@ export function StemMixer({
     return () => {
       cancelled = true;
       stopSources();
-      ctxRef.current?.close().catch(() => {});
+      // Detach our graph only — never close the shared context.
+      laneGainRef.current.forEach((g) => g.disconnect());
+      master.disconnect();
+      monoNode.disconnect();
       ctxRef.current = null;
       masterGainRef.current = null;
       monoNodeRef.current = null;

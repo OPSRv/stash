@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
+import {
+  getSharedAudioContext,
+  onSharedAudioContextReplaced,
+} from '../../../shared/audio/sharedAudioContext';
+import {
+  createStallWatchdog,
+  createWorkerTicker,
+  type WorkerTicker,
+} from '../../../shared/audio/audioClock';
 import {
   type MetronomeState,
   type SoundPreset,
@@ -18,24 +26,6 @@ type EngineConfig = Pick<
 /** Lookahead scheduler (Chris Wilson). */
 const LOOKAHEAD_MS = 25;
 const SCHEDULE_AHEAD_S = 0.1;
-
-/// Web Worker timer source. Browsers throttle `setInterval` on hidden tabs
-/// (down to ~1Hz), which starves the lookahead scheduler and makes the
-/// metronome stutter when the popup is closed. Workers aren't throttled, so
-/// we run the tick clock there and post a message back to drive the
-/// scheduler at full rate even when the popup is hidden.
-const SCHEDULER_WORKER_SRC = `
-let id = null;
-self.onmessage = (e) => {
-  if (e.data && e.data.type === 'start') {
-    if (id !== null) clearInterval(id);
-    const ms = e.data.ms || 25;
-    id = setInterval(() => self.postMessage('tick'), ms);
-  } else if (e.data && e.data.type === 'stop') {
-    if (id !== null) { clearInterval(id); id = null; }
-  }
-};
-`;
 
 type EngineHandle = {
   isPlaying: boolean;
@@ -58,14 +48,7 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   const masterRef = useRef<GainNode | null>(null);
   const nextNoteTimeRef = useRef<number>(0);
   const beatIdxRef = useRef<number>(0);
-  const workerRef = useRef<Worker | null>(null);
-  const workerUrlRef = useRef<string | null>(null);
-  /// Main-thread `setInterval` id — only used when the Web Worker can't be
-  /// constructed (e.g. CSP refuses `blob:` workers in a hardened build).
-  /// Workers stay throttle-proof when the popup is hidden, so they're still
-  /// the preferred path; this is a safety net so the metronome makes sound
-  /// even if `worker-src` is locked down again.
-  const fallbackTimerRef = useRef<number | null>(null);
+  const tickerRef = useRef<WorkerTicker | null>(null);
   const cfgRef = useRef(cfg);
   const listenersRef = useRef<Set<(beatDot: number, accent: boolean) => void>>(new Set());
   const currentBeatRef = useRef<number>(0);
@@ -73,6 +56,8 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   /// instead of letting the beat strip pulse for up to `SCHEDULE_AHEAD_S`
   /// after the user hit Stop.
   const pendingBeatTimersRef = useRef<Set<number>>(new Set());
+  /// Recovers a wedged shared context (see `audioClock.ts`).
+  const watchdogRef = useRef(createStallWatchdog());
 
   cfgRef.current = cfg;
 
@@ -128,18 +113,17 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   const scheduler = useCallback(() => {
     const ctx = ctxRef.current;
     if (!ctx) return;
-    // Self-heal a stalled audio graph. macOS / WKWebView suspends (or marks
-    // 'interrupted') the AudioContext for reasons beyond tab visibility —
-    // app deactivation, window occlusion, an audio-session grab by another
-    // app, device sleep/wake, or a headphone swap — and none of those fire
-    // `visibilitychange`. The worker keeps ticking regardless, so every tick
-    // we make sure the context is actually running; otherwise the strip
-    // keeps pulsing while the speaker stays silent ("sound disappears").
-    // While suspended `currentTime` is frozen, so we re-pin the next note a
-    // hair ahead to avoid flooding a burst of past-due clicks on resume.
-    if (ctx.state !== 'running') {
-      ctx.resume().catch(() => {});
-      nextNoteTimeRef.current = ctx.currentTime + 0.05;
+    // Self-heal a stalled audio graph — WKWebView suspends/'interrupts' the
+    // context (app deactivation, device sleep/wake, headphone swap, another
+    // context or the mic renegotiating the output) and can even leave it
+    // 'running' with a frozen clock: the strip would pulse while the speaker
+    // stays silent. The watchdog resumes, and rebuilds the context when
+    // resume() can't revive it (→ onSharedAudioContextReplaced below).
+    const verdict = watchdogRef.current.check(ctx);
+    if (verdict === 'suspended' || verdict === 'recreated') {
+      // While suspended `currentTime` is frozen, so re-pin the next note a
+      // hair ahead to avoid a burst of past-due clicks on resume.
+      if (verdict === 'suspended') nextNoteTimeRef.current = ctx.currentTime + 0.05;
       return;
     }
     const { bpm, subdivision } = cfgRef.current;
@@ -151,20 +135,9 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
     }
   }, [scheduleNote]);
 
-  const ensureWorker = useCallback((): Worker | null => {
-    if (workerRef.current) return workerRef.current;
-    if (typeof Worker === 'undefined') return null;
-    try {
-      const blob = new Blob([SCHEDULER_WORKER_SRC], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
-      const w = new Worker(url);
-      w.onmessage = () => scheduler();
-      workerRef.current = w;
-      workerUrlRef.current = url;
-      return w;
-    } catch {
-      return null;
-    }
+  const ensureTicker = useCallback((): WorkerTicker => {
+    if (!tickerRef.current) tickerRef.current = createWorkerTicker(() => scheduler(), LOOKAHEAD_MS);
+    return tickerRef.current;
   }, [scheduler]);
 
   const start = useCallback(() => {
@@ -172,24 +145,13 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
     ctx.resume().catch(() => {});
     nextNoteTimeRef.current = ctx.currentTime + 0.05;
     beatIdxRef.current = 0;
+    watchdogRef.current.reset();
     setIsPlaying(true);
-    const w = ensureWorker();
-    if (w) {
-      w.postMessage({ type: 'start', ms: LOOKAHEAD_MS });
-    } else {
-      if (fallbackTimerRef.current !== null) window.clearInterval(fallbackTimerRef.current);
-      fallbackTimerRef.current = window.setInterval(scheduler, LOOKAHEAD_MS);
-    }
-  }, [ensureWorker, scheduler]);
+    ensureTicker().start();
+  }, [ensureTicker]);
 
   const stop = useCallback(() => {
-    if (workerRef.current) {
-      workerRef.current.postMessage({ type: 'stop' });
-    }
-    if (fallbackTimerRef.current !== null) {
-      window.clearInterval(fallbackTimerRef.current);
-      fallbackTimerRef.current = null;
-    }
+    tickerRef.current?.stop();
     for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
     pendingBeatTimersRef.current.clear();
     setIsPlaying(false);
@@ -215,19 +177,8 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
 
   useEffect(() => {
     return () => {
-      if (workerRef.current) {
-        workerRef.current.postMessage({ type: 'stop' });
-        workerRef.current.terminate();
-        workerRef.current = null;
-      }
-      if (workerUrlRef.current) {
-        URL.revokeObjectURL(workerUrlRef.current);
-        workerUrlRef.current = null;
-      }
-      if (fallbackTimerRef.current !== null) {
-        window.clearInterval(fallbackTimerRef.current);
-        fallbackTimerRef.current = null;
-      }
+      tickerRef.current?.dispose();
+      tickerRef.current = null;
       for (const h of pendingBeatTimersRef.current) window.clearTimeout(h);
       pendingBeatTimersRef.current.clear();
       // Detach our master from the *shared* context — never close it, other
@@ -248,6 +199,39 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   useEffect(() => {
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
+  // Another module (or our own watchdog) rebuilt the shared context: our
+  // master gain belongs to the dead one, so re-attach to the new context and
+  // re-pin the schedule if we're mid-play.
+  useEffect(
+    () =>
+      onSharedAudioContextReplaced(() => {
+        masterRef.current?.disconnect();
+        masterRef.current = null;
+        ctxRef.current = null;
+        if (!isPlayingRef.current) return;
+        const ctx = ensureCtx();
+        nextNoteTimeRef.current = ctx.currentTime + 0.05;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ensureCtx only touches refs
+    [],
+  );
+
+  // A context rebuilt outside a user gesture may be held 'suspended' by the
+  // autoplay policy — the next click/key anywhere in the popup unlocks it.
+  useEffect(() => {
+    const unlock = () => {
+      if (!isPlayingRef.current) return;
+      const ctx = ctxRef.current;
+      if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+    };
+    document.addEventListener('pointerdown', unlock, true);
+    document.addEventListener('keydown', unlock, true);
+    return () => {
+      document.removeEventListener('pointerdown', unlock, true);
+      document.removeEventListener('keydown', unlock, true);
+    };
+  }, []);
+
   useEffect(() => {
     const onVis = () => {
       if (document.visibilityState !== 'visible') return;

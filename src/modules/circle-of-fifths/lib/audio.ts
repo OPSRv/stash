@@ -12,13 +12,20 @@
 import type { Chord } from './theory';
 import { chordPitches } from './theory';
 import { midiToFreq } from '../../../shared/music/tunings';
+import { getSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
 
 let ctx: AudioContext | null = null;
 let master: DynamicsCompressorNode | null = null;
 
+/* Runs on the app-wide shared context (see sharedAudioContext.ts): a private
+ * context here renegotiated the output device and could leave the Metronome
+ * sitting next to us in the Valeton tab silent. The compressor is rebuilt
+ * whenever the shared context is swapped out from under us. */
 const ensureCtx = (): AudioContext => {
-  if (!ctx) {
-    ctx = new AudioContext();
+  const shared = getSharedAudioContext();
+  if (ctx !== shared) {
+    master?.disconnect();
+    ctx = shared;
     master = ctx.createDynamicsCompressor();
     master.connect(ctx.destination);
   }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { detectPitch } from '../lib/pitch';
 import { matchChromatic } from '../tuner.constants';
+import { resumeSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
 
 /** Live snapshot of what the tuner hears — a chromatic reading, so the note is
  *  whatever pitch the mic picks up, not constrained to any tuning's strings. */
@@ -57,6 +58,7 @@ export const useTuner = (deviceId: string | null): TunerHandle => {
   const ctxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const bufRef = useRef<Float32Array | null>(null);
   const rafRef = useRef<number | null>(null);
   const smoothedRef = useRef<number>(-1);
@@ -84,9 +86,11 @@ export const useTuner = (deviceId: string | null): TunerHandle => {
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    sourceRef.current?.disconnect();
+    sourceRef.current = null;
     analyserRef.current?.disconnect();
     analyserRef.current = null;
-    ctxRef.current?.close().catch(() => {});
+    // Never close the shared context — other modules are still on it.
     ctxRef.current = null;
     smoothedRef.current = -1;
   }, []);
@@ -150,14 +154,14 @@ export const useTuner = (deviceId: string | null): TunerHandle => {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
-        const Ctor =
-          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ??
-          AudioContext;
-        const ctx = new Ctor();
+        // Shared app-wide context — a private one renegotiates the output
+        // device and can silence a running Metronome.
+        const ctx = resumeSharedAudioContext();
         const source = ctx.createMediaStreamSource(stream);
         const analyser = ctx.createAnalyser();
         analyser.fftSize = FFT_SIZE;
         source.connect(analyser);
+        sourceRef.current = source;
 
         ctxRef.current = ctx;
         streamRef.current = stream;
