@@ -232,7 +232,7 @@ export const DrumsShell = () => {
   const exportSeconds = loopSeconds(state, state.export_bars);
 
   return (
-    <div ref={rootRef} className="drums-root flex h-full min-h-0 flex-col gap-3">
+    <div ref={rootRef} className="drums-root flex h-full min-h-0 flex-col gap-2.5">
       <TransportBar
         state={state}
         isPlaying={engine.isPlaying}

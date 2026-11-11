@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 
 use crate::modules::drums::commands::{default_export_dir, state_path};
 use crate::modules::drums::state::{
-    is_preset, is_voice, DrumsState, BPM_MAX, BPM_MIN, EXPORT_BARS, METERS, PRESET_IDS, VOICES,
+    is_preset, is_voice, DrumsState, BPM_MAX, BPM_MIN, EXPORT_BARS, KITS, METERS, PRESET_IDS, VOICES,
 };
 use crate::modules::telegram::agent_util::{emit_with_ack, reveal_tab, run_slash, tokenize_quoted};
 use crate::modules::telegram::commands_registry::{
@@ -54,6 +54,8 @@ pub struct DrumsRemote {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meter: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub kit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bars: Option<u8>,
     /// Fraction 0..0.6.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,6 +84,7 @@ pub struct DrumsArgs {
     pub bpm_delta: Option<i32>,
     pub preset: Option<String>,
     pub meter: Option<String>,
+    pub kit: Option<String>,
     pub bars: Option<u8>,
     /// Percent 0..60.
     pub swing: Option<u8>,
@@ -198,6 +201,12 @@ pub fn parse_drums_args(args: &str) -> Result<DrumsArgs, String> {
                         }
                         out.meter = Some(val.to_string());
                     }
+                    "kit" => {
+                        if !KITS.contains(&val) {
+                            return Err(format!("kit має бути {}, отримано `{val}`", KITS.join("|")));
+                        }
+                        out.kit = Some(val.to_string());
+                    }
                     "bars" => out.bars = Some(parse_ranged("bars", val, 1, 2)? as u8),
                     "swing" => {
                         out.swing =
@@ -280,6 +289,7 @@ pub fn build_remote(
         bpm_delta: args.bpm_delta,
         preset: args.preset.clone(),
         meter: args.meter.clone(),
+        kit: args.kit.clone(),
         bars: args.bars,
         swing: args.swing.map(pct),
         steps: args.steps.clone(),
@@ -327,6 +337,9 @@ fn format_drums_reply(r: &DrumsRemote) -> String {
     }
     if let Some(m) = &r.meter {
         parts.push(m.clone());
+    }
+    if let Some(k) = &r.kit {
+        parts.push(format!("кіт {k}"));
     }
     if let Some(b) = r.bars {
         parts.push(format!("тактів: {b}"));
@@ -434,6 +447,7 @@ impl CommandHandler for DrumsCmd {
     }
     fn usage(&self) -> &'static str {
         "/drums [start|stop|toggle|status] [bpm=N|+N|-N] [preset=<id>] [meter=4/4|3/4|6/8|12/8] \
+         [kit=acoustic|rock|electronic] \
          [bars=1|2] [swing=0..60] [<voice>=<pattern>] [clear=<voice|all>[,..]] [mute=<voice>[,..]] \
          [unmute=<voice>[,..]] [vol_<voice>=0..100] [master=0..100] [export=wav|mp3] \
          [export_bars=1|2|4|8|16]\nІнструменти: kick, snare, chh, ohh, clap, tom, rim, crash. \
@@ -495,7 +509,7 @@ fn drums_slash_args(args: &Value) -> Result<String, String> {
             parts.push(format!("bpm={d:+}"));
         }
     }
-    for (field, key) in [("preset", "preset"), ("meter", "meter")] {
+    for (field, key) in [("preset", "preset"), ("meter", "meter"), ("kit", "kit")] {
         if let Some(v) = args.get(field).and_then(Value::as_str) {
             parts.push(format!("{key}={}", v.trim()));
         }
@@ -579,13 +593,21 @@ impl Tool for DrumsControl {
     }
     fn description(&self) -> &'static str {
         "Full control of the drum machine (step sequencer in the Valeton tab's Drums view) — \
-         playback, BPM (absolute or relative), built-in preset grooves, meter, 1 or 2 bars, \
+         playback, BPM (absolute or relative), built-in preset grooves, meter, drum kit (acoustic = recorded jazz/studio, rock = big punchy recorded rock, electronic = synthesized analog drum machine), 1 or 2 bars, \
          swing, per-voice step patterns, clearing rows, per-voice mute and volume, master \
          volume, and audio export (WAV/MP3 into ~/Music/Stash/Drums). Any field you omit is left \
          untouched; `action:\"status\"` returns whether it is playing, the BPM and preset. \
          Voices: kick, snare, chh (closed hi-hat), ohh (open hi-hat), clap, tom, rim, crash. \
-         Presets: rock, pop, funk, disco, shuffle, halftime, metal, reggae, bossa, hiphop, \
-         waltz, ballad68. Step notation: one character per step — `x` = hit, `X` = accented \
+         Presets (genre variations — the bare genre id is its basic groove): rock (basic), \
+         rock-2 (driving 8ths), rock-3 (open hats), rock-4 (four on the floor), pop (radio), \
+         pop-2 (ballad), pop-3 (dance-pop), funk (classic), funk-2 (ghost notes), funk-3 \
+         (linear), disco, disco-2 (nu-disco), disco-3 (house), shuffle, shuffle-2 (slow blues), \
+         shuffle-3 (texas shuffle), jazz (swing, 12/8), halftime, halftime-2 (trap), halftime-3, \
+         metal (double kick), metal-2 (gallop), metal-3 (thrash skank), metal-4 (blast beat), \
+         punk (straight 8ths), punk-2 (skate punk), reggae (one drop), reggae-2 (steppers), \
+         reggae-3 (rockers), bossa (bossa nova), bossa-2 (samba), bossa-3 (cha-cha), hiphop, \
+         hiphop-2 (boom bap), hiphop-3 (lo-fi), waltz, waltz-2 (jazz waltz), ballad68 (6/8 \
+         ballad), ballad68-2 (6/8 rock). Step notation: one character per step — `x` = hit, `X` = accented \
          hit, `.` or `-` = rest (`|` may separate beats); 1..32 steps, tiled/truncated to the \
          grid. Grid: 4/4 has 16 steps per bar (sixteenths), 3/4 and 6/8 have 12, 12/8 has 12 \
          (triplet grid). E.g. four-on-the-floor kick in 4/4: \"x...x...x...x...\". A preset is \
@@ -608,8 +630,12 @@ impl Tool for DrumsControl {
                     "type": "integer", "minimum": -200, "maximum": 200,
                     "description": "Relative BPM change, e.g. 5 = faster by 5. Result clamps to 40..240."
                 },
-                "preset": { "type": "string", "enum": PRESET_IDS },
+                "preset": { "type": "string", "enum": PRESET_IDS.as_slice() },
                 "meter": { "type": "string", "enum": METERS },
+                "kit": {
+                    "type": "string", "enum": KITS,
+                    "description": "Drum kit: acoustic (recorded jazz/studio), rock (big recorded rock), electronic (synthesized analog drum machine)."
+                },
                 "bars": { "type": "integer", "enum": [1, 2], "description": "Pattern length in bars." },
                 "swing_percent": {
                     "type": "integer", "minimum": 0, "maximum": SWING_MAX_PERCENT,
@@ -689,13 +715,15 @@ mod tests {
     #[test]
     fn parse_actions_and_scalars() {
         let a = parse_drums_args(
-            "play bpm=120 preset=FUNK meter=6/8 bars=2 swing=25 master=70% export=mp3 export_bars=8",
+            "play bpm=120 preset=FUNK meter=6/8 kit=rock bars=2 swing=25 master=70% export=mp3 export_bars=8",
         )
         .unwrap();
         assert_eq!(a.action.as_deref(), Some("start"));
         assert_eq!(a.bpm, Some(120));
         assert_eq!(a.preset.as_deref(), Some("funk"));
         assert_eq!(a.meter.as_deref(), Some("6/8"));
+        assert_eq!(a.kit.as_deref(), Some("rock"));
+        assert_eq!(parse_drums_args("kit=electronic").unwrap().kit.as_deref(), Some("electronic"));
         assert_eq!(a.bars, Some(2));
         assert_eq!(a.swing, Some(25));
         assert_eq!(a.master, Some(70));
@@ -730,6 +758,7 @@ mod tests {
             (&format!("kick={}", "x".repeat(33)), "kick"),
             ("preset=polka", "polka"),
             ("meter=5/4", "meter"),
+            ("kit=marimba", "kit"),
             ("bars=3", "bars"),
             ("swing=70", "swing"),
             ("vol_cowbell=50", "cowbell"),
@@ -821,6 +850,7 @@ mod tests {
             "bpm_delta": -5,
             "preset": "shuffle",
             "meter": "12/8",
+            "kit": "electronic",
             "bars": 2,
             "swing_percent": 20,
             "steps": { "kick": "x.. x..", "snare": "...X.." },
@@ -837,6 +867,7 @@ mod tests {
             bpm_delta: Some(-5),
             preset: Some("shuffle".into()),
             meter: Some("12/8".into()),
+            kit: Some("electronic".into()),
             bars: Some(2),
             swing: Some(20),
             steps: [("kick", "x..x.."), ("snare", "...X..")]

@@ -175,9 +175,10 @@ export const playVoice = (
   }
 };
 
-/** Longest voice tail in seconds — the offline render pads by this much
- *  before folding tails back onto the loop start. */
-export const MAX_TAIL_S = 1.8;
+/** Longest voice tail in seconds (the sampled crash is cut at 2.5 s) — the
+ *  offline render pads by this much before folding tails back onto the
+ *  loop start. */
+export const MAX_TAIL_S = 2.6;
 
 /** Linear peak for a step value (1 = hit, 2 = accent). */
 export const velocityFor = (step: 1 | 2): number => (step === 2 ? 1 : 0.7);

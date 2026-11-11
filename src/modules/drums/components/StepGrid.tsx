@@ -143,7 +143,7 @@ export const StepGrid = ({
       aria-label="Drum pattern"
       aria-rowcount={VOICES.length}
       aria-colcount={len}
-      className="drums-grid flex min-h-0 flex-1 flex-col gap-1.5"
+      className="drums-grid flex min-h-0 flex-1 flex-col gap-0.5"
     >
       {VOICES.map((voice, row) => (
         <div
@@ -209,7 +209,7 @@ type StripProps = {
 /** Row header: audition button, mute, volume. Memoised — only re-renders
  *  when its own voice's mix changes. */
 const VoiceStrip = memo(({ voice, mix, onMix, onPreview }: StripProps) => (
-  <div role="rowheader" className="flex w-[150px] shrink-0 items-center gap-1">
+  <div role="rowheader" className="flex w-[168px] shrink-0 items-center gap-1">
     <button
       type="button"
       className="drum-voice-name ring-focus text-meta"
@@ -225,13 +225,15 @@ const VoiceStrip = memo(({ voice, mix, onMix, onPreview }: StripProps) => (
     >
       <SpeakerIcon />
     </IconButton>
-    <RangeSlider
-      value={Math.round(mix.volume * 100)}
-      onChange={(v) => onMix(voice, { volume: v / 100 })}
-      label={`${VOICE_LABELS[voice]} volume`}
-      disabled={mix.muted}
-      className="w-12 min-w-0"
-    />
+    {/* Fixed-width wrapper — `.stash-range` is width:100%. */}
+    <div className="w-14 shrink-0">
+      <RangeSlider
+        value={Math.round(mix.volume * 100)}
+        onChange={(v) => onMix(voice, { volume: v / 100 })}
+        label={`${VOICE_LABELS[voice]} volume`}
+        disabled={mix.muted}
+      />
+    </div>
   </div>
 ));
 VoiceStrip.displayName = 'VoiceStrip';

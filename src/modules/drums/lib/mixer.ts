@@ -4,6 +4,7 @@
  * into sound, so live and exported loops can't drift apart. */
 
 import { type DrumsState, type DrumVoice, VOICES } from './model';
+import { playSample, type KitBuffers } from './samples';
 import { playVoice, velocityFor, type VoiceHandle } from './voices';
 
 export type DrumMixer = {
@@ -48,6 +49,18 @@ export const createMixer = (ctx: BaseAudioContext, dest: AudioNode, s: DrumsStat
 /** Per-render scratch: the ringing open hat so a closed hat can choke it. */
 export type ChokeState = { openHat: VoiceHandle | null };
 
+/** Fire one voice: a recorded sample when `kit` buffers are given, the
+ *  synth otherwise (Electronic kit). */
+export const hitVoice = (
+  ctx: BaseAudioContext,
+  out: AudioNode,
+  kit: KitBuffers | null,
+  voice: DrumVoice,
+  t: number,
+  step: 1 | 2,
+): VoiceHandle =>
+  kit ? playSample(ctx, out, kit, voice, t, step === 2) : playVoice(ctx, out, voice, t, velocityFor(step));
+
 /** Fire every active voice of pattern column `col` at time `t`. Muted voices
  *  are skipped outright (no wasted nodes). */
 export const triggerStep = (
@@ -57,12 +70,13 @@ export const triggerStep = (
   col: number,
   t: number,
   choke: ChokeState,
+  kit: KitBuffers | null,
 ): void => {
   for (const v of VOICES) {
     const step = s.steps[v][col];
     if (!step || s.mix[v].muted) continue;
     if (v === 'chh') choke.openHat?.choke(t);
-    const h = playVoice(ctx, mixer.voiceOut[v], v, t, velocityFor(step));
+    const h = hitVoice(ctx, mixer.voiceOut[v], kit, v, t, step as 1 | 2);
     if (v === 'ohh') choke.openHat = h;
   }
 };

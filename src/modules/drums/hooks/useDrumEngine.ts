@@ -10,7 +10,8 @@ import {
 } from '../../../shared/audio/audioClock';
 import { patternLength, stepDuration, type DrumsState, type DrumVoice } from '../lib/model';
 import { createMixer, triggerStep, type ChokeState, type DrumMixer } from '../lib/mixer';
-import { playVoice } from '../lib/voices';
+import { hitVoice } from '../lib/mixer';
+import { isSampledKit, loadKit, prefetchKit, type KitBuffers } from '../lib/samples';
 
 /** Lookahead scheduler (Chris Wilson), same cadence as the Metronome. */
 const LOOKAHEAD_MS = 25;
@@ -47,6 +48,30 @@ export const useDrumEngine = (state: DrumsState): DrumEngine => {
   const watchdogRef = useRef(createStallWatchdog());
   const listenersRef = useRef(new Set<(col: number) => void>());
   const pendingRef = useRef(new Set<number>());
+  /** Decoded buffers of the current sampled kit on the live context, tagged
+   *  with the kit they belong to (null = not loaded / Electronic). */
+  const kitRef = useRef<{ id: string; buffers: KitBuffers } | null>(null);
+
+  /** Make sure the live context has the current kit decoded. Hits scheduled
+   *  before it lands are skipped rather than played on the wrong kit. */
+  const syncKit = () => {
+    const ctx = ctxRef.current;
+    const kit = stateRef.current.kit;
+    if (!ctx || !isSampledKit(kit) || kitRef.current?.id === kit) return;
+    loadKit(ctx, kit)
+      .then((buffers) => {
+        if (ctxRef.current === ctx && stateRef.current.kit === kit) kitRef.current = { id: kit, buffers };
+      })
+      .catch(() => {});
+  };
+
+  /** Buffers for the current kit, `null` for the synth, `undefined` while a
+   *  sampled kit is still decoding. */
+  const currentKit = (): KitBuffers | null | undefined => {
+    const kit = stateRef.current.kit;
+    if (!isSampledKit(kit)) return null;
+    return kitRef.current?.id === kit ? kitRef.current.buffers : undefined;
+  };
 
   const ensureGraph = (): AudioContext => {
     if (!ctxRef.current) {
@@ -54,6 +79,8 @@ export const useDrumEngine = (state: DrumsState): DrumEngine => {
       ctxRef.current = ctx;
       mixerRef.current = createMixer(ctx, ctx.destination, stateRef.current);
       chokeRef.current = { openHat: null };
+      kitRef.current = null;
+      syncKit();
     }
     return ctxRef.current;
   };
@@ -82,11 +109,12 @@ export const useDrumEngine = (state: DrumsState): DrumEngine => {
     const s = stateRef.current;
     const len = patternLength(s);
     const d = stepDuration(s.bpm, s.meter);
+    const kit = currentKit();
     while (nextGridTimeRef.current < ctx.currentTime + SCHEDULE_AHEAD_S) {
       const col = colRef.current % len;
       const swung = s.meter !== '12/8' && col % 2 === 1 ? s.swing * d : 0;
       const t = nextGridTimeRef.current + swung;
-      triggerStep(ctx, mixer, s, col, t, chokeRef.current);
+      if (kit !== undefined) triggerStep(ctx, mixer, s, col, t, chokeRef.current, kit);
       const handle = window.setTimeout(() => {
         pendingRef.current.delete(handle);
         listenersRef.current.forEach((cb) => cb(col));
@@ -125,8 +153,23 @@ export const useDrumEngine = (state: DrumsState): DrumEngine => {
   const preview = useCallback((voice: DrumVoice) => {
     const ctx = ensureGraph();
     ctx.resume().catch(() => {});
-    const mixer = mixerRef.current;
-    if (mixer) playVoice(ctx, mixer.voiceOut[voice], voice, ctx.currentTime + 0.005, 1);
+    const play = (kit: KitBuffers | null) => {
+      const mixer = mixerRef.current;
+      if (mixer && ctxRef.current === ctx) hitVoice(ctx, mixer.voiceOut[voice], kit, voice, ctx.currentTime + 0.005, 2);
+    };
+    const kit = currentKit();
+    if (kit !== undefined) return play(kit);
+    // First audition on a sampled kit: wait for the decode instead of
+    // swallowing the click.
+    const id = stateRef.current.kit;
+    if (isSampledKit(id)) {
+      loadKit(ctx, id)
+        .then((buffers) => {
+          kitRef.current = { id, buffers };
+          play(buffers);
+        })
+        .catch(() => {});
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ensureGraph only touches refs
   }, []);
 
@@ -134,6 +177,14 @@ export const useDrumEngine = (state: DrumsState): DrumEngine => {
   useEffect(() => {
     mixerRef.current?.apply(state);
   }, [state]);
+
+  // Kit switched (or view opened): fetch its bytes right away, decode onto
+  // the live context if one exists already.
+  useEffect(() => {
+    if (isSampledKit(state.kit)) prefetchKit(state.kit);
+    syncKit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- syncKit only touches refs
+  }, [state.kit]);
 
   // Shared context rebuilt (our watchdog or another module's): re-attach.
   useEffect(

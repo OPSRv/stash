@@ -9,11 +9,19 @@ pub const VOICES: [&str; 8] = ["kick", "snare", "chh", "ohh", "clap", "tom", "ri
 /// (sixteenths), 6/8 (sixteenths) and 12/8 (triplet-eighth grid).
 pub const METERS: [&str; 4] = ["4/4", "3/4", "6/8", "12/8"];
 
-/// Built-in pattern ids. The frontend owns the actual patterns; Rust only
-/// validates ids and lists them in the agent tool description.
-pub const PRESET_IDS: [&str; 12] = [
-    "rock", "pop", "funk", "disco", "shuffle", "halftime", "metal", "reggae", "bossa", "hiphop",
-    "waltz", "ballad68",
+/// Drum kits (sample sets): recorded jazz/studio, big recorded rock, synthesized
+/// analog drum machine.
+pub const KITS: [&str; 3] = ["acoustic", "rock", "electronic"];
+
+/// Built-in pattern ids (genre variations; variation 1 keeps the bare genre
+/// id). The frontend owns the actual patterns (`src/modules/drums/lib/presets.ts`);
+/// Rust only validates ids and lists them in the agent tool description.
+pub const PRESET_IDS: [&str; 39] = [
+    "rock", "rock-2", "rock-3", "rock-4", "pop", "pop-2", "pop-3", "funk", "funk-2", "funk-3",
+    "disco", "disco-2", "disco-3", "shuffle", "shuffle-2", "shuffle-3", "jazz", "halftime",
+    "halftime-2", "halftime-3", "metal", "metal-2", "metal-3", "metal-4", "punk", "punk-2",
+    "reggae", "reggae-2", "reggae-3", "bossa", "bossa-2", "bossa-3", "hiphop", "hiphop-2",
+    "hiphop-3", "waltz", "waltz-2", "ballad68", "ballad68-2",
 ];
 
 /// Allowed export lengths, in bars.
@@ -61,6 +69,7 @@ impl Default for VoiceMix {
 pub struct DrumsState {
     pub bpm: u32,
     pub meter: String,
+    pub kit: String,
     pub bars: u8,
     /// Swing amount as a fraction, 0.0..=0.6.
     pub swing: f32,
@@ -99,6 +108,7 @@ impl Default for DrumsState {
         Self {
             bpm: 100,
             meter: "4/4".into(),
+            kit: "acoustic".into(),
             bars: 1,
             swing: 0.0,
             steps: default_steps(),
@@ -158,6 +168,9 @@ impl DrumsState {
         self.bpm = self.bpm.clamp(BPM_MIN, BPM_MAX);
         if !METERS.contains(&self.meter.as_str()) {
             self.meter = "4/4".into();
+        }
+        if !KITS.contains(&self.kit.as_str()) {
+            self.kit = "acoustic".into();
         }
         if !matches!(self.bars, 1 | 2) {
             self.bars = 1;
@@ -241,6 +254,7 @@ mod tests {
         let mut s = DrumsState::default();
         s.bpm = 999;
         s.meter = "7/8".into();
+        s.kit = "marimba".into();
         s.bars = 5;
         s.swing = 0.9;
         s.master_volume = f32::NAN;
@@ -262,6 +276,7 @@ mod tests {
         s.normalize();
         assert_eq!(s.bpm, 240);
         assert_eq!(s.meter, "4/4");
+        assert_eq!(s.kit, "acoustic");
         assert_eq!(s.bars, 1);
         assert!((s.swing - 0.6).abs() < 1e-6);
         assert!((s.master_volume - 0.8).abs() < 1e-6);
@@ -301,6 +316,7 @@ mod tests {
         let s = DrumsState::load(&p);
         assert_eq!(s.bpm, 130);
         assert_eq!(s.meter, "3/4");
+        assert_eq!(s.kit, "acoustic", "missing kit defaults to acoustic");
         assert_eq!(s.steps["kick"].len(), 12);
         assert!(s.mix["kick"].muted);
         assert!((s.mix["kick"].volume - 0.8).abs() < 1e-6);

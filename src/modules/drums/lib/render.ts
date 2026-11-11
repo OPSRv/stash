@@ -8,6 +8,7 @@
 import { encodeWavPcm16 } from '../../../shared/util/encodeWav';
 import { METER_GRID, patternLength, stepDuration, stepOffset, type DrumsState } from './model';
 import { createMixer, triggerStep, type ChokeState } from './mixer';
+import { isSampledKit, loadKit } from './samples';
 import { MAX_TAIL_S } from './voices';
 
 const SAMPLE_RATE = 44_100;
@@ -34,6 +35,8 @@ export const renderLoopWav = async (s: DrumsState, bars: number): Promise<Uint8A
       .webkitOfflineAudioContext;
   const ctx = new Ctor(2, total, SAMPLE_RATE);
   const mixer = createMixer(ctx, ctx.destination, s);
+  // Samples decode per context — the offline one needs its own copy.
+  const kit = isSampledKit(s.kit) ? await loadKit(ctx, s.kit) : null;
   const choke: ChokeState = { openHat: null };
   const len = patternLength(s);
   const totalSteps = METER_GRID[s.meter].stepsPerBar * bars;
@@ -41,7 +44,7 @@ export const renderLoopWav = async (s: DrumsState, bars: number): Promise<Uint8A
   for (let i = 0; i < totalSteps; i++) {
     const col = i % len;
     const t = Math.floor(i / len) * loopDur + stepOffset(col, s.bpm, s.meter, s.swing);
-    triggerStep(ctx, mixer, s, col, t, choke);
+    triggerStep(ctx, mixer, s, col, t, choke, kit);
   }
   const rendered = await ctx.startRendering();
 

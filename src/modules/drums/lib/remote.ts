@@ -16,6 +16,7 @@ import { applyPreset, findPreset } from './presets';
 
 export type DrumsRemote = {
   action?: 'start' | 'stop' | 'toggle' | 'status' | null;
+  kit?: string | null;
   bpm?: number | null;
   bpm_delta?: number | null;
   preset?: string | null;
@@ -56,6 +57,7 @@ export const applyRemote = (s: DrumsState, p: DrumsRemote): DrumsState => {
   if (typeof p.bpm === 'number') patch.bpm = clampBpm(p.bpm);
   else if (typeof p.bpm_delta === 'number') patch.bpm = clampBpm(next.bpm + p.bpm_delta);
   if (p.meter) patch.meter = p.meter as DrumsState['meter'];
+  if (p.kit) patch.kit = p.kit as DrumsState['kit'];
   if (p.bars === 1 || p.bars === 2) patch.bars = p.bars;
   if (typeof p.swing === 'number') patch.swing = Math.max(0, Math.min(SWING_MAX, p.swing));
   if (typeof p.master_volume === 'number') patch.master_volume = p.master_volume;

@@ -32,6 +32,16 @@ export const METER_GRID: Record<Meter, { stepsPerBar: number; stepsPerBeat: numb
   '12/8': { stepsPerBar: 12, stepsPerBeat: 3 },
 };
 
+/** Sound source: two recorded acoustic kits (samples, see lib/samples.ts)
+ *  or the synthesized analog drum machine (lib/voices.ts). */
+export const KITS = ['acoustic', 'rock', 'electronic'] as const;
+export type DrumKit = (typeof KITS)[number];
+export const KIT_LABELS: Record<DrumKit, string> = {
+  acoustic: 'Acoustic',
+  rock: 'Rock kit',
+  electronic: 'Electronic',
+};
+
 export const BPM_MIN = 40;
 export const BPM_MAX = 240;
 export const SWING_MAX = 0.6;
@@ -41,6 +51,7 @@ export type ExportFormat = 'wav' | 'mp3';
 export type VoiceMix = { volume: number; muted: boolean };
 
 export type DrumsState = {
+  kit: DrumKit;
   bpm: number;
   meter: Meter;
   bars: 1 | 2;
@@ -117,6 +128,7 @@ export const normalizeState = (s: Partial<DrumsState>, fallback: DrumsState): Dr
     ? (s.export_bars as number)
     : fallback.export_bars;
   return {
+    kit: (KITS as readonly string[]).includes(s.kit ?? '') ? (s.kit as DrumKit) : fallback.kit,
     bpm: clampBpm(s.bpm ?? fallback.bpm),
     meter,
     bars,
