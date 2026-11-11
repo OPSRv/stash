@@ -36,9 +36,12 @@ jobs:
     env:
       # Portable ggml build for whisper-rs-sys: no -mcpu=native, so the binary
       # doesn't inherit the runner CPU's features (macos-15 clang rejected the
-      # native i8mm path) and still runs on base M1 Macs. whisper-rs-sys
-      # forwards WHISPER_* to CMake; WHISPER_NATIVE aliases GGML_NATIVE.
-      WHISPER_NATIVE: 'OFF'
+      # native i8mm path) and still runs on base M1 Macs. GGML_NATIVE defaults
+      # OFF only when CMake cross-compiles, which an explicit CMAKE_SYSTEM_NAME
+      # triggers; whisper-rs-sys forwards CMAKE_* env vars to its CMake build.
+      # (WHISPER_NATIVE=OFF does nothing — the alias only maps ON.)
+      CMAKE_SYSTEM_NAME: Darwin
+      CMAKE_SYSTEM_PROCESSOR: arm64
     steps:
       - uses: actions/checkout@v4
 
