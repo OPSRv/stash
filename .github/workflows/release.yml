@@ -128,7 +128,9 @@ jobs:
             done
             SIG_B64="$(cat release-assets/Stash_arm64.app.tar.gz.sig)"
             VERSION="$(node -p "require('./package.json').version")"
-            TAG_NAME="${GITHUB_REF_NAME:-v$VERSION}"
+            # Manual dispatch runs on a branch ref — take the tag from the input,
+            # otherwise the manifest points at /releases/download/<branch>/ (404).
+            TAG_NAME="${{ inputs.tag || github.ref_name }}"
             PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG_NAME}/Stash_arm64.app.tar.gz"
             cat > release-assets/latest.json <<JSON
