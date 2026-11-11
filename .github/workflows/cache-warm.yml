@@ -30,6 +30,12 @@ jobs:
     name: Warm macOS arm64 cache
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      # Portable ggml build for whisper-rs-sys: no -mcpu=native, so the binary
+      # doesn't inherit the runner CPU's features (macos-15 clang rejected the
+      # native i8mm path) and still runs on base M1 Macs. whisper-rs-sys
+      # forwards WHISPER_* to CMake; WHISPER_NATIVE aliases GGML_NATIVE.
+      WHISPER_NATIVE: 'OFF'
     steps:
       - uses: actions/checkout@v4
 
