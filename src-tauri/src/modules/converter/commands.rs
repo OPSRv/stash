@@ -794,7 +794,7 @@ fn random_suffix() -> String {
 
 /// Bundle-bin candidate: same trick the stems pipeline uses to find
 /// the downloader-installed copy of ffmpeg.
-fn downloader_extras() -> Vec<PathBuf> {
+pub(crate) fn downloader_extras() -> Vec<PathBuf> {
     let mut extras: Vec<PathBuf> = Vec::new();
     // Without an `AppHandle` we can't read the downloader's runner
     // state directly. Stick with the default $APPLOCALDATA path the

@@ -72,32 +72,39 @@ function linearResample(input: Float32Array, fromHz: number, toHz: number): Floa
 }
 
 function encodeWavMono16(samples: Float32Array, sampleRate: number): Uint8Array {
-  const byteRate = sampleRate * 2;
-  const dataSize = samples.length * 2;
+  return encodeWavPcm16([samples], sampleRate);
+}
+
+/** Interleave 1..N equal-length channels into a canonical 44-byte-header
+ *  PCM s16le WAV. Samples are clipped to [-1, 1]. Shared by the Whisper
+ *  pre-encode (mono) and the Drums loop export (stereo). */
+export function encodeWavPcm16(channels: Float32Array[], sampleRate: number): Uint8Array {
+  const numCh = channels.length;
+  const frames = numCh > 0 ? channels[0].length : 0;
+  const blockAlign = numCh * 2;
+  const dataSize = frames * blockAlign;
   const buffer = new ArrayBuffer(44 + dataSize);
   const view = new DataView(buffer);
-  // RIFF header — 44 bytes, canonical PCM mono s16le.
   writeAscii(view, 0, 'RIFF');
   view.setUint32(4, 36 + dataSize, true);
   writeAscii(view, 8, 'WAVE');
   writeAscii(view, 12, 'fmt ');
   view.setUint32(16, 16, true); // fmt chunk size
   view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // mono
+  view.setUint16(22, numCh, true);
   view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, 2, true); // block align
+  view.setUint32(28, sampleRate * blockAlign, true); // byte rate
+  view.setUint16(32, blockAlign, true);
   view.setUint16(34, 16, true); // bits per sample
   writeAscii(view, 36, 'data');
   view.setUint32(40, dataSize, true);
   let offset = 44;
-  for (let i = 0; i < samples.length; i++) {
-    // Math.max/min faster than Math.round + clamp in hot loops; this
-    // runs once per utterance so either is fine, but the branchless
-    // form reads cleanly.
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-    offset += 2;
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < numCh; c++) {
+      const s = Math.max(-1, Math.min(1, channels[c][i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      offset += 2;
+    }
   }
   return new Uint8Array(buffer);
 }

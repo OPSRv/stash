@@ -53,6 +53,7 @@ export const initialState: AppState = {
   openCard: 'nr',
   liveView: false,
   circleView: false,
+  drumsView: false,
 };
 
 type Listener = () => void;

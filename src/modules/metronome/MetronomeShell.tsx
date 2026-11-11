@@ -36,7 +36,7 @@ import { Controls } from './components/Controls';
 import { ExtrasRow } from './components/ExtrasRow';
 import { SetupRow } from './components/SetupRow';
 import { useMetronomeEngine } from './hooks/useMetronomeEngine';
-import { useTapTempo } from './hooks/useTapTempo';
+import { useTapTempo } from '../../shared/hooks/useTapTempo';
 import { useTrainer } from './hooks/useTrainer';
 
 const clampBpm = (v: number) => Math.max(BPM_MIN, Math.min(BPM_MAX, Math.round(v)));
@@ -142,7 +142,7 @@ export const MetronomeShell = ({ embedded = false }: MetronomeShellProps) => {
   }, []);
 
   const setBpm = useCallback((bpm: number) => patch({ bpm: clampBpm(bpm) }), [patch]);
-  const tap = useTapTempo(setBpm);
+  const tap = useTapTempo(setBpm, BPM_MIN, BPM_MAX);
 
   useTrainer({ engine, bpm: state.bpm, config: state.trainer, onBpmChange: setBpm });
 

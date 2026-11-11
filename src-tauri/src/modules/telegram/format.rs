@@ -408,6 +408,7 @@ const TOOL_LABELS: &[(&str, &str, &str, Option<&str>)] = &[
     ("update_note", "✏️", "редагую нотатку", None),
     ("delete_note", "🗑", "видаляю нотатку", None),
     ("metronome_control", "🥁", "метроном", None),
+    ("drums_control", "🥁", "драм-машина", None),
     ("tuner_control", "🎸", "тюнер", None),
     ("circle_progression", "🎼", "коло квінт", None),
     ("valeton_set_tone", "🎛", "налаштовую тон Valeton", None),

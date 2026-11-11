@@ -243,7 +243,7 @@ const HELP_CATEGORIES: &[(&str, &[&str])] = &[
     ),
     (
         "🎵 Музика",
-        &["music", "metronome", "tuner", "record", "valeton", "stems", "bpm"],
+        &["music", "metronome", "drums", "tuner", "record", "valeton", "stems", "bpm"],
     ),
     ("📁 Файли та медіа", &["dl", "tr"]),
     (
@@ -539,6 +539,7 @@ mod tests {
             include_str!("../clipboard/agent.rs"),
             include_str!("../converter/agent.rs"),
             include_str!("../downloader/agent.rs"),
+            include_str!("../drums/agent.rs"),
             include_str!("../keepawake/agent.rs"),
             include_str!("../metronome/agent.rs"),
             include_str!("../music/agent.rs"),

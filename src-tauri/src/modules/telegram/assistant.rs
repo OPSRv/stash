@@ -721,6 +721,7 @@ pub fn build_runtime_assistant(
 
     // Same order as before the move: metronome, tuner, circle, valeton, record, music.
     crate::modules::metronome::agent::register_tools(&mut tools, app);
+    crate::modules::drums::agent::register_tools(&mut tools, app);
     crate::modules::tuner::agent::register_tools(&mut tools, app);
     crate::modules::circle::agent::register_tools(&mut tools, app);
     crate::modules::valeton::agent::register_tools(&mut tools, app);

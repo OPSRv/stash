@@ -5,6 +5,7 @@ pub mod clipboard;
 pub mod converter;
 pub mod diarization;
 pub mod downloader;
+pub mod drums;
 pub mod ipc;
 pub mod keepawake;
 pub mod media_server;

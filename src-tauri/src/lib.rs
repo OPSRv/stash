@@ -198,6 +198,10 @@ use modules::downloader::{
     runner::RunnerState,
 };
 use modules::media_server::{media_stream_url, MediaKind, MediaServerState};
+use modules::drums::commands::{
+    drums_default_export_dir, drums_export, drums_ffmpeg_available, drums_get_state,
+    drums_save_state, DrumsStateHandle,
+};
 use modules::metronome::commands::{
     metronome_get_state, metronome_save_state, MetronomeStateHandle,
 };
@@ -747,6 +751,11 @@ pub fn run() {
             translator_clear,
             metronome_get_state,
             metronome_save_state,
+            drums_get_state,
+            drums_save_state,
+            drums_ffmpeg_available,
+            drums_default_export_dir,
+            drums_export,
             tuner_get_state,
             tuner_save_state,
             recorder_list,
@@ -1031,6 +1040,9 @@ pub fn run() {
             let metronome_path = data_dir.join("metronome.json");
             app.manage(MetronomeStateHandle::new(metronome_path));
 
+            // Drums — single JSON blob in app data dir.
+            app.manage(DrumsStateHandle::new(data_dir.join("drums.json")));
+
             // Tuner — single JSON blob in app data dir.
             let tuner_path = data_dir.join("tuner.json");
             app.manage(TunerStateHandle::new(tuner_path));
@@ -1154,6 +1166,7 @@ pub fn run() {
             // the order in which other module states are constructed.
             modules::music::agent::register_commands(&telegram_state, app.handle());
             modules::metronome::agent::register_commands(&telegram_state, app.handle());
+            modules::drums::agent::register_commands(&telegram_state, app.handle());
             modules::tuner::agent::register_commands(&telegram_state, app.handle());
             modules::recorder::agent::register_commands(&telegram_state, app.handle());
             modules::valeton::agent::register_commands(&telegram_state, app.handle());

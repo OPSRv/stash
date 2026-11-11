@@ -1,23 +1,34 @@
 import { useCallback, useRef } from 'react';
-import { BPM_MAX, BPM_MIN } from '../metronome.constants';
 
+/** Tap-tempo shared by the Metronome and the Drums machine. Callers clamp to
+ *  their own range via `min`/`max` (both default to the app-wide 40..240). */
 const WINDOW_SIZE = 4;
+const DEFAULT_MIN = 40;
+const DEFAULT_MAX = 240;
 /** Reset the buffer if no tap arrives within this many ms — a stale gap
  *  would otherwise pull the average toward absurdly low BPMs. */
 const RESET_AFTER_MS = 2000;
 
 /** Compute BPM from the rolling buffer of the last few tap timestamps. */
-export const bpmFromTaps = (taps: number[]): number | null => {
+export const bpmFromTaps = (
+  taps: number[],
+  min = DEFAULT_MIN,
+  max = DEFAULT_MAX,
+): number | null => {
   if (taps.length < 2) return null;
   const intervals: number[] = [];
   for (let i = 1; i < taps.length; i++) intervals.push(taps[i] - taps[i - 1]);
   const avg = intervals.reduce((a, b) => a + b, 0) / intervals.length;
   if (avg <= 0) return null;
   const bpm = Math.round(60_000 / avg);
-  return Math.min(BPM_MAX, Math.max(BPM_MIN, bpm));
+  return Math.min(max, Math.max(min, bpm));
 };
 
-export const useTapTempo = (onBpm: (bpm: number) => void) => {
+export const useTapTempo = (
+  onBpm: (bpm: number) => void,
+  min = DEFAULT_MIN,
+  max = DEFAULT_MAX,
+) => {
   const tapsRef = useRef<number[]>([]);
 
   return useCallback(() => {
@@ -28,7 +39,7 @@ export const useTapTempo = (onBpm: (bpm: number) => void) => {
     }
     tapsRef.current.push(now);
     if (tapsRef.current.length > WINDOW_SIZE) tapsRef.current.shift();
-    const bpm = bpmFromTaps(tapsRef.current);
+    const bpm = bpmFromTaps(tapsRef.current, min, max);
     if (bpm !== null) onBpm(bpm);
-  }, [onBpm]);
+  }, [onBpm, min, max]);
 };

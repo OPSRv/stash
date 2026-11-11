@@ -63,4 +63,5 @@ export interface AppState {
   openCard: BlockKey; // відкрита картка ефекту (live-off)
   liveView: boolean;
   circleView: boolean; // circle-of-fifths workspace (mutually exclusive with live)
+  drumsView: boolean; // drum machine workspace (mutually exclusive with live/circle)
 }

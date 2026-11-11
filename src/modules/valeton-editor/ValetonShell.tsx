@@ -13,6 +13,12 @@ import { MetronomeShell } from '../metronome/MetronomeShell';
 const CircleShell = lazy(() =>
   import('../circle-of-fifths').then((m) => ({ default: m.CircleShell })),
 );
+// Cross-module import (deliberate trade-off): the drum machine is its own
+// module under `src/modules/drums/` (own Rust state + agent surface) with no
+// tab; the `Drums` toolbar button shows it here. Lazy, and kept mounted once
+// visited (hidden, not unmounted) so a groove keeps playing while you edit
+// the pedal chain. See CLAUDE.md "Modularity".
+const DrumsShell = lazy(() => import('../drums').then((m) => ({ default: m.DrumsShell })));
 // Cross-module import (deliberate trade-off): same arrangement as the
 // Metronome above — the Recorder is its own module (own SQLite store, audio
 // dir, agent surface under `src/modules/recorder/`) but has no tab; we host
@@ -40,7 +46,7 @@ import { handleNotification } from './lib/bluetooth';
 import { applyValetonRemote, type ValetonRemote } from './lib/remote';
 import { runtime } from './lib/runtime';
 import { nextPatch, prevPatch } from './lib/transport';
-import { getState, useStore } from './store/store';
+import { getState, setState, useStore } from './store/store';
 import type { BlockKey } from './store/types';
 import './valeton.css';
 
@@ -71,6 +77,11 @@ const KEY_TO_BLOCK: Record<string, BlockKey> = {
 export const ValetonShell = () => {
   const liveView = useStore((s) => s.liveView);
   const circleView = useStore((s) => s.circleView);
+  const drumsView = useStore((s) => s.drumsView);
+  const fullWidth = liveView || circleView || drumsView;
+  // Drums mounts on first open (or first assistant command) and then stays.
+  const [drumsMounted, setDrumsMounted] = useState(false);
+  if (drumsView && !drumsMounted) setDrumsMounted(true);
   const openCard = useStore((s) => s.openCard);
 
   const [showSettings, setShowSettings] = useState(false);
@@ -80,6 +91,21 @@ export const ValetonShell = () => {
   const [showPresetAi, setShowPresetAi] = useState(false);
 
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Assistant drives the drum machine (`drums:remote`, emitted with re-tries
+  // until acked): mount DrumsShell so it can apply + ack, and bring the
+  // Drums view forward for anything but a pure status probe.
+  useEffect(() => {
+    const un = listen<{ action?: string | null }>('drums:remote', (e) => {
+      setDrumsMounted(true);
+      if (e.payload?.action !== 'status' && !getState().drumsView) {
+        setState({ drumsView: true, liveView: false, circleView: false });
+      }
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
 
   // Підписка на вхідні байти від Rust-моста + раптове від'єднання пристрою.
   useEffect(() => {
@@ -180,7 +206,7 @@ export const ValetonShell = () => {
       // No editor shortcuts while the Circle view is up: arrows walk the
       // circle of fifths there (CircleShell's own listener), and letters /
       // Space would surprise-toggle blocks or tap the tempo.
-      if (getState().circleView) return;
+      if (getState().circleView || getState().drumsView) return;
 
       const block = KEY_TO_BLOCK[e.code];
       if (block) {
@@ -249,9 +275,16 @@ export const ValetonShell = () => {
 
       <main className="scroll-area min-h-0 flex-1 space-y-4 py-4 lg:grid lg:grid-cols-12 lg:gap-4 lg:space-y-0 lg:overflow-hidden">
         <section
-          className={`flex min-h-0 flex-col gap-4 ${liveView || circleView ? 'lg:col-span-12' : 'lg:col-span-8'}`}
+          className={`flex min-h-0 flex-col gap-4 ${fullWidth ? 'lg:col-span-12' : 'lg:col-span-8'}`}
         >
-          {liveView ? (
+          {drumsMounted && (
+            <div hidden={!drumsView} className={drumsView ? 'flex min-h-0 flex-1 flex-col' : undefined}>
+              <Suspense fallback={<CenterSpinner />}>
+                <DrumsShell />
+              </Suspense>
+            </div>
+          )}
+          {drumsView ? null : liveView ? (
             <ScrollArea className="pr-1 lg:h-full">
               <LiveView />
             </ScrollArea>
@@ -289,7 +322,7 @@ export const ValetonShell = () => {
             </>
           )}
         </section>
-        {!liveView && !circleView && (
+        {!fullWidth && (
           <aside className="min-h-0 lg:col-span-4">
             <div className="lg:h-full lg:overflow-hidden">
               <EffectCard key={card.key} block={card} />

@@ -1,0 +1,78 @@
+/* Drums step grid. Hosted inside the Valeton editor, so it uses the
+ * editor's studio-dark `ve-` palette; the accent follows the app theme. */
+
+.drums-root .drum-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  min-height: 18px;
+  max-height: 40px;
+  border-radius: 5px;
+  border: 1px solid var(--color-ve-stroke);
+  background: var(--color-ve-bg-2);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast, 120ms) ease,
+    box-shadow var(--duration-fast, 120ms) ease,
+    transform var(--duration-fast, 120ms) ease;
+  touch-action: none;
+}
+
+/* Every other beat group is a shade lighter, so the eye counts beats. */
+.drums-root .drum-cell[data-shaded] {
+  background: var(--color-ve-bg-3);
+}
+
+.drums-root .drum-cell:hover {
+  border-color: rgba(var(--stash-accent-rgb), 0.55);
+}
+
+.drums-root .drum-cell[data-step='1'] {
+  background: rgba(var(--stash-accent-rgb), 0.55);
+  border-color: rgba(var(--stash-accent-rgb), 0.7);
+}
+
+.drums-root .drum-cell[data-step='2'] {
+  background: rgb(var(--stash-accent-rgb));
+  border-color: rgb(var(--stash-accent-rgb));
+  box-shadow: 0 0 8px rgba(var(--stash-accent-rgb), 0.45);
+}
+
+/* Playhead: the sounding column lifts and brightens. */
+.drums-root .drum-cell.is-playhead {
+  border-color: var(--color-ve-text);
+}
+.drums-root .drum-cell.is-playhead[data-step='1'],
+.drums-root .drum-cell.is-playhead[data-step='2'] {
+  transform: scale(1.08);
+  filter: brightness(1.25);
+}
+
+.drums-root [role='row'][data-muted] .drum-cell {
+  opacity: 0.35;
+}
+
+.drums-root .drum-voice-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  color: var(--color-ve-text);
+  padding: 2px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drums-root .drum-voice-name:hover {
+  color: rgb(var(--stash-accent-rgb));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drums-root .drum-cell {
+    transition: none;
+  }
+  .drums-root .drum-cell.is-playhead[data-step='1'],
+  .drums-root .drum-cell.is-playhead[data-step='2'] {
+    transform: none;
+  }
+}

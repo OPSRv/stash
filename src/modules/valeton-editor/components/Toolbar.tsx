@@ -66,6 +66,7 @@ export const Toolbar = ({
   const saveEnabled = useStore((s) => s.saveEnabled);
   const liveView = useStore((s) => s.liveView);
   const circleView = useStore((s) => s.circleView);
+  const drumsView = useStore((s) => s.drumsView);
   const patchNames = useStore((s) => s.patchNames);
   const currentPatchNumber = useStore((s) => s.currentPatchNumber);
 
@@ -267,7 +268,7 @@ export const Toolbar = ({
             disabled={locked}
             aria-pressed={liveView}
             title="Live performance view"
-            onClick={() => setState({ liveView: !liveView, circleView: false })}
+            onClick={() => setState({ liveView: !liveView, circleView: false, drumsView: false })}
           >
             Live
           </button>
@@ -282,9 +283,21 @@ export const Toolbar = ({
             className={`seg-btn px-3 ${circleView ? 'active' : ''}`}
             aria-pressed={circleView}
             title="Circle of fifths"
-            onClick={() => setState({ circleView: !circleView, liveView: false })}
+            onClick={() => setState({ circleView: !circleView, liveView: false, drumsView: false })}
           >
             Circle
+          </button>
+          {/* Drum machine — standalone like Circle, so it stays reachable
+              without a connected GP-5. */}
+          <button
+            type="button"
+            data-id="drums_switch"
+            className={`seg-btn px-3 ${drumsView ? 'active' : ''}`}
+            aria-pressed={drumsView}
+            title="Drum machine"
+            onClick={() => setState({ drumsView: !drumsView, liveView: false, circleView: false })}
+          >
+            Drums
           </button>
         </div>
 
