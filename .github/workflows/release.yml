@@ -96,7 +96,12 @@ jobs:
       # the user downloads them on demand from this same release.
       - name: Build diarization sidecar
         working-directory: src-tauri
-        run: cargo build -p stash-diarize --release --target aarch64-apple-darwin
+        # Cargo >= 1.100 uses the new build-dir layout with no
+        # `<profile>/deps`; sherpa-rs-sys 0.6.8's build script still copies
+        # the onnx dylibs there and panics when the dir is missing.
+        run: |
+          mkdir -p target/aarch64-apple-darwin/release/deps
+          cargo build -p stash-diarize --release --target aarch64-apple-darwin
 
       - name: Stage release artifacts
         id: stage
