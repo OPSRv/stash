@@ -1,9 +1,11 @@
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { Button } from '../shared/ui/Button';
 import { Input } from '../shared/ui/Input';
 import { NpmProjectsSection } from './NpmProjectsSection';
 import { SettingRow } from './SettingRow';
 import { SettingsSection, SettingsTab } from './SettingsLayout';
 import type { Settings, TerminalSnippet } from './store';
+import { withPopupPinned } from '../shared/util/withPopupPinned';
 
 interface TerminalTabProps {
   settings: Settings;
@@ -46,6 +48,38 @@ export const TerminalTab = ({ settings, onChange }: TerminalTabProps) => (
             }
             className="w-[260px] font-mono"
           />
+        }
+      />
+      <SettingRow
+        title="Working folder"
+        description={
+          settings.terminalClaudeCwd
+            ? `/claude_code from Telegram or the CLI opens a new terminal tab here. ${settings.terminalClaudeCwd}`
+            : '/claude_code from Telegram or the CLI opens a new terminal tab here. Not set — runs in the focused pane.'
+        }
+        control={
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={async () => {
+                try {
+                  const picked = await withPopupPinned(() =>
+                    openDialog({ directory: true, multiple: false }),
+                  );
+                  if (typeof picked === 'string') onChange('terminalClaudeCwd', picked);
+                } catch (e) {
+                  console.error('folder pick failed', e);
+                }
+              }}
+            >
+              Choose…
+            </Button>
+            {settings.terminalClaudeCwd && (
+              <Button size="sm" tone="neutral" onClick={() => onChange('terminalClaudeCwd', '')}>
+                Clear
+              </Button>
+            )}
+          </div>
         }
       />
     </SettingsSection>

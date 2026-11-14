@@ -95,6 +95,12 @@ export type Settings = {
    */
   terminalClaudeCommand: string;
   /**
+   * Folder that `/claude_code` (Telegram / CLI / MCP) opens a fresh
+   * Terminal tab in before running the launcher. Empty → the launcher runs
+   * in the focused pane's current directory.
+   */
+  terminalClaudeCwd: string;
+  /**
    * Absolute paths of project folders (each with a `package.json`) whose
    * npm scripts are listed in the tray context menu. Pushed to Rust via
    * `npm_set_projects` on boot and on every change.
@@ -191,6 +197,7 @@ export const DEFAULT_SETTINGS: Settings = {
   canvasCaptureTextShortcut: 'CommandOrControl+Shift+O',
   terminalSnippets: DEFAULT_TERMINAL_SNIPPETS,
   terminalClaudeCommand: 'claude',
+  terminalClaudeCwd: '',
   npmProjects: [],
   hiddenModules: [],
   moduleOrder: [],

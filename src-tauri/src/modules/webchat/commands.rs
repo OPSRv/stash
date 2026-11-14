@@ -108,7 +108,9 @@ const WEBVIEW_DISGUISE_TEMPLATE: &str = r#"
       return;
     }
     if (!e.metaKey) return;
-    var k = (e.key || '').toLowerCase();
+    // Letters via e.code so chords survive non-Latin layouts
+    // (Cmd+W on a Ukrainian layout reports e.key === 'ц').
+    var k = /^Key[A-Z]$/.test(e.code || '') ? e.code.slice(3).toLowerCase() : (e.key || '').toLowerCase();
     if (!SHORTCUT_KEYS[k]) return;
     try {
       var qs = new URLSearchParams({

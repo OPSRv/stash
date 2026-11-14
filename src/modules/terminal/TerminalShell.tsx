@@ -13,6 +13,7 @@ import {
 } from './api';
 import { encodeBase64 } from './ui/xtermTheme';
 import { useDrag } from './hooks/useDrag';
+import { loadSettings } from '../../settings/store';
 import {
   allLeafIds,
   clampFontSize,
@@ -104,6 +105,7 @@ export const TerminalShell = () => {
 
   // Refs kept in sync with state so the document-level keyboard
   // listener (bound once on mount) always sees current values.
+  const rootRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef(tabs);
   const activeIdRef = useRef(activeId);
   const focusedPaneRef = useRef(focusedPane);
@@ -137,13 +139,61 @@ export const TerminalShell = () => {
     if (!leaves.includes(focusedPane)) setFocusedPane(leaves[0]);
   }, [tabs, activeId, focusedPane]);
 
+  // Open a fresh tab in `cwd` that runs `command` once its shell is up.
+  // When the tab cap is reached, fall back to the focused pane: `cd` there
+  // and run the command in place rather than silently dropping it.
+  // Returns the pane id the command landed in.
+  const openTabRunning = useCallback(
+    (cwd: string, command: string, label: string | null): string => {
+      const prev = tabsRef.current;
+      if (prev.length >= MAX_TABS) {
+        const paneId = focusedPaneRef.current;
+        ptyWrite(paneId, encodeBase64(`cd ${shellQuote(cwd)} && ${command}\r`)).catch(
+          () => {},
+        );
+        return paneId;
+      }
+      const tabId = newTabId(new Set(prev.map((t) => t.id)));
+      const paneId = newPaneId(allLeafIds(prev));
+      initialCwdsRef.current.set(paneId, cwd);
+      initialCommandsRef.current.set(paneId, command);
+      const next: Tab[] = [...prev, { id: tabId, root: leaf(paneId), label: label ?? undefined }];
+      // Update the ref eagerly so several queued runs drained in one batch
+      // get distinct tab/pane ids.
+      tabsRef.current = next;
+      setTabs(next);
+      setActiveId(tabId);
+      setFocusedPane(paneId);
+      return paneId;
+    },
+    [],
+  );
+
+  const runInNewTab = useCallback(
+    (run: PendingRun) => {
+      const paneId = openTabRunning(run.cwd, run.command, run.label);
+      terminalBindRun(run.runId, paneId).catch(() => {});
+    },
+    [openTabRunning],
+  );
+
   // Bridge for /claude_code Telegram + CLI command. Backend fires
-  // `terminal:launch_claude`; we forward it as a window CustomEvent
-  // scoped to the currently focused pane so exactly one pane runs the
-  // launcher (instead of every mounted TerminalPane racing).
+  // `terminal:launch_claude` with an optional folder. With a folder (from
+  // the command or Settings → Terminal → Working folder) Claude gets a
+  // fresh tab there — a new shell starts in $HOME, which Claude Code
+  // would otherwise stop on with its workspace-trust prompt. Without one
+  // we forward a CustomEvent scoped to the focused pane so exactly one
+  // pane runs the launcher.
   useEffect(() => {
     let dispose: (() => void) | null = null;
-    listen('terminal:launch_claude', () => {
+    let disposed = false;
+    listen<{ cwd?: string | null } | null>('terminal:launch_claude', async (evt) => {
+      const settings = await loadSettings().catch(() => null);
+      const cwd = evt.payload?.cwd || settings?.terminalClaudeCwd || '';
+      if (cwd) {
+        openTabRunning(cwd, (settings?.terminalClaudeCommand || 'claude').trim(), 'Claude');
+        return;
+      }
       const paneId = focusedPaneRef.current;
       if (!paneId) return;
       window.dispatchEvent(
@@ -151,44 +201,15 @@ export const TerminalShell = () => {
       );
     })
       .then((fn) => {
-        dispose = fn;
+        if (disposed) fn();
+        else dispose = fn;
       })
       .catch(() => {});
     return () => {
+      disposed = true;
       dispose?.();
     };
-  }, []);
-
-  // Open a fresh tab in `cwd` that runs `command` once its shell is up.
-  // When the tab cap is reached, fall back to the focused pane: `cd` there
-  // and run the command in place rather than silently dropping it.
-  const runInNewTab = useCallback((run: PendingRun) => {
-    const prev = tabsRef.current;
-    if (prev.length >= MAX_TABS) {
-      const paneId = focusedPaneRef.current;
-      terminalBindRun(run.runId, paneId).catch(() => {});
-      ptyWrite(
-        paneId,
-        encodeBase64(`cd ${shellQuote(run.cwd)} && ${run.command}\r`),
-      ).catch(() => {});
-      return;
-    }
-    const tabId = newTabId(new Set(prev.map((t) => t.id)));
-    const paneId = newPaneId(allLeafIds(prev));
-    terminalBindRun(run.runId, paneId).catch(() => {});
-    initialCwdsRef.current.set(paneId, run.cwd);
-    initialCommandsRef.current.set(paneId, run.command);
-    const next: Tab[] = [
-      ...prev,
-      { id: tabId, root: leaf(paneId), label: run.label ?? undefined },
-    ];
-    // Update the ref eagerly so several queued runs drained in one batch
-    // get distinct tab/pane ids.
-    tabsRef.current = next;
-    setTabs(next);
-    setActiveId(tabId);
-    setFocusedPane(paneId);
-  }, []);
+  }, [openTabRunning]);
 
   // Rust parks run requests in a queue (the tab is lazy, so an event fired
   // before mount would be lost). Drain on mount, and again on every
@@ -428,7 +449,15 @@ export const TerminalShell = () => {
       // Treating `ctrlKey` as interchangeable with `metaKey` here would
       // hijack those canonical terminal chords.
       if (!e.metaKey) return;
-      const key = e.key.toLowerCase();
+      // PopupShell keeps visited tabs mounted under `hidden`; without this
+      // guard ⌘W on another tab would close terminal tabs instead of
+      // hiding the popup.
+      if (rootRef.current?.closest('[hidden]')) return;
+      // Letters via `e.code` so chords work on any layout (Cmd+W on a
+      // Ukrainian layout reports `e.key === 'ц'`).
+      const key = /^Key[A-Z]$/.test(e.code)
+        ? e.code.slice(3).toLowerCase()
+        : e.key.toLowerCase();
 
       if (e.altKey && (key === 'arrowleft' || key === 'arrowright')) {
         const curTabs = tabsRef.current;
@@ -539,7 +568,7 @@ export const TerminalShell = () => {
   }, [addTab, closePane, closeTab, splitPane, toggleMaximize, bumpFontSize, resetFontSize]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div ref={rootRef} className="h-full flex flex-col">
       <TabBar
         tabs={tabs}
         activeId={activeId}
