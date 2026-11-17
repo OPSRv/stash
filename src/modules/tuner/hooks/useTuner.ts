@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { detectPitch } from '../lib/pitch';
 import { matchChromatic } from '../tuner.constants';
 import { resumeSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
+import { useSharedAudioHold } from '../../../shared/audio/useSharedAudioHold';
 
 /** Live snapshot of what the tuner hears — a chromatic reading, so the note is
  *  whatever pitch the mic picks up, not constrained to any tuning's strings. */
@@ -47,6 +48,7 @@ type TunerHandle = {
  */
 export const useTuner = (deviceId: string | null): TunerHandle => {
   const [listening, setListening] = useState(false);
+  useSharedAudioHold('tuner', listening);
   const [error, setError] = useState<string | null>(null);
   const [reading, setReading] = useState<TunerReading>(EMPTY);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);

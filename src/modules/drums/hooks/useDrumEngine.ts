@@ -8,6 +8,7 @@ import {
   createWorkerTicker,
   type WorkerTicker,
 } from '../../../shared/audio/audioClock';
+import { useSharedAudioHold } from '../../../shared/audio/useSharedAudioHold';
 import { patternLength, stepDuration, type DrumsState, type DrumVoice } from '../lib/model';
 import { createMixer, triggerStep, type ChokeState, type DrumMixer } from '../lib/mixer';
 import { hitVoice } from '../lib/mixer';
@@ -34,6 +35,7 @@ export type DrumEngine = {
  *  apply mid-loop without restarting. */
 export const useDrumEngine = (state: DrumsState): DrumEngine => {
   const [isPlaying, setIsPlaying] = useState(false);
+  useSharedAudioHold('drums', isPlaying);
   const isPlayingRef = useRef(false);
   const stateRef = useRef(state);
   stateRef.current = state;

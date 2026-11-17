@@ -21,6 +21,7 @@ import { revealFile } from '../../shared/util/revealFile';
 import { copyText } from '../../shared/util/clipboard';
 import { dragIconPath, mediaStreamUrl, mixdown, readPeaks, STEM_LABELS, stemColor, writePeaks, type ChordSegment } from './api';
 import { getSharedAudioContext } from '../../shared/audio/sharedAudioContext';
+import { useSharedAudioHold } from '../../shared/audio/useSharedAudioHold';
 
 interface StemMixerProps {
   /// Stable identifier for the job whose stems we're mixing. Used as
@@ -226,6 +227,7 @@ export function StemMixer({
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [playing, setPlaying] = useState(false);
+  useSharedAudioHold('stems', playing);
   const [position, setPosition] = useState(0);
   const playStartTimeRef = useRef(0); // context.currentTime at last (re)play
   const playStartOffsetRef = useRef(0); // playback offset (s) at last (re)play

@@ -8,6 +8,7 @@ import {
   createWorkerTicker,
   type WorkerTicker,
 } from '../../../shared/audio/audioClock';
+import { useSharedAudioHold } from '../../../shared/audio/useSharedAudioHold';
 import {
   type MetronomeState,
   type SoundPreset,
@@ -60,6 +61,7 @@ export const useMetronomeEngine = (cfg: EngineConfig): EngineHandle => {
   const watchdogRef = useRef(createStallWatchdog());
 
   cfgRef.current = cfg;
+  useSharedAudioHold('metronome', isPlaying);
 
   const ensureCtx = (): AudioContext => {
     if (!ctxRef.current) {

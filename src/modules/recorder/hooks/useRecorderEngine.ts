@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { resumeSharedAudioContext } from '../../../shared/audio/sharedAudioContext';
+import { useSharedAudioHold } from '../../../shared/audio/useSharedAudioHold';
 import { shortDeviceLabel } from '../../../shared/util/deviceLabel';
 import {
   GAIN_DEFAULT,
@@ -94,6 +95,7 @@ const readLevel = (analyser: AnalyserNode, buf: Uint8Array): number => {
  */
 export const useRecorderEngine = () => {
   const [phase, setPhase] = useState<RecorderPhase>('idle');
+  useSharedAudioHold('recorder', phase === 'recording');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);

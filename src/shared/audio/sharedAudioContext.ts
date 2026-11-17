@@ -22,11 +22,37 @@
  * nodes (disconnect on cleanup) but **must never `close()` it** — closing
  * silences every other module sharing it. `releaseSharedAudioContext` exists
  * only so tests can reset the singleton between runs.
+ *
+ * Idle suspend: a running context keeps WebKit's GPU-process audio I/O thread
+ * cycling forever, even in silence. Left like that for hours (popup hidden,
+ * system under memory pressure) the I/O thread overloads on every cycle and
+ * WebKit's audio path eventually wedges — Stash goes silent until relaunch.
+ * So the context is suspended once nothing has used it for `IDLE_SUSPEND_MS`:
+ * - one-shot sounds (chord/drum previews) just call `getSharedAudioContext` /
+ *   `resumeSharedAudioContext`, which counts as activity;
+ * - long-running consumers (sequencers, mic capture, stem playback) declare
+ *   `setSharedAudioHold(key, true)` while active and `false` when done.
  */
 let shared: AudioContext | null = null;
 
+/** Quiet time before an unheld context is suspended. Long enough to cover the
+ *  release tail of any one-shot and a bar of the slowest chord progression. */
+const IDLE_SUSPEND_MS = 30_000;
+const holds = new Set<string>();
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+const armIdleSuspend = () => {
+  if (idleTimer !== null) clearTimeout(idleTimer);
+  idleTimer = null;
+  if (holds.size > 0) return;
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    if (holds.size === 0 && shared?.state === 'running') shared.suspend().catch(() => {});
+  }, IDLE_SUSPEND_MS);
+};
+
 /** The shared context, created on first use with the WebKit-prefixed ctor when
- *  the standard one is absent (older WKWebView). */
+ *  the standard one is absent (older WKWebView). Counts as audio activity. */
 export const getSharedAudioContext = (): AudioContext => {
   if (!shared) {
     const Ctor =
@@ -34,7 +60,21 @@ export const getSharedAudioContext = (): AudioContext => {
       AudioContext;
     shared = new Ctor();
   }
+  armIdleSuspend();
   return shared;
+};
+
+/** Keep the shared context awake while `key` is active (a sequencer playing,
+ *  a mic open, stems playing). Idempotent per key; dropping the last hold
+ *  starts the idle-suspend countdown. Taking a hold resumes the context. */
+export const setSharedAudioHold = (key: string, on: boolean): void => {
+  if (on) {
+    holds.add(key);
+    if (shared && shared.state !== 'running') shared.resume().catch(() => {});
+  } else {
+    holds.delete(key);
+  }
+  armIdleSuspend();
 };
 
 type ReplacedListener = (next: AudioContext) => void;
@@ -83,5 +123,8 @@ export const releaseSharedAudioContext = (): Promise<void> => {
   const ctx = shared;
   shared = null;
   replacedListeners.clear();
+  holds.clear();
+  if (idleTimer !== null) clearTimeout(idleTimer);
+  idleTimer = null;
   return ctx ? ctx.close().catch(() => {}) : Promise.resolve();
 };
